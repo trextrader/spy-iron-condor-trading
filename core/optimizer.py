@@ -3,6 +3,7 @@ import copy
 import time
 import numpy as np
 import pandas as pd
+import datetime
 from core.backtest_engine import run_backtest_headless
 from core.config import StrategyConfig, RunConfig
 from tabulate import tabulate
@@ -148,6 +149,30 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
     # 4. Reporting (Top 100)
     sorted_results = sorted(results, key=lambda x: x['ratio'], reverse=True)
     top_100 = sorted_results[:100]
+    
+    # 4.1 Persistence (New: Save to CSV)
+    if top_100:
+        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        report_path = os.path.join("reports", f"top100_{now_str}.csv")
+        os.makedirs("reports", exist_ok=True)
+        
+        # Flatten and save
+        csv_data = []
+        for rank, res in enumerate(top_100, 1):
+            row = {"Rank": rank}
+            row.update(res['params'])
+            row.update({
+                "Balance": res['final_balance'],
+                "Profit": res['net_profit'],
+                "Ratio": res['ratio'],
+                "Sharpe": res['sharpe'],
+                "Trades": res['trades'],
+                "WinRate": res['win_rate']
+            })
+            csv_data.append(row)
+        
+        pd.DataFrame(csv_data).to_csv(report_path, index=False)
+        print(f"\n[Report Saved] {report_path}")
     
     table_headers = ["Rank", "Params", "Balance", "Profit", "Ratio", "Sharpe", "Trades", "Win %"]
     table_rows = []
