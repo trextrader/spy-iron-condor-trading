@@ -45,8 +45,21 @@ Position sizing scales dynamically using a Sugeno-style weighted average to aggr
 $$Signal = \frac{\sum_{i=1}^{n} w_i \cdot \mu_i(x)}{\sum_{i=1}^{n} \mu_i(x)}$$
 
 ### 6. `core/optimizer.py`: Risk-Adjusted Optimization Ratio
-The objective is to maximize the **$\Phi$ Recovery Ratio**, prioritizing capital preservation:
-$$\text{Maximize } \Phi = \frac{\sum \text{Net Profit}}{\text{Max Drawdown}}$$
+The primary objective is to maximize the **$\Phi$ Recovery Ratio**, prioritizing capital preservation:
+$$\Phi = \frac{\text{Net Profit}}{\text{Maximum Drawdown}}$$
+
+### 7. Performance Metrics Glossary
+The following metrics are used to rank results in the `top100_[timestamp].csv` report:
+
+- **Profit Factor ($PF$)**: Measures the relationship between gross winnings and gross losses.
+  $$PF = \frac{\sum \text{Gross Profits}}{\sum |\text{Gross Losses}|}$$
+- **Expectancy ($E$)**: The expected dollar value of each trade, including losses.
+  $$E = (AvgWin \times WR) - (AvgLoss \times (1 - WR))$$
+- **Win Rate ($WR$)**: The ratio of profitable trades to total trades.
+  $$WR = \frac{\text{Winning Trades}}{\text{Total Trades}}$$
+- **Sharpe Ratio ($S$)**: Annualized risk-adjusted returns calculated from 5-minute equity returns.
+  $$S = \sqrt{N} \times \frac{\mu_{returns}}{\sigma_{returns}}$$
+  *(Where $N = 19,656$ for annual 5-minute bars in a 252-day trading year).*
 
 ---
 
