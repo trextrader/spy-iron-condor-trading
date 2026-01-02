@@ -14,6 +14,35 @@
 
 ---
 
+## 🏗️ Engineering Architecture: The Dual-Data Engine
+
+Quantor-MTFuzz operates as a high-fidelity **Dual-Data Engine**, separating the "Strategy Clock" from the "Option Pricing":
+
+### 1. The Strategy Clock & Signal Layer (`reports/SPY/`)
+The system uses the underlying SPY 5-minute price data as its primary heart. This data determines:
+- **Consensus Timing**: Moving averages, RSI, and MTF (Multi-Timeframe) intelligence are calculated across 5m, 15m, and 60m timeframes to decide if a trade environment is "Favorable."
+- **Spot Reference**: The current stock price is used as the anchor to look up deltas and strikes for the options legs.
+
+### 2. The Quote & Execution Layer (`data/synthetic_options/`)
+While the SPY price drives the decision, the **Synthetic Options** data provides the actual market reality:
+- **Replacement Cost**: The bot uses these files to determine exactly what your Iron Condor is worth at any given moment.
+- **Realistic PnL**: Mark-to-Market (MtM) calculations are based on the mid-prices in the options data, ensuring you are testing against dollar-accurate execution.
+
+---
+
+## 🦅 Strategy Execution: The 4-Leg Standard
+
+This system is built exclusively for the **Iron Condor** structure. Every trade launched by the engine—whether in backtest or optimization—follows a strict **4-Leg Symmetry Rule**:
+
+1.  **Call Wing**: One Short Call (e.g., 15 Delta) and one Long Call (as protection).
+2.  **Put Wing**: One Short Put (e.g., 15 Delta) and one Long Put (as protection).
+3.  **Strict Cohesion**: The strategy engine is programmed with a "Fail-Fast" entry gate. If even one of these 4 legs cannot be found with valid pricing or at the target delta in the options chain, **the entire trade is rejected**.
+4.  **Credit-Based Management**: PnL is tracked as a single unit (Net Credit vs. Debit Cost), but individual leg exits (PT/SL) can be triggered if chosen.
+
+By requiring all 4 legs to be present, the backtester ensures that you are only analyzing "True" Iron Condors that could actually be filled in the market.
+
+---
+
 ## 🧮 Mathematical Foundation (Script-by-Script)
 
 ### 1. `core/backtest_engine.py`: high-Fidelity MtM PnL
