@@ -19,26 +19,27 @@
 1. **Python Version**: Ensure you are using **Python 3.12**.
 2. **Setup Dependencies**:
    ```powershell
-   pip install backtrader alpaca-py mplfinance tabulate matplotlib pandas numpy psutil
+   # Use 'py -3.12' to ensure you are targeting the correct version
+   py -3.12 -m pip install backtrader alpaca-py mplfinance tabulate matplotlib pandas numpy psutil
    ```
 
 ---
 
 ## ⚙️ Configuration
 
-1. **API Keys**: Copy `core/config.template.py` to `core/config.py` and enter your keys:
-   - `polygon_key`: Required for real-time data and backtesting.
-   - `alpaca_key` / `alpaca_secret`: Required for paper/live trading.
-2. **Strategy Parameters**: Tune your core strategy logic (DTE, Delta, IVR thresholds) directly in `core/config.py`.
+1. **API Keys**: Copy `core/config.template.py` to `core/config.py` and enter your keys.
+2. **Parameters**: The winning parameters from our initial optimization (**IVR 20, VIX 25, TP 60%, SL 2.0x**) are pre-set as the defaults in the configuration files.
 
 ---
 
 ## 📈 Execution Modes
 
+> [!TIP]
+> **Windows Users**: If you have multiple Python versions installed, always prefix your commands with **`py -3.12`** instead of `python`.
+
 ### 1. High-Fidelity Backtest
-Run a simulation over historical data with full reporting:
 ```powershell
-python core/main.py --mode backtest --use-mtf --dynamic-sizing --bt-samples 0
+py -3.12 core/main.py --mode backtest --use-mtf --dynamic-sizing --bt-samples 0
 ```
 - Results are saved to `reports/backtest_report.pdf`.
 
