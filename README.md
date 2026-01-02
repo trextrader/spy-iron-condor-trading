@@ -16,11 +16,9 @@
 
 ## 🛠️ Installation
 
-1. **Python Version**: Ensure you are using **Python 3.12**.
-2. **Setup Dependencies**:
-   ```powershell
-   # Use 'py -3.12' to ensure you are targeting the correct version
-   py -3.12 -m pip install backtrader alpaca-py mplfinance tabulate matplotlib pandas numpy psutil
+1. **Setup Dependencies**:
+   ```bash
+   pip install -r requirements.txt
    ```
 
 ---
@@ -34,12 +32,9 @@
 
 ## 📈 Execution Modes
 
-> [!TIP]
-> **Windows Users**: If you have multiple Python versions installed, always prefix your commands with **`py -3.12`** instead of `python`.
-
 ### 1. High-Fidelity Backtest
-```powershell
-py -3.12 core/main.py --mode backtest --use-mtf --dynamic-sizing --bt-samples 0
+```bash
+python core/main.py --mode backtest --use-mtf --dynamic-sizing --bt-samples 0
 ```
 - Results are saved to `reports/backtest_report.pdf`.
 
