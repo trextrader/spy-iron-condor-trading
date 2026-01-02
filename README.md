@@ -118,6 +118,10 @@ To modify the search space, edit the `OPTIMIZATION_MATRIX` in `core/optimizer.py
 | `profit_take_pct` | Float | `np.arange(start, stop + step, step)` | Target profit % (e.g., 0.1 to 1.0) |
 | `loss_close_multiple` | Float | `np.arange(start, stop + step, step)` | Stop loss multiple (e.g., 1.0 to 5.0) |
 | `dte_min` | Int | `range(start, stop + step, step)` | Minimum days to expiration |
+| `dte_max` | Int | `range(start, stop + step, step)` | Maximum days to expiration |
+| `target_short_delta_low` | Float | `np.arange(start, stop + step, step)` | Lower bound for target short delta |
+| `target_short_delta_high` | Float | `np.arange(start, stop + step, step)` | Upper bound for target short delta |
+| `wing_width_min` | Float | `np.arange(start, stop + step, step)` | Minimum allowed wing width |
 | `iv_rank_min` | Float | `np.arange(start, stop + step, step)` | Minimum required IV Rank |
 | `vix_threshold` | Float | `np.arange(start, stop + step, step)` | Maximum allowed VIX level |
 

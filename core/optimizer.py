@@ -18,11 +18,12 @@ OPTIMIZATION_MATRIX = {
     "profit_take_pct": np.arange(0.10, 1.0, 0.2),
     "loss_close_multiple": np.arange(1.0, 5.0, 0.2),
     
-    # Phase B: Entry (Uncomment params below to broaden the search)
-    # "dte_min": range(7, 46, 1),
-    # "dte_max": range(14, 91, 1),
-    # "target_short_delta_low": np.arange(0.05, 0.26, 0.01),
-    # "target_short_delta_high": np.arange(0.10, 0.36, 0.01),
+    # Phase B: Entry & Structure
+    "dte_min": range(7, 46, 7),                        # e.g. 7, 14, 21...
+    "dte_max": range(14, 91, 14),
+    "target_short_delta_low": np.arange(0.05, 0.26, 0.05),
+    "target_short_delta_high": np.arange(0.10, 0.36, 0.05),
+    "wing_width_min": np.arange(5.0, 15.1, 5.0),
     
     # Phase C: Filters
     #"iv_rank_min": np.arange(15, 55, 5),
