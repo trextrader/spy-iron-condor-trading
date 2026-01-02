@@ -1,4 +1,4 @@
-# polygon_client.py
+# data_factory/polygon_client.py
 import datetime as dt
 from typing import List
 from dataclasses import dataclass
@@ -61,7 +61,10 @@ class PolygonClient:
         return chain
 
 # Adapter to Strategy OptionQuote
-from options_strategy import OptionQuote
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from strategies.options_strategy import OptionQuote
 
 def poly_to_quote(p: PolyOption) -> OptionQuote:
     return OptionQuote(

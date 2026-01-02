@@ -1,123 +1,73 @@
-# SPY Iron Condor Trading System
+# Quantor-MTFuzz: Iron Condor Algorithmic Trading
 
-A professional-grade options trading system for SPY iron condors with dynamic wing adjustment, regime filtering, and comprehensive backtesting capabilities.
-
-## 🚀 Features
-
-- **Dynamic Wing Width**: Adjusts strike width based on VIX and IV Rank regimes
-- **Smart Strike Selection**: Delta-based targeting for optimal premium collection
-- **Credit-to-Width Validation**: Ensures adequate premium for risk taken
-- **Position Management**: Automated profit taking, stop losses, and vertical rolls
-- **Delta Hedging**: Portfolio-level delta neutralization
-- **Backtrader Integration**: Professional backtesting with detailed metrics
-- **Comprehensive Reporting**: PDF reports with equity curves, drawdowns, and trade markers
-
-## 📋 Prerequisites
-
-- Python 3.10+
-- Alpaca API account (for historical data)
-- Polygon.io API account (optional, for live market data)
-
-## 🛠️ Installation
-
-### 1. Clone Repository
-```bash
-git clone https://github.com/trextrader/spy-iron-condor-trading.git
-cd spy-iron-condor-trading
-```
-
-### 2. Create Virtual Environment
-```bash
-python -m venv venv
-venv\Scripts\activate
-```
-
-### 3. Install Dependencies
-```bash
-pip install backtrader matplotlib pandas numpy tabulate mplfinance requests pytz alpaca-py
-```
-
-### 4. Configure API Keys
-```bash
-copy config.template.py config.py
-notepad config.py
-```
-
-Edit and replace placeholder values with your actual API keys.
-
-## 📊 Usage
-
-### Download Historical Data
-```bash
-python AlpacaGetData.py
-```
-Enter "SPY" for symbol, select timeframe "5"
-
-### Run Backtest
-```bash
-python main.py --mode backtest --bt-cash 25000
-```
-
-### Advanced Options
-```bash
-python main.py --mode backtest --bt-cash 50000 --wing-min 5.0 --wing-max 10.0 --ivr-min 30.0 --vix-max 25.0 --profit-pct 0.50 --loss-multiple 1.5 --max-hold-days 14
-```
-
-## 📁 Project Structure
-```
-spy-iron-condor-trading/
-├── main.py                    # CLI entry point
-├── backtest_engine.py         # Backtrader integration
-├── options_strategy.py        # Iron condor logic
-├── broker.py                  # Broker abstraction
-├── polygon_client.py          # Polygon.io client
-├── AlpacaGetData.py          # Data downloader
-├── config.py                  # API keys (GITIGNORED)
-├── config.template.py         # Template
-└── reports/                   # Generated reports
-```
-
-## 🎯 Strategy Logic
-
-### Entry Criteria
-1. IV Rank ≥ 30
-2. VIX ≤ 25
-3. Under max position limit (3)
-4. Portfolio allocation below 15%
-
-### Strike Selection
-- DTE: 30-45 days
-- Short Delta: 0.15-0.20
-- Wing Width: $5-$10 (widens in high vol)
-- Min credit-to-width: 0.25
-
-### Exit Rules
-1. Profit Target: 50% of max profit
-2. Stop Loss: 1.5x credit received
-3. Time Decay: Close at 14 DTE
-4. Breach: Roll once per side
-
-## 🤝 Contributing
-```bash
-git pull
-git checkout -b feature/your-feature
-# Make changes
-git add .
-git commit -m "Add: description"
-git push origin feature/your-feature
-```
-
-## ⚠️ Security
-
-- NEVER commit `config.py`
-- Each developer maintains own API keys locally
-- Always use `config.template.py` as template
-
-## 📈 Output Reports
-
-- **trades.csv**: Detailed trade log with OHLCV and spreads
-- **backtest_report.pdf**: 3-page visual report with charts
+**Quantor-MTFuzz** is a high-fidelity algorithmic trading system designed specifically for SPY Iron Condor strategies. It combines Multi-Timeframe (MTF) technical intelligence with Fuzzy Logic position sizing to execute risk-managed options trades in both backtesting and live paper-trading environments.
 
 ---
 
-**Last Updated**: December 2024
+## 🚀 Key Features
+
+- **High-Fidelity Backtesting**: Simulates every 5-minute bar with accurate mark-to-market P&L, leg-by-leg exit logic (Profit Take, Stop Loss, Expiration), and price caching to handle data gaps.
+- **Phased Serial Optimization**: A custom grid-search engine that optimizes for the **Net Profit / Max Drawdown** ratio. Includes automatic hardware benchmarking and time-to-completion estimation.
+- **Fuzzy Intel Engine**: Dynamic position sizing based on VIX regime, IV Rank, and MTF consensus.
+- **Alpaca Integration**: Seamless transition to live paper trading using the Alpaca-Py SDK.
+- **Professional Reporting**: Generates automated PDF reports with equity curves, strike overlays, P&L distributions, and monthly performance grids.
+
+---
+
+## 🛠️ Installation
+
+1. **Python Version**: Ensure you are using **Python 3.12**.
+2. **Setup Dependencies**:
+   ```powershell
+   pip install backtrader alpaca-py mplfinance tabulate matplotlib pandas numpy psutil
+   ```
+
+---
+
+## ⚙️ Configuration
+
+1. **API Keys**: Copy `core/config.template.py` to `core/config.py` and enter your keys:
+   - `polygon_key`: Required for real-time data and backtesting.
+   - `alpaca_key` / `alpaca_secret`: Required for paper/live trading.
+2. **Strategy Parameters**: Tune your core strategy logic (DTE, Delta, IVR thresholds) directly in `core/config.py`.
+
+---
+
+## 📈 Execution Modes
+
+### 1. High-Fidelity Backtest
+Run a simulation over historical data with full reporting:
+```powershell
+python core/main.py --mode backtest --use-mtf --dynamic-sizing --bt-samples 0
+```
+- Results are saved to `reports/backtest_report.pdf`.
+
+### 2. Strategy Optimization
+Find the optimal parameters for your risk profile:
+```powershell
+python core/main.py --mode backtest --use-mtf --dynamic-sizing --bt-samples 0 --use-optimizer
+```
+- Performance is measured by the **Net Profit / Max Drawdown** ratio.
+- The script will benchmark your hardware first and provide a time estimate.
+- Once finished, you can select the best configuration from the Top 100 Leaderboard.
+
+### 3. Live Paper Trading (Alpaca)
+Transition your strategy to the real market:
+```powershell
+python core/main.py --mode live --alpaca --alpaca-key YOUR_KEY --alpaca-secret YOUR_SECRET --polygon-key YOUR_KEY
+```
+
+---
+
+## 📁 Repository Structure
+
+- `core/`: Primary logic including the `backtest_engine`, `optimizer`, and `broker` interfaces.
+- `strategies/`: Iron Condor strategy definitions and option leg logic.
+- `intelligence/`: Fuzzy logic engine and MTF membership functions.
+- `data_factory/`: Data synchronization and Polygon API integration.
+- `data/`: Local storage for synthetic and historical datasets.
+
+---
+
+## ⚖️ Disclaimer
+*This software is for educational and research purposes only. Trading options involves significant risk. The developers are not responsible for any financial losses incurred through the use of this software.*

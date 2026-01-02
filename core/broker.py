@@ -1,9 +1,13 @@
-# broker.py
+# core/broker.py
 import datetime as dt
 from typing import List, Dict, Optional
 from dataclasses import dataclass
-from options_strategy import OptionQuote, IronCondorLegs, PositionState
-from polygon_client import PolygonClient
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from strategies.options_strategy import OptionQuote, IronCondorLegs, PositionState
+from data_factory.polygon_client import PolygonClient
 
 class BrokerAPI:
     def get_spot(self, symbol: str) -> float: ...
@@ -89,3 +93,79 @@ class PaperBroker(BrokerAPI):
 
     def collect_trade_log(self) -> List[TradeEvent]:
         return self.trade_log
+
+class AlpacaBroker(BrokerAPI):
+    """
+    Live/Paper Broker using Alpaca-Py SDK for execution 
+    and Polygon for market intelligence.
+    """
+    def __init__(self, run_cfg, polygon_client: PolygonClient):
+        from alpaca.trading.client import TradingClient
+        
+        self.poly = polygon_client
+        self.r_cfg = run_cfg
+        # Use paper=True by default for safety
+        self.client = TradingClient(run_cfg.alpaca_key, run_cfg.alpaca_secret, paper=True)
+        
+    def get_spot(self, symbol: str) -> float:
+        return self.poly.get_spot(symbol)
+
+    def get_iv_rank(self, symbol: str, lookback_days: int = 252) -> float:
+        return self.poly.get_iv_rank(symbol, lookback_days)
+
+    def get_vix(self) -> float:
+        return self.poly.get_vix()
+
+    def get_option_chain(self, symbol: str, expiration: dt.date) -> List[OptionQuote]:
+        return self.poly.get_option_chain(symbol, expiration)
+
+    def get_expirations(self, symbol: str) -> List[dt.date]:
+        return self.poly.get_expirations(symbol)
+
+    def place_iron_condor(self, legs: IronCondorLegs, quantity: int, limit_price: float) -> str:
+        from alpaca.trading.requests import MarketOrderRequest
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        
+        leg_data = [
+            (legs.short_call.symbol, OrderSide.SELL),
+            (legs.long_call.symbol, OrderSide.BUY),
+            (legs.short_put.symbol, OrderSide.SELL),
+            (legs.long_put.symbol, OrderSide.BUY)
+        ]
+        
+        print(f"[Alpaca] Submitting {quantity} Iron Condor(s)...")
+        results = []
+        for symbol, side in leg_data:
+            req = MarketOrderRequest(
+                symbol=symbol,
+                qty=quantity,
+                side=side,
+                time_in_force=TimeInForce.GTC
+            )
+            order = self.client.submit_order(req)
+            results.append(order.id)
+            
+        return "MULTI-" + "-".join([str(r)[:8] for r in results])
+
+    def get_open_positions(self, symbol: str) -> List[PositionState]:
+        # Implementation for production would map Alpaca positions back to our structures.
+        return []
+
+    def get_account_metrics(self) -> Dict[str, float]:
+        acc = self.client.get_account()
+        return {
+            "equity": float(acc.equity),
+            "buying_power": float(acc.options_buying_power),
+            "positions_value": float(acc.long_market_value) + float(acc.short_market_value)
+        }
+
+    def trade_shares(self, symbol: str, quantity: int, side: str, limit_price: Optional[float] = None) -> None:
+        from alpaca.trading.requests import MarketOrderRequest
+        from alpaca.trading.enums import OrderSide, TimeInForce
+        req = MarketOrderRequest(
+            symbol=symbol,
+            qty=quantity,
+            side=OrderSide.BUY if side == "buy" else OrderSide.SELL,
+            time_in_force=TimeInForce.DAY
+        )
+        self.client.submit_order(req)

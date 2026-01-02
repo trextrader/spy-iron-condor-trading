@@ -1,7 +1,11 @@
-# metrics.py
+# analytics/metrics.py
 from typing import List
 import matplotlib.pyplot as plt
-from broker import TradeEvent
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.broker import TradeEvent
 
 def summarize(trades: List[TradeEvent]):
     opens = [t for t in trades if t.type == "open"]
