@@ -1,6 +1,7 @@
 import itertools
 import copy
 import time
+import os
 import numpy as np
 import pandas as pd
 import datetime
@@ -17,14 +18,14 @@ from tabulate import tabulate
 OPTIMIZATION_MATRIX = {
     # Phase A: Exits (Optimized to Ratio: Net Profit / Max DD)
     "profit_take_pct": np.arange(0.10, 1.0, 0.2),
-    "loss_close_multiple": np.arange(1.0, 5.0, 0.2),
+    #"loss_close_multiple": np.arange(1.0, 5.0, 0.2),
     
     # Phase B: Entry & Structure
-    "dte_min": range(7, 46, 7),                        # e.g. 7, 14, 21...
-    "dte_max": range(14, 91, 14),
-    "target_short_delta_low": np.arange(0.05, 0.26, 0.05),
-    "target_short_delta_high": np.arange(0.10, 0.36, 0.05),
-    "wing_width_min": np.arange(5.0, 15.1, 5.0),
+    #"dte_min": range(7, 46, 7),                        # e.g. 7, 14, 21...
+    #"dte_max": range(14, 91, 14),
+    #"target_short_delta_low": np.arange(0.05, 0.26, 0.05),
+    #"target_short_delta_high": np.arange(0.10, 0.36, 0.05),
+    #"wing_width_min": np.arange(5.0, 15.1, 5.0),
     
     # Phase C: Filters
     #"iv_rank_min": np.arange(15, 55, 5),
@@ -44,7 +45,6 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
     print("[1/3] Loading Data & Running Hardware Benchmark...")
     
     # Pre-load data once
-    import os
     from data_factory.sync_engine import MTFSyncEngine
     
     csv_path = os.path.join("reports", base_s_cfg.underlying, f"{base_s_cfg.underlying}_5.csv")
