@@ -83,6 +83,46 @@ python core/main.py --mode live --alpaca --alpaca-key YOUR_KEY --alpaca-secret Y
 
 ---
 
+## ⌨️ Command-Line Arguments
+
+| Argument | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `--mode` | string | `backtest` | Execution mode: `live` or `backtest` |
+| `--underlying` | string | `SPY` | Underlying ticker symbol |
+| `--quantity` | int | `1` | Base number of contracts per trade |
+| `--dte-min` | int | `30` | Minimum Days to Expiration for entry |
+| `--dte-max` | int | `45` | Maximum Days to Expiration for entry |
+| `--delta-low` | float | `0.15` | Target short delta (lower bound) |
+| `--delta-high` | float | `0.20` | Target short delta (upper bound) |
+| `--wing-min` | float | `5.0` | Minimum wing width (Iron Condor spread) |
+| `--wing-max` | float | `10.0` | Maximum wing width |
+| `--ivr-min` | float | `30.0` | Minimum IV Rank threshold for entry |
+| `--vix-max` | float | `25.0` | Maximum VIX threshold for entry |
+| `--profit-pct` | float | `0.50` | Profit take percentage (e.g., 0.50 = 50%) |
+| `--loss-multiple` | float | `1.5` | Stop loss multiple (e.g., 1.5 = 150% of credit) |
+| `--use-mtf` | flag | `False` | Enable Multi-Timeframe consensus filters |
+| `--dynamic-sizing` | flag | `False` | Enable Fuzzy Logic dynamic position sizing |
+| `--bt-cash` | float | `25000.0` | Starting cash for backtesting |
+| `--bt-samples` | int | `500` | Bars to sample (Set `0` for full year) |
+| `--alpaca` | flag | `False` | Use Alpaca Broker for paper/live trading |
+| `--use-optimizer` | flag | `False` | Run the phased serial grid search optimizer |
+
+---
+
+## 🧪 Optimizable Parameters (`core/optimizer.py`)
+
+To modify the search space, edit the `OPTIMIZATION_MATRIX` in `core/optimizer.py`.
+
+| Parameter | Type | Inclusive Range Format | Description |
+| :--- | :--- | :--- | :--- |
+| `profit_take_pct` | Float | `np.arange(start, stop + step, step)` | Target profit % (e.g., 0.1 to 1.0) |
+| `loss_close_multiple` | Float | `np.arange(start, stop + step, step)` | Stop loss multiple (e.g., 1.0 to 5.0) |
+| `dte_min` | Int | `range(start, stop + step, step)` | Minimum days to expiration |
+| `iv_rank_min` | Float | `np.arange(start, stop + step, step)` | Minimum required IV Rank |
+| `vix_threshold` | Float | `np.arange(start, stop + step, step)` | Maximum allowed VIX level |
+
+---
+
 ## 📁 Repository Structure
 
 - `core/`: Primary logic including the `backtest_engine`, `optimizer`, and `broker` interfaces.
