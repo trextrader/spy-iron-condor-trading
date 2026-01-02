@@ -44,6 +44,8 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
     
     # Pre-load data once
     import os
+    from data_factory.sync_engine import MTFSyncEngine
+    
     csv_path = os.path.join("reports", base_s_cfg.underlying, f"{base_s_cfg.underlying}_5.csv")
     full_df = pd.read_csv(csv_path, parse_dates=["timestamp"])
     full_df['timestamp'] = pd.to_datetime(full_df['timestamp']).dt.tz_localize(None)
@@ -60,8 +62,17 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
     for date, group in options_df.groupby('date'):
         preloaded_options[date.date()] = group.to_dict('records')
 
+    # Pre-load MTF Sync Engine if requested
+    preloaded_sync = None
+    if run_cfg.use_mtf:
+        preloaded_sync = MTFSyncEngine(base_s_cfg.underlying, run_cfg.mtf_timeframes)
+
     bench_start = time.time()
-    _ = run_backtest_headless(base_s_cfg, run_cfg, preloaded_df=full_df, preloaded_options=preloaded_options)
+    _ = run_backtest_headless(base_s_cfg, run_cfg, 
+                              preloaded_df=full_df, 
+                              preloaded_options=preloaded_options,
+                              preloaded_sync=preloaded_sync,
+                              verbose=True)
     bench_end = time.time()
     baseline_duration = bench_end - bench_start
     print(f"  -> Baseline Backtest (Cached): {baseline_duration:.2f} seconds\n")
@@ -100,8 +111,12 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
             
         print(f"  [{i+1}/{total_combos}] Running...", end="\r")
         
-        # Run Backtest
-        strat = run_backtest_headless(s_cfg, run_cfg, preloaded_df=full_df, preloaded_options=preloaded_options)
+        # Run Backtest (Silent mode for performance)
+        strat = run_backtest_headless(s_cfg, run_cfg, 
+                                      preloaded_df=full_df, 
+                                      preloaded_options=preloaded_options,
+                                      preloaded_sync=preloaded_sync,
+                                      verbose=False)
         
         if strat is not None:
             net_profit = strat.pnl

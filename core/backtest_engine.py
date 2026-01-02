@@ -20,7 +20,7 @@ from strategies.options_strategy import (
     PositionState, regime_wing_width
 )
 
-def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=None, preloaded_options=None):
+def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=None, preloaded_options=None, preloaded_sync=None, verbose=True):
     """
     Run backtest without generating reports, returning raw strategy object
     Used for optimization loops.
@@ -40,6 +40,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
     if preloaded_df is not None:
         df = preloaded_df
     else:
+        # Fallback to loading from disk (standard backtest behavior)
         csv_path = os.path.join("reports", s_cfg.underlying, f"{s_cfg.underlying}_5.csv")
         if not os.path.exists(csv_path):
             print(f"[ERROR] Data not found: {csv_path}")
@@ -64,24 +65,28 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             return None
         
         # Load and optimize for fast lookup
-        print(f"[Data] Loading synthetic options: {options_path}...")
+        if verbose: print(f"[Data] Loading synthetic options: {options_path}...")
         options_df = pd.read_csv(options_path, parse_dates=["date", "expiration"])
         options_by_date = {}
         for date, group in options_df.groupby('date'):
             options_by_date[date.date()] = group.to_dict('records')
     
     # === Initialize MTF Sync Engine ===
-    sync_engine = MTFSyncEngine(s_cfg.underlying, r_cfg.mtf_timeframes) if r_cfg.use_mtf else None
+    if preloaded_sync is not None:
+        sync_engine = preloaded_sync
+    else:
+        sync_engine = MTFSyncEngine(s_cfg.underlying, r_cfg.mtf_timeframes) if r_cfg.use_mtf else None
 
     # === Strategy Definition ===
     class IronCondorStrategy(bt.Strategy):
-        params = dict(s_cfg=None, r_cfg=None, sync_engine=None, options_data=None)
+        params = dict(s_cfg=None, r_cfg=None, sync_engine=None, options_data=None, verbose=True)
 
         def __init__(self):
             self.s_cfg = self.params.s_cfg
             self.r_cfg = self.params.r_cfg
             self.sync = self.params.sync_engine
             self.options_data = self.params.options_data
+            self.verbose = self.params.verbose
             
             # Performance Tracking
             self.pnl = 0.0
@@ -155,13 +160,9 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     if dte <= 0:
                         exit_triggered = True
                         exit_reason = "Expiration"
-                        # Use last known credit or 0 if expired worthless for P&L
-                        # For simplicity in backtest, if expired, realized = unrealized or based on intrinsic
-                        # If dte <= 0, we'll assume it's the last bar of the day
-                        pass
                     
                     # Periodic Status
-                    if len(self.equity_series) % 100 == 0:
+                    if self.verbose and len(self.equity_series) % 100 == 0:
                         cost_str = f"${current_cost:.2f}" if 'current_cost' in locals() else "N/A"
                         print(f"  [Position] PnL: ${unrealized_pnl:.2f} | Cost: {cost_str} | DTE: {dte}")
                             
