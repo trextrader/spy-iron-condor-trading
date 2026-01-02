@@ -14,25 +14,31 @@
 
 ---
 
-## 🧮 Mathematical Foundation
+## 🧮 Mathematical Foundation (Script-by-Script)
 
-### 1. Mark-to-Market (MtM) PnL
-The strategy tracks the real-time replacement cost of the Iron Condor spread. The floating PnL at any time $t$ is defined as:
+### 1. `core/backtest_engine.py`: high-Fidelity MtM PnL
+The engine tracks the real-time replacement cost of the Iron Condor spread at every 5-minute bar. The floating PnL at time $t$ is calculated as:
 $$PnL_{t} = (Credit_{0} - Cost_{t}) \times Q \times 100$$
-Where the current cost to close the spread ($Cost_{t}$) is:
+Where $Cost_{t}$ is the net cost to "buy back" the spread:
 $$Cost_{t} = (C_{short} - C_{long}) + (P_{short} - P_{long})$$
-*   $Credit_{0}$: Net premium received at entry.
-*   $Q$: Number of contracts (Quantity).
+Max Drawdown ($MDD$) is tracked bar-by-bar against the peak equity reached ($E_{peak}$):
+$$DD_{t} = 1 - \frac{E_{t}}{E_{peak}} \dots MDD = \max(DD_{t})$$
 
-### 2. Fuzzy Intelligence Aggregation
-Position sizing and regime detection use a Sugeno-style fuzzy inference engine. The final intelligence signal is calculated using a weighted average of membership functions ($\mu$):
+### 2. `intelligence/fuzzy_engine.py`: Sugeno Fuzzy Inference
+Position sizing scales dynamically based on market regimes. We use a Sugeno-style weighted average to aggregate membership functions ($\mu$) for VIX and IV Rank:
 $$Signal = \frac{\sum_{i=1}^{n} w_i \cdot \mu_i(x)}{\sum_{i=1}^{n} \mu_i(x)}$$
-This signal dynamically scales $Q$ based on VIX levels and IV Rank consensus.
+The resulting $Signal \in [0, 1]$ is used as a multiplier for the base contract quantity $Q$.
 
-### 3. Optimization Objective
-The system is optimized to maximize the risk-adjusted return ratio, specifically targeting the recovery speed relative to peak-to-valley loss:
-$$Ratio = \frac{\text{Net Profit}}{\text{Maximum Drawdown}}$$
-Unlike the Sharpe ratio, this metric prioritizes capital preservation and the ability of the strategy to "earn its way out" of drawdowns.
+### 3. `core/trade_decision.py`: Delta-Based Strike Selection
+Strikes are selected by minimizing the distance between the target delta ($\delta_{target}$) and the available market deltas ($\delta_{market}$):
+$$Strike = \text{argmin}(|\delta_{market} - \delta_{target}|)$$
+This ensures the spread maintains the desired probability of profit and risk-reward profile regardless of stock price movement.
+
+### 4. `core/optimizer.py`: Risk-Adjusted Optimization
+The grid search objective is to maximize the ratio of total earnings to the largest realized loss (Maximum Drawdown), ensuring the strategy is "robust" rather than just profitable:
+$$\text{Maximize } \Phi = \frac{\sum \text{Net Profit}}{\text{Max Drawdown}}$$
+Serial execution is benchmarked via a baseline duration $D_{base}$ to estimate total time $T_{total}$ for $N$ combinations:
+$$T_{total} = N \cdot D_{base}$$
 
 ---
 
