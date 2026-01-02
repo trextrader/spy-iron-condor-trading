@@ -83,6 +83,22 @@ python core/main.py --mode backtest --use-mtf --dynamic-sizing --bt-samples 0 --
 - The script will benchmark your hardware first and provide a time estimate.
 - Once finished, you can select the best configuration from the Top 100 Leaderboard.
 
+#### **Optimizer Reporting (New)**
+Every optimization run generates a persistent, timestamped CSV report stored in the `reports/` directory:
+- **Location**: `reports/top100_YYYYMMDD_HHMMSS.csv`
+- **Sorting Logic**: The results are strictly ordered by the **Net Profit / Max Drawdown Ratio** (Rank 1 is the best risk-adjusted performance).
+- **Report Fields**:
+  - `Rank`: Leaderboard position (1-100).
+  - `NetProfit`: Total dollar profit over the period.
+  - `MaxDD`: The largest peak-to-valley account dip (in dollars).
+  - `NP_DD_Ratio`: The primary recovery/risk metric.
+  - `ProfitFactor`: Gross Wins divided by Gross Losses.
+  - `Expectancy`: The average dollar value expected per trade (E-Ratio).
+  - `Sharpe`: Annualized risk-adjusted return.
+  - `Wins / Losses`: Individual counts of winning vs losing trades.
+  - `WinRate`: Percentage of successful trades.
+  - `[Strategy Params]`: All optimized inputs (e.g., `iv_rank_min`, `profit_take_pct`, etc.) are included as columns for direct analysis.
+
 ### 3. Live Paper Trading (Alpaca)
 Transition your strategy to the real market:
 ```powershell
