@@ -16,9 +16,9 @@
 
 ## 🧮 Mathematical Foundation
 
-### 1. Mark-to-Market (MtM) P&L
-The strategy tracks the real-time replacement cost of the Iron Condor spread. The floating P&L at any time $t$ is defined as:
-$$P\&L_{t} = (Credit_{0} - Cost_{t}) \times Q \times 100$$
+### 1. Mark-to-Market (MtM) PnL
+The strategy tracks the real-time replacement cost of the Iron Condor spread. The floating PnL at any time $t$ is defined as:
+$$PnL_{t} = (Credit_{0} - Cost_{t}) \times Q \times 100$$
 Where the current cost to close the spread ($Cost_{t}$) is:
 $$Cost_{t} = (C_{short} - C_{long}) + (P_{short} - P_{long})$$
 *   $Credit_{0}$: Net premium received at entry.
