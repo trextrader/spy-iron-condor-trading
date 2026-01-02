@@ -215,11 +215,20 @@ To modify the search space, edit the `OPTIMIZATION_MATRIX` in `core/optimizer.py
 
 ## 📁 Repository Structure
 
-- `core/`: Primary logic including the `backtest_engine`, `optimizer`, and `broker` interfaces.
-- `strategies/`: Iron Condor strategy definitions and option leg logic.
-- `intelligence/`: Fuzzy logic engine and MTF membership functions.
-- `data_factory/`: Data synchronization and Polygon API integration.
-- `data/`: Local storage for synthetic and historical datasets.
+```text
+C:.
++---analytics/          # Trade auditing and performance calculation
++---core/               # Engine: backtester, optimizer, and broker bridge
+|   |   backtest_engine.py
+|   |   optimizer.py
+|   |   main.py         # Entry Point
++---data/               # Storage for synthetic option chains
++---data_factory/       # ETL: Alpaca/Polygon data sync & Synthetic engine
++---intelligence/       # Fuzzy Logic and Volatility Regime filters
++---reports/            # Master Clock (SPY) data and Optimization logs
+|   \---SPY/            # 5m, 15m, 60m Underlying Price History
+\---strategies/         # Iron Condor strategy and leg-logic
+```
 
 ---
 
