@@ -14,6 +14,28 @@
 
 ---
 
+## 🧮 Mathematical Foundation
+
+### 1. Mark-to-Market (MtM) P&L
+The strategy tracks the real-time replacement cost of the Iron Condor spread. The floating P&L at any time $t$ is defined as:
+$$P\&L_{t} = (Credit_{0} - Cost_{t}) \times Q \times 100$$
+Where the current cost to close the spread ($Cost_{t}$) is:
+$$Cost_{t} = (C_{short} - C_{long}) + (P_{short} - P_{long})$$
+*   $Credit_{0}$: Net premium received at entry.
+*   $Q$: Number of contracts (Quantity).
+
+### 2. Fuzzy Intelligence Aggregation
+Position sizing and regime detection use a Sugeno-style fuzzy inference engine. The final intelligence signal is calculated using a weighted average of membership functions ($\mu$):
+$$Signal = \frac{\sum_{i=1}^{n} w_i \cdot \mu_i(x)}{\sum_{i=1}^{n} \mu_i(x)}$$
+This signal dynamically scales $Q$ based on VIX levels and IV Rank consensus.
+
+### 3. Optimization Objective
+The system is optimized to maximize the risk-adjusted return ratio, specifically targeting the recovery speed relative to peak-to-valley loss:
+$$Ratio = \frac{\text{Net Profit}}{\text{Maximum Drawdown}}$$
+Unlike the Sharpe ratio, this metric prioritizes capital preservation and the ability of the strategy to "earn its way out" of drawdowns.
+
+---
+
 ## 🛠️ Installation
 
 1. **Setup Dependencies**:
