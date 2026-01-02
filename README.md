@@ -216,19 +216,64 @@ To modify the search space, edit the `OPTIMIZATION_MATRIX` in `core/optimizer.py
 ## 📁 Repository Structure
 
 ```text
-C:.
-+---analytics/          # Trade auditing and performance calculation
-+---core/               # Engine: backtester, optimizer, and broker bridge
-|   |   backtest_engine.py
-|   |   optimizer.py
-|   |   main.py         # Entry Point
-+---data/               # Storage for synthetic option chains
-+---data_factory/       # ETL: Alpaca/Polygon data sync & Synthetic engine
-+---intelligence/       # Fuzzy Logic and Volatility Regime filters
-+---reports/            # Master Clock (SPY) data and Optimization logs
-|   \---SPY/            # 5m, 15m, 60m Underlying Price History
-\---strategies/         # Iron Condor strategy and leg-logic
+\spy-iron-condor-trading\
+|   CONTRIBUTING.md         # Guidelines for team collaboration
+|   DEVELOPMENT_STATUS.md   # Current roadmap and bug tracker
+|   PolyOptionsData.py      # Legacy Polygon options fetching script
+|   requirements.txt        # Project dependencies
++---analytics/
+|       audit_logger.py     # Detailed trade and system logging
+|       metrics.py          # Portfolio and performance math
++---core/
+|       backtest_engine.py  # High-fidelity Backtrader engine
+|       benchmark_cpu.py    # Hardware speed benchmarking
+|       broker.py           # Abstract broker interface (Alpaca/Paper)
+|       config.py           # Active user configuration
+|       liquidity_gate.py   # Bid/Ask spread and volume checks
+|       main.py             # CLI Entry point
+|       optimizer.py        # Grid search and reporting engine
+|       trade_decision.py   # Entry/Exit signal processing
++---data/
+|   \---synthetic_options/  # Generated option chains (prices/Greeks)
++---data_factory/
+|       AlpacaGetData.py    # Fetcher for underlying stock data
+|       polygon_client.py   # Wrapper for Polygon.io API
+|       sync_engine.py      # Multi-timeframe data alignment
+|       SyntheticOptionsEngine.py # BS-model option chain generator
++---execution/
+|       paper_executor.py   # Live paper-trading order management
++---intelligence/
+|       fuzzy_engine.py     # Sugeno fuzzy inference for sizing
+|       regime_filter.py    # Volatility and trend filters
++---reports/
+|   \---SPY/                # 5m/15m/60m underlying price data
+\---strategies/
+        options_strategy.py # Iron Condor logic and leg management
 ```
+
+### **File Glossary & Functions**
+
+#### **Root Files**
+- `main.py`: The central hub that coordinates backtesting, optimization, and live trading.
+- `requirements.txt`: Defines the Python environment (Pandas, Backtrader, NumPy, etc.).
+
+#### **Core Module (`/core`)**
+- `backtest_engine.py`: Implements the high-fidelity simulator that handles mark-to-market P&L and multi-leg strategies.
+- `optimizer.py`: Manages the phased serial grid search, hardware benchmarking, and generates the `top100_*.csv` reports.
+- `config.py`: Stores all strategy parameters, API keys, and execution settings.
+- `trade_decision.py`: Decides when to open or close positions based on strategy signals.
+
+#### **Data Factory (`/data_factory`)**
+- `SyntheticOptionsEngine.py`: The mathematical core that generates theoretical option prices and Greeks using the Black-Scholes model.
+- `AlpacaGetData.py`: Automates the downloading of historical 5-minute bars for the underlying ticker.
+- `sync_engine.py`: Ensures that data from different timeframes (5m, 15m, 60m) are perfectly aligned for technical analysis.
+
+#### **Intelligence Module (`/intelligence`)**
+- `fuzzy_engine.py`: uses fuzzy logic to scale trade quantities based on market confidence and volatility regimes.
+- `regime_filter.py`: Prevents trading during extreme volatility (VIX spikes) or low IV Rank environments.
+
+#### **Strategies Module (`/strategies`)**
+- `options_strategy.py`: Contains the logic for selecting Condor legs by Delta, calculating credits, and managing individual leg exits.
 
 ---
 
