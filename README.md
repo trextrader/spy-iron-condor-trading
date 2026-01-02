@@ -88,6 +88,9 @@ python core/main.py --mode live --alpaca --alpaca-key YOUR_KEY --alpaca-secret Y
 | Argument | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `--mode` | string | `backtest` | Execution mode: `live` or `backtest` |
+| `--polygon-key` | string | `None` | Polygon.io API key for market data |
+| `--alpaca-key` | string | `None` | Alpaca API Key ID |
+| `--alpaca-secret` | string | `None` | Alpaca API Secret Key |
 | `--underlying` | string | `SPY` | Underlying ticker symbol |
 | `--quantity` | int | `1` | Base number of contracts per trade |
 | `--dte-min` | int | `30` | Minimum Days to Expiration for entry |
@@ -96,14 +99,31 @@ python core/main.py --mode live --alpaca --alpaca-key YOUR_KEY --alpaca-secret Y
 | `--delta-high` | float | `0.20` | Target short delta (upper bound) |
 | `--wing-min` | float | `5.0` | Minimum wing width (Iron Condor spread) |
 | `--wing-max` | float | `10.0` | Maximum wing width |
+| `--min-credit-ratio`| float | `0.25` | Min credit/width ratio (e.g. 0.25 = 25% of width) |
 | `--ivr-min` | float | `30.0` | Minimum IV Rank threshold for entry |
 | `--vix-max` | float | `25.0` | Maximum VIX threshold for entry |
 | `--profit-pct` | float | `0.50` | Profit take percentage (e.g., 0.50 = 50%) |
 | `--loss-multiple` | float | `1.5` | Stop loss multiple (e.g., 1.5 = 150% of credit) |
+| `--max-hold-days` | int | `14` | Max days to hold a position |
+| `--max-positions` | int | `3` | maximum concurrent positions |
+| `--max-alloc` | float | `0.15` | Maximum portfolio allocation per trade |
+| `--regime-ivr-widen`| float | `40.0` | IVR threshold to trigger wing widening |
+| `--regime-vix-widen`| float | `22.0` | VIX threshold to trigger wing widening |
+| `--width-increment` | float | `5.0` | Points to add when widening wings |
+| `--enable-hedge` | flag | `False` | Enable delta hedging (shares) |
+| `--hedge-threshold`| float | `0.10` | Portfolio delta threshold to trigger hedge |
 | `--use-mtf` | flag | `False` | Enable Multi-Timeframe consensus filters |
-| `--dynamic-sizing` | flag | `False` | Enable Fuzzy Logic dynamic position sizing |
+| `--mtf-consensus-min`| float | `0.40` | Min consensus score for long-side signal |
+| `--mtf-consensus-max`| float | `0.60` | Max consensus score for short-side signal |
+| `--mtf-timeframes` | string | `5,15,60` | Timeframes to sync (comma-separated) |
+| `--no-liquidity-gate`| flag | `False` | Disable bid/ask spread checks |
 | `--bt-cash` | float | `25000.0` | Starting cash for backtesting |
+| `--bt-start` | string | `2024-01-01` | Backtest start date (YYYY-MM-DD) |
+| `--bt-end` | string | `2024-12-31` | Backtest end date (YYYY-MM-DD) |
 | `--bt-samples` | int | `500` | Bars to sample (Set `0` for full year) |
+| `--no-plot` | flag | `False` | Disable chart/PDF generation |
+| `--dynamic-sizing` | flag | `False` | Enable Fuzzy Logic dynamic position sizing |
+| `--position-size-pct`| float | `0.05` | Target allocation % for fuzzy sizing |
 | `--alpaca` | flag | `False` | Use Alpaca Broker for paper/live trading |
 | `--use-optimizer` | flag | `False` | Run the phased serial grid search optimizer |
 
