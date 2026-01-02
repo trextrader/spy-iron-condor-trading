@@ -8,6 +8,7 @@ Welcome! This document outlines the process for team developers to contribute to
 
 This is a private repository. To contribute, you must be invited as a **Collaborator** by the repository owner.
 
+- **Current Status**: See [DEVELOPMENT_STATUS.md](file:///c:/SPYOptionTrader_test/DEVELOPMENT_STATUS.md) for a list of resolved bugs and the current roadmap.
 - **Authentication**: Do **not** use the owner's credentials. Use your own GitHub account.
 - **Tokens**: When performing Git operations over HTTPS, use a **Personal Access Token (PAT)** instead of your password. 
   - *Setup*: GitHub Settings → Developer Settings → Personal Access Tokens → Tokens (classic).
