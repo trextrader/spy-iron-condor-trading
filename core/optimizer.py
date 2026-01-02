@@ -121,33 +121,56 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
         
         if strat is not None:
             net_profit = strat.pnl
+            final_balance = run_cfg.backtest_cash + net_profit
             max_dd = max(strat.drawdowns) if strat.drawdowns else 0.0
-            ratio = net_profit / max_dd if max_dd > 0 else (net_profit if net_profit > 0 else -999)
             
-            # Calculate Sharpe (Annualized for 5-min bars: 78/day * 252 days)
+            # Professional Metrics
+            wins = [t for t in strat.trade_log if t["result"] == "win"]
+            losses = [t for t in strat.trade_log if t["result"] == "loss"]
+            
+            gross_profit = sum(t["amount"] for t in wins)
+            gross_loss = abs(sum(t["amount"] for t in losses))
+            
+            # Profit Factor
+            profit_factor = gross_profit / gross_loss if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0.0)
+            
+            win_rate = (len(wins) / strat.trades * 100) if strat.trades > 0 else 0
+            loss_rate = 100 - win_rate
+            
+            avg_win = sum(t["amount"] for t in wins) / len(wins) if wins else 0
+            avg_loss = abs(sum(t["amount"] for t in losses)) / len(losses) if losses else 0
+            expectancy = ((avg_win * win_rate/100) - (avg_loss * loss_rate/100))
+            
+            # Primary Sorting Ratio: Net Profit / Max Drawdown
+            np_dd_ratio = net_profit / max_dd if max_dd > 0 else 0.0
+            
+            # Annualized Sharpe (Assuming 5-min bars: 78/day * 252 days)
             sharpe = 0.0
             if len(strat.equity_series) > 1:
                 equity_curve = np.array(strat.equity_series)
                 returns = np.diff(equity_curve) / equity_curve[:-1]
                 if np.std(returns) > 0:
-                    bars_per_year = 252 * 78
-                    sharpe = (np.mean(returns) / np.std(returns)) * np.sqrt(bars_per_year)
+                    sharpe = (np.mean(returns) / np.std(returns)) * np.sqrt(252 * 78)
 
             results.append({
                 "params": params_dict,
                 "net_profit": net_profit,
-                "final_balance": run_cfg.backtest_cash + net_profit,
+                "final_balance": final_balance,
                 "max_dd": max_dd,
-                "ratio": ratio,
+                "np_dd_ratio": np_dd_ratio,
                 "sharpe": sharpe,
+                "profit_factor": profit_factor,
+                "expectancy": expectancy,
                 "trades": strat.trades,
-                "win_rate": (strat.wins / strat.trades * 100) if strat.trades > 0 else 0
+                "wins": len(wins),
+                "losses": len(losses),
+                "win_rate": win_rate
             })
 
     print(f"\n\nDone. Processing {len(results)} valid results...")
 
     # 4. Reporting (Top 100)
-    sorted_results = sorted(results, key=lambda x: x['ratio'], reverse=True)
+    sorted_results = sorted(results, key=lambda x: x['np_dd_ratio'], reverse=True)
     top_100 = sorted_results[:100]
     
     # 4.1 Persistence (New: Save to CSV)
@@ -163,10 +186,15 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
             row.update(res['params'])
             row.update({
                 "Balance": res['final_balance'],
-                "Profit": res['net_profit'],
-                "Ratio": res['ratio'],
+                "NetProfit": res['net_profit'],
+                "MaxDD": res['max_dd'],
+                "NP_DD_Ratio": res['np_dd_ratio'],
+                "ProfitFactor": res['profit_factor'],
+                "Expectancy": res['expectancy'],
                 "Sharpe": res['sharpe'],
                 "Trades": res['trades'],
+                "Wins": res['wins'],
+                "Losses": res['losses'],
                 "WinRate": res['win_rate']
             })
             csv_data.append(row)
@@ -174,7 +202,7 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
         pd.DataFrame(csv_data).to_csv(report_path, index=False)
         print(f"\n[Report Saved] {report_path}")
     
-    table_headers = ["Rank", "Params", "Balance", "Profit", "Ratio", "Sharpe", "Trades", "Win %"]
+    table_headers = ["Rank", "Params", "Profit", "DD", "NP/DD", "PF", "Exp.", "Sharpe", "T", "W/L", "Win%"]
     table_rows = []
     
     for rank, res in enumerate(top_100, 1):
@@ -183,11 +211,14 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
         table_rows.append([
             rank,
             param_summary,
-            f"${res['final_balance']:,.0f}",
             f"${res['net_profit']:,.0f}",
-            f"{res['ratio']:.2f}",
+            f"${res['max_dd']:,.0f}",
+            f"{res['np_dd_ratio']:.2f}",
+            f"{res['profit_factor']:.2f}",
+            f"${res['expectancy']:.2f}",
             f"{res['sharpe']:.2f}",
             res['trades'],
+            f"{res['wins']}/{res['losses']}",
             f"{res['win_rate']:.1f}%"
         ])
 
