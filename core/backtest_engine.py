@@ -453,9 +453,28 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
 
             credit = calc_condor_credit(condor)
             
-            if credit < (width * self.s_cfg.min_credit_to_width):
+            # === Adaptive Credit Threshold (Regime Dependent) ===
+            # If IV is low, premium is cheap -> lower the bar
+            base_ratio = self.s_cfg.min_credit_to_width
+            if ivr < 20.0:
+                required_ratio = max(0.12, base_ratio * 0.7) # Allow 30% reduction or 0.12 floor
+            elif ivr > 50.0:
+                required_ratio = min(0.35, base_ratio * 1.2) # Demand more premium in high IV
+            else:
+                required_ratio = base_ratio
+                
+            min_credit = width * required_ratio
+            
+            if credit < min_credit:
                 if self.bar_count == 101 and self.verbose:
-                    print(f"[DEBUG] Entry blocked by credit: credit={credit:.2f} < min={width * self.s_cfg.min_credit_to_width:.2f}")
+                    print(f"[DEBUG] Entry blocked by credit. Needed {min_credit:.2f} (ratio {required_ratio:.2f}), Got {credit:.2f}")
+                    # Diagnostic: Print Legs
+                    if len(condor) == 4:
+                        print(f"    Legs: ShortC={condor[0]['strike']}@{condor[0]['mid']:.2f} | LongC={condor[1]['strike']}@{condor[1]['mid']:.2f}")
+                        print(f"          ShortP={condor[2]['strike']}@{condor[2]['mid']:.2f} | LongP={condor[3]['strike']}@{condor[3]['mid']:.2f}")
+                        call_cr = condor[0]['mid'] - condor[1]['mid']
+                        put_cr = condor[2]['mid'] - condor[3]['mid']
+                        print(f"    Calc: CallCr={call_cr:.2f} + PutCr={put_cr:.2f} = {call_cr + put_cr:.2f}")
                 return
 
             # === Neural Forecasting (Mamba 2) ===
@@ -475,7 +494,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                 neural_forecast_data = forecast_state.to_dict()
                 
                 if self.verbose and self.bar_count % 100 == 0:
-                    print(f"[Neural] Conf={forecast_state.confidence:.2f} | P(Bull)={forecast_state.prob_bull:.2f} | P(Bear)={forecast_state.prob_bear:.2f}")
+                    print(f"[Neural:{forecast_state.model_backend}] Conf={forecast_state.confidence:.2f} | P(Bull)={forecast_state.prob_bull:.2f} | P(Bear)={forecast_state.prob_bear:.2f}")
 
             # === Sizing via QTMF Facade (Neuro-Fuzzy) ===
             from qtmf.models import TradeIntent

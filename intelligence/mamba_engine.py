@@ -38,6 +38,9 @@ class ForecastState:
     # Raw value (e.g., predicted return)
     raw_output: float
     
+    # Backend source (MOCK_CPU or CUDA_REAL)
+    model_backend: str = "UNKNOWN"
+    
     def to_dict(self) -> Dict[str, Any]:
         return {
             "direction_probs": [self.prob_bear, self.prob_neutral, self.prob_bull],
@@ -116,12 +119,26 @@ class MambaForecastEngine:
             
         last_row = df.iloc[-1]
         
+        # Helper to safely get float value or default
+        def get_safe(key, default):
+            val = last_row.get(key)
+            if val is None or (isinstance(val, float) and math.isnan(val)):
+                return default
+            return float(val)
+
         # safely get features or default to 0
+        close_price = get_safe('close', 100.0)
+        prev_close = df.iloc[-2]['close'] if len(df) > 1 else close_price
+        
+        rsi_val = get_safe('rsi_14', 50.0)
+        atr_val = get_safe('atr_pct', 0.01)
+        vol_ratio = get_safe('volume_ratio', 1.0)
+        
         feat = [
-            last_row.get('close', 100.0) / df.iloc[-2]['close'] - 1.0 if len(df) > 1 else 0.0,
-            (last_row.get('rsi_14', 50.0) - 50.0) / 50.0,  # Center around 0
-            last_row.get('atr_pct', 0.01) * 10.0,          # Scale up
-            (last_row.get('volume_ratio', 1.0) - 1.0)      # Center around 0
+            (close_price / prev_close - 1.0) if prev_close != 0 else 0.0,
+            (rsi_val - 50.0) / 50.0,       # Center around 0
+            atr_val * 10.0,                # Scale up
+            (vol_ratio - 1.0)              # Center around 0
         ]
         
         # Pad to model dimension
@@ -183,5 +200,6 @@ class MambaForecastEngine:
             prob_bull=probs[2],
             pred_vol_regime=regime,
             confidence=0.5 + (abs(raw_output) / 2), # Higher signal = higher confidence
-            raw_output=float(raw_output)
+            raw_output=float(raw_output),
+            model_backend="MOCK_CPU" if not self.is_cuda else "CUDA_REAL"
         )

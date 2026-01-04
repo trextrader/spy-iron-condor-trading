@@ -74,8 +74,8 @@ The system uses two separate data sources that must be understood together:
 - **Core**: `main.py` -> `RunConfig` -> `BacktestEngine`
 - **Data Layer**: `MTFSyncEngine` (1m, 5m, 15m) + `SyntheticOptionsEngine` (Pricing)
 - **Intelligence Layer**: 
-  - `qtmf/`: Central Neuro-Fuzzy Facade
-  - `intelligence/mamba_engine.py`: Neural Market State Forecasting (Mock/Real)
+  - `qtmf/`: Central Neuro-Fuzzy Facade (Adaptive Credit Logic + 9-Factor Filters)
+  - `intelligence/mamba_engine.py`: Neural Market State Forecasting (Truthful Mamba Backend: Mock/Real)
   - `intelligence/fuzzy_engine.py`: Membership Functions
 - **Strategy**: `ZeroDTE_IC` (Iron Condor) located in `core/backtest_engine.py`
    - Provides theoretical option prices (Black-Scholes model)

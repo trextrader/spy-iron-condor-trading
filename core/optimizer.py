@@ -50,7 +50,23 @@ OPTIMIZATION_MATRIX = {
     #"fuzzy_weight_stoch": np.arange(0.05, 0.20, 0.05),
     #"fuzzy_weight_volume": np.arange(0.0, 0.15, 0.05),
     #"fuzzy_weight_sma": np.arange(0.0, 0.15, 0.05),
+
+    # Phase E: Advanced Exit Logic (ATR Stops, Trailing Stops, BB Breakouts)
+    #"atr_stop_multiplier_base": np.arange(1.0, 2.1, 0.25),           # 1.0, 1.25, 1.5, 1.75, 2.0
+    #"atr_stop_multiplier_min": np.arange(0.75, 1.26, 0.25),          # 0.75, 1.0, 1.25
+    #"atr_stop_multiplier_max": np.arange(2.0, 3.1, 0.25),            # 2.0, 2.25, 2.5, 2.75, 3.0
+    #"trailing_stop_activation_pct": np.arange(0.3, 0.71, 0.1),       # 30%, 40%, 50%, 60%, 70%
+    #"trailing_stop_trail_pct": np.arange(0.5, 0.81, 0.1),            # 50%, 60%, 70%, 80%
+    #"bbands_exit_touch_threshold": np.arange(0.90, 0.99, 0.02),      # 90%, 92%, 94%, 96%, 98%
 }
+
+# Optimization Phases (Recommended Order):
+# Phase A (Active): Basic exit optimization (profit_take_pct, loss_close_multiple)
+# Phase B (Future): Entry structure (DTE, delta targets, wing width)
+# Phase C (Future): Basic filters (IVR, VIX thresholds)
+# Phase C2 (Future): Advanced indicator filters (RSI, ADX, Stoch, BB, Volume, SMA)
+# Phase D (Future): Fuzzy weight distribution optimization
+# Phase E (Future): Advanced exit logic (ATR stops, trailing stops, BB breakouts)
 
 def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
     """
