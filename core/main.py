@@ -84,7 +84,7 @@ Examples:
     parser.add_argument("--no-mtf-filter", action="store_true")
     parser.add_argument("--mtf-consensus-min", type=float, default=0.40)
     parser.add_argument("--mtf-consensus-max", type=float, default=0.60)
-    parser.add_argument("--mtf-timeframes", type=str, default="5,15,60")
+    parser.add_argument("--mtf-timeframes", type=str, default="1,5,15")
 
     # --- Liquidity ---
     parser.add_argument("--no-liquidity-gate", action="store_true")

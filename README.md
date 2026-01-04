@@ -105,6 +105,7 @@ The following metrics are used to rank results in the `top100_[timestamp].csv` r
 
 1. **API Keys**: Copy `core/config.template.py` to `core/config.py` and enter your keys.
 2. **Parameters**: The winning parameters from our initial optimization (**IVR 20, VIX 25, TP 60%, SL 2.0x**) are pre-set as the defaults in the configuration files.
+3. **Latest Optimizer Selection**: Rank-1 applied to defaults: `profit_take_pct=0.9`, `loss_close_multiple=1.2`.
 
 ---
 
@@ -181,7 +182,7 @@ python core/main.py --mode live --alpaca --alpaca-key YOUR_KEY --alpaca-secret Y
 | `--use-mtf` | flag | `False` | Enable Multi-Timeframe consensus filters |
 | `--mtf-consensus-min`| float | `0.40` | Min consensus score for long-side signal |
 | `--mtf-consensus-max`| float | `0.60` | Max consensus score for short-side signal |
-| `--mtf-timeframes` | string | `5,15,60` | Timeframes to sync (comma-separated) |
+| `--mtf-timeframes` | string | `1,5,15` | Timeframes to sync (comma-separated) |
 | `--no-liquidity-gate`| flag | `False` | Disable bid/ask spread checks |
 | `--bt-cash` | float | `25000.0` | Starting cash for backtesting |
 | `--bt-start` | string | `2024-01-01` | Backtest start date (YYYY-MM-DD) |

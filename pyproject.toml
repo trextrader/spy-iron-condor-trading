@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qtmf"
+version = "0.1.0"
+description = "Quantor-MTFuzz (QTMF) - SPY options trading system with fuzzy logic utilities"
+readme = "README.md"
+requires-python = ">=3.10"
+
+# NOTE: runtime dependencies remain in requirements.txt for now.
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+  "qtmf*",
+  "analytics*",
+  "core*",
+  "data_factory*",
+  "execution*",
+  "intelligence*",
+  "reports*",
+  "strategies*"
+]

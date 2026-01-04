@@ -41,7 +41,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
         df = preloaded_df
     else:
         # Fallback to loading from disk (standard backtest behavior)
-        csv_path = os.path.join("reports", s_cfg.underlying, f"{s_cfg.underlying}_5.csv")
+        csv_path = os.path.join("reports", s_cfg.underlying, f"{s_cfg.underlying}_1.csv")
         if not os.path.exists(csv_path):
             print(f"[ERROR] Data not found: {csv_path}")
             return None
@@ -50,16 +50,27 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
         df.set_index("timestamp", inplace=True)
         df.sort_index(inplace=True)
         
+        # Filter by date range if specified
+        if hasattr(r_cfg, 'backtest_start') and r_cfg.backtest_start:
+            start_dt = pd.Timestamp(r_cfg.backtest_start)
+            df = df[df.index >= start_dt]
+        if hasattr(r_cfg, 'backtest_end') and r_cfg.backtest_end:
+            end_dt = pd.Timestamp(r_cfg.backtest_end) + pd.Timedelta(days=1)  # Include end day
+            df = df[df.index < end_dt]
+        
         # Optimization: Slice data if backtest_samples is set
         if r_cfg.backtest_samples and r_cfg.backtest_samples > 0:
             if len(df) > r_cfg.backtest_samples:
                 df = df.iloc[-r_cfg.backtest_samples:]
+        
+        total_bars = len(df)
+        if verbose: print(f"[Data] Loaded {total_bars:,} bars from {df.index.min().date()} to {df.index.max().date()}")
     
     # === Load Synthetic Options Data ===
     if preloaded_options is not None:
         options_by_date = preloaded_options
     else:
-        options_path = os.path.join("data", "synthetic_options", f"{s_cfg.underlying}_5min.csv")
+        options_path = os.path.join("data", "synthetic_options", f"{s_cfg.underlying.lower()}_options_marks.csv")
         if not os.path.exists(options_path):
             print(f"[ERROR] Synthetic options data not found: {options_path}")
             return None
@@ -102,10 +113,25 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             self.active_position = None # Handle 1 position at a time for simplicity
             self.bars_since_trade = 100 
             self.price_cache = {} # Persistent cache for leg prices: {symbol: last_price}
+            
+            # Progress tracking
+            self.bar_count = 0
+            self.total_bars = len(self.datas[0])
+            self.last_progress_pct = -1
 
         def next(self):
             dt_now = self.datas[0].datetime.datetime(0)
             date_now = dt_now.date()
+            
+            # Progress output
+            self.bar_count += 1
+            if self.total_bars > 0:
+                progress_pct = int((self.bar_count / self.total_bars) * 100)
+                if self.verbose and progress_pct % 10 == 0 and progress_pct != self.last_progress_pct:
+                    self.last_progress_pct = progress_pct
+                    equity = self.r_cfg.backtest_cash + self.pnl
+                    pos_status = "IN POSITION" if self.active_position else "SCANNING"
+                    print(f"[Progress] {progress_pct:3d}% | Bar {self.bar_count:,}/{self.total_bars:,} | {dt_now.strftime('%Y-%m-%d %H:%M')} | Equity: ${equity:,.2f} | Trades: {self.trades} | {pos_status}")
             
             # 1. Update Equity tracking for every bar
             current_equity = self.r_cfg.backtest_cash + self.pnl
@@ -222,6 +248,14 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
 
             # 3. Entry Logic
             chain_records = self.options_data.get(date_now, [])
+            
+            # Debug: Print once on first attempt after cooldown
+            if self.bar_count == 101 and self.verbose:
+                opt_keys = list(self.options_data.keys())[:5]
+                print(f"[DEBUG] Looking for date: {date_now} (type: {type(date_now)})")
+                print(f"[DEBUG] Options keys sample: {opt_keys} (type: {type(opt_keys[0]) if opt_keys else 'N/A'})")
+                print(f"[DEBUG] Chain records found: {len(chain_records)}")
+            
             if not chain_records:
                 return
                 
@@ -242,6 +276,8 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             vix = 18.0 + np.random.uniform(-3, 3) 
             
             if ivr < self.s_cfg.iv_rank_min or vix > self.s_cfg.vix_threshold:
+                if self.bar_count == 101 and self.verbose:
+                    print(f"[DEBUG] Entry blocked by IVR/VIX: ivr={ivr:.1f} (min={self.s_cfg.iv_rank_min}), vix={vix:.1f} (max={self.s_cfg.vix_threshold})")
                 return
 
             mtf_snapshot = self.sync.get_snapshot(dt_now) if self.sync else None
@@ -250,17 +286,23 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             
             if self.s_cfg.use_mtf_filter:
                 if mu_mtf < self.s_cfg.mtf_consensus_min or mu_mtf > self.s_cfg.mtf_consensus_max:
+                    if self.bar_count == 101 and self.verbose:
+                        print(f"[DEBUG] Entry blocked by MTF: mu_mtf={mu_mtf:.2f} (range=[{self.s_cfg.mtf_consensus_min}, {self.s_cfg.mtf_consensus_max}])")
                     return
 
             width = regime_wing_width(self.s_cfg, ivr, vix)
             condor = build_condor(quote_chain, self.s_cfg, date_now, self.data.close[0], width)
             
             if not condor:
+                if self.bar_count == 101 and self.verbose:
+                    print(f"[DEBUG] Entry blocked: condor build failed (width={width}, close={self.data.close[0]:.2f})")
                 return
 
             credit = calc_condor_credit(condor)
             
             if credit < (width * self.s_cfg.min_credit_to_width):
+                if self.bar_count == 101 and self.verbose:
+                    print(f"[DEBUG] Entry blocked by credit: credit={credit:.2f} < min={width * self.s_cfg.min_credit_to_width:.2f}")
                 return
 
             # Fuzzy sizing

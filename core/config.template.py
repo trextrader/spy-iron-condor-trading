@@ -26,8 +26,8 @@ class StrategyConfig:
 
     
     # === Exit Rules ===
-    profit_take_pct: float = 0.6  
-    loss_close_multiple: float = 2.0  
+    profit_take_pct:   float = 0.8999999999999999  
+    loss_close_multiple:  float = 1.2  
     max_hold_days: int = 14
     
     # === Adjustment Rules ===
@@ -85,4 +85,4 @@ class RunConfig:
     
     def __post_init__(self):
         if self.mtf_timeframes is None:
-            self.mtf_timeframes = ['5', '15', '60']
+            self.mtf_timeframes = ['1', '5', '15']

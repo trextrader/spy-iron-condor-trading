@@ -3,7 +3,7 @@ import pandas as pd
 import os
 
 class MTFSyncEngine:
-    def __init__(self, symbol, timeframes=['5', '60', 'D']):
+    def __init__(self, symbol, timeframes=['1', '5', '15']):
         self.symbol = symbol
         self.timeframes = timeframes
         self.data_store = {}

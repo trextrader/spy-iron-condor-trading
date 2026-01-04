@@ -34,3 +34,4 @@ This document provides the development team with a clear snapshot of the technic
 
 ## 📈 Strategy Standing
 The system is currently in a **Live-Ready** state for paper trading. The core mathematical foundations have been verified, and the optimizer is fully functional with high-resolution tuning capabilities.
+- **Optimizer Selection Applied**: Rank-1 parameters set as defaults: profit_take_pct=0.9, loss_close_multiple=1.2 (updated in core/config.template.py and core/config.py).

@@ -17,8 +17,8 @@ from tabulate import tabulate
 # ==========================================================
 OPTIMIZATION_MATRIX = {
     # Phase A: Exits (Optimized to Ratio: Net Profit / Max DD)
-    "profit_take_pct": np.arange(0.10, 1.0, 0.2),
-    #"loss_close_multiple": np.arange(1.0, 5.0, 0.2),
+    "profit_take_pct": np.arange(0.50, 1.4, 0.2),
+    "loss_close_multiple": np.arange(1.0, 5.0, 0.2),
     
     # Phase B: Entry & Structure
     #"dte_min": range(7, 46, 7),                        # e.g. 7, 14, 21...
@@ -69,14 +69,138 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
         preloaded_sync = MTFSyncEngine(base_s_cfg.underlying, run_cfg.mtf_timeframes)
 
     bench_start = time.time()
-    _ = run_backtest_headless(base_s_cfg, run_cfg, 
-                              preloaded_df=full_df, 
-                              preloaded_options=preloaded_options,
-                              preloaded_sync=preloaded_sync,
-                              verbose=True)
+    baseline_strat = run_backtest_headless(
+        base_s_cfg,
+        run_cfg,
+        preloaded_df=full_df,
+        preloaded_options=preloaded_options,
+        preloaded_sync=preloaded_sync,
+        verbose=True,
+    )
     bench_end = time.time()
     baseline_duration = bench_end - bench_start
     print(f"  -> Baseline Backtest (Cached): {baseline_duration:.2f} seconds\n")
+
+    if baseline_strat is None:
+        print("[ERROR] Baseline backtest failed; cannot compute baseline metrics.")
+        return
+
+    # Baseline metrics (same fields as optimizer results)
+    base_net_profit = baseline_strat.pnl
+    base_final_balance = run_cfg.backtest_cash + base_net_profit
+    base_max_dd = max(baseline_strat.drawdowns) if baseline_strat.drawdowns else 0.0
+
+    base_wins = [t for t in baseline_strat.trade_log if t["result"] == "win"]
+    base_losses = [t for t in baseline_strat.trade_log if t["result"] == "loss"]
+
+    base_gross_profit = sum(t["amount"] for t in base_wins)
+    base_gross_loss = abs(sum(t["amount"] for t in base_losses))
+    base_profit_factor = (
+        base_gross_profit / base_gross_loss
+        if base_gross_loss > 0
+        else (base_gross_profit if base_gross_profit > 0 else 0.0)
+    )
+
+    base_win_rate = (
+        (len(base_wins) / baseline_strat.trades) * 100
+        if baseline_strat.trades > 0
+        else 0.0
+    )
+    base_loss_rate = 100 - base_win_rate
+    base_avg_win = sum(t["amount"] for t in base_wins) / len(base_wins) if base_wins else 0.0
+    base_avg_loss = abs(sum(t["amount"] for t in base_losses)) / len(base_losses) if base_losses else 0.0
+    base_expectancy = (base_avg_win * base_win_rate / 100) - (
+        base_avg_loss * base_loss_rate / 100
+    )
+    base_np_dd_ratio = base_net_profit / base_max_dd if base_max_dd > 0 else 0.0
+
+    base_sharpe = 0.0
+    if len(baseline_strat.equity_series) > 1:
+        equity_curve = np.array(baseline_strat.equity_series)
+        returns = np.diff(equity_curve) / equity_curve[:-1]
+        if np.std(returns) > 0:
+            base_sharpe = (np.mean(returns) / np.std(returns)) * np.sqrt(252 * 78)
+
+    # Date range + time in trade (match backtest reporting style)
+    if baseline_strat.trade_log:
+        base_start_date = baseline_strat.trade_log[0]["start"].date()
+        base_end_date = baseline_strat.trade_log[-1]["end"].date()
+    else:
+        base_start_date = baseline_strat.data.datetime.date(-len(baseline_strat.data) + 1)
+        base_end_date = baseline_strat.data.datetime.date(0)
+
+    base_days = (base_end_date - base_start_date).days
+    base_total_seconds = sum(
+        (t["end"] - t["start"]).total_seconds() for t in baseline_strat.trade_log
+    )
+    m, s = divmod(base_total_seconds, 60)
+    h, m = divmod(m, 60)
+    d, h = divmod(h, 24)
+    base_time_in_trade = f"{int(d)}d {int(h):02d}:{int(m):02d}:{int(s):02d}"
+
+    print("[Baseline Metrics]")
+    print(
+        tabulate(
+            [
+                [
+                    f"{base_start_date} to {base_end_date}",
+                    base_days,
+                    base_time_in_trade,
+                    f"${base_net_profit:,.2f}",
+                    f"${base_max_dd:,.2f}",
+                    f"{base_np_dd_ratio:.2f}",
+                    f"{base_profit_factor:.2f}",
+                    f"${base_expectancy:.2f}",
+                    f"{base_sharpe:.2f}",
+                    baseline_strat.trades,
+                    f"{len(base_wins)}/{len(base_losses)}",
+                    f"{base_win_rate:.2f}%",
+                    f"${base_final_balance:,.2f}",
+                ]
+            ],
+            headers=[
+                "Period",
+                "Days",
+                "TimeInTrade",
+                "NetProfit",
+                "MaxDD",
+                "NP/DD",
+                "PF",
+                "Expectancy",
+                "Sharpe",
+                "Trades",
+                "W/L",
+                "Win%",
+                "FinalBalance",
+            ],
+            tablefmt="simple",
+        )
+    )
+
+    # Persist baseline metrics (CSV)
+    os.makedirs("reports", exist_ok=True)
+    baseline_ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    baseline_csv = os.path.join("reports", f"baseline_metrics_{baseline_ts}.csv")
+    baseline_row = {
+        "Timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "PeriodStart": str(base_start_date),
+        "PeriodEnd": str(base_end_date),
+        "Days": base_days,
+        "TimeInTrade": base_time_in_trade,
+        "NetProfit": round(base_net_profit, 2),
+        "MaxDD": round(base_max_dd, 2),
+        "NP_DD_Ratio": round(base_np_dd_ratio, 2),
+        "ProfitFactor": round(base_profit_factor, 2),
+        "Expectancy": round(base_expectancy, 2),
+        "Sharpe": round(base_sharpe, 2),
+        "Trades": baseline_strat.trades,
+        "Wins": len(base_wins),
+        "Losses": len(base_losses),
+        "WinRate": round(base_win_rate, 2),
+        "FinalBalance": round(base_final_balance, 2),
+    }
+    pd.DataFrame([baseline_row]).to_csv(baseline_csv, index=False)
+    print(f"[Baseline Saved] {baseline_csv}\n")
 
     # 2. Build Grid
     keys = list(OPTIMIZATION_MATRIX.keys())
@@ -185,17 +309,17 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
             row = {"Rank": rank}
             row.update(res['params'])
             row.update({
-                "Balance": res['final_balance'],
-                "NetProfit": res['net_profit'],
-                "MaxDD": res['max_dd'],
-                "NP_DD_Ratio": res['np_dd_ratio'],
-                "ProfitFactor": res['profit_factor'],
-                "Expectancy": res['expectancy'],
-                "Sharpe": res['sharpe'],
+                "Balance": round(res['final_balance'], 2),
+                "NetProfit": round(res['net_profit'], 2),
+                "MaxDD": round(res['max_dd'], 2),
+                "NP_DD_Ratio": round(res['np_dd_ratio'], 2),
+                "ProfitFactor": round(res['profit_factor'], 2),
+                "Expectancy": round(res['expectancy'], 2),
+                "Sharpe": round(res['sharpe'], 2),
                 "Trades": res['trades'],
                 "Wins": res['wins'],
                 "Losses": res['losses'],
-                "WinRate": res['win_rate']
+                "WinRate": round(res['win_rate'], 2)
             })
             csv_data.append(row)
         
@@ -211,15 +335,15 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
         table_rows.append([
             rank,
             param_summary,
-            f"${res['net_profit']:,.0f}",
-            f"${res['max_dd']:,.0f}",
+            f"${res['net_profit']:,.2f}",
+            f"${res['max_dd']:,.2f}",
             f"{res['np_dd_ratio']:.2f}",
             f"{res['profit_factor']:.2f}",
             f"${res['expectancy']:.2f}",
             f"{res['sharpe']:.2f}",
             res['trades'],
             f"{res['wins']}/{res['losses']}",
-            f"{res['win_rate']:.1f}%"
+            f"{res['win_rate']:.2f}%"
         ])
 
     print("\n" + "="*120)
