@@ -321,15 +321,127 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     print(f"[DEBUG] Entry blocked by IVR/VIX: ivr={ivr:.1f} (min={self.s_cfg.iv_rank_min}), vix={vix:.1f} (max={self.s_cfg.vix_threshold})")
                 return
 
+            # === ENHANCED ENTRY LOGIC WITH ALL INDICATORS ===
             mtf_snapshot = self.sync.get_snapshot(dt_now) if self.sync else None
-            from intelligence.fuzzy_engine import calculate_mtf_membership
+
+            # Import all membership functions
+            from intelligence.fuzzy_engine import (
+                calculate_mtf_membership, calculate_iv_membership, calculate_regime_membership,
+                calculate_rsi_membership, calculate_adx_membership, calculate_bbands_membership,
+                calculate_volume_membership, calculate_sma_distance_membership, calculate_stoch_membership
+            )
+
+            # Existing indicators
             mu_mtf = calculate_mtf_membership(mtf_snapshot) if self.s_cfg.use_mtf_filter else 0.5
+            mu_iv = calculate_iv_membership(ivr)
+            mu_regime = calculate_regime_membership(vix, self.s_cfg.vix_threshold)
+
+            # Get 5-minute snapshot for new indicators
+            snapshot_5m = mtf_snapshot.get('5', {}) if mtf_snapshot else {}
             
+            # Extract indicators centrally (safe defaults)
+            rsi_current = snapshot_5m.get('rsi_14', None)
+            adx_current = snapshot_5m.get('adx_14', None)
+            stoch_k = snapshot_5m.get('stoch_k', None)
+            bb_position = snapshot_5m.get('bb_position', None)
+            bb_width = snapshot_5m.get('bb_width', None)
+            volume_ratio = snapshot_5m.get('volume_ratio', None)
+            sma_distance = snapshot_5m.get('sma_distance', None)
+
+            # RSI Filter
+            if self.s_cfg.use_rsi_filter:
+                mu_rsi = calculate_rsi_membership(
+                    rsi_current,
+                    self.s_cfg.rsi_neutral_min,
+                    self.s_cfg.rsi_neutral_max
+                )
+                if mu_rsi < 0.3:
+                    if self.verbose:
+                        print(f"  [Filter] RSI too extreme ({rsi_current}), skip entry")
+                    return
+            else:
+                mu_rsi = 0.5
+
+            # ADX Filter
+            if self.s_cfg.use_adx_filter:
+                mu_adx = calculate_adx_membership(
+                    adx_current,
+                    self.s_cfg.adx_threshold_low,
+                    self.s_cfg.adx_threshold_high
+                )
+                if mu_adx < 0.3:
+                    if self.verbose:
+                        print(f"  [Filter] ADX too high ({adx_current}), trending market, skip entry")
+                    return
+            else:
+                mu_adx = 0.5
+
+            # Stochastic Filter
+            if self.s_cfg.use_stoch_filter:
+                mu_stoch = calculate_stoch_membership(
+                    stoch_k,
+                    self.s_cfg.stoch_neutral_min,
+                    self.s_cfg.stoch_neutral_max
+                )
+                if mu_stoch < 0.3:
+                    if self.verbose:
+                        print(f"  [Filter] Stochastic extreme ({stoch_k}), skip entry")
+                    return
+            else:
+                mu_stoch = 0.5
+
+            # Bollinger Bands Filter
+            if self.s_cfg.use_bbands_filter:
+                mu_bbands = calculate_bbands_membership(
+                    bb_position,
+                    bb_width,
+                    self.s_cfg.bbands_squeeze_threshold
+                )
+                if mu_bbands < 0.3:
+                    if self.verbose:
+                        print(f"  [Filter] BB position extreme ({bb_position}), skip entry")
+                    return
+            else:
+                mu_bbands = 0.5
+
+            # Volume Filter
+            if self.s_cfg.use_volume_filter:
+                mu_volume = calculate_volume_membership(
+                    volume_ratio,
+                    self.s_cfg.volume_min_ratio
+                )
+                if mu_volume < 0.3:
+                    if self.verbose:
+                        print(f"  [Filter] Low volume ({volume_ratio}), skip entry")
+                    return
+            else:
+                mu_volume = 0.5
+
+            # SMA Distance Filter
+            if self.s_cfg.use_sma_filter:
+                mu_sma = calculate_sma_distance_membership(
+                    sma_distance,
+                    self.s_cfg.sma_max_distance
+                )
+                if mu_sma < 0.3:
+                    if self.verbose:
+                        print(f"  [Filter] Price too far from SMA ({sma_distance}), skip entry")
+                    return
+            else:
+                mu_sma = 0.5
+
+            # Existing MTF consensus check
             if self.s_cfg.use_mtf_filter:
                 if mu_mtf < self.s_cfg.mtf_consensus_min or mu_mtf > self.s_cfg.mtf_consensus_max:
-                    if self.bar_count == 101 and self.verbose:
-                        print(f"[DEBUG] Entry blocked by MTF: mu_mtf={mu_mtf:.2f} (range=[{self.s_cfg.mtf_consensus_min}, {self.s_cfg.mtf_consensus_max}])")
+                    if self.verbose:
+                        print(f"  [Filter] MTF consensus {mu_mtf:.2f} outside range, skip entry")
                     return
+
+            # Warmup Rule: Require minimum bars since start (prevents early NaN contamination)
+            if len(self.equity_series) < 60:
+                if self.verbose:
+                    print(f"  [Filter] Warmup period (bar {len(self.equity_series)}/60), skip entry")
+                return
 
             width = regime_wing_width(self.s_cfg, ivr, vix)
             condor = build_condor(quote_chain, self.s_cfg, date_now, self.data.close[0], width)
@@ -353,7 +465,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                 # Creating a small DF context for the mock/inference
                 ctx_df = pd.DataFrame([{
                     'close': self.data.close[0],
-                    'rsi_14': rsi,
+                    'rsi_14': rsi_current,
                     'atr_pct': 0.01, # Simplified for mock
                     'volume_ratio': volume_ratio
                 }])
@@ -380,8 +492,8 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                 realized_vol=0.0,
                 mtf_snapshot=mtf_snapshot,
                 # New Advanced Indicators
-                rsi=rsi,
-                adx=adx,
+                rsi=rsi_current,
+                adx=adx_current,
                 bb_position=bb_position,
                 bb_width=bb_width,
                 stoch_k=stoch_k,
@@ -402,6 +514,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     'w_bbands': getattr(self.s_cfg, 'fuzzy_weight_bbands', 0.10),
                     'w_volume': getattr(self.s_cfg, 'fuzzy_weight_volume', 0.05),
                     'w_sma': getattr(self.s_cfg, 'fuzzy_weight_sma', 0.05),
+                    'w_stoch': getattr(self.s_cfg, 'fuzzy_weight_stoch', 0.07),
                     'fuzzy_weight_neural': getattr(self.s_cfg, 'fuzzy_weight_neural', 0.20)
                 }
             )
