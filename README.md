@@ -127,7 +127,13 @@ This allows the model to selectively "remember" or "forget" based on input conte
 
 The input $x_t$ is constructed from normalized technical indicators:
 
-$$x_t = \begin{bmatrix} \frac{P_t - P_{t-1}}{P_{t-1}} \\ \frac{RSI_{14} - 50}{50} \\ ATR\% \times 10 \\ VolumeRatio - 1 \\ \vdots \end{bmatrix}$$
+$$x_t = \begin{bmatrix} 
+\frac{P_t - P_{t-1}}{P_{t-1}} \\
+\frac{RSI_{14} - 50}{50} \\
+ATR\% \times 10 \\
+VolumeRatio - 1 \\
+\vdots 
+\end{bmatrix}$$
 
 #### Output Interpretation
 
