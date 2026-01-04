@@ -118,6 +118,17 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             self.bar_count = 0
             self.total_bars = len(self.datas[0])
             self.last_progress_pct = -1
+            
+            # Initialize Mamba Neural Engine
+            if getattr(self.s_cfg, 'use_mamba_model', False):
+                try:
+                    from intelligence.mamba_engine import MambaForecastEngine
+                    self.mamba_engine = MambaForecastEngine(d_model=getattr(self.s_cfg, 'mamba_d_model', 64))
+                    if self.verbose:
+                        print(f"[{self.__class__.__name__}] Mamba Neural Engine Initialized")
+                except Exception as e:
+                    print(f"[Warning] Failed to init Mamba Engine: {e}")
+                    self.mamba_engine = None
 
         def next(self):
             dt_now = self.datas[0].datetime.datetime(0)
@@ -335,88 +346,75 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     print(f"[DEBUG] Entry blocked by credit: credit={credit:.2f} < min={width * self.s_cfg.min_credit_to_width:.2f}")
                 return
 
-            # Fuzzy sizing with full indicator suite
-            from intelligence.fuzzy_engine import (
-                compute_position_size, calculate_iv_membership, calculate_regime_membership,
-                calculate_rsi_membership, calculate_adx_membership, calculate_bbands_membership,
-                calculate_stoch_membership, calculate_volume_membership, calculate_sma_distance_membership
+            # === Neural Forecasting (Mamba 2) ===
+            neural_forecast_data = None
+            if getattr(self.s_cfg, 'use_mamba_model', False) and hasattr(self, 'mamba_engine'):
+                # Pass recent data context to Mamba
+                # Creating a small DF context for the mock/inference
+                ctx_df = pd.DataFrame([{
+                    'close': self.data.close[0],
+                    'rsi_14': rsi,
+                    'atr_pct': 0.01, # Simplified for mock
+                    'volume_ratio': volume_ratio
+                }])
+                
+                # Predict Market State
+                forecast_state = self.mamba_engine.predict_state(ctx_df)
+                neural_forecast_data = forecast_state.to_dict()
+                
+                if self.verbose and self.bar_count % 100 == 0:
+                    print(f"[Neural] Conf={forecast_state.confidence:.2f} | P(Bull)={forecast_state.prob_bull:.2f} | P(Bear)={forecast_state.prob_bear:.2f}")
+
+            # === Sizing via QTMF Facade (Neuro-Fuzzy) ===
+            from qtmf.models import TradeIntent
+            from qtmf.facade import benchmark_and_size
+            
+            # Construct Trade Intent with all 9 indicators + Neural Signal
+            intent = TradeIntent(
+                symbol=self.s_cfg.underlying,
+                action="SELL_CONDOR",
+                gaussian_confidence=0.5, # Gaussian component placeholder for hybrid weighting
+                current_price=self.data.close[0],
+                vix=vix,
+                ivr=ivr,
+                realized_vol=0.0,
+                mtf_snapshot=mtf_snapshot,
+                # New Advanced Indicators
+                rsi=rsi,
+                adx=adx,
+                bb_position=bb_position,
+                bb_width=bb_width,
+                stoch_k=stoch_k,
+                volume_ratio=volume_ratio,
+                sma_distance=sma_distance,
+                # Neural Forecast
+                neural_forecast=neural_forecast_data,
+                extras={
+                    'equity': self.broker.get_cash(),
+                    'max_loss_per_contract': width * 100.0, # Approximate max loss as spread width
+                    'risk_fraction': self.s_cfg.max_account_risk_per_trade,
+                    # Pass config weights to facade
+                    'w_mtf': getattr(self.s_cfg, 'fuzzy_weight_mtf', 0.25),
+                    'w_iv': getattr(self.s_cfg, 'fuzzy_weight_iv', 0.20),
+                    'w_regime': getattr(self.s_cfg, 'fuzzy_weight_regime', 0.15),
+                    'w_rsi': getattr(self.s_cfg, 'fuzzy_weight_rsi', 0.10),
+                    'w_adx': getattr(self.s_cfg, 'fuzzy_weight_adx', 0.10),
+                    'w_bbands': getattr(self.s_cfg, 'fuzzy_weight_bbands', 0.10),
+                    'w_volume': getattr(self.s_cfg, 'fuzzy_weight_volume', 0.05),
+                    'w_sma': getattr(self.s_cfg, 'fuzzy_weight_sma', 0.05),
+                    'fuzzy_weight_neural': getattr(self.s_cfg, 'fuzzy_weight_neural', 0.20)
+                }
             )
             
-            # Core memberships
-            mu_iv = calculate_iv_membership(ivr)
-            mu_regime = calculate_regime_membership(vix, self.s_cfg.vix_threshold)
+            # Get Sizing Plan from Facade
+            plan = benchmark_and_size(intent)
             
-            # Get indicators from MTF snapshot (use primary timeframe '1' or '5')
-            primary_tf = self.r_cfg.mtf_timeframes[0] if self.r_cfg.mtf_timeframes else '1'
-            indicator_data = mtf_snapshot.get(primary_tf, {}) if mtf_snapshot else {}
-            
-            # Extract indicator values with safe defaults
-            rsi = indicator_data.get('rsi_14', 50.0) if indicator_data else 50.0
-            adx = indicator_data.get('adx_14', 20.0) if indicator_data else 20.0
-            bb_position = indicator_data.get('bb_position', 0.5) if indicator_data else 0.5
-            bb_width = indicator_data.get('bb_width', 0.02) if indicator_data else 0.02
-            stoch_k = indicator_data.get('stoch_k', 50.0) if indicator_data else 50.0
-            volume_ratio = indicator_data.get('volume_ratio', 1.0) if indicator_data else 1.0
-            sma_distance = indicator_data.get('sma_distance', 0.0) if indicator_data else 0.0
-            
-            # Calculate advanced memberships (with getattr fallbacks for backwards compatibility)
-            mu_rsi = calculate_rsi_membership(
-                rsi, 
-                getattr(self.s_cfg, 'rsi_neutral_min', 40.0), 
-                getattr(self.s_cfg, 'rsi_neutral_max', 60.0)
-            )
-            mu_adx = calculate_adx_membership(
-                adx, 
-                getattr(self.s_cfg, 'adx_threshold_low', 25.0), 
-                getattr(self.s_cfg, 'adx_threshold_high', 40.0)
-            )
-            mu_bbands = calculate_bbands_membership(
-                bb_position, bb_width, 
-                getattr(self.s_cfg, 'bb_squeeze_threshold', 0.02)
-            )
-            mu_stoch = calculate_stoch_membership(
-                stoch_k, 
-                getattr(self.s_cfg, 'stoch_neutral_min', 30.0), 
-                getattr(self.s_cfg, 'stoch_neutral_max', 70.0)
-            )
-            mu_volume = calculate_volume_membership(
-                volume_ratio, 
-                getattr(self.s_cfg, 'volume_min_ratio', 0.8)
-            )
-            mu_sma = calculate_sma_distance_membership(
-                sma_distance, 
-                getattr(self.s_cfg, 'sma_max_distance', 0.02)
-            )
-            
-            # Build full membership dictionary
-            memberships = {
-                'mtf': mu_mtf, 
-                'iv': mu_iv, 
-                'regime': mu_regime,
-                'rsi': mu_rsi,
-                'adx': mu_adx,
-                'bbands': mu_bbands,
-                'stoch': mu_stoch,
-                'volume': mu_volume,
-                'sma': mu_sma
-            }
-            
-            # Use config-based weights (with getattr fallbacks)
-            weights = {
-                'mtf': getattr(self.s_cfg, 'fuzzy_weight_mtf', 0.25),
-                'iv': getattr(self.s_cfg, 'fuzzy_weight_iv', 0.20),
-                'regime': getattr(self.s_cfg, 'fuzzy_weight_regime', 0.15),
-                'rsi': getattr(self.s_cfg, 'fuzzy_weight_rsi', 0.10),
-                'adx': getattr(self.s_cfg, 'fuzzy_weight_adx', 0.10),
-                'bbands': getattr(self.s_cfg, 'fuzzy_weight_bbands', 0.10),
-                'volume': getattr(self.s_cfg, 'fuzzy_weight_volume', 0.05),
-                'sma': getattr(self.s_cfg, 'fuzzy_weight_sma', 0.05)
-            }
-            
-            quantity = compute_position_size(
-                total_equity, width * 100.0, memberships, weights,
-                vix, 12.0, 35.0, self.r_cfg.position_size_pct
-            )
+            if not plan.approved:
+                # Silent return unless verbose debug needed
+                # if self.verbose: print(f"[DEBUG] Entry blocked by QTMF: {plan.reason}")
+                return
+                
+            quantity = plan.total_qty
 
             
             if quantity > 0:

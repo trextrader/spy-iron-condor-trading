@@ -62,6 +62,26 @@ The system uses two separate data sources that must be understood together:
    - Used for mark-to-market P&L calculations
    - Contains bid/ask/mid/Greeks for each strike/expiration
 
+## Technology Stack
+- **Backtest**: `backtrader` (Custom customized), `matplotlib` (Reporting)
+- **Data**: `pandas`, `numpy`, `polygon-api-client`
+- **Technical Analysis**: `pandas-ta` (Indicators: RSI, ADX, BBands, Stoch, etc.)
+- **Intelligence**: 
+  - **Fuzzy Logic**: 9-Factor Inference Engine (`qtmf.facade`)
+  - **Neural**: Mamba 2 State-Space Model (`intelligence.mamba_engine`)
+
+## Architecture
+- **Core**: `main.py` -> `RunConfig` -> `BacktestEngine`
+- **Data Layer**: `MTFSyncEngine` (1m, 5m, 15m) + `SyntheticOptionsEngine` (Pricing)
+- **Intelligence Layer**: 
+  - `qtmf/`: Central Neuro-Fuzzy Facade
+  - `intelligence/mamba_engine.py`: Neural Market State Forecasting (Mock/Real)
+  - `intelligence/fuzzy_engine.py`: Membership Functions
+- **Strategy**: `ZeroDTE_IC` (Iron Condor) located in `core/backtest_engine.py`
+   - Provides theoretical option prices (Black-Scholes model)
+   - Used for mark-to-market P&L calculations
+   - Contains bid/ask/mid/Greeks for each strike/expiration
+
 **Key Insight**: The backtest engine loads both datasets into memory at the start of optimization runs to avoid 10x performance penalty from repeated disk I/O.
 
 ### 4-Leg Iron Condor Standard

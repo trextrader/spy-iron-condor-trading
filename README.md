@@ -9,6 +9,7 @@
 - **High-Fidelity Backtesting**: Simulates every 5-minute bar with accurate mark-to-market P&L, leg-by-leg exit logic (Profit Take, Stop Loss, Expiration), and price caching to handle data gaps.
 - **Phased Serial Optimization**: A custom grid-search engine that optimizes for the **Net Profit / Max Drawdown** ratio. Includes automatic hardware benchmarking and time-to-completion estimation.
 - **9-Factor Fuzzy Intelligence**: Dynamic position sizing based on MTF Consensus, IV Rank, VIX Regime, RSI, ADX, Bollinger Bands, Stochastic, Volume, and SMA Distance.
+- **Mamba 2 Neural Forecasting**: Integrated state-space model that predicts market state probabilities (Bear/Neutral/Bull) and volatility regimes to bias trade sizing.
 - **Enhanced Risk Controls**: MTF trend filters, ATR-based dynamic stops, and trailing stop exits.
 - **Alpaca Integration**: Seamless transition to live paper trading using the Alpaca-Py SDK.
 - **Professional Reporting**: Generates automated PDF reports with equity curves, strike overlays, P&L distributions, and monthly performance grids.
@@ -74,11 +75,17 @@ Filters ensure the strategy only operates in favorable risk-adjusted environment
 Position sizing scales dynamically using a Sugeno-style weighted average to aggregate membership functions ($\mu$):
 $$Signal = \frac{\sum_{i=1}^{n} w_i \cdot \mu_i(x)}{\sum_{i=1}^{n} \mu_i(x)}$$
 
-### 6. `core/optimizer.py`: Risk-Adjusted Optimization Ratio
+### 6. `intelligence/mamba_engine.py`: Neural State-Space Modeling
+The system forecasts market regime using a selective state-space model:
+$$h_t = A h_{t-1} + B x_t$$
+$$y_t = C h_t$$
+Where $x_t$ represents the 9-factor input vector and $y_t$ outputs the probability distribution over [Bearish, Neutral, Bullish] states. This interacts with the fuzzy engine via `fuzzy_weight_neural`.
+
+### 7. `core/optimizer.py`: Risk-Adjusted Optimization Ratio
 The primary objective is to maximize the **$\Phi$ Recovery Ratio**, prioritizing capital preservation:
 $$\Phi = \frac{\text{Net Profit}}{\text{Maximum Drawdown}}$$
 
-### 7. Performance Metrics Glossary
+### 8. Performance Metrics Glossary
 The following metrics are used to rank results in the `top100_[timestamp].csv` report:
 
 - **Profit Factor ($PF$)**: Measures the relationship between gross winnings and gross losses.
@@ -247,6 +254,10 @@ To modify the search space, edit the `OPTIMIZATION_MATRIX` in `core/optimizer.py
 +---intelligence/
 |       fuzzy_engine.py     # Sugeno fuzzy inference for sizing
 |       regime_filter.py    # Volatility and trend filters
+|       mamba_engine.py     # Neural state-space forecasting
++---qtmf/
+|       facade.py           # Central Neuro-Fuzzy Facade
+|       models.py           # TradeIntent & SizingPlan Data Structures
 +---reports/
 |   \---SPY/                # 5m/15m/60m underlying price data
 \---strategies/

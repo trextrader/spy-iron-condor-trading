@@ -98,6 +98,11 @@ class StrategyConfig:
     use_trailing_stop: bool = False
     trailing_stop_activation_pct: float = 0.50  # Activate at 50% profit
     trailing_stop_distance_pct: float = 0.25    # Trail by 25% of credit
+    
+    # === Mamba Neural Forecasting ===
+    use_mamba_model: bool = True               # Enable Mamba 2 neural engine
+    mamba_d_model: int = 64                    # Model dimension
+    fuzzy_weight_neural: float = 0.20          # Weight of neural signal in sizing
 
 
 @dataclass

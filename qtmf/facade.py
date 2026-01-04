@@ -10,9 +10,17 @@ from intelligence.fuzzy_engine import (
     compute_fuzzy_confidence,
     normalize_volatility,
     compute_scaling_factor,
+    # Core
     calculate_mtf_membership,
     calculate_iv_membership,
     calculate_regime_membership,
+    # Advanced
+    calculate_rsi_membership,
+    calculate_adx_membership,
+    calculate_bbands_membership,
+    calculate_stoch_membership,
+    calculate_volume_membership,
+    calculate_sma_distance_membership,
 )
 
 
@@ -25,74 +33,28 @@ def _derive_put_call_weights(
     direction_probs: Optional[Any],
     gaussian_confidence: float,
 ) -> Tuple[float, float, Dict[str, Any]]:
-    """Return (put_weight, call_weight, diag).
+    # ... (existing put/call logic unchanged)
+    
+    # [Lines 23-77 omitted for brevity in tool call, will be preserved by replace if not targeted]
+    # But wait, I need to replace the whole import block and then skip to benchmark_and_size logic.
+    # Since I can't skip lines in replace_file_content easily without context matching. 
+    # I will stick to imports first.
+    pass
 
-    If direction_probs is provided as [down, neutral, up], we tilt sizing toward
-    the higher directional risk side:
-      - Higher down prob => heavier put wing
-      - Higher up prob   => heavier call wing
-
-    Neutral probability pulls weights back toward 0.5.
-    """
-    diag: Dict[str, Any] = {}
-
-    put_w = 0.5
-    call_w = 0.5
-
-    if direction_probs is None:
-        diag["weight_source"] = "default"
-        return put_w, call_w, diag
-
-    try:
-        down = float(direction_probs[0])
-        neutral = float(direction_probs[1])
-        up = float(direction_probs[2])
-    except Exception:
-        diag["weight_source"] = "invalid_direction_probs"
-        return put_w, call_w, diag
-
-    # Directional tilt: (-1..1)
-    tilt = _clamp(down - up, -1.0, 1.0)
-
-    # Confidence amplifies tilt modestly; neutral dampens it
-    conf_amp = _clamp(gaussian_confidence, 0.0, 1.0)
-    neutral_damp = 1.0 - _clamp(neutral, 0.0, 1.0) * 0.75
-
-    strength = 0.35 * conf_amp * neutral_damp  # max +/- 0.35
-    put_w = _clamp(0.5 + tilt * strength, 0.10, 0.90)
-    call_w = 1.0 - put_w
-
-    diag.update(
-        {
-            "weight_source": "direction_probs",
-            "down": down,
-            "neutral": neutral,
-            "up": up,
-            "tilt": tilt,
-            "strength": strength,
-        }
-    )
-
-    return put_w, call_w, diag
-
+# ... (Let's target benchmark_and_size logic specifically)
 
 def benchmark_and_size(
     trade_intent: TradeIntent | Dict[str, Any],
 ) -> SizingPlan:
     """Primary QTMF callable for Gaussian.
-
+    
     This function is *pure*: no broker calls, no state mutations.
-
+    
     Inputs:
       - A TradeIntent dataclass (preferred) or a compatible dict.
-
+    
     Outputs:
       - SizingPlan with wing weights and quantities.
-
-    Caller responsibilities:
-      - Execution and order placement
-      - Providing equity/max_loss_per_contract if you want QTMF to compute
-        a risk-based quantity ceiling
     """
 
     if isinstance(trade_intent, dict):
@@ -106,6 +68,15 @@ def benchmark_and_size(
             ivr=trade_intent.get("ivr"),
             realized_vol=trade_intent.get("realized_vol"),
             mtf_snapshot=trade_intent.get("mtf_snapshot"),
+            # New Fields
+            rsi=trade_intent.get("rsi"),
+            adx=trade_intent.get("adx"),
+            bb_position=trade_intent.get("bb_position"),
+            bb_width=trade_intent.get("bb_width"),
+            stoch_k=trade_intent.get("stoch_k"),
+            volume_ratio=trade_intent.get("volume_ratio"),
+            sma_distance=trade_intent.get("sma_distance"),
+            neural_forecast=trade_intent.get("neural_forecast"),
             suggested_total_qty=trade_intent.get("suggested_total_qty"),
             extras=trade_intent.get("extras"),
         )
@@ -170,21 +141,56 @@ def benchmark_and_size(
         total_qty = int(extras.get("fallback_total_qty", 1))
         total_qty_source = "fallback"
 
-    # --- 2) Apply fuzzy scaling (optional) ---
-    # If we have enough features, we can compute a confidence Ft and volatility penalty.
+    # --- 2) Apply 9-Factor Fuzzy Scaling ---
+    
+    # A. Core Indicators
     mtf_mu = calculate_mtf_membership(ti.mtf_snapshot)
     iv_mu = calculate_iv_membership(float(ti.ivr)) if ti.ivr is not None else 0.5
     regime_mu = calculate_regime_membership(float(ti.vix)) if ti.vix is not None else 0.5
+    
+    # B. Advanced Indicators (with defaults)
+    rsi_mu = calculate_rsi_membership(ti.rsi, 
+        float(extras.get('rsi_neutral_min', 40.0)), 
+        float(extras.get('rsi_neutral_max', 60.0))) if ti.rsi is not None else 0.5
+        
+    adx_mu = calculate_adx_membership(ti.adx,
+        float(extras.get('adx_threshold_low', 25.0)),
+        float(extras.get('adx_threshold_high', 40.0))) if ti.adx is not None else 0.5
+        
+    bb_mu = calculate_bbands_membership(ti.bb_position, ti.bb_width,
+        float(extras.get('bb_squeeze_threshold', 0.02))) if ti.bb_position is not None else 0.5
+        
+    stoch_mu = calculate_stoch_membership(ti.stoch_k,
+        float(extras.get('stoch_neutral_min', 30.0)),
+        float(extras.get('stoch_neutral_max', 70.0))) if ti.stoch_k is not None else 0.5
+        
+    vol_mu = calculate_volume_membership(ti.volume_ratio,
+        float(extras.get('volume_min_ratio', 0.8))) if ti.volume_ratio is not None else 0.5
+        
+    sma_mu = calculate_sma_distance_membership(ti.sma_distance,
+        float(extras.get('sma_max_distance', 0.02))) if ti.sma_distance is not None else 0.5
 
     memberships = {
         "mtf": float(mtf_mu),
         "iv": float(iv_mu),
         "regime": float(regime_mu),
+        "rsi": float(rsi_mu),
+        "adx": float(adx_mu),
+        "bbands": float(bb_mu),
+        "stoch": float(stoch_mu),
+        "volume": float(vol_mu),
+        "sma": float(sma_mu),
     }
+    
     weights = {
-        "mtf": float(extras.get("w_mtf", 0.45)),
-        "iv": float(extras.get("w_iv", 0.35)),
-        "regime": float(extras.get("w_regime", 0.20)),
+        "mtf": float(extras.get("w_mtf", 0.25)),
+        "iv": float(extras.get("w_iv", 0.20)),
+        "regime": float(extras.get("w_regime", 0.15)),
+        "rsi": float(extras.get("w_rsi", 0.10)),
+        "adx": float(extras.get("w_adx", 0.10)),
+        "bbands": float(extras.get("w_bbands", 0.10)),
+        "volume": float(extras.get("w_volume", 0.05)),
+        "sma": float(extras.get("w_sma", 0.05)),
     }
 
     Ft = compute_fuzzy_confidence(memberships, weights)

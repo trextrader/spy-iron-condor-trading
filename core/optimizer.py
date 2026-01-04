@@ -30,6 +30,26 @@ OPTIMIZATION_MATRIX = {
     # Phase C: Filters
     #"iv_rank_min": np.arange(15, 55, 5),
     #"vix_threshold": np.arange(15, 55, 5),
+    # Phase C2: Advanced Filters (9-Factor)
+    #"rsi_neutral_min": np.arange(30, 45, 5),
+    #"rsi_neutral_max": np.arange(55, 70, 5),
+    #"adx_threshold_low": np.arange(20, 30, 2),
+    #"bb_squeeze_threshold": [0.01, 0.02, 0.03],
+    #"stoch_neutral_min": np.arange(20, 40, 5),
+    #"stoch_neutral_max": np.arange(60, 80, 5),
+    #"volume_min_ratio": np.arange(0.6, 1.2, 0.1),
+    #"sma_max_distance": [0.01, 0.02, 0.03],
+    
+    # Phase D: Fuzzy Logic Weights
+    #"fuzzy_weight_mtf": np.arange(0.1, 0.5, 0.1),
+    #"fuzzy_weight_iv": np.arange(0.1, 0.4, 0.1),
+    #"fuzzy_weight_neural": np.arange(0.0, 0.4, 0.1),
+    #"fuzzy_weight_rsi": np.arange(0.05, 0.20, 0.05),
+    #"fuzzy_weight_adx": np.arange(0.05, 0.20, 0.05),
+    #"fuzzy_weight_bbands": np.arange(0.05, 0.20, 0.05),
+    #"fuzzy_weight_stoch": np.arange(0.05, 0.20, 0.05),
+    #"fuzzy_weight_volume": np.arange(0.0, 0.15, 0.05),
+    #"fuzzy_weight_sma": np.arange(0.0, 0.15, 0.05),
 }
 
 def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):

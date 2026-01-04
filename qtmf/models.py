@@ -17,11 +17,23 @@ class TradeIntent:
     current_price: float
 
     # Optional context fields
-    direction_probs: Optional[Sequence[float]] = None  # [down, neutral, up]
+    direction_probs: Optional[Sequence[float]] = None  # [down, neutral, up] (from Mamba/Neural)
     vix: Optional[float] = None
     ivr: Optional[float] = None
     realized_vol: Optional[float] = None
     mtf_snapshot: Optional[Dict[str, Any]] = None
+    
+    # Advanced Indicator Fields (9-Factor Fuzzy)
+    rsi: Optional[float] = None
+    adx: Optional[float] = None
+    bb_position: Optional[float] = None
+    bb_width: Optional[float] = None
+    stoch_k: Optional[float] = None
+    volume_ratio: Optional[float] = None
+    sma_distance: Optional[float] = None
+    
+    # Neural Market State
+    neural_forecast: Optional[Dict[str, Any]] = None  # {regime: 'volatile', trend: 'bull', conf: 0.8}
 
     # Optional suggested ceiling from caller (e.g., RL); QTMF can clamp
     suggested_total_qty: Optional[int] = None
