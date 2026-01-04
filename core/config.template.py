@@ -131,6 +131,9 @@ class StrategyConfig:
     mamba_d_model: int = 64                    # Model dimension
     fuzzy_weight_neural: float = 0.20          # Weight of neural signal in sizing
 
+    # === Position Sizing Guardrails ===
+    min_total_qty_for_iron_condor: int = 2     # Minimum contracts for Iron Condor (must be >= 2 for two wings)
+
 
 @dataclass
 class RunConfig:

@@ -258,6 +258,13 @@ def benchmark_and_size(
     )
 
     total_qty = scaled_qty
+    
+    # ASSERTION GUARD: Multi-leg minimums must be respected
+    assert total_qty >= min_floor, (
+        f"CRITICAL: Position sizing violated minimum floor! "
+        f"Got {total_qty}, required {min_floor} for {'two-wing' if require_two_wings else 'single-wing'} strategy. "
+        f"This indicates a bug in the sizing logic."
+    )
 
     # --- 3) Derive put/call weights and split quantities ---
     put_w, call_w, wdiag = _derive_put_call_weights(

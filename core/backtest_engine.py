@@ -544,7 +544,8 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     'max_loss_per_contract': width * 100.0, # Approximate max loss as spread width
                     'risk_fraction': self.s_cfg.max_account_risk_per_trade,
                     'min_gaussian_confidence': 0.40,  # Lower threshold (we already have 0.3 hard gates on all indicators)
-                    'fallback_total_qty': 2,  # Minimum for Iron Condor (2 wings)
+                    'fallback_total_qty': getattr(self.s_cfg, 'min_total_qty_for_iron_condor', 2),  # Configurable minimum
+                    'min_total_qty_for_two_wings': getattr(self.s_cfg, 'min_total_qty_for_iron_condor', 2),  # Facade guardrail
                     # Pass config weights to facade
                     'w_mtf': getattr(self.s_cfg, 'fuzzy_weight_mtf', 0.25),
                     'w_iv': getattr(self.s_cfg, 'fuzzy_weight_iv', 0.20),
