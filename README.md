@@ -158,6 +158,21 @@ The neural forecast is fused with the 9-factor fuzzy system via weighted aggrega
 
 $$G_{fused} = 0.60 \times G_{gaussian} + 0.40 \times F_t + w_{neural} \times Confidence_{mamba}$$
 
+## Market Realism (Stage 1)
+
+The backtest engine now includes professional-grade market mechanics to prevent "simulation bias":
+
+### 1. Realized Volatility & IV Rank
+Instead of relying on random placeholders, the system calculates realized volatility dynamically from 5-minute bars:
+- **Realized Vol**: Annualized standard deviation of returns over a 20-period lookback.
+- **IV Rank Proxy**: Rolling percentile rank of current volatility vs. trailing 252-bar history.
+
+### 2. Transaction Cost Model
+To align with live execution, the backtest enforces:
+- **Slippage**: default `$0.02` per contract applied to *each leg* on both entry and exit.
+- **Commission**: default `$0.65` per contract deducted from P&L.
+- **Net Reporting**: Logs show both Gross P&L and Net P&L (after costs).
+
 Where $G_{gaussian}$ is the weighted sum of fuzzy memberships and $F_t$ is the fuzzy confidence score.
 
 ### 7. `core/optimizer.py`: Risk-Adjusted Optimization Ratio

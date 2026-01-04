@@ -30,19 +30,19 @@ Intelligence modules (fuzzy sizing and regime filters) provide higher-order cont
 ### Stage 0 — Baseline & Safety
 | Task | File(s) | Status |
 |------|---------|--------|
-| Benchmark runner (10k bars/sec) | `benchmark_cpu.py` | ⬜ |
-| Baseline metrics to JSON | `backtest_engine.py` | ⬜ |
-| Config sanity checks | `main.py` | ⬜ |
-| Document benchmark in README | `README.md` | ⬜ |
+| Benchmark runner (10k bars/sec) | `benchmark_cpu.py` | ✅ |
+| Baseline metrics to JSON | `backtest_engine.py` | ✅ |
+| Config sanity checks | `main.py` | ✅ |
+| Document benchmark in README | `README.md` | ✅ |
 
 ### Stage 1 — Data & Market Realism
 | Task | File(s) | Status |
 |------|---------|--------|
-| Add `risk_free_rate`/`iv_annual_volatility` to RunConfig | `config.template.py` | ⬜ |
-| Realized volatility from 5m bars | `backtest_engine.py` | ⬜ |
-| IV Rank proxy (rolling percentile) | `backtest_engine.py` | ⬜ |
-| Bid/ask slippage model | `backtest_engine.py` | ⬜ |
-| Commission model (per contract) | `backtest_engine.py` | ⬜ |
+| Add `risk_free_rate`/`iv_annual_volatility` to RunConfig | `config.template.py` | ✅ |
+| Realized volatility from 5m bars | `backtest_engine.py` | ✅ |
+| IV Rank proxy (rolling percentile) | `backtest_engine.py` | ✅ |
+| Bid/ask slippage model | `backtest_engine.py` | ✅ |
+| Commission model (per contract) | `backtest_engine.py` | ✅ |
 
 ### Stage 2 — Strategy Depth
 | Task | File(s) | Status |

@@ -161,6 +161,12 @@ class RunConfig:
     # === Optimizer ===
     use_optimizer: bool = False
     
+    # === Market Realism (Stage 1) ===
+    risk_free_rate: float = 0.05              # 5% annual risk-free rate (for Black-Scholes)
+    iv_annual_volatility: float = 0.20        # 20% default IV assumption
+    slippage_per_contract: float = 0.02       # $0.02 per contract slippage (per leg)
+    commission_per_contract: float = 0.65     # $0.65 per contract commission (typical broker)
+    
     def __post_init__(self):
         if self.mtf_timeframes is None:
             self.mtf_timeframes = ['1', '5', '15']

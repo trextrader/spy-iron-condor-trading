@@ -20,6 +20,57 @@ from strategies.options_strategy import (
     PositionState, regime_wing_width
 )
 
+
+# ==========================================================
+# MARKET REALISM HELPERS (Stage 1)
+# ==========================================================
+
+def compute_realized_vol(prices: pd.Series, window: int = 20) -> float:
+    """Compute annualized realized volatility from 5m bar returns.
+    
+    Args:
+        prices: Series of close prices
+        window: Lookback window for volatility calculation
+        
+    Returns:
+        Annualized volatility as a decimal (e.g., 0.20 for 20%)
+    """
+    if len(prices) < window + 1:
+        return 0.20  # Default 20% if insufficient data
+    
+    returns = prices.pct_change().dropna()
+    if len(returns) < window:
+        return 0.20
+    
+    std = returns.tail(window).std()
+    # Annualize: sqrt(bars_per_year) where 5m bars = 78/day * 252 days = 19,656
+    annualized = std * np.sqrt(19656)
+    return float(annualized) if not np.isnan(annualized) else 0.20
+
+
+def compute_iv_rank_proxy(current_vol: float, vol_history: list, lookback: int = 252) -> float:
+    """Compute IV Rank as percentile of current vol vs trailing history.
+    
+    Args:
+        current_vol: Current realized volatility
+        vol_history: List of historical volatility values
+        lookback: Number of periods to look back (default 252 ~= 1 year of daily)
+        
+    Returns:
+        IV Rank as percentage 0-100
+    """
+    if len(vol_history) < 10:
+        return 50.0  # Default mid-range
+    
+    history = vol_history[-lookback:] if len(vol_history) >= lookback else vol_history
+    sorted_vols = sorted(history)
+    rank = sum(1 for v in sorted_vols if v <= current_vol)
+    ivr = (rank / len(sorted_vols)) * 100
+    return round(ivr, 2)
+
+
+
+
 def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=None, preloaded_options=None, preloaded_sync=None, verbose=True):
     """
     Run backtest without generating reports, returning raw strategy object
@@ -238,13 +289,29 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                         print(f"  [Position] PnL: ${unrealized_pnl:.2f} | Cost: {cost_str} | DTE: {dte}")
                             
                         if exit_triggered:
-                            realized_pnl = unrealized_pnl
+                            # === Apply Exit Costs (Stage 1: Market Realism) ===
+                            qty = self.active_position.quantity
+                            slippage_rate = self.active_position.metadata.get("slippage_rate", 0.02)
+                            commission_rate = self.active_position.metadata.get("commission_rate", 0.65)
+                            entry_commission = self.active_position.metadata.get("entry_commission", 0.0)
+                            
+                            # Exit slippage: we pay more to buy back due to adverse fills
+                            exit_slippage = slippage_rate * qty * 4
+                            # Exit commission
+                            exit_commission = commission_rate * qty * 4
+                            # Total commission (entry + exit)
+                            total_commission = entry_commission + exit_commission
+                            
+                            # Adjusted realized P&L = gross P&L - exit slippage - total commission
+                            gross_pnl = unrealized_pnl
+                            realized_pnl = gross_pnl - exit_slippage - total_commission
+                            
                             self.pnl += realized_pnl
                             self.trades += 1
                             if realized_pnl > 0: self.wins += 1
                             else: self.losses += 1
                             
-                            print(f"[Trade] Closed: {exit_reason} | PnL: ${realized_pnl:.2f}")
+                            print(f"[Trade] Closed: {exit_reason} | PnL: ${realized_pnl:.2f} (gross: ${gross_pnl:.2f}, costs: ${exit_slippage + total_commission:.2f})")
 
                             # Market context at exit
                             exit_ohlcv = {
@@ -316,9 +383,26 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                 iv=r['implied_volatility']
             ) for r in chain_records]
 
-            # Market context (Simulated until we have real indices)
-            ivr = 35.0 + np.random.uniform(-5, 5)
-            vix = 18.0 + np.random.uniform(-3, 3) 
+            # === Market Realism (Stage 1) ===
+            # Calculate Realized Volatility
+            vol_window = 20
+            # Get enough history for calculation (window + 1 for diff)
+            price_history = self.data.close.get(ago=0, size=vol_window+1)
+            # Backtrader returns array.array or list, convert to Series
+            price_series = pd.Series(price_history) if price_history else pd.Series()
+            
+            realized_vol = compute_realized_vol(price_series, window=vol_window)
+            
+            # Update Volatility History for IV Rank
+            if not hasattr(self, 'vol_history'):
+                self.vol_history = []
+            self.vol_history.append(realized_vol)
+            
+            # Calculate IV Rank
+            ivr = compute_iv_rank_proxy(realized_vol, self.vol_history)
+            
+            # Use realized vol as VIX proxy (scaled to %)
+            vix = realized_vol * 100 
             
             if ivr < self.s_cfg.iv_rank_min or vix > self.s_cfg.vix_threshold:
                 if self.verbose:
@@ -572,7 +656,19 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
 
             
             if quantity > 0:
-                print(f"[Trade] Opened | Qty: {quantity} | Credit: ${credit:.2f} | Exp: {condor.short_call.expiration}")
+                # === Apply Market Realism (Stage 1) ===
+                slippage_rate = getattr(self.r_cfg, 'slippage_per_contract', 0.02)
+                commission_rate = getattr(self.r_cfg, 'commission_per_contract', 0.65)
+                
+                # Slippage on entry (4 legs * qty contracts)
+                entry_slippage = slippage_rate * quantity * 4
+                # Commission on entry
+                entry_commission = commission_rate * quantity * 4
+                
+                # Net credit after slippage (we receive less due to adverse fills)
+                net_credit = credit - entry_slippage
+                
+                print(f"[Trade] Opened | Qty: {quantity} | Credit: ${credit:.2f} (net: ${net_credit:.2f}) | Exp: {condor.short_call.expiration}")
                 entry_ohlcv = {
                     "open": self.data.open[0],
                     "high": self.data.high[0],
@@ -584,7 +680,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     id=f"BT-{len(self.trade_log)+1}",
                     legs=condor,
                     open_time=dt_now,
-                    credit_received=credit,
+                    credit_received=net_credit,  # Use net credit after slippage
                     quantity=quantity,
                     adjustments_done={"call":0, "put":0},
                     mtf_consensus=mu_mtf
@@ -599,7 +695,13 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                         "long_call": condor.long_call.strike,
                         "short_put": condor.short_put.strike,
                         "long_put": condor.long_put.strike
-                    }
+                    },
+                    # Stage 1: Market realism tracking
+                    "gross_credit": credit,
+                    "entry_slippage": entry_slippage,
+                    "entry_commission": entry_commission,
+                    "slippage_rate": slippage_rate,
+                    "commission_rate": commission_rate
                 }
 
     # === Run Backtest ===
