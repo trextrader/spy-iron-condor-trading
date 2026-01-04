@@ -223,7 +223,16 @@ The system is "Live-Ready" for paper trading. See `DEVELOPMENT_STATUS.md` for:
 
 ## Testing Philosophy
 
-This codebase does not use traditional unit tests. Validation occurs through:
+This codebase uses a hybrid validation approach:
+
+### Regression Tests
+```bash
+py -3.12 -m pytest tests/test_iron_condor_sizing.py -v
+```
+- **6 tests** validate Iron Condor position sizing invariants
+- Prevents the "1-lot failure" bug from returning (minimum 2 contracts enforced)
+
+### Integration Validation
 1. Full-year backtests with known data (`--bt-samples 0`)
 2. Optimizer regression checks (comparing Rank 1 metrics across runs)
 3. Alpaca smoke tests (unauthorized response = connectivity verified)

@@ -43,6 +43,23 @@ This system is built exclusively for the **Iron Condor** structure. Every trade 
 
 By requiring all 4 legs to be present, the backtester ensures that you are only analyzing "True" Iron Condors that could actually be filled in the market.
 
+### Position Sizing Guardrails
+
+Iron Condors have a structural requirement: they need **at least 2 contracts** (one per wing). The system enforces this via multiple safety layers:
+
+| Layer | Location | Purpose |
+|-------|----------|---------|
+| **Config Minimum** | `min_total_qty_for_iron_condor: 2` | Configurable floor for Iron Condor sizing |
+| **Fallback Floor** | `fallback_total_qty: 2` | Minimum when risk-based sizing produces 0 |
+| **Scaling Floor** | `max(min_floor, scaled_qty)` | Prevents fuzzy scaling from reducing below minimum |
+| **Assertion Guard** | `assert total_qty >= min_floor` | Runtime safety net to catch logic bugs |
+| **Regression Tests** | `tests/test_iron_condor_sizing.py` | 6 tests to prevent the 1-lot bug from returning |
+
+**Run Tests:**
+```bash
+py -3.12 -m pytest tests/test_iron_condor_sizing.py -v
+```
+
 ---
 
 ## 🧮 Mathematical Foundation (Script-by-Script)
@@ -75,11 +92,67 @@ Filters ensure the strategy only operates in favorable risk-adjusted environment
 Position sizing scales dynamically using a Sugeno-style weighted average to aggregate membership functions ($\mu$):
 $$Signal = \frac{\sum_{i=1}^{n} w_i \cdot \mu_i(x)}{\sum_{i=1}^{n} \mu_i(x)}$$
 
-### 6. `intelligence/mamba_engine.py`: Neural State-Space Modeling
-The system forecasts market regime using a selective state-space model:
-$$h_t = A h_{t-1} + B x_t$$
+### 6. `intelligence/mamba_engine.py`: Neural State-Space Modeling (Mamba 2)
+
+The system forecasts market regime using a **Selective State-Space Model (SSM)**, which is the mathematical foundation of the Mamba 2 architecture:
+
+#### Core State-Space Equations
+
+The continuous-time state-space model is defined as:
+
+$$\frac{dh(t)}{dt} = Ah(t) + Bx(t)$$
+$$y(t) = Ch(t)$$
+
+For discrete-time implementation (our 5-minute bars), this is approximated via the **Zero-Order Hold (ZOH) discretization:**
+
+$$h_t = \bar{A} h_{t-1} + \bar{B} x_t$$
 $$y_t = C h_t$$
-Where $x_t$ represents the 9-factor input vector and $y_t$ outputs the probability distribution over [Bearish, Neutral, Bullish] states. This interacts with the fuzzy engine via `fuzzy_weight_neural`.
+
+Where:
+- $h_t \in \mathbb{R}^{d_{model} \times d_{state}}$ is the hidden state (memory)
+- $x_t \in \mathbb{R}^{d_{model}}$ is the input feature vector
+- $y_t \in \mathbb{R}^3$ is the output probability distribution $[P_{bear}, P_{neutral}, P_{bull}]$
+- $\bar{A}, \bar{B}$ are the discretized state transition matrices
+
+#### The Selective Scan Mechanism
+
+Unlike traditional RNNs, Mamba 2 uses a **selective scan** where the matrices $B$ and $C$ are input-dependent:
+
+$$B_t = \text{Linear}_{B}(x_t)$$
+$$C_t = \text{Linear}_{C}(x_t)$$
+
+This allows the model to selectively "remember" or "forget" based on input content—critical for filtering noise in volatile markets.
+
+#### Input Feature Vector (9 Factors)
+
+The input $x_t$ is constructed from normalized technical indicators:
+
+$$x_t = \begin{bmatrix} \frac{P_t - P_{t-1}}{P_{t-1}} \\ \frac{RSI_{14} - 50}{50} \\ ATR\% \times 10 \\ VolumeRatio - 1 \\ \vdots \end{bmatrix}$$
+
+#### Output Interpretation
+
+The raw output scalar $y_{raw} \in [-1, 1]$ (via $\tanh$) is converted to probabilities:
+
+| $y_{raw}$ Range | Market State | Probability Distribution |
+|-----------------|--------------|-------------------------|
+| $y > 0.2$ | Bullish | $P_{bull} = 0.6 + 0.2y$, $P_{neutral} = 0.3$, $P_{bear} = 0.1$ |
+| $y < -0.2$ | Bearish | $P_{bear} = 0.6 + 0.2|y|$, $P_{neutral} = 0.3$, $P_{bull} = 0.1$ |
+| $-0.2 \le y \le 0.2$ | Neutral | $P_{neutral} = 0.8$, $P_{bull} = 0.1$, $P_{bear} = 0.1$ |
+
+#### Confidence Calculation
+
+Model confidence scales with signal strength:
+$$Confidence = 0.5 + \frac{|y_{raw}|}{2}$$
+
+This produces confidence values from 0.5 (minimum, when $y \approx 0$) to 1.0 (maximum, when $|y| = 1$).
+
+#### Integration with Fuzzy System
+
+The neural forecast is fused with the 9-factor fuzzy system via weighted aggregation:
+
+$$G_{fused} = 0.60 \times G_{gaussian} + 0.40 \times F_t + w_{neural} \times Confidence_{mamba}$$
+
+Where $G_{gaussian}$ is the weighted sum of fuzzy memberships and $F_t$ is the fuzzy confidence score.
 
 ### 7. `core/optimizer.py`: Risk-Adjusted Optimization Ratio
 The primary objective is to maximize the **$\Phi$ Recovery Ratio**, prioritizing capital preservation:
@@ -260,8 +333,10 @@ To modify the search space, edit the `OPTIMIZATION_MATRIX` in `core/optimizer.py
 |       models.py           # TradeIntent & SizingPlan Data Structures
 +---reports/
 |   \---SPY/                # 5m/15m/60m underlying price data
-\---strategies/
-        options_strategy.py # Iron Condor logic and leg management
++---strategies/
+|       options_strategy.py # Iron Condor logic and leg management
+\---tests/
+        test_iron_condor_sizing.py  # Regression tests for position sizing
 ```
 
 ### **File Glossary & Functions**
