@@ -33,13 +33,42 @@ def _derive_put_call_weights(
     direction_probs: Optional[Any],
     gaussian_confidence: float,
 ) -> Tuple[float, float, Dict[str, Any]]:
-    # ... (existing put/call logic unchanged)
-    
-    # [Lines 23-77 omitted for brevity in tool call, will be preserved by replace if not targeted]
-    # But wait, I need to replace the whole import block and then skip to benchmark_and_size logic.
-    # Since I can't skip lines in replace_file_content easily without context matching. 
-    # I will stick to imports first.
-    pass
+    """
+    Derive put/call wing weights from directional probabilities.
+
+    For Iron Condors, default is 50/50 balanced wings.
+    Can be adjusted based on neural direction_probs if available.
+
+    Returns:
+        (put_weight, call_weight, diagnostics)
+    """
+    # Default: Balanced 50/50 for Iron Condor
+    put_weight = 0.5
+    call_weight = 0.5
+
+    # If neural forecast provides directional bias, adjust weights
+    if direction_probs is not None and len(direction_probs) >= 3:
+        # direction_probs format: [down, neutral, up]
+        prob_down = direction_probs[0]
+        prob_up = direction_probs[2]
+
+        # Slight bias: if market leans bullish, reduce call weight slightly
+        # (less risk on call side if expecting upward move)
+        if prob_up > 0.5:
+            call_weight = 0.45
+            put_weight = 0.55
+        elif prob_down > 0.5:
+            put_weight = 0.45
+            call_weight = 0.55
+
+    diagnostics = {
+        "put_weight": put_weight,
+        "call_weight": call_weight,
+        "direction_probs": direction_probs,
+        "confidence": gaussian_confidence
+    }
+
+    return put_weight, call_weight, diagnostics
 
 # ... (Let's target benchmark_and_size logic specifically)
 
@@ -204,9 +233,16 @@ def benchmark_and_size(
     fused_conf = _clamp((ti.gaussian_confidence * 0.60) + (Ft * 0.40), 0.0, 1.0)
     g = compute_scaling_factor(fused_conf, sigma_star, min_scale=float(extras.get("min_scale", 0.10)))
 
+    # Check minimum requirements before applying scaling floor
+    require_two_wings = bool(extras.get("require_two_wings", True))
+    min_total_for_two = int(extras.get("min_total_qty_for_two_wings", 2))
+    min_floor = min_total_for_two if require_two_wings else 1
+
     scaled_qty = int(total_qty * g)
-    # ensure at least 1 if total_qty>=1
-    if total_qty >= 1:
+    # ensure at least min_floor if total_qty >= min_floor
+    if total_qty >= min_floor:
+        scaled_qty = max(min_floor, scaled_qty)
+    elif total_qty >= 1:
         scaled_qty = max(1, scaled_qty)
 
     diagnostics.update(
@@ -232,10 +268,6 @@ def benchmark_and_size(
         gaussian_confidence=ti.gaussian_confidence,
     )
     diagnostics.update({"weighting": wdiag})
-
-    # For an iron condor you generally need both wings.
-    require_two_wings = bool(extras.get("require_two_wings", True))
-    min_total_for_two = int(extras.get("min_total_qty_for_two_wings", 2))
 
     if require_two_wings and total_qty < min_total_for_two:
         return SizingPlan(

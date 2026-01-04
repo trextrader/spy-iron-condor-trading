@@ -317,8 +317,8 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             vix = 18.0 + np.random.uniform(-3, 3) 
             
             if ivr < self.s_cfg.iv_rank_min or vix > self.s_cfg.vix_threshold:
-                if self.bar_count == 101 and self.verbose:
-                    print(f"[DEBUG] Entry blocked by IVR/VIX: ivr={ivr:.1f} (min={self.s_cfg.iv_rank_min}), vix={vix:.1f} (max={self.s_cfg.vix_threshold})")
+                if self.verbose:
+                    print(f"  [Filter] IVR/VIX gate: ivr={ivr:.1f} < {self.s_cfg.iv_rank_min} or vix={vix:.1f} > {self.s_cfg.vix_threshold}, skip entry")
                 return
 
             # === ENHANCED ENTRY LOGIC WITH ALL INDICATORS ===
@@ -447,8 +447,8 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             condor = build_condor(quote_chain, self.s_cfg, date_now, self.data.close[0], width)
             
             if not condor:
-                if self.bar_count == 101 and self.verbose:
-                    print(f"[DEBUG] Entry blocked: condor build failed (width={width}, close={self.data.close[0]:.2f})")
+                if self.verbose:
+                    print(f"  [Filter] Condor build failed (width={width:.1f}, close={self.data.close[0]:.2f})")
                 return
 
             credit = calc_condor_credit(condor)
@@ -466,15 +466,8 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             min_credit = width * required_ratio
             
             if credit < min_credit:
-                if self.bar_count == 101 and self.verbose:
-                    print(f"[DEBUG] Entry blocked by credit. Needed {min_credit:.2f} (ratio {required_ratio:.2f}), Got {credit:.2f}")
-                    # Diagnostic: Print Legs
-                    if len(condor) == 4:
-                        print(f"    Legs: ShortC={condor[0]['strike']}@{condor[0]['mid']:.2f} | LongC={condor[1]['strike']}@{condor[1]['mid']:.2f}")
-                        print(f"          ShortP={condor[2]['strike']}@{condor[2]['mid']:.2f} | LongP={condor[3]['strike']}@{condor[3]['mid']:.2f}")
-                        call_cr = condor[0]['mid'] - condor[1]['mid']
-                        put_cr = condor[2]['mid'] - condor[3]['mid']
-                        print(f"    Calc: CallCr={call_cr:.2f} + PutCr={put_cr:.2f} = {call_cr + put_cr:.2f}")
+                if self.verbose:
+                    print(f"  [Filter] Insufficient credit: need ${min_credit:.2f} (ratio {required_ratio:.2f}), got ${credit:.2f}")
                 return
 
             # === Neural Forecasting (Mamba 2) ===
@@ -499,12 +492,25 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             # === Sizing via QTMF Facade (Neuro-Fuzzy) ===
             from qtmf.models import TradeIntent
             from qtmf.facade import benchmark_and_size
-            
+
+            # Calculate Gaussian Confidence from Fuzzy Memberships
+            gaussian_confidence = (
+                mu_mtf * getattr(self.s_cfg, 'fuzzy_weight_mtf', 0.25) +
+                mu_iv * getattr(self.s_cfg, 'fuzzy_weight_iv', 0.18) +
+                mu_regime * getattr(self.s_cfg, 'fuzzy_weight_regime', 0.15) +
+                mu_rsi * getattr(self.s_cfg, 'fuzzy_weight_rsi', 0.10) +
+                mu_adx * getattr(self.s_cfg, 'fuzzy_weight_adx', 0.10) +
+                mu_stoch * getattr(self.s_cfg, 'fuzzy_weight_stoch', 0.07) +
+                mu_bbands * getattr(self.s_cfg, 'fuzzy_weight_bbands', 0.08) +
+                mu_volume * getattr(self.s_cfg, 'fuzzy_weight_volume', 0.04) +
+                mu_sma * getattr(self.s_cfg, 'fuzzy_weight_sma', 0.03)
+            )
+
             # Construct Trade Intent with all 9 indicators + Neural Signal
             intent = TradeIntent(
                 symbol=self.s_cfg.underlying,
                 action="SELL_CONDOR",
-                gaussian_confidence=0.5, # Gaussian component placeholder for hybrid weighting
+                gaussian_confidence=gaussian_confidence,
                 current_price=self.data.close[0],
                 vix=vix,
                 ivr=ivr,
@@ -524,6 +530,8 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     'equity': self.broker.get_cash(),
                     'max_loss_per_contract': width * 100.0, # Approximate max loss as spread width
                     'risk_fraction': self.s_cfg.max_account_risk_per_trade,
+                    'min_gaussian_confidence': 0.40,  # Lower threshold (we already have 0.3 hard gates on all indicators)
+                    'fallback_total_qty': 2,  # Minimum for Iron Condor (2 wings)
                     # Pass config weights to facade
                     'w_mtf': getattr(self.s_cfg, 'fuzzy_weight_mtf', 0.25),
                     'w_iv': getattr(self.s_cfg, 'fuzzy_weight_iv', 0.20),
@@ -542,8 +550,8 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             plan = benchmark_and_size(intent)
             
             if not plan.approved:
-                # Silent return unless verbose debug needed
-                # if self.verbose: print(f"[DEBUG] Entry blocked by QTMF: {plan.reason}")
+                if self.verbose:
+                    print(f"  [Filter] QTMF rejected: {plan.reason}")
                 return
                 
             quantity = plan.total_qty
