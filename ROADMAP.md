@@ -103,34 +103,9 @@ Intelligence modules (fuzzy sizing and regime filters) provide higher-order cont
 
 ---
 
-## File Interaction Map
+## Roadmap Flowchart
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         main.py                                 │
-│              (CLI Entrypoint, Config Builder)                   │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-         ┌───────────────┼───────────────┐
-         ▼               ▼               ▼
-┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-│  Backtest   │  │  Optimizer  │  │  Live/Paper │
-│    Mode     │  │    Mode     │  │    Mode     │
-└──────┬──────┘  └──────┬──────┘  └──────┬──────┘
-       │                │                │
-       ▼                ▼                ▼
-┌──────────────────────────────────────────────────────────────┐
-│                    backtest_engine.py                        │
-│            (High-Fidelity MtM PnL Simulation)                │
-└─────────────────────────┬────────────────────────────────────┘
-                          │
-        ┌─────────────────┼─────────────────┐
-        ▼                 ▼                 ▼
-┌───────────────┐  ┌───────────────┐  ┌───────────────┐
-│ sync_engine   │  │ options_      │  │ fuzzy_engine  │
-│ (MTF Data)    │  │ strategy.py   │  │ (9-Factor)    │
-└───────────────┘  └───────────────┘  └───────────────┘
-```
+![Quantor-MTFuzz Roadmap: Completed vs Pending](diagrams/roadmap_flowchart.png)
 
 ---
 
