@@ -119,6 +119,10 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             self.total_bars = len(self.datas[0])
             self.last_progress_pct = -1
             
+            # Log throttling for spammy filter messages
+            self._last_credit_reject_date = None
+            self._last_credit_reject_value = None
+            
             # Initialize Mamba Neural Engine
             if getattr(self.s_cfg, 'use_mamba_model', False):
                 try:
@@ -466,8 +470,17 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             min_credit = width * required_ratio
             
             if credit < min_credit:
-                if self.verbose:
+                # Throttle: only log once per day or if credit changed by >$0.10
+                should_log = False
+                if self._last_credit_reject_date != date_now:
+                    should_log = True
+                elif self._last_credit_reject_value is None or abs(credit - self._last_credit_reject_value) >= 0.10:
+                    should_log = True
+                
+                if should_log and self.verbose:
                     print(f"  [Filter] Insufficient credit: need ${min_credit:.2f} (ratio {required_ratio:.2f}), got ${credit:.2f}")
+                    self._last_credit_reject_date = date_now
+                    self._last_credit_reject_value = credit
                 return
 
             # === Neural Forecasting (Mamba 2) ===
