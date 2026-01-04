@@ -179,6 +179,35 @@ The following metrics are used to rank results in the `top100_[timestamp].csv` r
 
 ---
 
+## 📊 Benchmarking
+
+Run the hardware benchmark to measure system performance and project optimizer runtimes:
+
+```bash
+py -3.12 core/benchmark_cpu.py
+```
+
+**Outputs:**
+- `reports/benchmark.json` — Structured metrics for CI/baseline tracking
+- Console output with bars/second and projected optimizer time
+
+**JSON Format:**
+```json
+{
+  "timestamp": "2026-01-04T15:00:00",
+  "test_bars": 5000,
+  "runtime_seconds": 0.8,
+  "bars_per_second": 6250,
+  "projected_100_runs_minutes": 1.33,
+  "system": {"cpu_physical_cores": 8, "ram_total_gb": 32, "python_version": "3.12.7"}
+}
+```
+
+**Baseline Metrics:**
+After each backtest, key metrics are saved to `reports/baseline_metrics.json` for regression tracking.
+
+---
+
 ## 🛠️ Installation
 
 1. **Setup Dependencies**:

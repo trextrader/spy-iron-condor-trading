@@ -734,6 +734,34 @@ def run_backtest_and_report(s_cfg: StrategyConfig, r_cfg: RunConfig):
         trades_df.to_csv(out_csv, index=False)
         print(f"[Export] Trade log saved: {out_csv}")
     
+    # Export Baseline Metrics JSON
+    import json
+    from datetime import datetime
+    baseline_metrics = {
+        "timestamp": datetime.now().isoformat(),
+        "data_window": f"{data_start_str} to {data_end_str}",
+        "data_days": days,
+        "net_profit": round(net_profit, 2),
+        "net_profit_pct": round(pct_return, 2),
+        "max_drawdown": round(max_dd_money, 2),
+        "max_drawdown_pct": round(max_dd_pct, 2),
+        "sharpe_ratio": round(sharpe, 2),
+        "profit_factor": "INF" if profit_factor == float('inf') else round(profit_factor, 2),
+        "net_pnl_dd_ratio": round(net_pnl_dd_ratio, 2),
+        "total_trades": len(strat.trade_log),
+        "open_trades": open_positions,
+        "win_rate": round(win_rate, 2),
+        "avg_win": round(avg_win, 2),
+        "avg_loss": round(avg_loss, 2),
+        "expectancy": round(expectancy, 2),
+        "largest_win": round(largest_win, 2),
+        "largest_loss": round(largest_loss, 2),
+    }
+    baseline_json_path = os.path.join("reports", "baseline_metrics.json")
+    with open(baseline_json_path, 'w') as f:
+        json.dump(baseline_metrics, f, indent=2)
+    print(f"[Export] Baseline metrics saved: {baseline_json_path}")
+    
     # Save PDF Report
     if r_cfg.backtest_plot:
         # Re-load DF just for plotting (inefficient but cleaner for now)

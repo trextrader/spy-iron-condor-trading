@@ -108,6 +108,46 @@ Examples:
 
 
 # ==========================================================
+# CONFIG VALIDATION
+# ==========================================================
+def validate_config(s_cfg: StrategyConfig, r_cfg: RunConfig) -> list:
+    """Validate config values and return list of errors (empty if valid)."""
+    errors = []
+    
+    # DTE range check
+    if s_cfg.dte_min > s_cfg.dte_max:
+        errors.append(f"dte_min ({s_cfg.dte_min}) cannot exceed dte_max ({s_cfg.dte_max})")
+    
+    # Delta range check
+    if s_cfg.target_short_delta_low > s_cfg.target_short_delta_high:
+        errors.append(f"delta_low ({s_cfg.target_short_delta_low}) cannot exceed delta_high ({s_cfg.target_short_delta_high})")
+    
+    # Wing width range check
+    if s_cfg.wing_width_min > s_cfg.wing_width_max:
+        errors.append(f"wing_width_min ({s_cfg.wing_width_min}) cannot exceed wing_width_max ({s_cfg.wing_width_max})")
+    
+    # Positive value checks
+    if s_cfg.profit_take_pct <= 0:
+        errors.append(f"profit_take_pct must be positive, got {s_cfg.profit_take_pct}")
+    
+    if s_cfg.loss_close_multiple <= 0:
+        errors.append(f"loss_close_multiple must be positive, got {s_cfg.loss_close_multiple}")
+    
+    if s_cfg.max_account_risk_per_trade <= 0 or s_cfg.max_account_risk_per_trade > 1:
+        errors.append(f"max_account_risk_per_trade must be between 0 and 1, got {s_cfg.max_account_risk_per_trade}")
+    
+    # Backtest date range
+    if r_cfg.backtest_start > r_cfg.backtest_end:
+        errors.append(f"backtest_start ({r_cfg.backtest_start}) cannot be after backtest_end ({r_cfg.backtest_end})")
+    
+    # Cash validation
+    if r_cfg.backtest_cash <= 0:
+        errors.append(f"backtest_cash must be positive, got {r_cfg.backtest_cash}")
+    
+    return errors
+
+
+# ==========================================================
 # MAIN
 # ==========================================================
 def main():
@@ -177,6 +217,17 @@ def main():
 
     if args.no_liquidity_gate:
         strategy_config.use_liquidity_gate = False
+
+    # -------------------------
+    # VALIDATE CONFIG
+    # -------------------------
+    validation_errors = validate_config(strategy_config, run_config)
+    if validation_errors:
+        print("\n[Config Error] Invalid configuration detected:")
+        for err in validation_errors:
+            print(f"  - {err}")
+        print("\nPlease fix the above issues and try again.")
+        sys.exit(1)
 
     # -------------------------
     # RUN
