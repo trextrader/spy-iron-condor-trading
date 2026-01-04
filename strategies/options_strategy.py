@@ -73,7 +73,15 @@ def pick_long_by_width(chain: List[OptionQuote], short_leg: OptionQuote,
                        is_call: bool, wing_width: float) -> Optional[OptionQuote]:
     target_strike = short_leg.strike + wing_width if is_call else short_leg.strike - wing_width
     candidates = [q for q in chain if q.is_call == is_call 
-                  and q.expiration == short_leg.expiration]
+                  and q.expiration == short_leg.expiration
+                  and q.strike != short_leg.strike] # Ensure distinct strike
+    
+    # Enforce OTM direction (Calls > Short, Puts < Short)
+    if is_call:
+        candidates = [q for q in candidates if q.strike > short_leg.strike]
+    else:
+        candidates = [q for q in candidates if q.strike < short_leg.strike]
+        
     if not candidates:
         return None
     return sorted(candidates, key=lambda q: abs(q.strike - target_strike))[0]

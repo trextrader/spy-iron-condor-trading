@@ -12,8 +12,8 @@ class StrategyConfig:
     target_short_delta_high: float = 0.20
     
     # === Wing Width & Pricing ===
-    wing_width_min: float = 5.0
-    wing_width_max: float = 10.0
+    wing_width_min: float = 50.0  # ~7-8% of SPY at $650-700
+    wing_width_max: float = 80.0  # ~12% of SPY at $650-700
     min_credit_to_width: float = 0.25
     
     # === Risk Management ===

@@ -239,11 +239,8 @@ def benchmark_and_size(
     min_floor = min_total_for_two if require_two_wings else 1
 
     scaled_qty = int(total_qty * g)
-    # ensure at least min_floor if total_qty >= min_floor
-    if total_qty >= min_floor:
-        scaled_qty = max(min_floor, scaled_qty)
-    elif total_qty >= 1:
-        scaled_qty = max(1, scaled_qty)
+    # Unconditionally enforce minimum floor for strategy type
+    scaled_qty = max(min_floor, scaled_qty)
 
     diagnostics.update(
         {

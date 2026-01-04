@@ -617,16 +617,19 @@ def run_backtest_and_report(s_cfg: StrategyConfig, r_cfg: RunConfig):
     net_profit = final_equity - r_cfg.backtest_cash
     pct_return = (net_profit / r_cfg.backtest_cash) * 100.0
     
-    # Date calculations
+    # Date calculations - Use actual data window (not trade dates)
+    data_start_date = strat.data.datetime.date(-len(strat.data)+1)
+    data_end_date = strat.data.datetime.date(0)
+
+    # Track trade activity window separately
     if strat.trade_log:
-        start_date = strat.trade_log[0]["start"].date()
-        end_date = strat.trade_log[-1]["end"].date()
+        trade_start_date = strat.trade_log[0]["start"].date()
+        trade_end_date = strat.trade_log[-1]["end"].date()
     else:
-        # Fallback to feed dates if no trades closed
-        start_date = strat.data.datetime.date(-len(strat.data)+1)
-        end_date = strat.data.datetime.date(0)
-    
-    days = (end_date - start_date).days
+        trade_start_date = None
+        trade_end_date = None
+
+    days = (data_end_date - data_start_date).days
     years = days / 365.0 if days > 0 else 0.0
     cagr = ((final_equity / r_cfg.backtest_cash) ** (1 / years) - 1) * 100.0 if years > 0 and final_equity > 0 else 0.0
 
@@ -660,7 +663,14 @@ def run_backtest_and_report(s_cfg: StrategyConfig, r_cfg: RunConfig):
 
     gross_win = sum(t["amount"] for t in wins)
     gross_loss = abs(sum(t["amount"] for t in losses))
-    profit_factor = gross_win / gross_loss if gross_loss > 0 else 0.0
+
+    # Profit Factor: INF when wins exist but no losses; 0.0 when no activity
+    if gross_loss > 0:
+        profit_factor = gross_win / gross_loss
+    elif gross_win > 0:
+        profit_factor = float('inf')
+    else:
+        profit_factor = 0.0
     
     largest_win = max([t["amount"] for t in wins]) if wins else 0.0
     largest_loss = min([t["amount"] for t in losses]) if losses else 0.0
@@ -674,22 +684,26 @@ def run_backtest_and_report(s_cfg: StrategyConfig, r_cfg: RunConfig):
     d, h = divmod(h, 24)
     time_in_trade_str = f"{int(d)}d {int(h):02d}:{int(m):02d}:{int(s):02d}"
 
-    start_date_str = start_date.strftime("%Y-%m-%d")
-    end_date_str = end_date.strftime("%Y-%m-%d")
+    data_start_str = data_start_date.strftime("%Y-%m-%d")
+    data_end_str = data_end_date.strftime("%Y-%m-%d")
+
+    # Count open positions (positions in strat.positions that are still active)
+    open_positions = len(strat.positions) if hasattr(strat, 'positions') and strat.positions else 0
 
     print("\n" + "="*60)
     print(f"BACKTEST RESULTS: {s_cfg.underlying}")
     print("="*60)
-    print(f"Period:           {start_date_str} to {end_date_str} ({days} days)")
+    print(f"Data Window:      {data_start_str} to {data_end_str} ({days} days)")
     print(f"Final Equity:     ${final_equity:,.2f}")
     print(f"Net Profit:       ${net_profit:,.2f} ({pct_return:.2f}%)")
     print(f"CAGR:             {cagr:.2f}%")
     print(f"Max Drawdown:     ${max_dd_money:,.2f} ({max_dd_pct:.2f}%)")
     print(f"Sharpe Ratio:     {sharpe:.2f}")
-    print(f"Profit Factor:    {profit_factor:.2f}")
+    print(f"Profit Factor:    {'INF' if profit_factor == float('inf') else f'{profit_factor:.2f}'}")
     print(f"Net PnL / DD:     {net_pnl_dd_ratio:.2f}")
     print(f"Time in Trade:    {time_in_trade_str}")
     print(f"Total Trades:     {len(strat.trade_log)}")
+    print(f"Open Trades:      {open_positions}")
     print(f"Win Rate:         {win_rate:.2f}%")
     print(f"Avg Win:          ${avg_win:,.2f}")
     print(f"Avg Loss:         ${avg_loss:,.2f}")
@@ -727,16 +741,17 @@ def run_backtest_and_report(s_cfg: StrategyConfig, r_cfg: RunConfig):
             
             metrics = [
                 ["Metric", "Value"],
-                ["Period", f"{start_date_str} to {end_date_str}"],
+                ["Data Window", f"{data_start_str} to {data_end_str}"],
                 ["Initial Capital", f"${r_cfg.backtest_cash:,.2f}"],
                 ["Final Equity", f"${final_equity:,.2f}"],
                 ["Net Profit", f"${net_profit:,.2f} ({pct_return:.2f}%)"],
                 ["Max Drawdown", f"${max_dd_money:,.2f} ({max_dd_pct:.2f}%)"],
                 ["Sharpe Ratio", f"{sharpe:.2f}"],
-                ["Profit Factor", f"{profit_factor:.2f}"],
+                ["Profit Factor", "INF" if profit_factor == float('inf') else f"{profit_factor:.2f}"],
                 ["Net PnL / DD", f"{net_pnl_dd_ratio:.2f}"],
                 ["Time in Trade", f"{time_in_trade_str}"],
                 ["Total Trades", f"{len(strat.trade_log)}"],
+                ["Open Trades", f"{open_positions}"],
                 ["Win Rate", f"{win_rate:.2f}%"],
                 ["Avg Win", f"${avg_win:,.2f}"],
                 ["Avg Loss", f"${avg_loss:,.2f}"],
