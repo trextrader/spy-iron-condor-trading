@@ -108,8 +108,14 @@ The `MTFSyncEngine` (`data_factory/sync_engine.py:5`) loads all timeframes (1m, 
 - `data_factory/sync_engine.py` → Loads multi-timeframe data for aligned lookups
 
 ### Intelligence Modules
-- `intelligence/fuzzy_engine.py:88` (`compute_position_size`) - Scales quantity based on volatility regime and MTF consensus
-- `intelligence/regime_filter.py` - Prevents entry during high VIX or low IV Rank conditions
+- `intelligence/fuzzy_engine.py` - Implements 9-factor Fuzzy Logic Position Sizing:
+  - **Core**: MTF Consensus, IV Rank, VIX Regime
+  - **Momentum**: RSI (40-60 neutral), Stochastic (30-70 neutral)
+  - **Trend**: ADX (<25 weak trend), SMA Distance (<2%)
+  - **Volatility**: Bollinger Bands (Squeeze & Range)
+  - **Volume**: Relative Volume Ratio (>0.8)
+- `data_factory/sync_engine.py` - Calcluates all indicators during data load (autodetects `pandas-ta`, falls back to robust manual calculation if missing).
+- `intelligence/regime_filter.py` - Prevents entry during high VIX or low IV Rank conditions.
 
 ## Code Modification Guidelines
 

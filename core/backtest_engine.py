@@ -170,9 +170,39 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                         
                         unrealized_pnl = (self.active_position.credit_received - current_cost) * self.active_position.quantity * 100
                         
-                        # Exit Rule: Profit Take / Stop Loss
+                        # Exit Rule: Profit Take
                         target_profit = self.active_position.credit_received * self.s_cfg.profit_take_pct
-                        stop_loss = self.active_position.credit_received * (1 + self.s_cfg.loss_close_multiple)
+                        
+                        # Exit Rule: Dynamic Stop Loss (ATR-based)
+                        base_multiplier = self.s_cfg.loss_close_multiple
+                        use_atr_stops = getattr(self.s_cfg, 'use_atr_stops', False)
+                        if use_atr_stops and self.sync:
+                            # Get current ATR from primary timeframe
+                            primary_tf = self.r_cfg.mtf_timeframes[0] if self.r_cfg.mtf_timeframes else '1'
+                            tf_snapshot = self.sync.get_snapshot(dt_now)
+                            atr_pct = tf_snapshot.get(primary_tf, {}).get('atr_pct', 0.01) if tf_snapshot and tf_snapshot.get(primary_tf) else 0.01
+                            
+                            # Import and calculate dynamic multiplier
+                            from intelligence.fuzzy_engine import calculate_atr_stop_multiplier
+                            atr_base = getattr(self.s_cfg, 'atr_stop_base_multiplier', 1.5)
+                            dynamic_multiplier = calculate_atr_stop_multiplier(atr_pct, atr_base)
+                            stop_loss = self.active_position.credit_received * (1 + dynamic_multiplier)
+                        else:
+                            stop_loss = self.active_position.credit_received * (1 + base_multiplier)
+                        
+                        # Exit Rule: Trailing Stop
+                        use_trailing = getattr(self.s_cfg, 'use_trailing_stop', False)
+                        if use_trailing and unrealized_pnl > 0:
+                            # Check if trailing stop is activated
+                            profit_ratio = unrealized_pnl / (self.active_position.credit_received * self.active_position.quantity * 100)
+                            activation_pct = getattr(self.s_cfg, 'trailing_stop_activation_pct', 0.50)
+                            distance_pct = getattr(self.s_cfg, 'trailing_stop_distance_pct', 0.25)
+                            if profit_ratio >= activation_pct:
+                                # Set trailing stop distance
+                                trailing_floor = self.active_position.credit_received * (1 - activation_pct + distance_pct)
+                                if current_cost <= trailing_floor:
+                                    exit_triggered = True
+                                    exit_reason = "Trailing Stop"
                         
                         if current_cost <= target_profit:
                             exit_triggered = True
@@ -305,17 +335,89 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     print(f"[DEBUG] Entry blocked by credit: credit={credit:.2f} < min={width * self.s_cfg.min_credit_to_width:.2f}")
                 return
 
-            # Fuzzy sizing
-            from intelligence.fuzzy_engine import compute_position_size, calculate_iv_membership, calculate_regime_membership
+            # Fuzzy sizing with full indicator suite
+            from intelligence.fuzzy_engine import (
+                compute_position_size, calculate_iv_membership, calculate_regime_membership,
+                calculate_rsi_membership, calculate_adx_membership, calculate_bbands_membership,
+                calculate_stoch_membership, calculate_volume_membership, calculate_sma_distance_membership
+            )
+            
+            # Core memberships
             mu_iv = calculate_iv_membership(ivr)
             mu_regime = calculate_regime_membership(vix, self.s_cfg.vix_threshold)
             
-            memberships = {'mtf': mu_mtf, 'iv': mu_iv, 'regime': mu_regime}
+            # Get indicators from MTF snapshot (use primary timeframe '1' or '5')
+            primary_tf = self.r_cfg.mtf_timeframes[0] if self.r_cfg.mtf_timeframes else '1'
+            indicator_data = mtf_snapshot.get(primary_tf, {}) if mtf_snapshot else {}
+            
+            # Extract indicator values with safe defaults
+            rsi = indicator_data.get('rsi_14', 50.0) if indicator_data else 50.0
+            adx = indicator_data.get('adx_14', 20.0) if indicator_data else 20.0
+            bb_position = indicator_data.get('bb_position', 0.5) if indicator_data else 0.5
+            bb_width = indicator_data.get('bb_width', 0.02) if indicator_data else 0.02
+            stoch_k = indicator_data.get('stoch_k', 50.0) if indicator_data else 50.0
+            volume_ratio = indicator_data.get('volume_ratio', 1.0) if indicator_data else 1.0
+            sma_distance = indicator_data.get('sma_distance', 0.0) if indicator_data else 0.0
+            
+            # Calculate advanced memberships (with getattr fallbacks for backwards compatibility)
+            mu_rsi = calculate_rsi_membership(
+                rsi, 
+                getattr(self.s_cfg, 'rsi_neutral_min', 40.0), 
+                getattr(self.s_cfg, 'rsi_neutral_max', 60.0)
+            )
+            mu_adx = calculate_adx_membership(
+                adx, 
+                getattr(self.s_cfg, 'adx_threshold_low', 25.0), 
+                getattr(self.s_cfg, 'adx_threshold_high', 40.0)
+            )
+            mu_bbands = calculate_bbands_membership(
+                bb_position, bb_width, 
+                getattr(self.s_cfg, 'bb_squeeze_threshold', 0.02)
+            )
+            mu_stoch = calculate_stoch_membership(
+                stoch_k, 
+                getattr(self.s_cfg, 'stoch_neutral_min', 30.0), 
+                getattr(self.s_cfg, 'stoch_neutral_max', 70.0)
+            )
+            mu_volume = calculate_volume_membership(
+                volume_ratio, 
+                getattr(self.s_cfg, 'volume_min_ratio', 0.8)
+            )
+            mu_sma = calculate_sma_distance_membership(
+                sma_distance, 
+                getattr(self.s_cfg, 'sma_max_distance', 0.02)
+            )
+            
+            # Build full membership dictionary
+            memberships = {
+                'mtf': mu_mtf, 
+                'iv': mu_iv, 
+                'regime': mu_regime,
+                'rsi': mu_rsi,
+                'adx': mu_adx,
+                'bbands': mu_bbands,
+                'stoch': mu_stoch,
+                'volume': mu_volume,
+                'sma': mu_sma
+            }
+            
+            # Use config-based weights (with getattr fallbacks)
+            weights = {
+                'mtf': getattr(self.s_cfg, 'fuzzy_weight_mtf', 0.25),
+                'iv': getattr(self.s_cfg, 'fuzzy_weight_iv', 0.20),
+                'regime': getattr(self.s_cfg, 'fuzzy_weight_regime', 0.15),
+                'rsi': getattr(self.s_cfg, 'fuzzy_weight_rsi', 0.10),
+                'adx': getattr(self.s_cfg, 'fuzzy_weight_adx', 0.10),
+                'bbands': getattr(self.s_cfg, 'fuzzy_weight_bbands', 0.10),
+                'volume': getattr(self.s_cfg, 'fuzzy_weight_volume', 0.05),
+                'sma': getattr(self.s_cfg, 'fuzzy_weight_sma', 0.05)
+            }
+            
             quantity = compute_position_size(
-                total_equity, width * 100.0, memberships, 
-                {'mtf': 0.4, 'iv': 0.3, 'regime': 0.3},
+                total_equity, width * 100.0, memberships, weights,
                 vix, 12.0, 35.0, self.r_cfg.position_size_pct
             )
+
             
             if quantity > 0:
                 print(f"[Trade] Opened | Qty: {quantity} | Credit: ${credit:.2f} | Exp: {condor.short_call.expiration}")

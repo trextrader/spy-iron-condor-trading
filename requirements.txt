@@ -7,3 +7,4 @@ matplotlib>=3.10.0
 pandas>=2.2.3
 numpy>=2.2.0
 psutil>=6.1.1
+pandas-ta>=0.3.14b

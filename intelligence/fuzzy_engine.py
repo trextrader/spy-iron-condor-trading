@@ -212,6 +212,177 @@ def calculate_regime_membership(vix: float, threshold: float = 20.0) -> float:
     return max(0.0, 1.0 - penalty)
 
 
+# =============================================================================
+# ADVANCED TECHNICAL INDICATOR MEMBERSHIP FUNCTIONS
+# =============================================================================
+
+def calculate_rsi_membership(rsi: float, neutral_min: float = 40.0, neutral_max: float = 60.0) -> float:
+    """
+    RSI membership for Iron Condor favorability.
+    
+    Neutral RSI (40-60) = 1.0 (ideal for range-bound trading)
+    Extremes (0-30, 70-100) = 0.0 (momentum breakout risk)
+    """
+    if rsi is None or np.isnan(rsi):
+        return 0.3  # Conservative default
+    
+    # Perfect zone: RSI between 40-60
+    if neutral_min <= rsi <= neutral_max:
+        return 1.0
+    
+    # Below neutral zone: Linear decay
+    elif rsi < neutral_min:
+        return max(0.0, rsi / neutral_min)
+    
+    # Above neutral zone: Linear decay
+    else:
+        return max(0.0, (100 - rsi) / (100 - neutral_max))
+
+
+def calculate_adx_membership(adx: float, threshold_low: float = 25.0, threshold_high: float = 40.0) -> float:
+    """
+    ADX membership for range-bound market detection.
+    
+    Low ADX (< 25) = 1.0 (weak trend, ideal for IC)
+    High ADX (> 40) = 0.0 (strong trend, avoid IC)
+    """
+    if adx is None or np.isnan(adx):
+        return 0.5  # Neutral default
+    
+    # Weak trend: Perfect for IC
+    if adx <= threshold_low:
+        return 1.0
+    
+    # Moderate trend: Linear decay
+    elif adx <= threshold_high:
+        return 1.0 - ((adx - threshold_low) / (threshold_high - threshold_low))
+    
+    # Strong trend: Avoid
+    else:
+        return 0.0
+
+
+def calculate_bbands_membership(bb_position: float, bb_width: float = None, squeeze_threshold: float = 0.02) -> float:
+    """
+    Bollinger Bands membership for volatility regime.
+    
+    Favorable conditions:
+    - Price in middle 60% of bands (position 0.2-0.8)
+    - Compressed bands (width < 2%)
+    """
+    if bb_position is None or np.isnan(bb_position):
+        return 0.5
+    
+    # Position score: Prefer middle (0.5 = perfect)
+    position_score = max(0.0, 1.0 - abs(bb_position - 0.5) * 2)
+    
+    # Squeeze score: Prefer narrow bands
+    if bb_width is None or np.isnan(bb_width):
+        squeeze_score = 0.5
+    else:
+        squeeze_score = max(0.0, 1.0 - (bb_width / (squeeze_threshold * 2)))
+    
+    # Combined score: Position matters more (70/30 split)
+    return (position_score * 0.7 + squeeze_score * 0.3)
+
+
+def calculate_stoch_membership(stoch_k: float, neutral_min: float = 30.0, neutral_max: float = 70.0) -> float:
+    """
+    Stochastic oscillator membership (similar to RSI).
+    
+    Neutral %K (30-70) = 1.0
+    Extremes = 0.0
+    """
+    if stoch_k is None or np.isnan(stoch_k):
+        return 0.5
+    
+    if neutral_min <= stoch_k <= neutral_max:
+        return 1.0
+    elif stoch_k < neutral_min:
+        return max(0.0, stoch_k / neutral_min)
+    else:
+        return max(0.0, (100 - stoch_k) / (100 - neutral_max))
+
+
+def calculate_volume_membership(volume_ratio: float, min_ratio: float = 0.8) -> float:
+    """
+    Volume confirmation membership.
+    
+    High volume relative to average = better liquidity = 1.0
+    Low volume = poor fills = 0.0
+    """
+    if volume_ratio is None or np.isnan(volume_ratio):
+        return 0.5
+    
+    # Linear scale: 0 at ratio=0, 1.0 at ratio=min_ratio
+    return min(1.0, max(0.0, volume_ratio / min_ratio))
+
+
+def calculate_sma_distance_membership(sma_distance: float, max_distance: float = 0.02) -> float:
+    """
+    SMA distance membership (price near moving average = equilibrium).
+    
+    Price at SMA (distance = 0%) = 1.0
+    Price > 2% from SMA = 0.0
+    """
+    if sma_distance is None or np.isnan(sma_distance):
+        return 0.5
+    
+    abs_dist = abs(sma_distance)
+    
+    if abs_dist <= max_distance:
+        return 1.0 - (abs_dist / max_distance)
+    else:
+        return 0.0
+
+
+# =============================================================================
+# EXIT INDICATOR FUNCTIONS
+# =============================================================================
+
+def calculate_atr_stop_multiplier(atr_pct: float, base_multiplier: float = 1.5) -> float:
+    """
+    Calculate dynamic stop-loss multiplier based on ATR.
+    
+    Low volatility (ATR < 0.5%) → Tight stop (1.0x)
+    Medium volatility (ATR 0.5-2%) → Standard stop (1.5x)
+    High volatility (ATR > 2%) → Wide stop (2.0x)
+    """
+    if atr_pct is None or np.isnan(atr_pct):
+        return base_multiplier
+    
+    # Low volatility: Tighter stop
+    if atr_pct <= 0.005:  # 0.5%
+        return max(1.0, base_multiplier - 0.5)
+    
+    # High volatility: Wider stop
+    elif atr_pct >= 0.02:  # 2.0%
+        return min(2.5, base_multiplier + 0.5)
+    
+    # Medium volatility: Linear interpolation
+    else:
+        adjustment = ((atr_pct - 0.005) / 0.015) * 0.5
+        return base_multiplier + adjustment
+
+
+def check_bbands_breakout(bb_position: float, touch_threshold: float = 0.95) -> bool:
+    """
+    Check if price has touched Bollinger Bands (breakout signal).
+    """
+    if bb_position is None or np.isnan(bb_position):
+        return False
+    
+    # Upper band touch
+    if bb_position >= touch_threshold:
+        return True
+    
+    # Lower band touch
+    if bb_position <= (1.0 - touch_threshold):
+        return True
+    
+    return False
+
+
 # Backward Compatibility
 get_fuzzy_consensus = calculate_mtf_membership
 
