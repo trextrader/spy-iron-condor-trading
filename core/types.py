@@ -25,10 +25,16 @@ class MarketSnapshot:
     spot: float
     bars: pd.DataFrame              # OHLCV bars (recent history)
     option_chain: pd.DataFrame      # Option quotes for current date
-    vix: Optional[float] = None
-    es_price: Optional[float] = None
-    prev_close: Optional[float] = None
-    open_price: Optional[float] = None
+    vix: float | None = None
+    es_price: float | None = None
+    prev_close: float | None = None
+    open_price: float | None = None
+    
+    # Options alignment metadata (optional; populated by DataEngine when available)
+    option_used_ts: Any = None
+    option_lag_sec: float | None = None
+    option_iv_conf: float | None = None
+    option_align_mode: str | None = None
 
 
 @dataclass(frozen=True)

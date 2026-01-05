@@ -10,24 +10,79 @@ from intelligence.fuzzy_engine import get_fuzzy_consensus
 from intelligence.regime_filter import check_liquidity_gate
 
 # === Core Types ===
+def lag_weighted_edge(edge: float, iv_conf: float, align_mode: str, cfg: Any) -> float:
+    """
+    Reduce VRP edge as options lag increases.
+
+    If cfg.vrp_lag_weighting is False -> returns edge.
+
+    Modes:
+      - multiply: edge *= iv_conf * scale
+      - subtract: edge -= (1 - iv_conf) * scale
+
+    align_mode == "stale" => returns 0.0 (chain treated as empty under cutoff policies)
+    """
+    if not bool(getattr(cfg, "vrp_lag_weighting", True)):
+        return edge
+    scale = float(getattr(cfg, "vrp_lag_penalty_scale", 1.0))
+    modew = str(getattr(cfg, "vrp_lag_weight_mode", "multiply"))
+    iv_conf = float(iv_conf) if iv_conf is not None else 1.0
+    iv_conf = max(0.0, min(1.0, iv_conf))
+
+    if align_mode == "stale":
+        return 0.0
+
+    if modew == "subtract":
+        return edge - (1.0 - iv_conf) * scale
+    return edge * (iv_conf * scale)
+
+
 @dataclass
 class OptionQuote:
-    symbol: str
-    expiration: dt.date
     strike: float
-    is_call: bool
     bid: float
     ask: float
     mid: float
-    delta: float
     iv: float
+    delta: float
+    gamma: float = 0.0
+    vega: float = 0.0
+    theta: float = 0.0
+
 
 @dataclass
 class IronCondorLegs:
+    long_put: OptionQuote
+    short_put: OptionQuote
     short_call: OptionQuote
     long_call: OptionQuote
-    short_put: OptionQuote
-    long_put: OptionQuote
+    net_credit: float
+    max_loss: float
+
+
+class OptionsStrategy:
+    """
+    Base class / interface for options strategies.
+    """
+    def __init__(self, cfg: Any):
+        self.cfg = cfg
+
+    def alignment_policy(self) -> dict[str, Any]:
+        """
+        Strategy-level override for stale options handling.
+
+        Return dict:
+          - policy: "hard_cutoff" | "decay_only" | "decay_then_cutoff"
+          - max_lag_sec: int | None (None => use config per-symbol/default)
+          - allow_trade_without_chain: bool
+
+        Defaults are conservative for multi-leg options strategies.
+        """
+        return {
+            "policy": getattr(self.cfg, "lag_policy_default", "decay_then_cutoff"),
+            "max_lag_sec": None,
+            "allow_trade_without_chain": False,
+        }
 
 @dataclass
 class PositionState:

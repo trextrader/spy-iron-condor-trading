@@ -5,29 +5,28 @@ Mock OptionChainProvider for synthetic options marks file with columns:
 timestamp,date,symbol,option_symbol,strike,expiration,contract_type,bid,ask,last_price,
 bid_size,ask_size,volume,open_interest,delta,gamma,theta,vega,implied_volatility
 
-Returns per-timestamp slices and normalizes to:
-timestamp, symbol, option_symbol, strike, expiry, type, bid, ask, mid, last, volume, oi, delta, gamma, theta, vega, iv
-
-Includes timestamp alignment diagnostics.
+Returns per-timestamp slices with ChainAlignment metadata.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 import pandas as pd
-import numpy as np
+
+
+@dataclass(frozen=True)
+class ChainAlignment:
+    chain: pd.DataFrame
+    used_ts: Optional[pd.Timestamp]
+    mode: str       # "exact" | "prior" | "stale" | "none"
+    lag_sec: float
+    iv_conf: float  # [0,1] confidence weight from lag decay
 
 
 @dataclass
 class OptionChainProvider:
     cfg: Any
     _df: Optional[pd.DataFrame] = None
-    
-    # Alignment statistics
-    _exact_matches: int = 0
-    _fallback_prior: int = 0
-    _lags_seconds: list = field(default_factory=list)
-    _total_requests: int = 0
 
     def _load(self) -> pd.DataFrame:
         if self._df is not None:
@@ -39,19 +38,15 @@ class OptionChainProvider:
 
         df = pd.read_csv(path)
 
-        # Parse timestamps
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
         df = df.dropna(subset=["timestamp"]).sort_values("timestamp")
 
-        # Normalize expiration
         df["expiration"] = pd.to_datetime(df["expiration"], utc=True, errors="coerce")
 
-        # Normalize type to "C"/"P"
         t = df["contract_type"].astype(str).str.lower()
         t = t.replace({"call": "C", "put": "P"})
         df["type"] = t.str.upper()
 
-        # Canonical columns
         out = pd.DataFrame(
             {
                 "timestamp": df["timestamp"],
@@ -73,55 +68,78 @@ class OptionChainProvider:
             }
         )
 
-        # Mid price
         out["mid"] = (out["bid"].fillna(0.0) + out["ask"].fillna(0.0)) / 2.0
-
-        # Clean
         out = out.dropna(subset=["strike"])
         self._df = out
         return out
 
-    def get_chain(self, ts: Any, symbol: str) -> pd.DataFrame:
-        df = self._load()
-        self._total_requests += 1
-        
-        # Exact timestamp match
-        s = df[df["timestamp"] == ts]
-        if not s.empty:
-            self._exact_matches += 1
-            self._lags_seconds.append(0.0)
-            return s
+    def _symbol_max_lag(self, symbol: str) -> int:
+        mp = getattr(self.cfg, "max_option_lag_sec_by_symbol", None) or {}
+        if symbol in mp:
+            return int(mp[symbol])
+        return int(getattr(self.cfg, "max_option_lag_sec", 600))
 
-        # Nearest prior snapshot
+    def _decay_iv_conf(self, lag_sec: float) -> float:
+        """
+        Half-life exponential decay:
+          iv_conf = 0.5 ** (lag_sec / iv_decay_half_life_sec)
+        """
+        hl = float(getattr(self.cfg, "iv_decay_half_life_sec", 300))
+        if hl <= 0:
+            return 1.0 if lag_sec <= 0 else 0.0
+        if lag_sec <= 0:
+            return 1.0
+        return float(0.5 ** (lag_sec / hl))
+
+    def get_chain(self, ts: Any, symbol: str) -> pd.DataFrame:
+        """
+        Backwards-compatible: return only chain DataFrame.
+        For alignment metadata + iv_conf, use get_chain_with_meta().
+        """
+        aligned = self.get_chain_with_meta(ts, symbol)
+        return aligned.chain
+
+    def get_chain_with_meta(
+        self,
+        ts: Any,
+        symbol: str,
+        policy: Optional[str] = None,
+        max_lag_sec: Optional[int] = None,
+    ) -> ChainAlignment:
+        """
+        Align option snapshots to a spot timestamp.
+
+        policy ∈ {"hard_cutoff","decay_only","decay_then_cutoff"}
+        mode   ∈ {"exact","prior","stale","none"}
+        """
+        df = self._load()
+        ts = pd.to_datetime(ts, utc=True)
+
+        policy = policy or getattr(self.cfg, "lag_policy_default", "decay_then_cutoff")
+
+        exact = df[df["timestamp"] == ts]
+        if not exact.empty:
+            return ChainAlignment(exact, ts, "exact", 0.0, 1.0)
+
         prior = df[df["timestamp"] <= ts]
         if prior.empty:
-            return df.iloc[0:0]
-        
-        self._fallback_prior += 1
-        last_ts = prior["timestamp"].iloc[-1]
-        
-        # Calculate lag in seconds
-        lag_seconds = (pd.Timestamp(ts) - pd.Timestamp(last_ts)).total_seconds()
-        self._lags_seconds.append(lag_seconds)
-        
-        return df[df["timestamp"] == last_ts]
-    
-    def print_alignment_stats(self) -> None:
-        """Print timestamp alignment statistics."""
-        if self._total_requests == 0:
-            print("[ALIGN] No requests made yet")
-            return
-        
-        exact_pct = 100.0 * self._exact_matches / self._total_requests
-        fallback_pct = 100.0 * self._fallback_prior / self._total_requests
-        
-        lags = np.array(self._lags_seconds)
-        median_lag = np.median(lags) if len(lags) > 0 else 0.0
-        max_lag = np.max(lags) if len(lags) > 0 else 0.0
-        
-        print(f"\n[ALIGN] Timestamp Alignment Report:")
-        print(f"  Total spot bars processed: {self._total_requests}")
-        print(f"  Exact matches: {self._exact_matches} ({exact_pct:.1f}%)")
-        print(f"  Nearest-prior fallback: {self._fallback_prior} ({fallback_pct:.1f}%)")
-        print(f"  Median lag: {median_lag:.1f} seconds")
-        print(f"  Max lag: {max_lag:.1f} seconds")
+            return ChainAlignment(df.iloc[0:0], None, "none", float("nan"), 0.0)
+
+        used_ts = pd.to_datetime(prior["timestamp"].iloc[-1], utc=True)
+        lag_sec = float((ts - used_ts).total_seconds())
+        iv_conf = self._decay_iv_conf(lag_sec)
+
+        ml = int(max_lag_sec) if max_lag_sec is not None else self._symbol_max_lag(symbol)
+
+        if policy == "hard_cutoff":
+            if lag_sec > ml:
+                return ChainAlignment(df.iloc[0:0], used_ts, "stale", lag_sec, 0.0)
+            return ChainAlignment(df[df["timestamp"] == used_ts], used_ts, "prior", lag_sec, 1.0)
+
+        if policy == "decay_only":
+            return ChainAlignment(df[df["timestamp"] == used_ts], used_ts, "prior", lag_sec, iv_conf)
+
+        # default: decay_then_cutoff
+        if lag_sec > ml:
+            return ChainAlignment(df.iloc[0:0], used_ts, "stale", lag_sec, 0.0)
+        return ChainAlignment(df[df["timestamp"] == used_ts], used_ts, "prior", lag_sec, iv_conf)

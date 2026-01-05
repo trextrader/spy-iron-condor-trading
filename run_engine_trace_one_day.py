@@ -36,17 +36,36 @@ def main() -> int:
     # Point to your options marks file
     setattr(cfg, "options_chain_csv", "data/synthetic_options/spy_options_marks.csv")
 
-    # Optional: constrain to a specific UTC day (must exist in BOTH spot and options)
-    # If you omit this, it will run all timestamps available in the spot file.
-    # Enable auto-pick to automatically select the most recent overlapping day
+    # Auto-pick most recent overlap day between spot and options
     setattr(cfg, "auto_pick_overlap_day", True)
-    setattr(cfg, "trace_day_utc", None)  # Leave unset so auto-pick runs
+    setattr(cfg, "trace_day_utc", None)
+
+    # Enable alignment diagnostics summary
+    setattr(cfg, "alignment_diagnostics", True)
 
     # Rolling window length delivered to indicators/strategy
     setattr(cfg, "bars_window", 600)
 
+    # --- Lag-aware features ---
+    setattr(cfg, "lag_policy_default", "decay_then_cutoff")
+    setattr(cfg, "max_option_lag_sec", 600)
+    setattr(cfg, "iv_decay_half_life_sec", 300)
+    setattr(cfg, "max_option_lag_sec_by_symbol", {"SPY": 600, "QQQ": 600, "SPX": 900})
+
+    # Lag-weighted VRP
+    setattr(cfg, "vrp_lag_weighting", True)
+    setattr(cfg, "vrp_lag_weight_mode", "multiply")
+    setattr(cfg, "vrp_lag_penalty_scale", 1.0)
+
+    # Fail-fast if stale fraction too high
+    setattr(cfg, "fail_fast_stale_rate", 0.20)
+    setattr(cfg, "fail_fast_min_bars", 50)
+
     data = DataEngine(cfg)
     engine = TradingEngine(cfg=cfg, data=data)
+
+    # allow DataEngine to consult strategy-level alignment policy without imports
+    setattr(cfg, "_strategy_ref", engine.strategy)
 
     # ---- Trace wrappers ----
     original_stream = engine.data.stream
@@ -54,7 +73,14 @@ def main() -> int:
     def traced_stream():
         for snap in original_stream():
             assert isinstance(snap, MarketSnapshot)
-            print(f"[SNAP] {snap.ts} {snap.symbol} spot={snap.spot:.2f} bars={len(snap.bars)} chain={len(snap.option_chain)}")
+            mode = getattr(snap, "option_align_mode", None)
+            lag = getattr(snap, "option_lag_sec", None)
+            conf = getattr(snap, "option_iv_conf", None)
+            print(
+                f"[SNAP] {snap.ts} {snap.symbol} spot={snap.spot:.2f} "
+                f"bars={len(snap.bars)} chain={len(snap.option_chain)} "
+                f"mode={mode} lag_sec={lag:.1f if lag else 0} iv_conf={conf:.3f if conf else 1.0}"
+            )
             yield snap
 
     engine.data.stream = traced_stream  # type: ignore

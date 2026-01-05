@@ -20,6 +20,7 @@ from strategies.options_strategy import (
     PositionState, regime_wing_width
 )
 from intelligence.regime_filter import classify_regime, MarketRegime
+from core.risk_manager import RiskManager, PortfolioGreeks
 
 
 # ==========================================================
@@ -180,6 +181,9 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             # Regime Indicators (Stage 2)
             self.sma = bt.ind.SMA(self.datas[0], period=200)
             self.adx = bt.ind.ADX(self.datas[0], period=14)
+            
+            # Risk Manager (Stage 3)
+            self.risk_manager = RiskManager(self.s_cfg)
             
             # Initialize Mamba Neural Engine
             if getattr(self.s_cfg, 'use_mamba_model', False):
@@ -388,7 +392,11 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                 ask=r['ask'],
                 mid=r['last_price'],
                 delta=r['delta'],
-                iv=r['implied_volatility']
+                iv=r['implied_volatility'],
+                # Stage 3: Greeks for Risk Management
+                gamma=r.get('gamma', 0.0) or 0.0,
+                vega=r.get('vega', 0.0) or 0.0,
+                theta=r.get('theta', 0.0) or 0.0
             ) for r in chain_records]
 
             # === Market Realism (Stage 1) ===
@@ -686,6 +694,19 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
 
             
             if quantity > 0:
+                # === Stage 3: Risk Management Gate ===
+                current_equity = self.r_cfg.backtest_cash + self.pnl
+                risk_approved, risk_reason = self.risk_manager.check_new_trade(
+                    legs=condor,
+                    quantity=quantity,
+                    current_equity=current_equity
+                )
+                
+                if not risk_approved:
+                    if self.verbose:
+                        print(f"  [Risk] Trade rejected: {risk_reason}")
+                    return
+                
                 # === Apply Market Realism (Stage 1) ===
                 slippage_rate = getattr(self.r_cfg, 'slippage_per_contract', 0.02)
                 commission_rate = getattr(self.r_cfg, 'commission_per_contract', 0.65)
