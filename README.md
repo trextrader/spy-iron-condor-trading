@@ -142,7 +142,7 @@ The raw output scalar $y_{raw} \in [-1, 1]$ (via $\tanh$) is converted to probab
 | $y_{raw}$ Range | Market State | Probability Distribution |
 |-----------------|--------------|-------------------------|
 | $y > 0.2$ | Bullish | $P_{bull} = 0.6 + 0.2y$, $P_{neutral} = 0.3$, $P_{bear} = 0.1$ |
-| $y < -0.2$ | Bearish | $P_{bear} = 0.6 + 0.2|y|$, $P_{neutral} = 0.3$, $P_{bull} = 0.1$ |
+| $y < -0.2$ | Bearish | $P_{bear} = 0.6 + 0.2\|y\|$, $P_{neutral} = 0.3$, $P_{bull} = 0.1$ |
 | $-0.2 \le y \le 0.2$ | Neutral | $P_{neutral} = 0.8$, $P_{bull} = 0.1$, $P_{bear} = 0.1$ |
 
 #### Confidence Calculation
