@@ -3,6 +3,8 @@ run_engine_trace_one_day.py
 
 Runs TradingEngine using the real pipeline with mock data providers.
 Prints a trace log for each snapshot and each stage of the pipeline.
+
+Supports 1/5/15 minute timeframes via spot_bars_csv_map.
 """
 
 from __future__ import annotations
@@ -17,64 +19,75 @@ def main() -> int:
     # Create config
     cfg = RunConfig()
 
-    # --- REQUIRED: set these paths to your real files ---
+    # Pick one timeframe for the trace run: 1, 5, or 15
+    tf = 5
+
     # Attach extra attributes for mock providers
     setattr(cfg, "symbol", "SPY")
-    setattr(cfg, "trace_day_utc", "2025-07-03")  # Date that exists in BOTH datasets
-    setattr(cfg, "bars_window", 200)             # Rolling bars window (200x30m ~ 4 days)
-    setattr(cfg, "spot_bars_csv", "reports/SPY/SPY_5.csv")  # Your 5m bars (or SPY_30.csv for 30m)
-    setattr(cfg, "options_chain_csv", "data/synthetic_options/spy_options_marks.csv")  # Your synthetic chain
-    setattr(cfg, "iv_rank_lookback_bars", 78 * 20)
+    setattr(cfg, "bar_interval_minutes", tf)
+    
+    # Provide the file mapping for 1/5/15
+    setattr(cfg, "spot_bars_csv_map", {
+        1: "reports/SPY/SPY_1.csv",
+        5: "reports/SPY/SPY_5.csv",
+        15: "reports/SPY/SPY_15.csv",
+    })
+
+    # Point to your options marks file
+    setattr(cfg, "options_chain_csv", "data/synthetic_options/spy_options_marks.csv")
+
+    # Optional: constrain to a specific UTC day (must exist in BOTH spot and options)
+    # If you omit this, it will run all timestamps available in the spot file.
+    setattr(cfg, "trace_day_utc", "2025-07-03")
+
+    # Rolling window length delivered to indicators/strategy
+    setattr(cfg, "bars_window", 600)
 
     data = DataEngine(cfg)
     engine = TradingEngine(cfg=cfg, data=data)
 
-    # Wrap run loop with trace prints
+    # ---- Trace wrappers ----
     original_stream = engine.data.stream
 
     def traced_stream():
         for snap in original_stream():
             assert isinstance(snap, MarketSnapshot)
-            print(f"[TRACE SNAP] {snap.ts} {snap.symbol} spot={snap.spot:.2f} bars={len(snap.bars)} chain={len(snap.option_chain)}")
+            print(f"[SNAP] {snap.ts} {snap.symbol} spot={snap.spot:.2f} bars={len(snap.bars)} chain={len(snap.option_chain)}")
             yield snap
 
     engine.data.stream = traced_stream  # type: ignore
 
-    # Wrap strategy evaluate
     orig_eval = engine.strategy.evaluate
     def traced_eval(snapshot):
-        decision = orig_eval(snapshot)
-        print(f"[TRACE DEC] should_trade={decision.should_trade} bias={decision.bias} rationale_keys={list(decision.rationale.keys())}")
-        return decision
+        d = orig_eval(snapshot)
+        print(f"[DEC ] trade={d.should_trade} bias={d.bias} rationale={list(d.rationale.keys())}")
+        return d
     engine.strategy.evaluate = traced_eval  # type: ignore
 
-    # Wrap sizing
     orig_size = engine.sizer.size
     def traced_size(decision, snapshot):
-        sized = orig_size(decision, snapshot)
-        print(f"[TRACE SIZE] contracts={sized.contracts} conf={sized.confidence:.3f}")
-        return sized
+        s = orig_size(decision, snapshot)
+        print(f"[SIZE] qty={s.contracts} conf={s.confidence:.3f}")
+        return s
     engine.sizer.size = traced_size  # type: ignore
 
-    # Wrap risk approve
     orig_approve = engine.risk.approve
     def traced_approve(sized, snapshot):
-        ap = orig_approve(sized, snapshot)
-        print(f"[TRACE RISK] approved={ap.approved} reason={ap.reason}")
-        return ap
+        a = orig_approve(sized, snapshot)
+        print(f"[RISK] ok={a.approved} reason={a.reason}")
+        return a
     engine.risk.approve = traced_approve  # type: ignore
 
-    # Wrap router execute
     orig_exec = engine.router.execute
     def traced_exec(plan, snapshot):
         if plan:
-            print(f"[TRACE EXEC] orders={len(plan.orders)} meta={plan.metadata}")
+            print(f"[EXEC] orders={len(plan.orders)} meta={plan.metadata}")
         return orig_exec(plan, snapshot)
     engine.router.execute = traced_exec  # type: ignore
 
-    print(f"[TRACE] Starting engine run...")
+    print(f"[TRACE] Starting engine run (tf={tf}m)...")
     engine.run()
-    print("[TRACE] Engine run completed.")
+    print("[TRACE] Completed.")
     return 0
 
 
