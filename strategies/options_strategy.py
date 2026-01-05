@@ -215,11 +215,23 @@ def build_condor(chain: List[OptionQuote], cfg, today: dt.date,
     if not long_call or not long_put:
         return None
     
+    # Calculate net credit and max loss
+    # Credit = (short_call.mid + short_put.mid) - (long_call.mid + long_put.mid)
+    net_credit = (short_call.mid + short_put.mid) - (long_call.mid + long_put.mid)
+    
+    # Max loss for iron condor = wing width - net credit
+    call_width = abs(long_call.strike - short_call.strike)
+    put_width = abs(short_put.strike - long_put.strike)
+    wing_width = max(call_width, put_width)
+    max_loss = (wing_width * 100) - (net_credit * 100)  # Per contract
+    
     return IronCondorLegs(
         short_call=short_call,
         long_call=long_call,
         short_put=short_put,
-        long_put=long_put
+        long_put=long_put,
+        net_credit=net_credit,
+        max_loss=max_loss
     )
 
 # === Entry Filters ===
