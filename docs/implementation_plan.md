@@ -162,38 +162,20 @@ def calculate_divergence(spy_close: float, es_price: float) -> float:
 
 ## 5.1 Fuzzy Position Sizing Pipeline
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                   FUZZY SIZING PIPELINE                     │
-├─────────────────────────────────────────────────────────────┤
-│  INPUTS (Membership Functions)                              │
-│  ┌─────────┬─────────┬─────────┬─────────┬─────────┐       │
-│  │  RSI    │  ADX    │  SMA    │ BBands  │  MTF    │       │
-│  │ (0-1)   │ (0-1)   │  Dist   │Position │Consensus│       │
-│  └────┬────┴────┬────┴────┬────┴────┬────┴────┬────┘       │
-│       │         │         │         │         │             │
-│       └─────────┴─────────┴─────────┴─────────┘             │
-│                         │                                   │
-│                    Weighted Sum                             │
-│                         │                                   │
-│                         ▼                                   │
-│              ┌──────────────────┐                          │
-│              │   Confidence     │                          │
-│              │   Score (Ft)     │                          │
-│              └────────┬─────────┘                          │
-│                       │                                     │
-│                       ▼                                     │
-│  ┌────────────────────────────────────────────┐            │
-│  │  Scaling Factor: g = Ft × (1 - σ*)         │            │
-│  └────────────────────┬───────────────────────┘            │
-│                       │                                     │
-│                       ▼                                     │
-│              ┌──────────────────┐                          │
-│              │  Final Size      │                          │
-│              │  Q = Q₀ × g      │                          │
-│              └──────────────────┘                          │
-└─────────────────────────────────────────────────────────────┘
-```
+![Fuzzy Sizing Pipeline](architecture/fuzzy_sizing_pipeline.png)
+
+**9-Factor Dynamic Position Sizing**: The fuzzy sizing pipeline combines RSI, ADX, SMA Distance, Bollinger Bands, MTF Consensus, VIX Regime, Volume, Stochastic, and IV Rank into a confidence score (Ft), then applies volatility dampening to produce the final scaling factor:
+
+$$g = F_t \times (1 - \sigma^*)$$
+$$Q_{final} = Q_0 \times g$$
+
+Where:
+- **Ft** = Fuzzy confidence score (0-1) from weighted aggregation
+- **σ*** = Volatility percentile (risk dampening factor)
+- **Q₀** = Base position size (max contracts)
+- **Q** = Final position size
+
+**Example**: With Ft=0.65, σ*=0.30, and Q₀=5 lots → **Q=2 lots** (45.5% sizing)
 
 ## 5.2 Membership Function Weights (Default)
 | Factor | Weight | Type |
