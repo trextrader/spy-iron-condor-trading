@@ -1,0 +1,88 @@
+digraph LagAwareAlignment {
+    rankdir=LR;
+    bgcolor="#1e1e1e";
+    fontname="Helvetica";
+    fontcolor="#e0e0e0";
+    node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
+    edge [fontname="Helvetica", fontcolor="#b0b0b0", color="#606060"];
+
+    label=<<b>Lag-Aware Timestamp Alignment Pipeline</b><br/>Eliminates Look-Ahead Bias with IV Confidence Decay>;
+    labelloc="t";
+    fontsize=18;
+
+    // Input
+    spot_ts [label="Spot Timestamp\nt_spot", shape=ellipse, fillcolor="#4a90e2"];
+    
+    // Chain Lookup
+    lookup [label=<<b>get_chain_with_meta()</b><br/>Query options data>, shape=box, fillcolor="#5dade2"];
+    
+    // Decision Diamond
+    exact_check [label="Exact match?\n(t_opt == t_spot)", shape=diamond, fillcolor="#f39c12"];
+    prior_check [label="Prior snapshot\nexists?", shape=diamond, fillcolor="#f39c12"];
+    
+    // Lag Calculation
+    calc_lag [label=<<b>Calculate Lag</b><br/>lag_sec =<br/>t_spot - t_opt>, shape=box, fillcolor="#9b59b6"];
+    
+    // IV Decay
+    calc_iv_conf [label=<<b>IV Confidence Decay</b><br/>iv_conf =<br/>0.5^(lag_sec / half_life)<br/><i>default half_life = 300s</i>>, shape=box, fillcolor="#9b59b6"];
+    
+    // Policy Check
+    policy_check [label="Policy?\n(config/strategy)", shape=diamond, fillcolor="#e67e22"];
+    
+    // Policy Branches
+    hard_cutoff [label=<<b>hard_cutoff</b><br/>lag_sec > max?<br/>→ stale (empty)<br/>else → prior (iv_conf=1.0)>, shape=box, fillcolor="#c0392b"];
+    
+    decay_only [label=<<b>decay_only</b><br/>→ prior<br/>(iv_conf decayed)<br/><i>no cutoff</i>>, shape=box, fillcolor="#16a085"];
+    
+    decay_then_cutoff [label=<<b>decay_then_cutoff</b><br/>lag_sec > max?<br/>→ stale (empty)<br/>else → prior (iv_conf)>, shape=box, fillcolor="#27ae60"];
+    
+    // Outputs
+    exact_output [label=<<b>ChainAlignment</b><br/>mode: exact<br/>lag_sec: 0.0<br/>iv_conf: 1.0>, shape=note, fillcolor="#1abc9c"];
+    
+    prior_output [label=<<b>ChainAlignment</b><br/>mode: prior<br/>lag_sec: calculated<br/>iv_conf: decayed>, shape=note, fillcolor="#3498db"];
+    
+    stale_output [label=<<b>ChainAlignment</b><br/>mode: stale<br/>chain: EMPTY<br/>iv_conf: 0.0>, shape=note, fillcolor="#e74c3c"];
+    
+    none_output [label=<<b>ChainAlignment</b><br/>mode: none<br/>chain: EMPTY<br/>lag_sec: NaN>, shape=note, fillcolor="#95a5a6"];
+    
+    // VRP Weighting
+    vrp_edge [label=<<b>lag_weighted_edge()</b><br/><i>In Strategy:</i><br/>VRP_adj = VRP × iv_conf<br/><i>or</i><br/>VRP_adj = VRP - (1-iv_conf)>, shape=box, fillcolor="#d35400"];
+    
+    // Diagnostics
+    diagnostics [label=<<b>Diagnostics</b><br/>Track:<br/>• exact_matches<br/>• prior_count<br/>• stale_count<br/>• lag distribution<br/>• iv_conf stats>, shape=folder, fillcolor="#34495e"];
+
+    // Flow
+    spot_ts -> lookup;
+    lookup -> exact_check;
+    
+    exact_check -> exact_output [label="YES", fontcolor="#1abc9c"];
+    exact_check -> prior_check [label="NO", fontcolor="#e74c3c"];
+    
+    prior_check -> none_output [label="NO", fontcolor="#95a5a6"];
+    prior_check -> calc_lag [label="YES", fontcolor="#3498db"];
+    
+    calc_lag -> calc_iv_conf;
+    calc_iv_conf -> policy_check;
+    
+    policy_check -> hard_cutoff [label="hard_cutoff"];
+    policy_check -> decay_only [label="decay_only"];
+    policy_check -> decay_then_cutoff [label="decay_then_cutoff\n(default)"];
+    
+    hard_cutoff -> stale_output [label="lag > max", fontcolor="#e74c3c"];
+    hard_cutoff -> prior_output [label="lag ≤ max", fontcolor="#3498db", xlabel="iv_conf=1.0"];
+    
+    decay_only -> prior_output [fontcolor="#16a085"];
+    
+    decay_then_cutoff -> stale_output [label="lag > max", fontcolor="#e74c3c"];
+    decay_then_cutoff -> prior_output [label="lag ≤ max", fontcolor="#3498db", xlabel="iv_conf decayed"];
+    
+    // VRP integration
+    prior_output -> vrp_edge [style=dashed, label="if trading", fontcolor="#d35400"];
+    exact_output -> vrp_edge [style=dashed, fontcolor="#d35400"];
+    
+    // Diagnostics tracking
+    exact_output -> diagnostics [style=dotted, fontcolor="#7f8c8d"];
+    prior_output -> diagnostics [style=dotted, fontcolor="#7f8c8d"];
+    stale_output -> diagnostics [style=dotted, fontcolor="#7f8c8d"];
+    none_output -> diagnostics [style=dotted, fontcolor="#7f8c8d"];
+}

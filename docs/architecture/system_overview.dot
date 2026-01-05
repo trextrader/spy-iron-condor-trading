@@ -1,0 +1,124 @@
+digraph QuantorMTFuzzArchitecture {
+    rankdir=TB;
+    bgcolor="#1e1e1e";
+    fontname="Helvetica";
+    fontcolor="#e0e0e0";
+    node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
+    edge [fontname="Helvetica", fontcolor="#b0b0b0", color="#606060"];
+
+    // Title
+    label=<<b>Quantor-MTFuzz Trading System Architecture</b><br/>Lag-Aware Multi-Timeframe Options Trading Platform>;
+    labelloc="t";
+    fontsize=20;
+
+    // Data Ingestion Layer
+    subgraph cluster_data {
+        label=<<b>Data Ingestion Layer</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+        
+        spot_csv [label="Spot Bars CSV\n(1m/5m/15m)", shape=folder, fillcolor="#4a90e2"];
+        options_csv [label="Options Chain CSV\n(Marks + Greeks)", shape=folder, fillcolor="#4a90e2"];
+        aux_feeds [label="Aux Feeds\n(VIX, ES, Gaps)", shape=folder, fillcolor="#4a90e2"];
+        
+        spot_provider [label="SpotBarsProvider\n• Auto-detect OHLCV\n• Synthesize from close\n• Multi-timeframe", shape=box, fillcolor="#5dade2"];
+        options_provider [label="OptionChainProvider\n• ChainAlignment\n• IV decay (half-life)\n• Stale detection", shape=box, fillcolor="#5dade2"];
+        aux_provider [label="AuxFeedsProvider\n• Gap calculation\n• Seed from bars", shape=box, fillcolor="#5dade2"];
+    }
+
+    // Data Engine
+    data_engine [label=<<b>DataEngine</b><br/>• Auto-overlap day selection<br/>• Lag-aware alignment<br/>• Fail-fast mode<br/>• Diagnostics tracking>, shape=component, fillcolor="#e74c3c", fontsize=12];
+
+    // Market Snapshot
+    market_snapshot [label=<<b>MarketSnapshot</b><br/>ts, symbol, spot<br/>bars (OHLCV window)<br/>option_chain<br/>vix, es_price<br/><i>+ alignment metadata:</i><br/>option_used_ts<br/>option_lag_sec<br/>option_iv_conf<br/>option_align_mode>, shape=note, fillcolor="#f39c12"];
+
+    // Intelligence Layer
+    subgraph cluster_intelligence {
+        label=<<b>Intelligence Layer</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+        
+        fuzzifier [label="Fuzzifier\n• Extract ADX/RSI\n• IV Rank\n• Membership degrees", shape=box, fillcolor="#9b59b6"];
+        regime_filter [label="Regime Filter\n• Liquidity gate\n• Trend detection\n• Volatility regime", shape=box, fillcolor="#9b59b6"];
+        fuzzy_engine [label="Fuzzy Engine\n• MTF consensus\n• Rule evaluation\n• Defuzzification", shape=box, fillcolor="#9b59b6"];
+    }
+
+    // Analytics Layer
+    subgraph cluster_analytics {
+        label=<<b>Analytics Layer</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+        
+        realized_vol [label="Realized Vol\n• VRP gate", shape=box, fillcolor="#1abc9c"];
+        divergence [label="Divergence\n• SPY-ES Z-score", shape=box, fillcolor="#1abc9c"];
+        skew [label="Skew\n• IV crash risk", shape=box, fillcolor="#1abc9c"];
+        gaps [label="Gap Analysis\n• Mean reversion", shape=box, fillcolor="#1abc9c"];
+        carry [label="Carry Model\n• Fair value", shape=box, fillcolor="#1abc9c"];
+    }
+
+    // Trading Engine
+    trading_engine [label=<<b>TradingEngine</b><br/>Orchestrates pipeline>, shape=component, fillcolor="#e74c3c", fontsize=12];
+
+    // Strategy Layer
+    strategy [label=<<b>Strategy</b><br/>• Signal gating<br/>• alignment_policy()<br/>• lag_weighted_edge()<br/><i>IV edge *= iv_conf</i>>, shape=hexagon, fillcolor="#e67e22"];
+
+    // Sizer
+    sizer [label=<<b>Sizer</b><br/>• Risk budget<br/>• Confidence scaling<br/>• Kelly criterion>, shape=hexagon, fillcolor="#e67e22"];
+
+    // Risk Manager
+    risk_manager [label=<<b>RiskManager</b><br/>• Greeks tracking<br/>• Drawdown caps<br/>• Position limits>, shape=hexagon, fillcolor="#c0392b"];
+
+    // Router
+    router [label=<<b>Router</b><br/>• Order execution<br/>• 4-leg standard<br/>• Fill simulation>, shape=hexagon, fillcolor="#16a085"];
+
+    // Outputs
+    subgraph cluster_outputs {
+        label=<<b>Outputs</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+        
+        diagnostics [label="Alignment Diagnostics\n• Exact/prior/stale rates\n• Lag stats (median/p90/max)\n• IV conf distribution", shape=note, fillcolor="#3498db"];
+        trade_log [label="Trade Log\n• Positions\n• P&L\n• Greeks", shape=folder, fillcolor="#95a5a6"];
+        metrics [label="Performance Metrics\n• Sharpe\n• Max DD\n• Win rate", shape=folder, fillcolor="#95a5a6"];
+    }
+
+    // Connections - Data Flow
+    spot_csv -> spot_provider;
+    options_csv -> options_provider;
+    aux_feeds -> aux_provider;
+    
+    spot_provider -> data_engine;
+    options_provider -> data_engine;
+    aux_provider -> data_engine;
+    
+    data_engine -> market_snapshot [label="stream()", fontcolor="#76d7c4"];
+    
+    market_snapshot -> fuzzifier;
+    market_snapshot -> regime_filter;
+    market_snapshot -> realized_vol;
+    market_snapshot -> divergence;
+    market_snapshot -> skew;
+    market_snapshot -> gaps;
+    market_snapshot -> carry;
+    
+    fuzzifier -> fuzzy_engine;
+    regime_filter -> fuzzy_engine;
+    
+    market_snapshot -> trading_engine [label="snapshot", fontcolor="#76d7c4"];
+    fuzzy_engine -> trading_engine [label="signals", fontcolor="#aed6f1"];
+    realized_vol -> trading_engine [label="VRP", fontcolor="#aed6f1"];
+    divergence -> trading_engine [label="z-score", fontcolor="#aed6f1"];
+    skew -> trading_engine [label="skew metric", fontcolor="#aed6f1"];
+    
+    trading_engine -> strategy [label="evaluate()", fontcolor="#f8c471"];
+    strategy -> sizer [label="TradeDecision", fontcolor="#f8c471"];
+    sizer -> risk_manager [label="SizedDecision", fontcolor="#f8c471"];
+    risk_manager -> router [label="Approval", fontcolor="#76d7c4"];
+    router -> trade_log [label="OrderPlan", fontcolor="#76d7c4"];
+    
+    data_engine -> diagnostics [label="alignment stats", style=dashed, fontcolor="#85c1e9"];
+    router -> metrics [label="fills", fontcolor="#76d7c4"];
+
+    // Lag-aware feedback
+    strategy -> data_engine [label="alignment_policy()", style=dashed, color="#e74c3c", fontcolor="#ec7063"];
+}

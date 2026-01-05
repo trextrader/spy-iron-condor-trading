@@ -1,0 +1,137 @@
+digraph DataPipeline {
+    rankdir=TB;
+    bgcolor="#1e1e1e";
+    fontname="Helvetica";
+    fontcolor="#e0e0e0";
+    node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
+    edge [fontname="Helvetica", fontcolor="#b0b0b0", color="#606060"];
+
+    label=<<b>Data Pipeline: CSV → MarketSnapshot → Trading Decision</b>>;
+    labelloc="t";
+    fontsize=18;
+
+    // Stage 1: CSV Files
+    subgraph cluster_csvs {
+        label=<<b>Stage 1: Raw Data</b>>;
+        style=filled;
+        fillcolor="#2c3e50";
+        
+        spy_1 [label="SPY_1.csv\n(1m bars)", shape=folder, fillcolor="#3498db"];
+        spy_5 [label="SPY_5.csv\n(5m bars)", shape=folder, fillcolor="#3498db"];
+        spy_15 [label="SPY_15.csv\n(15m bars)", shape=folder, fillcolor="#3498db"];
+        
+        options_csv [label="spy_options_marks.csv\n(timestamp, strike, expiry\ntype, Greeks, IV, bid/ask)", shape=folder, fillcolor="#9b59b6"];
+    }
+
+    // Stage 2: Providers
+    subgraph cluster_providers {
+        label=<<b>Stage 2: Data Providers</b>>;
+        style=filled;
+        fillcolor="#34495e";
+        
+        file_selector [label=<<b>File Selector</b><br/>cfg.bar_interval_minutes<br/>→ spot_bars_csv_map[tf]>, shape=box, fillcolor="#5dade2"];
+        
+        csv_loader [label=<<b>CSV Loader</b><br/>• Auto-detect columns<br/>• Parse timestamps (UTC)<br/>• Handle close-only format>, shape=box, fillcolor="#5dade2"];
+        
+        window_generator [label=<<b>Window Generator</b><br/>• Rolling bars window<br/>• cfg.bars_window (600)<br/>• Filter by trace_day_utc>, shape=box, fillcolor="#5dade2"];
+        
+        chain_loader [label=<<b>Chain Loader</b><br/>• Parse Greeks<br/>• Normalize types (C/P)<br/>• Calculate mid prices>, shape=box, fillcolor="#a569bd"];
+        
+        chain_aligner [label=<<b>Chain Aligner</b><br/>• Exact match<br/>• Nearest prior<br/>• Lag calculation<br/>• IV decay>, shape=box, fillcolor="#a569bd"];
+    }
+
+    // Stage 3: Overlap Detection
+    overlap_detector [label=<<b>Auto-Overlap Detector</b><br/>if cfg.auto_pick_overlap_day:<br/>  spot_days ∩ option_days<br/>  → most recent<br/>  → cfg.trace_day_utc>, shape=box, fillcolor="#e67e22"];
+
+    // Stage 4: DataEngine
+    data_engine [label=<<b>DataEngine.stream()</b><br/>Unified iterator:<br/>for ts, symbol, bars in spot.stream():<br/>  aligned = options.get_chain_with_meta()<br/>  aux = aux_feeds.get()<br/>  → yield MarketSnapshot>, shape=component, fillcolor="#e74c3c", fontsize=11];
+
+    // Stage 5: MarketSnapshot
+    market_snapshot [label=<<table border="0" cellborder="1" cellspacing="0">
+        <tr><td bgcolor="#f39c12" colspan="2"><b>MarketSnapshot</b></td></tr>
+        <tr><td align="left">ts</td><td align="left">2025-07-03 14:30:00+00:00</td></tr>
+        <tr><td align="left">symbol</td><td align="left">SPY</td></tr>
+        <tr><td align="left">spot</td><td align="left">625.42</td></tr>
+        <tr><td align="left">bars</td><td align="left">DataFrame[600 rows × 5 cols]</td></tr>
+        <tr><td align="left">option_chain</td><td align="left">DataFrame[624 rows × 16 cols]</td></tr>
+        <tr><td bgcolor="#85c1e9" align="left">option_used_ts</td><td align="left">2025-07-03 14:25:00+00:00</td></tr>
+        <tr><td bgcolor="#85c1e9" align="left">option_lag_sec</td><td align="left">300.0</td></tr>
+        <tr><td bgcolor="#85c1e9" align="left">option_iv_conf</td><td align="left">0.707</td></tr>
+        <tr><td bgcolor="#85c1e9" align="left">option_align_mode</td><td align="left">prior</td></tr>
+    </table>>, shape=plaintext];
+
+    // Stage 6: Feature Extraction
+    subgraph cluster_features {
+        label=<<b>Stage 6: Feature Extraction</b>>;
+        style=filled;
+        fillcolor="#2c3e50";
+        
+        indicators [label=<<b>Indicators</b><br/>from bars:<br/>• ADX (trend)<br/>• RSI (momentum)<br/>• IV Rank>, shape=box, fillcolor="#1abc9c"];
+        
+        analytics [label=<<b>Analytics</b><br/>• VRP (σ_impl - σ_real)<br/>• Divergence (SPY-ES)<br/>• Skew (OTM/ATM IV)<br/>• Gaps (overnight)>, shape=box, fillcolor="#1abc9c"];
+        
+        fuzz [label=<<b>Fuzzifier</b><br/>Crisp → Membership<br/>ADX: low/med/high<br/>RSI: over/neut/under<br/>IV_Rank: low/med/high>, shape=box, fillcolor="#16a085"];
+    }
+
+    // Stage 7: Strategy Decision
+    strategy_decision [label=<<table border="0" cellborder="1" cellspacing="0">
+        <tr><td bgcolor="#e67e22" colspan="2"><b>TradeDecision</b></td></tr>
+        <tr><td align="left">should_trade</td><td align="left">True / False</td></tr>
+        <tr><td align="left">bias</td><td align="left">bullish / neutral / bearish</td></tr>
+        <tr><td align="left">confidence</td><td align="left">0.0 - 1.0</td></tr>
+        <tr><td align="left">rationale</td><td align="left">{"vrp_pass": True, ...}</td></tr>
+        <tr><td bgcolor="#aed6f1" align="left">vrp_edge_adj</td><td align="left">VRP × iv_conf</td></tr>
+    </table>>, shape=plaintext];
+
+    // Stage 8: Diagnostics
+    diagnostics [label=<<table border="0" cellborder="1" cellspacing="0">
+        <tr><td bgcolor="#3498db" colspan="2"><b>Alignment Diagnostics</b></td></tr>
+        <tr><td align="left">Total bars</td><td align="left">79</td></tr>
+        <tr><td align="left">Exact matches</td><td align="left">16 (20.3%)</td></tr>
+        <tr><td align="left">Prior fallback</td><td align="left">63 (79.7%)</td></tr>
+        <tr><td align="left">Stale (cutoff)</td><td align="left">0 (0.0%)</td></tr>
+        <tr><td align="left">Median lag</td><td align="left">0.0 sec</td></tr>
+        <tr><td align="left">P90 lag</td><td align="left">240.0 sec</td></tr>
+        <tr><td align="left">Max lag</td><td align="left">300.0 sec</td></tr>
+        <tr><td align="left">Median iv_conf</td><td align="left">1.000</td></tr>
+        <tr><td align="left">Min iv_conf</td><td align="left">0.707</td></tr>
+    </table>>, shape=plaintext];
+
+    // Connections
+    spy_1 -> file_selector [style=dashed];
+    spy_5 -> file_selector [label="tf=5", fontcolor="#3498db"];
+    spy_15 -> file_selector [style=dashed];
+    
+    file_selector -> csv_loader;
+    csv_loader -> window_generator;
+    
+    options_csv -> chain_loader;
+    chain_loader -> chain_aligner;
+    
+    window_generator -> overlap_detector;
+    chain_loader -> overlap_detector;
+    
+    overlap_detector -> data_engine [label="trace_day_utc set", fontcolor="#e67e22"];
+    
+    window_generator -> data_engine [label="(ts, symbol, bars)"];
+    chain_aligner -> data_engine [label="ChainAlignment"];
+    
+    data_engine -> market_snapshot [label="yield", fontcolor="#f39c12"];
+    
+    market_snapshot -> indicators;
+    market_snapshot -> analytics;
+    indicators -> fuzz;
+    analytics -> fuzz;
+    
+    fuzz -> strategy_decision [label="features", fontcolor="#16a085"];
+    market_snapshot -> strategy_decision [label="option_iv_conf", style=dashed, fontcolor="#d35400"];
+    
+    data_engine -> diagnostics [label="emit at end", style=dotted, fontcolor="#85c1e9"];
+    
+    // Annotations
+    note1 [label="Per-symbol lag limits:\nSPY: 600s\nQQQ: 600s\nSPX: 900s", shape=note, fillcolor="#f4d03f"];
+    chain_aligner -> note1 [style=invis];
+    
+    note2 [label="IV Decay Formula:\niv_conf = 0.5^(lag/300)\nHalf-life = 300s", shape=note, fillcolor="#f4d03f"];
+    chain_aligner -> note2 [style=invis];
+}
