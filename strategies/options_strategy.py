@@ -48,6 +48,10 @@ class OptionQuote:
     gamma: float = 0.0
     vega: float = 0.0
     theta: float = 0.0
+    # Added for backtest_engine compatibility
+    symbol: str = ""
+    expiration: Any = None  # datetime.date
+    is_call: bool = True
 
 
 @dataclass
