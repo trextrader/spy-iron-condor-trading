@@ -1,0 +1,89 @@
+digraph FuzzySizingPipeline {
+    rankdir=TB;
+    bgcolor="#1e1e1e";
+    fontname="Helvetica";
+    fontcolor="#e0e0e0";
+    node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
+    edge [fontname="Helvetica", fontcolor="#b0b0b0", color="#606060"];
+
+    label=<<b>Fuzzy Position Sizing Pipeline</b><br/>Dynamic Risk Allocation via Multi-Factor Confidence>;
+    labelloc="t";
+    fontsize=20;
+
+    // Input Layer
+    subgraph cluster_inputs {
+        label=<<b>Input Features (Membership Functions)</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+        
+        rsi [label=<<b>RSI</b><br/>Momentum<br/>(0-1)>, shape=box, fillcolor="#e74c3c", fontsize=11];
+        adx [label=<<b>ADX</b><br/>Trend Strength<br/>(0-1)>, shape=box, fillcolor="#e67e22", fontsize=11];
+        sma_dist [label=<<b>SMA Distance</b><br/>Price Position<br/>(normalized)>, shape=box, fillcolor="#f39c12", fontsize=11];
+        bbands [label=<<b>BBands</b><br/>Volatility Regime<br/>(0-1)>, shape=box, fillcolor="#16a085", fontsize=11];
+        mtf [label=<<b>MTF Consensus</b><br/>Multi-Timeframe<br/>(-1 to +1)>, shape=box, fillcolor="#3498db", fontsize=11];
+        vix [label=<<b>VIX Regime</b><br/>Market Fear<br/>(0-1)>, shape=box, fillcolor="#9b59b6", fontsize=11];
+        volume [label=<<b>Volume</b><br/>Liquidity<br/>(0-1)>, shape=box, fillcolor="#1abc9c", fontsize=11];
+        stoch [label=<<b>Stochastic</b><br/>Oscillator<br/>(0-1)>, shape=box, fillcolor="#2ecc71", fontsize=11];
+        iv_rank [label=<<b>IV Rank</b><br/>Vol Percentile<br/>(0-1)>, shape=box, fillcolor="#34495e", fontsize=11];
+    }
+
+    // Aggregation Layer
+    weighted_sum [label=<<b>Weighted Aggregation</b><br/><i>Σ (w<SUB>i</SUB> × feature<SUB>i</SUB>)</i><br/>w = [0.15, 0.15, 0.10, ...]>, shape=component, fillcolor="#5dade2", fontsize=12];
+
+    // Confidence Score
+    confidence [label=<<b>Confidence Score</b><br/>F<SUB>t</SUB> ∈ [0, 1]<br/><i>Reflects market favorability</i>>, shape=ellipse, fillcolor="#f39c12", fontsize=12];
+
+    // Volatility Adjustment
+    vol_adj [label=<<b>Volatility Dampening</b><br/>σ* = Rolling Vol Percentile<br/><i>Reduces size in high-vol regimes</i>>, shape=box, fillcolor="#c0392b", fontsize=11];
+
+    // Scaling Factor Calculation
+    scaling [label=<<b>Scaling Factor</b><br/>g = F<SUB>t</SUB> × (1 - σ*)<br/><i>Combined confidence + vol adjustment</i>>, shape=component, fillcolor="#27ae60", fontsize=12];
+
+    // Base Quantity
+    base_q [label=<<b>Base Quantity</b><br/>Q₀<br/><i>Max contracts per trade</i>>, shape=folder, fillcolor="#7f8c8d", fontsize=11];
+
+    // Final Size
+    final_size [label=<<b>Final Position Size</b><br/><i>Q = Q₀ × g</i><br/>Contracts to Trade>, shape=doubleoctagon, fillcolor="#16a085", fontsize=13];
+
+    // Example Values
+    example [label=<<table border="0" cellborder="1" cellspacing="0">
+        <tr><td bgcolor="#34495e" colspan="2"><b>Example Calculation</b></td></tr>
+        <tr><td align="left">RSI (neutral)</td><td align="right">0.50</td></tr>
+        <tr><td align="left">ADX (trending)</td><td align="right">0.70</td></tr>
+        <tr><td align="left">MTF Consensus</td><td align="right">0.60</td></tr>
+        <tr><td align="left">IV Rank (high)</td><td align="right">0.80</td></tr>
+        <tr><td bgcolor="#85c1e9" align="left">→ F<SUB>t</SUB></td><td bgcolor="#85c1e9" align="right">0.65</td></tr>
+        <tr><td align="left">σ* (vol pctl)</td><td align="right">0.30</td></tr>
+        <tr><td bgcolor="#aed6f1" align="left">→ g</td><td bgcolor="#aed6f1" align="right">0.455</td></tr>
+        <tr><td align="left">Q₀ (base)</td><td align="right">5 lots</td></tr>
+        <tr><td bgcolor="#76d7c4" align="left"><b>→ Q (final)</b></td><td bgcolor="#76d7c4" align="right"><b>2 lots</b></td></tr>
+    </table>>, shape=plaintext];
+
+    // Flow - Inputs to Weighted Sum
+    rsi -> weighted_sum [label="w₁=0.15", fontsize=9];
+    adx -> weighted_sum [label="w₂=0.15", fontsize=9];
+    sma_dist -> weighted_sum [label="w₃=0.10", fontsize=9];
+    bbands -> weighted_sum [label="w₄=0.10", fontsize=9];
+    mtf -> weighted_sum [label="w₅=0.20", fontsize=9];
+    vix -> weighted_sum [label="w₆=0.10", fontsize=9];
+    volume -> weighted_sum [label="w₇=0.05", fontsize=9];
+    stoch -> weighted_sum [label="w₈=0.10", fontsize=9];
+    iv_rank -> weighted_sum [label="w₉=0.05", fontsize=9];
+
+    // Flow - Aggregation to Confidence
+    weighted_sum -> confidence [label="normalize", fontcolor="#f39c12"];
+
+    // Flow - Volatility Path
+    confidence -> scaling [label="F_t", fontcolor="#27ae60"];
+    vol_adj -> scaling [label="1-σ*", fontcolor="#c0392b"];
+
+    // Flow - Final Calculation
+    base_q -> final_size [label="Q₀", fontcolor="#7f8c8d"];
+    scaling -> final_size [label="×g", fontcolor="#27ae60", penwidth=2];
+
+    // Example annotation
+    final_size -> example [style=dashed, color="#85c1e9", label="example"];
+
+    // Mathematical footnote
+    note [label="Key:\nF_t = Fuzzy confidence (favorability)\nσ* = Volatility percentile (risk dampening)\ng = Final scaling factor\nQ₀ = Base position size", shape=note, fillcolor="#2c3e50", fontcolor="#ecf0f1"];
+}
