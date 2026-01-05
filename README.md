@@ -16,13 +16,20 @@
 - **Alpaca Integration**: Seamless live paper trading via Alpaca-Py SDK
 - **Professional Reporting**: Automated PDF reports with equity curves, strike overlays, P&L distributions
 
-### Phase 1 Analytics (NEW)
+### Phase 1+ Analytics & Data Pipeline (NEW)
 - **Volatility Risk Premium (VRP)**: Realized vs Implied volatility edge detection
 - **SPY-ES Divergence**: Z-score based divergence trading signals
 - **IV Skew Analysis**: Crash-risk detection via put/call skew metrics
 - **Gap Classification**: Overnight gap-fill mean-reversion logic
 - **Cost-of-Carry**: Futures fair value and basis calculations
 - **Real Indicators**: ADX/RSI/IV Rank with Wilder smoothing for 5-minute bars
+- **Lag-Aware Data Pipeline**: Institutional-grade timestamp alignment with IV confidence decay
+  - Auto-overlap day selection (spot ∩ options)
+  - ChainAlignment engine (exact/prior/stale/none modes)
+  - IV confidence decay: `iv_conf = 0.5^(lag_sec / 300)`
+  - Per-symbol lag limits (SPY/QQQ: 600s, SPX: 900s)
+  - Fail-fast mode (abort if stale rate > 20%)
+  - Comprehensive diagnostics (exact match%, lag distribution, IV conf stats)
 
 ---
 
@@ -31,25 +38,30 @@
 ### Module Hierarchy
 ```
 core/
-├── types.py          → DTOs (MarketSnapshot, TradeDecision, etc.)
+├── dto.py            → DTOs (MarketSnapshot, TradeDecision, etc.)
 ├── engine.py         → TradingEngine orchestrator
 ├── backtest_engine.py → Backtrader integration (legacy)
 ├── config.py         → Configuration model
 └── risk_manager.py   → Portfolio risk gate
 
-data_factory/
-├── sync_engine.py    → MTF data synchronization
-└── polygon_client.py → Market data provider
+data_factory/         [NEW - Phase 2]
+├── spot_bars.py      → Multi-timeframe OHLCV provider (1/5/15m)
+├── option_chain.py   → Lag-aware chain alignment with IV decay
+├── aux_feeds.py      → Gap analysis helpers
+├── data_engine.py    → MarketSnapshot streaming + auto-overlap
+├── sync_engine.py    → MTF data synchronization (legacy)
+└── polygon_client.py → Market data provider (legacy)
 
 strategies/
 └── options_strategy.py → Iron Condor signal gating & strike selection
 
 intelligence/
+├── fuzzifier.py      → Feature extraction (ADX/RSI/IV Rank)
 ├── fuzzy_engine.py   → Fuzzy position sizing
 ├── regime_filter.py  → Market regime classification
 └── mamba_engine.py   → Neural forecasting (Mamba 2)
 
-analytics/            [NEW - Phase 1]
+analytics/            [Phase 1]
 ├── realized_vol.py   → Realized volatility calculator
 ├── divergence.py     → SPY-ES Z-score
 ├── skew.py           → IV skew metrics
@@ -60,7 +72,7 @@ analytics/            [NEW - Phase 1]
 risk/
 └── risk_manager.py   → Greeks tracking, drawdown caps
 
-tests/                [NEW - Phase 1]
+tests/                [Phase 1]
 └── test_*.py         → 18 unit tests (pytest)
 ```
 
