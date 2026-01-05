@@ -509,10 +509,10 @@ $$
 
 ## 📚 Documentation
 
-- **[Implementation Plan](brain/implementation_plan.md)**: Complete architectural roadmap
-- **[Task List](brain/task.md)**: Detailed task breakdown
-- **[Phase 1 Walkthrough](brain/phase1_walkthrough.md)**: Phase 1 completion summary
-- **[Architectural Refactoring Plan](brain/architectural_refactoring_plan.md)**: Migration strategy
+- **[Task List](docs/task.md)**: Detailed task breakdown with Phase 2 & 2.5 completion
+- **[Phase 2 & 2.5 Walkthrough](docs/walkthrough.md)**: Implementation summary with architecture diagrams
+- **[Implementation Plan](docs/implementation_plan.md)**: Complete architectural roadmap
+- **[Architectural Refactoring Plan](docs/architectural_refactoring_plan.md)**: Migration strategy
 
 ---
 
