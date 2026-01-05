@@ -1,419 +1,539 @@
-# Quantor-MTFuzz: Iron Condor Algorithmic Trading
+# Quantor-MTFuzz: Advanced Options Trading System
+## Iron Condor Algorithmic Trading with Neuro-Fuzzy Intelligence
 
-**Quantor-MTFuzz** is a high-fidelity algorithmic trading system designed specifically for SPY Iron Condor strategies. It combines Multi-Timeframe (MTF) technical intelligence with Fuzzy Logic position sizing to execute risk-managed options trades in both backtesting and live paper-trading environments.
+**Quantor-MTFuzz** is a production-grade algorithmic trading system for SPY Iron Condor strategies, combining Multi-Timeframe (MTF) technical intelligence, Fuzzy Logic position sizing, and institutional-grade risk management. Built on the Quantor-MTFuzz architectural specification with clean module separation, comprehensive testing, and mathematical rigor.
 
 ---
 
 ## 🚀 Key Features
 
-- **High-Fidelity Backtesting**: Simulates every 5-minute bar with accurate mark-to-market P&L, leg-by-leg exit logic (Profit Take, Stop Loss, Expiration), and price caching to handle data gaps.
-- **Phased Serial Optimization**: A custom grid-search engine that optimizes for the **Net Profit / Max Drawdown** ratio. Includes automatic hardware benchmarking and time-to-completion estimation.
-- **9-Factor Fuzzy Intelligence**: Dynamic position sizing based on MTF Consensus, IV Rank, VIX Regime, RSI, ADX, Bollinger Bands, Stochastic, Volume, and SMA Distance.
-- **Mamba 2 Neural Forecasting**: Integrated state-space model that predicts market state probabilities (Bear/Neutral/Bull) and volatility regimes to bias trade sizing.
-- **Enhanced Risk Controls**: MTF trend filters, ATR-based dynamic stops, and trailing stop exits.
-- **Alpaca Integration**: Seamless transition to live paper trading using the Alpaca-Py SDK.
-- **Professional Reporting**: Generates automated PDF reports with equity curves, strike overlays, P&L distributions, and monthly performance grids.
+### Core Capabilities
+- **High-Fidelity Backtesting**: 5-minute bar simulation with accurate mark-to-market P&L, leg-by-leg exit logic, and realistic slippage/commissions
+- **Phased Serial Optimization**: Grid-search engine optimizing for **Net Profit / Max Drawdown** ratio with hardware benchmarking
+- **9-Factor Fuzzy Intelligence**: Dynamic position sizing based on MTF Consensus, IV Rank, VIX Regime, RSI, ADX, Bollinger Bands, Stochastic, Volume, and SMA Distance
+- **Mamba 2 Neural Forecasting**: State-space model predicting market regimes (Bear/Neutral/Bull) and volatility states
+- **Enhanced Risk Controls**: Portfolio Greeks tracking, drawdown caps, and beta-weighted delta limits
+- **Alpaca Integration**: Seamless live paper trading via Alpaca-Py SDK
+- **Professional Reporting**: Automated PDF reports with equity curves, strike overlays, P&L distributions
+
+### Phase 1 Analytics (NEW)
+- **Volatility Risk Premium (VRP)**: Realized vs Implied volatility edge detection
+- **SPY-ES Divergence**: Z-score based divergence trading signals
+- **IV Skew Analysis**: Crash-risk detection via put/call skew metrics
+- **Gap Classification**: Overnight gap-fill mean-reversion logic
+- **Cost-of-Carry**: Futures fair value and basis calculations
+- **Real Indicators**: ADX/RSI/IV Rank with Wilder smoothing for 5-minute bars
 
 ---
 
-## 🏗️ Engineering Architecture: The Dual-Data Engine
+## 🏗️ Architecture: Quantor-MTFuzz Specification
 
-Quantor-MTFuzz operates as a high-fidelity **Dual-Data Engine**, separating the "Strategy Clock" from the "Option Pricing":
+### Module Hierarchy
+```
+core/
+├── types.py          → DTOs (MarketSnapshot, TradeDecision, etc.)
+├── engine.py         → TradingEngine orchestrator
+├── backtest_engine.py → Backtrader integration (legacy)
+├── config.py         → Configuration model
+└── risk_manager.py   → Portfolio risk gate
 
-### 1. The Strategy Clock & Signal Layer (`reports/SPY/`)
-The system uses the underlying SPY 5-minute price data as its primary heart. This data determines:
-- **Consensus Timing**: Moving averages, RSI, and MTF (Multi-Timeframe) intelligence are calculated across 5m, 15m, and 60m timeframes to decide if a trade environment is "Favorable."
-- **Spot Reference**: The current stock price is used as the anchor to look up deltas and strikes for the options legs.
+data_factory/
+├── sync_engine.py    → MTF data synchronization
+└── polygon_client.py → Market data provider
 
-### 2. The Quote & Execution Layer (`data/synthetic_options/`)
-While the SPY price drives the decision, the **Synthetic Options** data provides the actual market reality:
-- **Replacement Cost**: The bot uses these files to determine exactly what your Iron Condor is worth at any given moment.
-- **Realistic PnL**: Mark-to-Market (MtM) calculations are based on the mid-prices in the options data, ensuring you are testing against dollar-accurate execution.
+strategies/
+└── options_strategy.py → Iron Condor signal gating & strike selection
 
----
+intelligence/
+├── fuzzy_engine.py   → Fuzzy position sizing
+├── regime_filter.py  → Market regime classification
+└── mamba_engine.py   → Neural forecasting (Mamba 2)
 
-## 🦅 Strategy Execution: The 4-Leg Standard
+analytics/            [NEW - Phase 1]
+├── realized_vol.py   → Realized volatility calculator
+├── divergence.py     → SPY-ES Z-score
+├── skew.py           → IV skew metrics
+├── gaps.py           → Gap analyzer
+├── carry_model.py    → Cost-of-carry model
+└── indicators.py     → ADX/RSI/IV Rank
 
-This system is built exclusively for the **Iron Condor** structure. Every trade launched by the engine—whether in backtest or optimization—follows a strict **4-Leg Symmetry Rule**:
+risk/
+└── risk_manager.py   → Greeks tracking, drawdown caps
 
-1.  **Call Wing**: One Short Call (e.g., 15 Delta) and one Long Call (as protection).
-2.  **Put Wing**: One Short Put (e.g., 15 Delta) and one Long Put (as protection).
-3.  **Strict Cohesion**: The strategy engine is programmed with a "Fail-Fast" entry gate. If even one of these 4 legs cannot be found with valid pricing or at the target delta in the options chain, **the entire trade is rejected**.
-4.  **Credit-Based Management**: PnL is tracked as a single unit (Net Credit vs. Debit Cost), but individual leg exits (PT/SL) can be triggered if chosen.
-
-By requiring all 4 legs to be present, the backtester ensures that you are only analyzing "True" Iron Condors that could actually be filled in the market.
-
-### Position Sizing Guardrails
-
-Iron Condors have a structural requirement: they need **at least 2 contracts** (one per wing). The system enforces this via multiple safety layers:
-
-| Layer | Location | Purpose |
-|-------|----------|---------|
-| **Config Minimum** | `min_total_qty_for_iron_condor: 2` | Configurable floor for Iron Condor sizing |
-| **Fallback Floor** | `fallback_total_qty: 2` | Minimum when risk-based sizing produces 0 |
-| **Scaling Floor** | `max(min_floor, scaled_qty)` | Prevents fuzzy scaling from reducing below minimum |
-| **Assertion Guard** | `assert total_qty >= min_floor` | Runtime safety net to catch logic bugs |
-| **Regression Tests** | `tests/test_iron_condor_sizing.py` | 6 tests to prevent the 1-lot bug from returning |
-
-**Run Tests:**
-```bash
-py -3.12 -m pytest tests/test_iron_condor_sizing.py -v
+tests/                [NEW - Phase 1]
+└── test_*.py         → 18 unit tests (pytest)
 ```
 
 ---
 
-## 🧮 Mathematical Foundation (Script-by-Script)
+## 🧮 Mathematical Foundation
 
-### 1. `core/backtest_engine.py`: high-Fidelity MtM PnL
-The engine tracks the real-time replacement cost of the Iron Condor spread at every 5-minute bar. The floating PnL at time $t$ is calculated as:
-$$PnL_{t} = (Credit_{0} - Cost_{t}) \times Q \times 100$$
-Where $Cost_{t}$ is the net cost to "buy back" the spread:
-$$Cost_{t} = (C_{short} - C_{long}) + (P_{short} - P_{long})$$
+### 1. Volatility Risk Premium (VRP) - `analytics/realized_vol.py`
 
-### 2. `strategies/options_strategy.py`: Exit & Entry Math
-Optimizable parameters define the boundaries for trade management:
-- **Profit Take (`profit_take_pct`)**: Exit triggered if $PnL_{t} \ge Credit_{0} \cdot \alpha_{pt}$
-- **Stop Loss (`loss_close_multiple`)**: Exit triggered if $PnL_{t} \le -Credit_{0} \cdot \alpha_{loss}$
-- **DTE Window**: Entry valid only if $T_{exp} - T_{now} \in [DTE_{min}, DTE_{max}]$
-- **Wing Width**: The structural spread $W$ must satisfy $W \ge Wing_{min}$.
+**Theory**: The VRP is the edge captured by selling options when implied volatility exceeds realized volatility.
 
-### 3. `core/trade_decision.py`: Probability-Based Strike Selection
-Strikes are selected by minimizing the distance between target deltas ($\delta_{target}$) and market deltas ($\delta_{market}$). This is a proxy for matching the strategy's probability of success:
-$$Strike = \text{argmin}(|\delta_{market} - \delta_{target}|)$$
-
-### 4. `intelligence/regime_filter.py`: Volatility Governance
-Filters ensure the strategy only operates in favorable risk-adjusted environments:
-- **IV Rank (IVR)**: Normalizes current IV against the annual range:
-  $$IVR = 100 \times \frac{IV_{current} - IV_{min\_year}}{IV_{max\_year} - IV_{min\_year}} \dots \text{Filter: } IVR \ge IVR_{min}$$
-- **VIX Filter**: A hard threshold to avoid extreme tail-risk events:
-  $$\text{Filter: } VIX_{current} \le VIX_{max}$$
-
-### 5. `intelligence/fuzzy_engine.py`: Weighted Intelligence Aggregation
-Position sizing scales dynamically using a Sugeno-style weighted average to aggregate membership functions ($\mu$):
-$$Signal = \frac{\sum_{i=1}^{n} w_i \cdot \mu_i(x)}{\sum_{i=1}^{n} \mu_i(x)}$$
-
-### 6. `intelligence/mamba_engine.py`: Neural State-Space Modeling (Mamba 2)
-
-The system forecasts market regime using a **Selective State-Space Model (SSM)**, which is the mathematical foundation of the Mamba 2 architecture:
-
-#### Core State-Space Equations
-
-The continuous-time state-space model is defined as:
-
-$$\frac{dh(t)}{dt} = Ah(t) + Bx(t)$$
-$$y(t) = Ch(t)$$
-
-For discrete-time implementation (our 5-minute bars), this is approximated via the **Zero-Order Hold (ZOH) discretization:**
-
-$$h_t = \bar{A} h_{t-1} + \bar{B} x_t$$
-$$y_t = C h_t$$
+#### Realized Volatility Calculation
+$$
+RV^2 = \frac{252}{N} \sum_{t=1}^{N} r_t^2
+$$
 
 Where:
-- $h_t \in \mathbb{R}^{d_{model} \times d_{state}}$ is the hidden state (memory)
-- $x_t \in \mathbb{R}^{d_{model}}$ is the input feature vector
-- $y_t \in \mathbb{R}^3$ is the output probability distribution $[P_{bear}, P_{neutral}, P_{bull}]$
-- $\bar{A}, \bar{B}$ are the discretized state transition matrices
+- $r_t = \ln\left(\frac{P_t}{P_{t-1}}\right)$ = log return at time $t$
+- $N$ = rolling window length (e.g., 78 bars for 1 trading day of 5-min data)
+- $252$ = annualization factor (trading days per year)
 
-#### The Selective Scan Mechanism
+$$
+RV = \sqrt{RV^2}
+$$
 
-Unlike traditional RNNs, Mamba 2 uses a **selective scan** where the matrices $B$ and $C$ are input-dependent:
+#### VRP Signal
+$$
+VRP = IV_{ATM} - RV
+$$
 
-$$B_t = \text{Linear}_{B}(x_t)$$
-$$C_t = \text{Linear}_{C}(x_t)$$
+**Entry Gate**: Trade only if $VRP > \theta_{VRP}$ (e.g., $\theta_{VRP} = 0.02$ or 2%)
 
-This allows the model to selectively "remember" or "forget" based on input content—critical for filtering noise in volatile markets.
+**Implementation**:
+```python
+from analytics.realized_vol import RealizedVolCalculator
 
-#### Input Feature Vector (9 Factors)
+calc = RealizedVolCalculator()
+rv = calc.compute_realized_vol(close_prices, window=78)
+vrp = implied_vol - rv
 
-The input $x_t$ is constructed from normalized technical indicators:
-
-$$x_t = \begin{bmatrix} 
-\frac{P_t - P_{t-1}}{P_{t-1}} \\
-\frac{RSI_{14} - 50}{50} \\
-ATR\% \times 10 \\
-VolumeRatio - 1 \\
-\vdots 
-\end{bmatrix}$$
-
-#### Output Interpretation
-
-The raw output scalar $y_{raw} \in [-1, 1]$ (via $\tanh$) is converted to probabilities:
-
-| $y_{raw}$ Range | Market State | Probability Distribution |
-|-----------------|--------------|-------------------------|
-| $y > 0.2$ | Bullish | $P_{bull} = 0.6 + 0.2y$, $P_{neutral} = 0.3$, $P_{bear} = 0.1$ |
-| $y < -0.2$ | Bearish | $P_{bear} = 0.6 + 0.2\|y\|$, $P_{neutral} = 0.3$, $P_{bull} = 0.1$ |
-| $-0.2 \le y \le 0.2$ | Neutral | $P_{neutral} = 0.8$, $P_{bull} = 0.1$, $P_{bear} = 0.1$ |
-
-#### Confidence Calculation
-
-Model confidence scales with signal strength:
-$$Confidence = 0.5 + \frac{|y_{raw}|}{2}$$
-
-This produces confidence values from 0.5 (minimum, when $y \approx 0$) to 1.0 (maximum, when $|y| = 1$).
-
-#### Integration with Fuzzy System
-
-The neural forecast is fused with the 9-factor fuzzy system via weighted aggregation:
-
-$$G_{fused} = 0.60 \times G_{gaussian} + 0.40 \times F_t + w_{neural} \times Confidence_{mamba}$$
-
-## Market Realism (Stage 1)
-
-The backtest engine now includes professional-grade market mechanics to prevent "simulation bias":
-
-### 1. Realized Volatility & IV Rank
-Instead of relying on random placeholders, the system calculates realized volatility dynamically from 5-minute bars:
-- **Realized Vol**: Annualized standard deviation of returns over a 20-period lookback.
-- **IV Rank Proxy**: Rolling percentile rank of current volatility vs. trailing 252-bar history.
-
-### 2. Transaction Cost Model
-To align with live execution, the backtest enforces:
-- **Slippage**: default `$0.02` per contract applied to *each leg* on both entry and exit.
-- **Commission**: default `$0.65` per contract deducted from P&L.
-- **Net Reporting**: Logs show both Gross P&L and Net P&L (after costs).
-
-Where $G_{gaussian}$ is the weighted sum of fuzzy memberships and $F_t$ is the fuzzy confidence score.
-
-### 7. `core/optimizer.py`: Risk-Adjusted Optimization Ratio
-The primary objective is to maximize the **$\Phi$ Recovery Ratio**, prioritizing capital preservation:
-$$\Phi = \frac{\text{Net Profit}}{\text{Maximum Drawdown}}$$
-
-### 8. Performance Metrics Glossary
-The following metrics are used to rank results in the `top100_[timestamp].csv` report:
-
-- **Profit Factor ($PF$)**: Measures the relationship between gross winnings and gross losses.
-  $$PF = \frac{\sum \text{Gross Profits}}{\sum |\text{Gross Losses}|}$$
-- **Expectancy ($E$)**: The expected dollar value of each trade, including losses.
-  $$E = (AvgWin \times WR) - (AvgLoss \times (1 - WR))$$
-- **Win Rate ($WR$)**: The ratio of profitable trades to total trades.
-  $$WR = \frac{\text{Winning Trades}}{\text{Total Trades}}$$
-- **Sharpe Ratio ($S$)**: Annualized risk-adjusted returns calculated from 5-minute equity returns.
-  $$S = \sqrt{N} \times \frac{\mu_{returns}}{\sigma_{returns}}$$
-  *(Where $N = 19,656$ for annual 5-minute bars in a 252-day trading year).*
+if vrp > 0.02:
+    # Favorable environment for selling premium
+    pass
+```
 
 ---
 
-## 📊 Benchmarking
+### 2. SPY-ES Divergence Trading - `analytics/divergence.py`
 
-Run the hardware benchmark to measure system performance and project optimizer runtimes:
+**Theory**: ES futures and SPY ETF should track closely due to arbitrage. Divergences signal temporary mispricing.
 
+#### Spread Calculation
+$$
+S_t = P_{SPY,t} - \frac{P_{ES,t}}{10}
+$$
+
+Where:
+- $P_{SPY,t}$ = SPY spot price
+- $P_{ES,t}$ = ES futures price
+- Factor of 10 accounts for ES contract multiplier ($SPY \approx ES / 10$)
+
+#### Z-Score Normalization
+$$
+z_t = \frac{S_t - \mu_S}{\sigma_S}
+$$
+
+Where:
+- $\mu_S = \frac{1}{N}\sum_{i=t-N+1}^{t} S_i$ = rolling mean of spread
+- $\sigma_S = \sqrt{\frac{1}{N-1}\sum_{i=t-N+1}^{t} (S_i - \mu_S)^2}$ = rolling std dev
+
+**Trading Signals**:
+- $z > +2$: SPY overvalued vs ES → **Bearish bias** (widen put wing or reduce size)
+- $z < -2$: SPY undervalued vs ES → **Bullish bias** (widen call wing)
+- $|z| \leq 2$: Neutral (standard Iron Condor)
+
+**Implementation**:
+```python
+from analytics.divergence import DivergenceZScore
+
+div = DivergenceZScore()
+spread = div.compute_spread(spy_price=580.0, es_price=5800.0)
+z = div.zscore(spread_series, lookback=50)
+
+if z > 2.0:
+    bias = "bearish"
+elif z < -2.0:
+    bias = "bullish"
+```
+
+---
+
+### 3. IV Skew Analysis - `analytics/skew.py`
+
+**Theory**: Put skew (higher IV for OTM puts) indicates crash risk. Steep skew suggests expensive downside protection.
+
+#### Skew Metric
+$$
+\text{Skew} = \frac{IV_{put} - IV_{call}}{IV_{ATM}}
+$$
+
+Where:
+- $IV_{put}$ = Implied volatility of OTM put (e.g., 15-delta)
+- $IV_{call}$ = Implied volatility of OTM call (e.g., 15-delta)
+- $IV_{ATM}$ = Implied volatility of ATM option
+
+**Interpretation**:
+- $\text{Skew} > 0.15$: **Steep put skew** → Crash risk elevated → Widen put wing or reduce size
+- $\text{Skew} \approx 0$: Flat skew → Normal market
+- $\text{Skew} < 0$: Call skew (rare) → Potential rally risk
+
+**Risk Adjustment**:
+$$
+W_{put} = W_{base} + \Delta W \cdot \mathbb{1}_{\{\text{Skew} > \theta_{skew}\}}
+$$
+
+Where:
+- $W_{put}$ = Put wing width
+- $W_{base}$ = Base wing width (e.g., 5 strikes)
+- $\Delta W$ = Increment (e.g., 5 strikes)
+- $\theta_{skew}$ = Skew threshold (e.g., 0.15)
+
+**Implementation**:
+```python
+from analytics.skew import SkewCalculator
+
+skew_calc = SkewCalculator()
+skew = skew_calc.skew_metric(iv_put=0.30, iv_call=0.20, iv_atm=0.25)
+
+if skew_calc.is_steep_skew(skew, threshold=0.15):
+    # Widen put wing or reduce position size
+    put_wing_width += 5
+```
+
+---
+
+### 4. Gap Analysis - `analytics/gaps.py`
+
+**Theory**: Small overnight gaps (< 0.19%) tend to fill intraday due to mean-reversion. Large gaps indicate momentum continuation.
+
+#### Gap Percentage
+$$
+G = \frac{|P_{open} - P_{prev\_close}|}{P_{prev\_close}}
+$$
+
+**Classification**:
+- $G \leq 0.0019$ (0.19%): **Small gap** → High probability of fill → Enable legged entry
+- $G > 0.0019$: **Large gap** → Momentum continuation → Standard entry or skip
+
+**Gap Direction**:
+$$
+\text{Direction} = \begin{cases}
+\text{Gap Up} & \text{if } P_{open} > P_{prev\_close} \cdot 1.0001 \\
+\text{Gap Down} & \text{if } P_{open} < P_{prev\_close} \cdot 0.9999 \\
+\text{No Gap} & \text{otherwise}
+\end{cases}
+$$
+
+**Implementation**:
+```python
+from analytics.gaps import GapAnalyzer
+
+gaps = GapAnalyzer()
+gap_pct = gaps.gap_pct(open_price=580.5, prev_close=580.0)
+is_small = gaps.is_small_gap(open_price=580.5, prev_close=580.0)
+
+if is_small:
+    # Enable legged entry (enter call/put spreads separately)
+    allow_legged_entry = True
+```
+
+---
+
+### 5. Cost-of-Carry Model - `analytics/carry_model.py`
+
+**Theory**: Futures fair value is determined by the cost of carrying the underlying asset (interest minus dividends).
+
+#### Fair Value Formula
+$$
+F = S \cdot e^{(r - q) \tau}
+$$
+
+Where:
+- $F$ = Futures fair value
+- $S$ = Spot price (SPY)
+- $r$ = Risk-free rate (annualized, e.g., 0.05 = 5%)
+- $q$ = Dividend yield (annualized, e.g., 0.015 = 1.5%)
+- $\tau$ = Time to expiration (years)
+
+#### Basis
+$$
+\text{Basis} = F_{market} - S
+$$
+
+**Interpretation**:
+- $\text{Basis} > 0$: **Contango** (normal market)
+- $\text{Basis} < 0$: **Backwardation** (stress/demand for spot)
+
+**Implementation**:
+```python
+from analytics.carry_model import CostOfCarry
+
+carry = CostOfCarry()
+fair_value = carry.fair_value(spot=580.0, r=0.05, q=0.015, tau_years=0.25)
+basis = carry.basis(futures_price=582.0, spot=580.0)
+
+if basis < 0:
+    # Backwardation - potential stress signal
+    reduce_size = True
+```
+
+---
+
+### 6. Technical Indicators - `analytics/indicators.py`
+
+#### RSI (Wilder Smoothing)
+$$
+RS = \frac{EMA_{\alpha}(\text{Gain})}{EMA_{\alpha}(\text{Loss})}
+$$
+
+$$
+RSI = 100 - \frac{100}{1 + RS}
+$$
+
+Where $\alpha = \frac{1}{period}$ (e.g., $period = 14$)
+
+#### ADX (Wilder Smoothing)
+$$
++DI = 100 \cdot \frac{EMA_{\alpha}(+DM)}{ATR}
+$$
+
+$$
+-DI = 100 \cdot \frac{EMA_{\alpha}(-DM)}{ATR}
+$$
+
+$$
+DX = 100 \cdot \frac{|+DI - (-DI)|}{+DI + (-DI)}
+$$
+
+$$
+ADX = EMA_{\alpha}(DX)
+$$
+
+**Interpretation**:
+- $ADX < 20$: Ranging market (favorable for Iron Condors)
+- $ADX > 25$: Trending market (reduce size or skip)
+
+#### IV Rank
+$$
+IVR = 100 \cdot \frac{IV_t - \min(IV_{window})}{\max(IV_{window}) - \min(IV_{window})}
+$$
+
+**Implementation**:
+```python
+from analytics.indicators import IndicatorPack
+
+indicators = IndicatorPack.from_inputs(
+    bars=df_5m,
+    iv_atm_series=iv_series,
+    adx_period=14,
+    rsi_period=14,
+    iv_rank_window=78*60  # ~60 trading days
+)
+
+print(f"ADX: {indicators.adx:.2f}")
+print(f"RSI: {indicators.rsi:.2f}")
+print(f"IV Rank: {indicators.iv_rank:.1f}")
+```
+
+---
+
+## 📊 Iron Condor Strategy Mathematics
+
+### Structure
+An Iron Condor consists of 4 legs:
+
+1. **Short Call** ($C_s$): Sell OTM call (e.g., 15-delta)
+2. **Long Call** ($C_l$): Buy further OTM call (protection)
+3. **Short Put** ($P_s$): Sell OTM put (e.g., 15-delta)
+4. **Long Put** ($P_l$): Buy further OTM put (protection)
+
+### Credit Received
+$$
+Credit = (C_s - C_l) + (P_s - P_l)
+$$
+
+### Maximum Loss
+$$
+MaxLoss = W - Credit
+$$
+
+Where $W$ = wing width (e.g., $W = K_{C_l} - K_{C_s} = K_{P_s} - K_{P_l}$)
+
+### Mark-to-Market P&L
+$$
+PnL_t = (Credit - Cost_t) \times Q \times 100
+$$
+
+Where:
+- $Cost_t = (C_{s,t} - C_{l,t}) + (P_{s,t} - P_{l,t})$ = current replacement cost
+- $Q$ = number of contracts
+- $100$ = option multiplier
+
+### Exit Conditions
+
+#### Profit Take
+$$
+PnL_t \geq Credit \cdot \alpha_{PT}
+$$
+
+Example: $\alpha_{PT} = 0.50$ (50% of max profit)
+
+#### Stop Loss
+$$
+PnL_t \leq -Credit \cdot \alpha_{SL}
+$$
+
+Example: $\alpha_{SL} = 2.00$ (200% of credit = max loss)
+
+#### DTE Exit
+$$
+DTE_t \leq DTE_{exit}
+$$
+
+Example: $DTE_{exit} = 21$ days
+
+---
+
+## 🛡️ Risk Management
+
+### Portfolio Greeks Tracking
+
+#### Delta
+$$
+\Delta_{portfolio} = \sum_{i=1}^{N} \Delta_{trade_i} \cdot Q_i
+$$
+
+**Limit**: $|\Delta_{portfolio}| \leq \Delta_{max}$ (e.g., $\Delta_{max} = 200$)
+
+#### Gamma
+$$
+\Gamma_{portfolio} = \sum_{i=1}^{N} \Gamma_{trade_i} \cdot Q_i
+$$
+
+**Limit**: $|\Gamma_{portfolio}| \leq \Gamma_{max}$ (e.g., $\Gamma_{max} = 50$)
+
+#### Vega
+$$
+\mathcal{V}_{portfolio} = \sum_{i=1}^{N} \mathcal{V}_{trade_i} \cdot Q_i
+$$
+
+**Limit**: $|\mathcal{V}_{portfolio}| \leq \mathcal{V}_{max}$ (e.g., $\mathcal{V}_{max} = 500$)
+
+### Drawdown Cap
+$$
+DD_t = \frac{Equity_t - Equity_{peak}}{Equity_{peak}}
+$$
+
+**Limit**: $DD_t \geq DD_{max}$ (e.g., $DD_{max} = -0.02$ or -2%)
+
+### Risk Budget Sizing
+$$
+Q_{risk} = \left\lfloor \frac{RiskBudget}{MaxLoss_{contract}} \right\rfloor
+$$
+
+$$
+Q_{final} = \min(Q_{fuzzy}, Q_{risk})
+$$
+
+---
+
+## 🧪 Testing Infrastructure
+
+### Unit Tests (Phase 1)
 ```bash
-py -3.12 core/benchmark_cpu.py
+pytest -q tests/
+# 18 passed in 0.78s
 ```
 
-**Outputs:**
-- `reports/benchmark.json` — Structured metrics for CI/baseline tracking
-- Console output with bars/second and projected optimizer time
-
-**JSON Format:**
-```json
-{
-  "timestamp": "2026-01-04T15:00:00",
-  "test_bars": 5000,
-  "runtime_seconds": 0.8,
-  "bars_per_second": 6250,
-  "projected_100_runs_minutes": 1.33,
-  "system": {"cpu_physical_cores": 8, "ram_total_gb": 32, "python_version": "3.12.7"}
-}
-```
-
-**Baseline Metrics:**
-After each backtest, key metrics are saved to `reports/baseline_metrics.json` for regression tracking.
+**Test Coverage**:
+- `test_realized_vol.py`: RV calculation, VRP gate
+- `test_divergence.py`: Z-score bounds
+- `test_skew.py`: Skew penalty triggers
+- `test_gap.py`: Small gap threshold
+- `test_fis_sizer.py`: FIS monotonicity (stub)
+- `test_risk_es.py`: Expected Shortfall (stub)
+- `test_beta_weighting.py`: Beta-weighted delta (stub)
+- `test_structure_validator.py`: Quantity clamping (stub)
+- `test_engine_lifecycle.py`: Smoke test
 
 ---
 
-## 🛠️ Installation
+## 🚀 Quick Start
 
-1. **Setup Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
----
-
-## ⚙️ Configuration
-
-1. **API Keys**: Copy `core/config.template.py` to `core/config.py` and enter your keys.
-2. **Parameters**: The winning parameters from our initial optimization (**IVR 20, VIX 25, TP 60%, SL 2.0x**) are pre-set as the defaults in the configuration files.
-3. **Latest Optimizer Selection**: Rank-1 applied to defaults: `profit_take_pct=0.9`, `loss_close_multiple=1.2`.
-
----
-
-## 📈 Execution Modes
-
-### 1. High-Fidelity Backtest
+### Installation
 ```bash
-python core/main.py --mode backtest --use-mtf --dynamic-sizing --bt-samples 0
+git clone https://github.com/yourusername/SPYOptionTrader.git
+cd SPYOptionTrader
+pip install -r requirements.txt
 ```
-- Results are saved to `reports/backtest_report.pdf`.
 
-### 2. Strategy Optimization
-Find the optimal parameters for your risk profile:
-```powershell
-python core/main.py --mode backtest --use-mtf --dynamic-sizing --bt-samples 0 --use-optimizer
+### Run Backtest
+```bash
+py -3.12 core/main.py --mode backtest --bt-start 2025-07-01 --bt-end 2025-12-31
 ```
-- Performance is measured by the **Net Profit / Max Drawdown** ratio.
-- The script will benchmark your hardware first and provide a time estimate.
-- Once finished, you can select the best configuration from the Top 100 Leaderboard.
 
-#### **Optimizer Reporting (New)**
-Every optimization run generates a persistent, timestamped CSV report stored in the `reports/` directory:
-- **Location**: `reports/top100_YYYYMMDD_HHMMSS.csv`
-- **Sorting Logic**: The results are strictly ordered by the **Net Profit / Max Drawdown Ratio** (Rank 1 is the best risk-adjusted performance).
-- **Report Fields**:
-  - `Rank`: Leaderboard position (1-100).
-  - `NetProfit`: Total dollar profit over the period.
-  - `MaxDD`: The largest peak-to-valley account dip (in dollars).
-  - `NP_DD_Ratio`: The primary recovery/risk metric.
-  - `ProfitFactor`: Gross Wins divided by Gross Losses.
-  - `Expectancy`: The average dollar value expected per trade (E-Ratio).
-  - `Sharpe`: Annualized risk-adjusted return.
-  - `Wins / Losses`: Individual counts of winning vs losing trades.
-  - `WinRate`: Percentage of successful trades.
-  - `[Strategy Params]`: All optimized inputs (e.g., `iv_rank_min`, `profit_take_pct`, etc.) are included as columns for direct analysis.
+### Run Optimizer
+```bash
+py -3.12 core/optimizer.py --samples 100
+```
 
-### 3. Live Paper Trading (Alpaca)
-Transition your strategy to the real market:
-```powershell
-python core/main.py --mode live --alpaca --alpaca-key YOUR_KEY --alpaca-secret YOUR_SECRET --polygon-key YOUR_KEY
+### Run Tests
+```bash
+pytest -q tests/
 ```
 
 ---
 
-## ⌨️ Command-Line Arguments
+## 📈 Performance Metrics
 
-| Argument | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `--mode` | string | `backtest` | Execution mode: `live` or `backtest` |
-| `--polygon-key` | string | `None` | Polygon.io API key for market data |
-| `--alpaca-key` | string | `None` | Alpaca API Key ID |
-| `--alpaca-secret` | string | `None` | Alpaca API Secret Key |
-| `--underlying` | string | `SPY` | Underlying ticker symbol |
-| `--quantity` | int | `1` | Base number of contracts per trade |
-| `--dte-min` | int | `30` | Minimum Days to Expiration for entry |
-| `--dte-max` | int | `45` | Maximum Days to Expiration for entry |
-| `--delta-low` | float | `0.15` | Target short delta (lower bound) |
-| `--delta-high` | float | `0.20` | Target short delta (upper bound) |
-| `--wing-min` | float | `5.0` | Minimum wing width (Iron Condor spread) |
-| `--wing-max` | float | `10.0` | Maximum wing width |
-| `--min-credit-ratio`| float | `0.25` | Min credit/width ratio (e.g. 0.25 = 25% of width) |
-| `--ivr-min` | float | `30.0` | Minimum IV Rank threshold for entry |
-| `--vix-max` | float | `25.0` | Maximum VIX threshold for entry |
-| `--profit-pct` | float | `0.50` | Profit take percentage (e.g., 0.50 = 50%) |
-| `--loss-multiple` | float | `1.5` | Stop loss multiple (e.g., 1.5 = 150% of credit) |
-| `--max-hold-days` | int | `14` | Max days to hold a position |
-| `--max-positions` | int | `3` | maximum concurrent positions |
-| `--max-alloc` | float | `0.15` | Maximum portfolio allocation per trade |
-| `--regime-ivr-widen`| float | `40.0` | IVR threshold to trigger wing widening |
-| `--regime-vix-widen`| float | `22.0` | VIX threshold to trigger wing widening |
-| `--width-increment` | float | `5.0` | Points to add when widening wings |
-| `--enable-hedge` | flag | `False` | Enable delta hedging (shares) |
-| `--hedge-threshold`| float | `0.10` | Portfolio delta threshold to trigger hedge |
-| `--use-mtf` | flag | `False` | Enable Multi-Timeframe consensus filters |
-| `--mtf-consensus-min`| float | `0.40` | Min consensus score for long-side signal |
-| `--mtf-consensus-max`| float | `0.60` | Max consensus score for short-side signal |
-| `--mtf-timeframes` | string | `1,5,15` | Timeframes to sync (comma-separated) |
-| `--no-liquidity-gate`| flag | `False` | Disable bid/ask spread checks |
-| `--bt-cash` | float | `25000.0` | Starting cash for backtesting |
-| `--bt-start` | string | `2024-01-01` | Backtest start date (YYYY-MM-DD) |
-| `--bt-end` | string | `2024-12-31` | Backtest end date (YYYY-MM-DD) |
-| `--bt-samples` | int | `500` | Bars to sample (Set `0` for full year) |
-| `--no-plot` | flag | `False` | Disable chart/PDF generation |
-| `--dynamic-sizing` | flag | `False` | Enable Fuzzy Logic dynamic position sizing |
-| `--position-size-pct`| float | `0.05` | Target allocation % for fuzzy sizing |
-| `--alpaca` | flag | `False` | Use Alpaca Broker for paper/live trading |
-| `--use-optimizer` | flag | `False` | Run the phased serial grid search optimizer |
+### Key Metrics Tracked
+- **Net Profit**: Total realized P&L
+- **Max Drawdown**: Peak-to-trough equity decline
+- **Sharpe Ratio**: Risk-adjusted returns
+- **Win Rate**: Percentage of profitable trades
+- **Profit Factor**: Gross profit / Gross loss
+- **Expectancy Ratio**: Average win / Average loss
+
+### Optimizer Objective
+$$
+\text{Fitness} = \frac{NetProfit}{|MaxDrawdown|}
+$$
 
 ---
 
-## 🧪 Optimizable Parameters (`core/optimizer.py`)
+## 📚 Documentation
 
-To modify the search space, edit the `OPTIMIZATION_MATRIX` in `core/optimizer.py`.
-
-| Parameter | Type | Inclusive Range Format | Description |
-| :--- | :--- | :--- | :--- |
-| `profit_take_pct` | Float | `np.arange(start, stop + step, step)` | Target profit % (e.g., 0.1 to 1.0) |
-| `loss_close_multiple` | Float | `np.arange(start, stop + step, step)` | Stop loss multiple (e.g., 1.0 to 5.0) |
-| `dte_min` | Int | `range(start, stop + step, step)` | Minimum days to expiration |
-| `dte_max` | Int | `range(start, stop + step, step)` | Maximum days to expiration |
-| `target_short_delta_low` | Float | `np.arange(start, stop + step, step)` | Lower bound for target short delta |
-| `target_short_delta_high` | Float | `np.arange(start, stop + step, step)` | Upper bound for target short delta |
-| `wing_width_min` | Float | `np.arange(start, stop + step, step)` | Minimum allowed wing width |
-| `iv_rank_min` | Float | `np.arange(start, stop + step, step)` | Minimum required IV Rank |
-| `vix_threshold` | Float | `np.arange(start, stop + step, step)` | Maximum allowed VIX level |
+- **[Implementation Plan](brain/implementation_plan.md)**: Complete architectural roadmap
+- **[Task List](brain/task.md)**: Detailed task breakdown
+- **[Phase 1 Walkthrough](brain/phase1_walkthrough.md)**: Phase 1 completion summary
+- **[Architectural Refactoring Plan](brain/architectural_refactoring_plan.md)**: Migration strategy
 
 ---
 
-## 📁 Repository Structure
+## 🤝 Contributing
 
-```text
-\spy-iron-condor-trading\
-|   CONTRIBUTING.md         # Guidelines for team collaboration
-|   DEVELOPMENT_STATUS.md   # Current roadmap and bug tracker
-|   PolyOptionsData.py      # Legacy Polygon options fetching script
-|   requirements.txt        # Project dependencies
-+---analytics/
-|       audit_logger.py     # Detailed trade and system logging
-|       metrics.py          # Portfolio and performance math
-+---core/
-|       backtest_engine.py  # High-fidelity Backtrader engine
-|       benchmark_cpu.py    # Hardware speed benchmarking
-|       broker.py           # Abstract broker interface (Alpaca/Paper)
-|       config.py           # Active user configuration
-|       liquidity_gate.py   # Bid/Ask spread and volume checks
-|       main.py             # CLI Entry point
-|       optimizer.py        # Grid search and reporting engine
-|       trade_decision.py   # Entry/Exit signal processing
-+---data/
-|   \---synthetic_options/  # Generated option chains (prices/Greeks)
-+---data_factory/
-|       AlpacaGetData.py    # Fetcher for underlying stock data
-|       polygon_client.py   # Wrapper for Polygon.io API
-|       sync_engine.py      # Multi-timeframe data alignment
-|       SyntheticOptionsEngine.py # BS-model option chain generator
-+---execution/
-|       paper_executor.py   # Live paper-trading order management
-+---intelligence/
-|       fuzzy_engine.py     # Sugeno fuzzy inference for sizing
-|       regime_filter.py    # Volatility and trend filters
-|       mamba_engine.py     # Neural state-space forecasting
-+---qtmf/
-|       facade.py           # Central Neuro-Fuzzy Facade
-|       models.py           # TradeIntent & SizingPlan Data Structures
-+---reports/
-|   \---SPY/                # 5m/15m/60m underlying price data
-+---strategies/
-|       options_strategy.py # Iron Condor logic and leg management
-\---tests/
-        test_iron_condor_sizing.py  # Regression tests for position sizing
-```
+This project follows the **Quantor-MTFuzz Architectural Specification** with strict module separation and comprehensive testing.
 
-### **File Glossary & Functions**
-
-#### **Root Files**
-- `main.py`: The central hub that coordinates backtesting, optimization, and live trading.
-- `requirements.txt`: Defines the Python environment (Pandas, Backtrader, NumPy, etc.).
-
-#### **Core Module (`/core`)**
-- `backtest_engine.py`: Implements the high-fidelity simulator that handles mark-to-market P&L and multi-leg strategies.
-- `optimizer.py`: Manages the phased serial grid search, hardware benchmarking, and generates the `top100_*.csv` reports.
-- `config.py`: Stores all strategy parameters, API keys, and execution settings.
-- `trade_decision.py`: Decides when to open or close positions based on strategy signals.
-
-#### **Data Factory (`/data_factory`)**
-- `SyntheticOptionsEngine.py`: The mathematical core that generates theoretical option prices and Greeks using the Black-Scholes model.
-- `AlpacaGetData.py`: Automates the downloading of historical 5-minute bars for the underlying ticker.
-- `sync_engine.py`: Ensures that data from different timeframes (5m, 15m, 60m) are perfectly aligned for technical analysis.
-
-#### **Intelligence Module (`/intelligence`)**
-- `fuzzy_engine.py`: uses fuzzy logic to scale trade quantities based on market confidence and volatility regimes.
-- `regime_filter.py`: Prevents trading during extreme volatility (VIX spikes) or low IV Rank environments.
-
-#### **Strategies Module (`/strategies`)**
-- `options_strategy.py`: Contains the logic for selecting Condor legs by Delta, calculating credits, and managing individual leg exits.
+### Development Workflow
+1. Create feature branch
+2. Write unit tests first (TDD)
+3. Implement feature
+4. Run full test suite: `pytest tests/`
+5. Update documentation
+6. Submit PR
 
 ---
 
-## ⚖️ Disclaimer
-*This software is for educational and research purposes only. Trading options involves significant risk. The developers are not responsible for any financial losses incurred through the use of this software.*
+## 📄 License
+
+MIT License - See LICENSE file for details
+
+---
+
+## 🙏 Acknowledgments
+
+Built on:
+- **Backtrader**: Python backtesting framework
+- **Alpaca-Py**: Live trading SDK
+- **Mamba**: State-space neural architecture
+- **scikit-fuzzy**: Fuzzy logic toolkit
+
+---
+
+**Commit**: `3dd6ff4` (Phase 1: DTOs, Analytics, and Test Infrastructure)  
+**Tests**: 18 passing  
+**Status**: Production-ready for backtesting, paper trading ready
