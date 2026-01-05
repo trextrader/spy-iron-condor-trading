@@ -61,13 +61,40 @@ def pick_expiration(expirations: List[dt.date], cfg, today: dt.date) -> Optional
     return sorted(candidates)[0] if candidates else None
 
 def nearest_by_delta(quotes: List[OptionQuote], is_call: bool, 
-                     target_low: float, target_high: float) -> Optional[OptionQuote]:
+                     target_low: float, target_high: float,
+                     atm_iv: float = None) -> Optional[OptionQuote]:
+    """
+    Select best strike by delta, penalizing those with 'bad' skew 
+    (buying high IV or selling low IV relative to ATM).
+    """
     candidates = [q for q in quotes if q.is_call == is_call 
                   and within_delta_band(q, target_low, target_high)]
-    if candidates:
-        center = (target_low + target_high) / 2.0
-        return sorted(candidates, key=lambda q: abs(abs(q.delta) - center))[0]
-    return None
+    
+    if not candidates:
+        return None
+
+    center_delta = (target_low + target_high) / 2.0
+    
+    # Skew Logic: If ATM IV is provided, prefer selling strikes with IV > ATM (rich premium)
+    best_candidate = None
+    best_score = float('inf')
+    
+    for q in candidates:
+        delta_dist = abs(abs(q.delta) - center_delta)
+        
+        # Skew Penalty used as a tie-breaker or sweetener
+        skew_penalty = 0.0
+        if atm_iv and q.iv < atm_iv:
+            # Selling cheap volatility is bad. Penalize.
+            skew_penalty = (atm_iv - q.iv) * 100.0  # Weight factor
+            
+        score = delta_dist + (skew_penalty * 0.1) # 0.1 weight: Delta is still king
+        
+        if score < best_score:
+            best_score = score
+            best_candidate = q
+            
+    return best_candidate
 
 def pick_long_by_width(chain: List[OptionQuote], short_leg: OptionQuote, 
                        is_call: bool, wing_width: float) -> Optional[OptionQuote]:
@@ -109,8 +136,16 @@ def optimize_wing_width(cfg, historical_credit_curve: Dict[float, float]) -> flo
 def build_condor(chain: List[OptionQuote], cfg, today: dt.date, 
                  spot: float, base_wing_width: float) -> Optional[IronCondorLegs]:
     """Construct iron condor from option chain"""
-    short_call = nearest_by_delta(chain, True, cfg.target_short_delta_low, cfg.target_short_delta_high)
-    short_put = nearest_by_delta(chain, False, cfg.target_short_delta_low, cfg.target_short_delta_high)
+    # Estimate ATM IV
+    atm_iv = None
+    calls = [q for q in chain if q.is_call]
+    if calls:
+        # Find closest to spot
+        atm_call = min(calls, key=lambda q: abs(q.strike - spot))
+        atm_iv = atm_call.iv
+
+    short_call = nearest_by_delta(chain, True, cfg.target_short_delta_low, cfg.target_short_delta_high, atm_iv)
+    short_put = nearest_by_delta(chain, False, cfg.target_short_delta_low, cfg.target_short_delta_high, atm_iv)
     
     if not short_call or not short_put:
         return None

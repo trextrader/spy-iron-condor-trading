@@ -19,6 +19,7 @@ from strategies.options_strategy import (
     OptionQuote, build_condor, calc_condor_credit, 
     PositionState, regime_wing_width
 )
+from intelligence.regime_filter import classify_regime, MarketRegime
 
 
 # ==========================================================
@@ -162,6 +163,8 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             
             # High-Fidelity Tracking
             self.active_position = None # Handle 1 position at a time for simplicity
+            self.current_unrealized_pnl = 0.0 # Track latest open P&L for reporting
+
             self.bars_since_trade = 100 
             self.price_cache = {} # Persistent cache for leg prices: {symbol: last_price}
             
@@ -173,6 +176,10 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             # Log throttling for spammy filter messages
             self._last_credit_reject_date = None
             self._last_credit_reject_value = None
+            
+            # Regime Indicators (Stage 2)
+            self.sma = bt.ind.SMA(self.datas[0], period=200)
+            self.adx = bt.ind.ADX(self.datas[0], period=14)
             
             # Initialize Mamba Neural Engine
             if getattr(self.s_cfg, 'use_mamba_model', False):
@@ -235,6 +242,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                         )
                         
                         unrealized_pnl = (self.active_position.credit_received - current_cost) * self.active_position.quantity * 100
+                        self.current_unrealized_pnl = unrealized_pnl
                         
                         # Exit Rule: Profit Take
                         target_profit = self.active_position.credit_received * self.s_cfg.profit_take_pct
@@ -531,7 +539,29 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     print(f"  [Filter] Warmup period (bar {len(self.equity_series)}/60), skip entry")
                 return
 
-            width = regime_wing_width(self.s_cfg, ivr, vix)
+            # === Regime Classification (Stage 2) ===
+            # Use Backtrader indicators
+            current_regime = MarketRegime.LOW_VOL_RANGE 
+            
+            is_trending = self.adx[0] > 25.0
+            is_bullish = self.data.close[0] > self.sma[0]
+            
+            if vix > 35.0:
+                current_regime = MarketRegime.CRASH_MODE
+            elif is_trending:
+                current_regime = MarketRegime.BULL_TREND if is_bullish else MarketRegime.BEAR_TREND
+            elif vix > 20.0:
+                current_regime = MarketRegime.HIGH_VOL_RANGE
+            
+            # Dynamic Wing Width based on Regime
+            base_width = self.s_cfg.wing_width_min
+            if current_regime in [MarketRegime.HIGH_VOL_RANGE, MarketRegime.CRASH_MODE]:
+                width = min(self.s_cfg.wing_width_max, base_width + self.s_cfg.wing_increment_high)
+            elif current_regime in [MarketRegime.BULL_TREND, MarketRegime.BEAR_TREND]:
+                width = min(self.s_cfg.wing_width_max, base_width + self.s_cfg.wing_increment_med)
+            else:
+                width = base_width
+
             condor = build_condor(quote_chain, self.s_cfg, date_now, self.data.close[0], width)
             
             if not condor:
@@ -729,7 +759,21 @@ def run_backtest_and_report(s_cfg: StrategyConfig, r_cfg: RunConfig):
         return
 
     # Calculate Metrics from Strategy Object
-    final_equity = r_cfg.backtest_cash + strat.pnl
+    realized_pnl = strat.pnl
+    open_trade_pnl = 0.0
+    open_trades_count = 0
+    
+    # Mark-to-Market Open Position
+    if strat.active_position:
+        open_trades_count = 1
+        # Use the PnL tracked by the strategy itself
+        open_trade_pnl = getattr(strat, 'current_unrealized_pnl', 0.0)
+        
+        # Final Equity = Initial Cash + Realized + Unrealized
+        final_equity = r_cfg.backtest_cash + realized_pnl + open_trade_pnl
+    else:
+        final_equity = r_cfg.backtest_cash + realized_pnl
+
     net_profit = final_equity - r_cfg.backtest_cash
     pct_return = (net_profit / r_cfg.backtest_cash) * 100.0
     
@@ -818,8 +862,8 @@ def run_backtest_and_report(s_cfg: StrategyConfig, r_cfg: RunConfig):
     print(f"Profit Factor:    {'INF' if profit_factor == float('inf') else f'{profit_factor:.2f}'}")
     print(f"Net PnL / DD:     {net_pnl_dd_ratio:.2f}")
     print(f"Time in Trade:    {time_in_trade_str}")
-    print(f"Total Trades:     {len(strat.trade_log)}")
-    print(f"Open Trades:      {open_positions}")
+    print(f"Total Trades:     {len(strat.trade_log) + open_trades_count}")
+    print(f"Open Trades:      {open_trades_count}")
     print(f"Win Rate:         {win_rate:.2f}%")
     print(f"Avg Win:          ${avg_win:,.2f}")
     print(f"Avg Loss:         ${avg_loss:,.2f}")
