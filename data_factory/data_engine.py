@@ -167,16 +167,11 @@ class DataEngine:
                     es_price=aux.get("es_price"),
                     prev_close=aux.get("prev_close"),
                     open_price=aux.get("open_price"),
+                    option_used_ts=used_ts,
+                    option_align_mode=mode,
+                    option_lag_sec=lag_sec,
+                    option_iv_conf=iv_conf,
                 )
-
-                # attach metadata (works even if MarketSnapshot is older)
-                try:
-                    snap.option_used_ts = used_ts
-                    snap.option_align_mode = mode
-                    snap.option_lag_sec = lag_sec
-                    snap.option_iv_conf = iv_conf
-                except Exception:
-                    pass
 
                 if self._diag_enabled:
                     self._diag_rows.append(
