@@ -14,7 +14,7 @@ from typing import Optional
 
 from core.config import RunConfig, StrategyConfig
 from data_factory.data_engine import DataEngine
-from core.types import TradeDecision, SizedDecision, Approval
+from core.dto import TradeDecision, SizedDecision, Approval
 
 
 # Stub strategy that returns no-trade decisions

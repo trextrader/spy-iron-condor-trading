@@ -12,7 +12,7 @@ from __future__ import annotations
 from core.config import RunConfig
 from core.engine import TradingEngine
 from data_factory.data_engine import DataEngine
-from core.types import MarketSnapshot
+from core.dto import MarketSnapshot
 
 
 def main() -> int:
@@ -48,9 +48,9 @@ def main() -> int:
 
     # --- Lag-aware features ---
     setattr(cfg, "lag_policy_default", "decay_then_cutoff")
-    setattr(cfg, "max_option_lag_sec", 600)
+    setattr(cfg, "max_option_lag_sec", 3600)  # 1 hour for sparse options data
     setattr(cfg, "iv_decay_half_life_sec", 300)
-    setattr(cfg, "max_option_lag_sec_by_symbol", {"SPY": 600, "QQQ": 600, "SPX": 900})
+    setattr(cfg, "max_option_lag_sec_by_symbol", {"SPY": 3600, "QQQ": 3600, "SPX": 3600})
 
     # Lag-weighted VRP
     setattr(cfg, "vrp_lag_weighting", True)
@@ -76,10 +76,15 @@ def main() -> int:
             mode = getattr(snap, "option_align_mode", None)
             lag = getattr(snap, "option_lag_sec", None)
             conf = getattr(snap, "option_iv_conf", None)
+            
+            # Handle None/nan for stale modes
+            lag_str = f"{lag:.1f}" if lag is not None and not (isinstance(lag, float) and lag != lag) else "N/A"
+            conf_str = f"{conf:.3f}" if conf is not None and not (isinstance(conf, float) and conf != conf) else "N/A"
+            
             print(
                 f"[SNAP] {snap.ts} {snap.symbol} spot={snap.spot:.2f} "
                 f"bars={len(snap.bars)} chain={len(snap.option_chain)} "
-                f"mode={mode} lag_sec={lag:.1f if lag else 0} iv_conf={conf:.3f if conf else 1.0}"
+                f"mode={mode} lag_sec={lag_str} iv_conf={conf_str}"
             )
             yield snap
 

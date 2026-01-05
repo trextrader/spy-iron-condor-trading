@@ -20,7 +20,7 @@ import pandas as pd
 import numpy as np
 
 from core.config import RunConfig
-from core.types import MarketSnapshot
+from core.dto import MarketSnapshot
 from data_factory.spot_bars import SpotBarsProvider
 from data_factory.option_chain import OptionChainProvider
 from data_factory.aux_feeds import AuxFeedsProvider

@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from core.config import StrategyConfig
-from core.types import MarketSnapshot
+from core.dto import MarketSnapshot
 from analytics.indicators import adx_wilder, rsi_wilder, iv_rank
 
 
