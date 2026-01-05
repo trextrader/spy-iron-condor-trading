@@ -102,7 +102,7 @@ def _bs_vega(S: float, K: float, T: float, r: float, sigma: float) -> float:
     if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
         return 0.0
     d1 = _bs_d1(S, K, T, r, sigma)
-    return S * _norm_pdf(d1) * math.sqrt(T)
+    return S * _norm_pdf(d1) * math.sqrt(T) / 100.0
 
 
 def _bs_theta_per_day(S: float, K: float, T: float, r: float, sigma: float, right: str) -> float:

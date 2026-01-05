@@ -48,16 +48,16 @@ Examples:
     parser.add_argument("--dte-max", type=int, default=45)
 
     # --- Delta ---
-    parser.add_argument("--delta-low", type=float, default=0.15)
-    parser.add_argument("--delta-high", type=float, default=0.20)
+    parser.add_argument("--delta-low", type=float, default=0.10)
+    parser.add_argument("--delta-high", type=float, default=0.25)
 
     # --- Wings ---
     parser.add_argument("--wing-min", type=float, default=5.0)
     parser.add_argument("--wing-max", type=float, default=10.0)
-    parser.add_argument("--min-credit-ratio", type=float, default=0.25)
+    parser.add_argument("--min-credit-ratio", type=float, default=0.15)
 
     # --- Filters ---
-    parser.add_argument("--ivr-min", type=float, default=30.0)
+    parser.add_argument("--ivr-min", type=float, default=0.0)
     parser.add_argument("--vix-max", type=float, default=25.0)
 
     # --- Exits ---

@@ -1,5 +1,5 @@
 ﻿# API Keys and Secrets
-config.py
+#config.py
 .env
 *.key
 *.secret
