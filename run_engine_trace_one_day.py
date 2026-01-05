@@ -38,7 +38,9 @@ def main() -> int:
 
     # Optional: constrain to a specific UTC day (must exist in BOTH spot and options)
     # If you omit this, it will run all timestamps available in the spot file.
-    setattr(cfg, "trace_day_utc", "2025-07-03")
+    # Enable auto-pick to automatically select the most recent overlapping day
+    setattr(cfg, "auto_pick_overlap_day", True)
+    setattr(cfg, "trace_day_utc", None)  # Leave unset so auto-pick runs
 
     # Rolling window length delivered to indicators/strategy
     setattr(cfg, "bars_window", 600)
@@ -88,6 +90,10 @@ def main() -> int:
     print(f"[TRACE] Starting engine run (tf={tf}m)...")
     engine.run()
     print("[TRACE] Completed.")
+    
+    # Print timestamp alignment statistics
+    engine.data.options.print_alignment_stats()
+    
     return 0
 
 
