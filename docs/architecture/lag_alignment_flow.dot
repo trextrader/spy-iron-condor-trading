@@ -18,7 +18,7 @@ digraph LagAwareAlignment {
     
     // Decision Diamond
     exact_check [label="Exact match?\n(t_opt == t_spot)", shape=diamond, fillcolor="#f39c12"];
-    prior_check [label="Prior snapshot\nexists?", shape=diamond, fillcolor="#f39c12"];
+    prior_check [label="Prior snapshot\nexists", shape=diamond, fillcolor="#f39c12"];
     
     // Lag Calculation
     calc_lag [label=<<b>Calculate Lag</b><br/>lag_sec =<br/>t_spot - t_opt>, shape=box, fillcolor="#9b59b6"];
@@ -27,14 +27,14 @@ digraph LagAwareAlignment {
     calc_iv_conf [label=<<b>IV Confidence Decay</b><br/>iv_conf =<br/>0.5^(lag_sec / half_life)<br/><i>default half_life = 300s</i>>, shape=box, fillcolor="#9b59b6"];
     
     // Policy Check
-    policy_check [label="Policy?\n(config/strategy)", shape=diamond, fillcolor="#e67e22"];
+    policy_check [label="Policy\n(config/strategy)", shape=diamond, fillcolor="#e67e22"];
     
     // Policy Branches
-    hard_cutoff [label=<<b>hard_cutoff</b><br/>lag_sec > max?<br/>→ stale (empty)<br/>else → prior (iv_conf=1.0)>, shape=box, fillcolor="#c0392b"];
+    hard_cutoff [label=<<b>hard_cutoff</b><br/>lag_sec &gt; max<br/>stale (empty)<br/>else prior (iv_conf=1.0)>, shape=box, fillcolor="#c0392b"];
     
-    decay_only [label=<<b>decay_only</b><br/>→ prior<br/>(iv_conf decayed)<br/><i>no cutoff</i>>, shape=box, fillcolor="#16a085"];
+    decay_only [label=<<b>decay_only</b><br/>prior<br/>(iv_conf decayed)<br/><i>no cutoff</i>>, shape=box, fillcolor="#16a085"];
     
-    decay_then_cutoff [label=<<b>decay_then_cutoff</b><br/>lag_sec > max?<br/>→ stale (empty)<br/>else → prior (iv_conf)>, shape=box, fillcolor="#27ae60"];
+    decay_then_cutoff [label=<<b>decay_then_cutoff</b><br/>lag_sec &gt; max<br/>stale (empty)<br/>else prior (iv_conf)>, shape=box, fillcolor="#27ae60"];
     
     // Outputs
     exact_output [label=<<b>ChainAlignment</b><br/>mode: exact<br/>lag_sec: 0.0<br/>iv_conf: 1.0>, shape=note, fillcolor="#1abc9c"];
