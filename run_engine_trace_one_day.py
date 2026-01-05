@@ -122,11 +122,9 @@ def main() -> int:
     engine.run()
     print("[TRACE] Completed.")
     
-    # Print timestamp alignment statistics
-    engine.data.options.print_alignment_stats()
-    
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+"""
