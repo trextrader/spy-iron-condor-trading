@@ -96,31 +96,68 @@ class PaperBroker(BrokerAPI):
 
 class AlpacaBroker(BrokerAPI):
     """
-    Live/Paper Broker using Alpaca-Py SDK for execution 
-    and Polygon for market intelligence.
+    Live/Paper Broker using Alpaca-Py SDK for both execution and market data.
+    No longer requires Polygon for options data - uses Alpaca's option chain API.
     """
-    def __init__(self, run_cfg, polygon_client: PolygonClient):
+    def __init__(self, run_cfg, polygon_client: PolygonClient = None):
         from alpaca.trading.client import TradingClient
+        from data_factory.alpaca_data_client import AlpacaDataClient
         
-        self.poly = polygon_client
         self.r_cfg = run_cfg
         # Use paper=True by default for safety
         self.client = TradingClient(run_cfg.alpaca_key, run_cfg.alpaca_secret, paper=True)
         
+        # Use Alpaca for all market data (spot, options, etc.)
+        self.data_client = AlpacaDataClient(run_cfg.alpaca_key, run_cfg.alpaca_secret)
+        
+        # Keep Polygon as optional fallback for VIX
+        self.poly = polygon_client
+        
+        self.positions: Dict[str, PositionState] = {}
+        self.trade_log: List[TradeEvent] = []
+        
     def get_spot(self, symbol: str) -> float:
-        return self.poly.get_spot(symbol)
+        return self.data_client.get_spot(symbol)
 
     def get_iv_rank(self, symbol: str, lookback_days: int = 252) -> float:
-        return self.poly.get_iv_rank(symbol, lookback_days)
+        return self.data_client.get_iv_rank(symbol, lookback_days)
 
     def get_vix(self) -> float:
-        return self.poly.get_vix()
+        # Try Alpaca first, fall back to Polygon if available
+        try:
+            vix = self.data_client.get_vix()
+            if vix and vix > 0:
+                return vix
+        except Exception:
+            pass
+        if self.poly:
+            return self.poly.get_vix()
+        return 18.0  # Default fallback
 
     def get_option_chain(self, symbol: str, expiration: dt.date) -> List[OptionQuote]:
-        return self.poly.get_option_chain(symbol, expiration)
+        # Get Alpaca options and convert to OptionQuote format
+        alpaca_chain = self.data_client.get_option_chain(symbol, expiration)
+        return [
+            OptionQuote(
+                strike=o.strike,
+                bid=o.bid,
+                ask=o.ask,
+                mid=o.mid,
+                iv=o.iv,
+                delta=o.delta,
+                gamma=o.gamma,
+                vega=o.vega,
+                theta=o.theta,
+                symbol=o.symbol,
+                expiration=o.expiration,
+                is_call=o.is_call
+            )
+            for o in alpaca_chain
+        ]
 
     def get_expirations(self, symbol: str) -> List[dt.date]:
-        return self.poly.get_expirations(symbol)
+        return self.data_client.get_expirations(symbol)
+
 
     def place_iron_condor(self, legs: IronCondorLegs, quantity: int, limit_price: float) -> str:
         from alpaca.trading.requests import MarketOrderRequest
@@ -140,7 +177,7 @@ class AlpacaBroker(BrokerAPI):
                 symbol=symbol,
                 qty=quantity,
                 side=side,
-                time_in_force=TimeInForce.GTC
+                time_in_force=TimeInForce.DAY  # Options require DAY, not GTC
             )
             order = self.client.submit_order(req)
             results.append(order.id)

@@ -312,18 +312,25 @@ def main():
     # -------------------------
     # LIVE / PAPER
     # -------------------------
-    # For live/paper mode, ensure polygon key is provided either via CLI or RunConfig defaults
-    polygon_key = args.polygon_key or run_config.polygon_key
-    if not polygon_key:
-        raise ValueError("Polygon API key required for live mode. Pass --polygon-key YOUR_KEY")
-
-    poly_client = PolygonClient(api_key=polygon_key)
-    
     if args.alpaca:
+        # Alpaca mode: uses Alpaca for both trading AND market data (no Polygon needed)
         from core.broker import AlpacaBroker
+        
+        # Polygon is optional - only used for VIX fallback
+        poly_client = None
+        polygon_key = args.polygon_key or run_config.polygon_key
+        if polygon_key:
+            poly_client = PolygonClient(api_key=polygon_key)
+        
         broker = AlpacaBroker(run_config, poly_client)
-        print("[Mode] ALPACA LIVE/PAPER TRADING ENABLED")
+        print("[Mode] ALPACA LIVE/PAPER TRADING ENABLED (Alpaca data)")
     else:
+        # Non-Alpaca mode: requires Polygon for market data
+        polygon_key = args.polygon_key or run_config.polygon_key
+        if not polygon_key:
+            raise ValueError("Polygon API key required for non-Alpaca live mode. Pass --polygon-key YOUR_KEY")
+
+        poly_client = PolygonClient(api_key=polygon_key)
         from core.broker import PaperBroker
         broker = PaperBroker(polygon_client=poly_client, starting_equity=args.bt_cash)
         print("[Mode] LOCAL PAPER TRADING ENABLED")

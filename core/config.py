@@ -87,8 +87,8 @@ class StrategyConfig:
     
     # === MTF Enhancements ===
     use_mtf_filter: bool = True
-    mtf_consensus_min: float = 0.40  # Min consensus (-1 to 1) to allow entry
-    mtf_consensus_max: float = 0.60  # Max consensus (avoid strong trends)
+    mtf_consensus_min: float = 0.20  # Min consensus (-1 to 1) to allow entry
+    mtf_consensus_max: float = 0.80  # Max consensus (avoid strong trends)
     use_liquidity_gate: bool = True
     min_volume_threshold: int = 100
     max_volatility_pct: float = 0.02  # Max 2% range in recent bars
@@ -110,7 +110,7 @@ class StrategyConfig:
     use_adx_filter: bool = True
     adx_period: int = 14
     adx_threshold_low: float = 25.0  # Below this = weak trend (good)
-    adx_threshold_high: float = 40.0  # Above this = strong trend (avoid)
+    adx_threshold_high: float = 55.0  # Above this = strong trend (avoid)
 
     # Stochastic Oscillator Settings
     use_stoch_filter: bool = True
@@ -199,7 +199,7 @@ class RunConfig:
     # === Position Sizing ===
     quantity: int = 1
     dynamic_sizing: bool = False
-    position_size_pct: float = 0.02  # 2% of equity per trade
+    position_size_pct: float = 0.05  # 2% of equity per trade
     
     # === MTF Settings ===
     use_mtf: bool = True
