@@ -14,6 +14,7 @@ from data_factory.polygon_client import PolygonClient
 from core.broker import PaperBroker
 from strategies.options_strategy import run_strategy
 from analytics.metrics import plot_metrics
+from core.data_validator import validate_data_coverage
 
 
 # ==========================================================
@@ -274,6 +275,29 @@ def main():
             run_config.alpaca_key = args.alpaca_key
         if args.alpaca_secret:
             run_config.alpaca_secret = args.alpaca_secret
+
+        if args.alpaca_secret:
+            run_config.alpaca_secret = args.alpaca_secret
+
+        # --- DATA SYNC CHECK ---
+        # Construct path (assuming standard synthetic structure)
+        # In a real app, this path comes from DataFactory config
+        opt_path = os.path.join("data", "synthetic_options", f"{strategy_config.underlying.lower()}_options_marks.csv")
+        
+        # Only validate if we are NOT sampling 0 (which usually means quick test)
+        # Actually, even for 0 samples, we want to know if data exists for the period.
+        if os.path.exists(opt_path):
+            print(f"[Data Validator] Checking coverage for {strategy_config.underlying}...")
+            is_valid = validate_data_coverage(opt_path, run_config.backtest_start, run_config.backtest_end, strategy_config.underlying)
+            
+            if not is_valid:
+                print("\n[CRITICAL WARNING] Data file does not cover the requested backtest period.")
+                conf = input("Do you want to proceed anyway? (y/N): ")
+                if conf.lower() != 'y':
+                    print("Aborted.")
+                    sys.exit(1)
+        else:
+             print(f"[Data Validator] Warning: Option file not found at {opt_path}. Backtest may fail.")
 
         # Check for Optimizer Mode
         if args.use_optimizer:

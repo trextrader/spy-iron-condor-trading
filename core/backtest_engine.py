@@ -130,7 +130,20 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
         
         # Load and optimize for fast lookup
         if verbose: print(f"[Data] Loading synthetic options: {options_path}...")
+        
+        # Memory optimization: Load with chunking and filter by date range
         options_df = pd.read_csv(options_path, parse_dates=["date", "expiration"])
+        
+        # Filter to backtest date range BEFORE grouping to save memory
+        if hasattr(r_cfg, 'backtest_start') and r_cfg.backtest_start:
+            start_dt = pd.Timestamp(r_cfg.backtest_start).date()
+            options_df = options_df[options_df['date'].dt.date >= start_dt]
+        if hasattr(r_cfg, 'backtest_end') and r_cfg.backtest_end:
+            end_dt = pd.Timestamp(r_cfg.backtest_end).date()
+            options_df = options_df[options_df['date'].dt.date <= end_dt]
+        
+        if verbose: print(f"[Data] Filtered options to {len(options_df):,} rows for date range.")
+        
         options_by_date = {}
         for date, group in options_df.groupby('date'):
             options_by_date[date.date()] = group.to_dict('records')
