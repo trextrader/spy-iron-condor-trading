@@ -1,7 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "WebFetch(domain:www.reddit.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(mamba create:*)",
+      "WebFetch(domain:eci.intel.com)",
+      "WebFetch(domain:pytorch-extension.intel.com)",
+      "WebFetch(domain:developers.llamaindex.ai)",
+      "WebFetch(domain:pypi.org)",
+      "WebFetch(domain:www.intel.com)",
+      "WebSearch",
+      "Bash(where:*)"
     ]
   }
 }

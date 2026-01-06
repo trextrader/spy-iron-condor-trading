@@ -8,13 +8,14 @@ class StrategyConfig:
     underlying: str = "SPY"
     dte_min: int = 30
     dte_max: int = 45
-    target_short_delta_low: float = 0.15
+    target_short_delta_low:  float = 0.08  
     target_short_delta_high: float = 0.20
     
     # === Wing Width & Pricing ===
-    wing_width_min: float = 50.0  # ~7-8% of SPY at $650-700
+    wing_width_min:  float = 5.00  # ~7-8% of SPY at $650-700
+
     wing_width_max: float = 80.0  # ~12% of SPY at $650-700
-    min_credit_to_width: float = 0.25
+    min_credit_to_width:  float = 0.10  
     
     # === Risk Management ===
     max_account_risk_per_trade: float = 0.02
@@ -22,13 +23,13 @@ class StrategyConfig:
     max_portfolio_alloc: float = 0.15
     
     # === Entry Filters ===
-    iv_rank_min: float = 20.0  
+    iv_rank_min:  float = 0.00  
 
     
     # === Exit Rules ===
-    profit_take_pct:   float = 0.8999999999999999  
-    loss_close_multiple:  float = 1.2  
-    max_hold_days: int = 14
+    profit_take_pct:    float = 0.40  
+    loss_close_multiple:   float = 1.00  
+    max_hold_days:  int = 10  
     
     # === Adjustment Rules ===
     delta_roll_threshold: float = 0.30
@@ -45,7 +46,7 @@ class StrategyConfig:
     
     # === Dynamic Wing Logic ===
     base_wing_width: float = 5.0
-    vix_threshold: float = 25.0  
+    vix_threshold:  float = 25.00  
     wing_increment_med: float = 2.5   # If VIX > 20
     wing_increment_high: float = 5.0  # If VIX > 30
     
@@ -62,8 +63,10 @@ class StrategyConfig:
     # RSI (Relative Strength Index) Settings
     use_rsi_filter: bool = True
     rsi_period: int = 14
-    rsi_neutral_min: float = 40.0  # Lower bound of neutral zone
-    rsi_neutral_max: float = 60.0  # Upper bound of neutral zone
+    rsi_neutral_min:  float = 30  # Lower bound of neutral zone
+
+    rsi_neutral_max:  float = 60  # Upper bound of neutral zone
+
 
     # ADX (Average Directional Index) Settings
     use_adx_filter: bool = True

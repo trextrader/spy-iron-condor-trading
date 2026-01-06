@@ -665,7 +665,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     'equity': self.broker.get_cash(),
                     'max_loss_per_contract': width * 100.0, # Approximate max loss as spread width
                     'risk_fraction': self.s_cfg.max_account_risk_per_trade,
-                    'min_gaussian_confidence': 0.40,  # Lower threshold (we already have 0.3 hard gates on all indicators)
+                    'min_gaussian_confidence': getattr(self.s_cfg, 'min_gaussian_confidence', 0.20),  # Use config
                     'fallback_total_qty': getattr(self.s_cfg, 'min_total_qty_for_iron_condor', 2),  # Configurable minimum
                     'min_total_qty_for_two_wings': getattr(self.s_cfg, 'min_total_qty_for_iron_condor', 2),  # Facade guardrail
                     # Pass config weights to facade
@@ -687,7 +687,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             
             if not plan.approved:
                 if self.verbose:
-                    print(f"  [Filter] QTMF rejected: {plan.reason}")
+                    print(f"  [Filter] QTMF rejected: {plan.reason} (Conf={gaussian_confidence:.2f})")
                 return
                 
             quantity = plan.total_qty

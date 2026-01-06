@@ -132,6 +132,9 @@ def compute_position_size(
     
     # DEBUG LOG
     # print(f"[FuzzyDebug] Eq={equity:.0f} Risk={equity*risk_fraction:.0f} Loss={max_loss_per_contract:.0f} -> q0={q0} | Ft={Ft:.2f} Vol={realized_vol:.1f} Sig={sigma_star:.2f} -> g={g:.2f} => Final q={q}")
+    
+    if int(q0 * g) < 2 and q0 >= 2:
+         print(f"[Debug] Rejected scaled_qty={int(q0*g)} from total_qty={q0}, confidence={Ft:.2f}, scaling={g:.2f}")
 
     return max(q, 0)
 

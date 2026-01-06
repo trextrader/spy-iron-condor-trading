@@ -10,90 +10,88 @@ from core.config import StrategyConfig, RunConfig
 from tabulate import tabulate
 
 # ==========================================================
-# OPTIMIZATION MATRIX (Edit START, STOP, STEP here)
+# OPTIMIZATION SEGMENTS
+# Each segment refines a specific aspect of the strategy.
+# The best params from Segment N become the baseline for Segment N+1.
 # ==========================================================
-# Format: "param_name": np.arange(start, stop + step, step)
-# Use np.arange for floats, range for ints if needed
-# ==========================================================
-OPTIMIZATION_MATRIX = {
-    # Phase A: Exits (Optimized to Ratio: Net Profit / Max DD)
-    "profit_take_pct": np.arange(0.50, 1.4, 0.2),
-    "loss_close_multiple": np.arange(1.0, 5.0, 0.2),
-    
-    # Phase B: Entry & Structure
-    #"dte_min": range(7, 46, 7),                        # e.g. 7, 14, 21...
-    #"dte_max": range(14, 91, 14),
-    #"target_short_delta_low": np.arange(0.05, 0.26, 0.05),
-    #"target_short_delta_high": np.arange(0.10, 0.36, 0.05),
-    #"wing_width_min": np.arange(5.0, 15.1, 5.0),
-    
-    # Phase C: Filters
-    #"iv_rank_min": np.arange(15, 55, 5),
-    #"vix_threshold": np.arange(15, 55, 5),
-    # Phase C2: Advanced Filters (9-Factor)
-    #"rsi_neutral_min": np.arange(30, 45, 5),
-    #"rsi_neutral_max": np.arange(55, 70, 5),
-    #"adx_threshold_low": np.arange(20, 30, 2),
-    #"bb_squeeze_threshold": [0.01, 0.02, 0.03],
-    #"stoch_neutral_min": np.arange(20, 40, 5),
-    #"stoch_neutral_max": np.arange(60, 80, 5),
-    #"volume_min_ratio": np.arange(0.6, 1.2, 0.1),
-    #"sma_max_distance": [0.01, 0.02, 0.03],
-    
-    # Phase D: Fuzzy Logic Weights
-    #"fuzzy_weight_mtf": np.arange(0.1, 0.5, 0.1),
-    #"fuzzy_weight_iv": np.arange(0.1, 0.4, 0.1),
-    #"fuzzy_weight_neural": np.arange(0.0, 0.4, 0.1),
-    #"fuzzy_weight_rsi": np.arange(0.05, 0.20, 0.05),
-    #"fuzzy_weight_adx": np.arange(0.05, 0.20, 0.05),
-    #"fuzzy_weight_bbands": np.arange(0.05, 0.20, 0.05),
-    #"fuzzy_weight_stoch": np.arange(0.05, 0.20, 0.05),
-    #"fuzzy_weight_volume": np.arange(0.0, 0.15, 0.05),
-    #"fuzzy_weight_sma": np.arange(0.0, 0.15, 0.05),
+OPTIMIZATION_SEGMENTS = [
+    {
+        "name": "Phase 1: Exits & Risk (The Pacing)",
+        "description": "Optimizing profit taking and stop-loss behavior.",
+        "params": {
+            "profit_take_pct": np.arange(0.40, 1.01, 0.1),       # 0.4, 0.5, ... 1.0
+            "loss_close_multiple": np.arange(1.0, 3.1, 0.5),     # 1.0, 1.5, 2.0, 2.5, 3.0
+            "max_hold_days": [10, 14, 21, 30]                    # Hold duration cap
+        }
+    },
+    {
+        "name": "Phase 2: Structure & Entries (The Vehicle)",
+        "description": "Optimizing delta targets and spread structure.",
+        "params": {
+            "target_short_delta_low": [0.08, 0.10, 0.12, 0.15],
+            "wing_width_min": [5.0, 10.0],
+            "min_credit_to_width": [0.10, 0.15, 0.20]
+        }
+    },
+    {
+        "name": "Phase 3: Filters (The Safety)",
+        "description": "Refining entry filters to avoid bad trades.",
+        "params": {
+            "iv_rank_min": [0.0, 10.0, 20.0, 30.0],
+            "vix_threshold": [25.0, 30.0, 40.0],
+            "rsi_neutral_min": [30, 40],
+            # Note: rsi_neutral_max usually coupled, but we keep it simple here
+            "rsi_neutral_max": [60, 70]
+        }
+    }
+]
 
-    # Phase E: Advanced Exit Logic (ATR Stops, Trailing Stops, BB Breakouts)
-    #"atr_stop_multiplier_base": np.arange(1.0, 2.1, 0.25),           # 1.0, 1.25, 1.5, 1.75, 2.0
-    #"atr_stop_multiplier_min": np.arange(0.75, 1.26, 0.25),          # 0.75, 1.0, 1.25
-    #"atr_stop_multiplier_max": np.arange(2.0, 3.1, 0.25),            # 2.0, 2.25, 2.5, 2.75, 3.0
-    #"trailing_stop_activation_pct": np.arange(0.3, 0.71, 0.1),       # 30%, 40%, 50%, 60%, 70%
-    #"trailing_stop_trail_pct": np.arange(0.5, 0.81, 0.1),            # 50%, 60%, 70%, 80%
-    #"bbands_exit_touch_threshold": np.arange(0.90, 0.99, 0.02),      # 90%, 92%, 94%, 96%, 98%
-}
-
-# Optimization Phases (Recommended Order):
-# Phase A (Active): Basic exit optimization (profit_take_pct, loss_close_multiple)
-# Phase B (Future): Entry structure (DTE, delta targets, wing width)
-# Phase C (Future): Basic filters (IVR, VIX thresholds)
-# Phase C2 (Future): Advanced indicator filters (RSI, ADX, Stoch, BB, Volume, SMA)
-# Phase D (Future): Fuzzy weight distribution optimization
-# Phase E (Future): Advanced exit logic (ATR stops, trailing stops, BB breakouts)
-
-def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
+def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confirm: bool = True):
     """
     Run phased serial optimization with time estimation.
     """
-    print("\n" + "="*50)
-    print(" HIGH-FIDELITY SERIAL OPTIMIZER")
+    print("\n" + "="*60)
+    print(" HIGH-FIDELITY SEGMENTED OPTIMIZER")
     print(" Target: Maximize Net Profit / Max Drawdown")
-    print("="*50 + "\n")
+    print("="*60 + "\n")
 
     # 1. Automatic Benchmarking & Data Loading
-    print("[1/3] Loading Data & Running Hardware Benchmark...")
+    print("[1/4] Loading Data & Running Hardware Benchmark...")
     
     # Pre-load data once
     from data_factory.sync_engine import MTFSyncEngine
     
     csv_path = os.path.join("reports", base_s_cfg.underlying, f"{base_s_cfg.underlying}_5.csv")
+    if not os.path.exists(csv_path):
+         # Fallback to daily or other available source
+         csv_path = os.path.join("reports", base_s_cfg.underlying, f"{base_s_cfg.underlying}_1.csv")
+
+    if not os.path.exists(csv_path):
+         print(f"[ERROR] No data found at {csv_path}. Cannot optimize.")
+         return
+
     full_df = pd.read_csv(csv_path, parse_dates=["timestamp"])
     full_df['timestamp'] = pd.to_datetime(full_df['timestamp']).dt.tz_localize(None)
     full_df.set_index("timestamp", inplace=True)
     full_df.sort_index(inplace=True)
+
+    # Filter by date range if specified (Crucial for performance)
+    if hasattr(run_cfg, 'backtest_start') and run_cfg.backtest_start:
+        start_dt = pd.Timestamp(run_cfg.backtest_start)
+        full_df = full_df[full_df.index >= start_dt]
+    if hasattr(run_cfg, 'backtest_end') and run_cfg.backtest_end:
+        end_dt = pd.Timestamp(run_cfg.backtest_end) + pd.Timedelta(days=1)
+        full_df = full_df[full_df.index < end_dt]
     
     if run_cfg.backtest_samples and run_cfg.backtest_samples > 0:
         if len(full_df) > run_cfg.backtest_samples:
             full_df = full_df.iloc[-run_cfg.backtest_samples:]
             
-    options_path = os.path.join("data", "synthetic_options", f"{base_s_cfg.underlying}_5min.csv")
+    options_path = os.path.join("data", "synthetic_options", f"{base_s_cfg.underlying.lower()}_options_marks.csv")
+    if not os.path.exists(options_path):
+        print(f"[ERROR] Synthetic options not found at {options_path}.")
+        return
+
     options_df = pd.read_csv(options_path, parse_dates=["date", "expiration"])
     preloaded_options = {}
     for date, group in options_df.groupby('date'):
@@ -111,301 +109,173 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig):
         preloaded_df=full_df,
         preloaded_options=preloaded_options,
         preloaded_sync=preloaded_sync,
-        verbose=True,
+        verbose=False, # Baseline run can be quiet
     )
     bench_end = time.time()
     baseline_duration = bench_end - bench_start
     print(f"  -> Baseline Backtest (Cached): {baseline_duration:.2f} seconds\n")
 
-    if baseline_strat is None:
-        print("[ERROR] Baseline backtest failed; cannot compute baseline metrics.")
-        return
+    # 2. Estimate Total Time
+    total_combos_all_phases = 0
+    for seg in OPTIMIZATION_SEGMENTS:
+        keys = list(seg['params'].keys())
+        values = list(seg['params'].values())
+        total_combos_all_phases += len(list(itertools.product(*values)))
 
-    # Baseline metrics (same fields as optimizer results)
-    base_net_profit = baseline_strat.pnl
-    base_final_balance = run_cfg.backtest_cash + base_net_profit
-    base_max_dd = max(baseline_strat.drawdowns) if baseline_strat.drawdowns else 0.0
-
-    base_wins = [t for t in baseline_strat.trade_log if t["result"] == "win"]
-    base_losses = [t for t in baseline_strat.trade_log if t["result"] == "loss"]
-
-    base_gross_profit = sum(t["amount"] for t in base_wins)
-    base_gross_loss = abs(sum(t["amount"] for t in base_losses))
-    base_profit_factor = (
-        base_gross_profit / base_gross_loss
-        if base_gross_loss > 0
-        else (base_gross_profit if base_gross_profit > 0 else 0.0)
-    )
-
-    base_win_rate = (
-        (len(base_wins) / baseline_strat.trades) * 100
-        if baseline_strat.trades > 0
-        else 0.0
-    )
-    base_loss_rate = 100 - base_win_rate
-    base_avg_win = sum(t["amount"] for t in base_wins) / len(base_wins) if base_wins else 0.0
-    base_avg_loss = abs(sum(t["amount"] for t in base_losses)) / len(base_losses) if base_losses else 0.0
-    base_expectancy = (base_avg_win * base_win_rate / 100) - (
-        base_avg_loss * base_loss_rate / 100
-    )
-    base_np_dd_ratio = base_net_profit / base_max_dd if base_max_dd > 0 else 0.0
-
-    base_sharpe = 0.0
-    if len(baseline_strat.equity_series) > 1:
-        equity_curve = np.array(baseline_strat.equity_series)
-        returns = np.diff(equity_curve) / equity_curve[:-1]
-        if np.std(returns) > 0:
-            base_sharpe = (np.mean(returns) / np.std(returns)) * np.sqrt(252 * 78)
-
-    # Date range + time in trade (match backtest reporting style)
-    if baseline_strat.trade_log:
-        base_start_date = baseline_strat.trade_log[0]["start"].date()
-        base_end_date = baseline_strat.trade_log[-1]["end"].date()
-    else:
-        base_start_date = baseline_strat.data.datetime.date(-len(baseline_strat.data) + 1)
-        base_end_date = baseline_strat.data.datetime.date(0)
-
-    base_days = (base_end_date - base_start_date).days
-    base_total_seconds = sum(
-        (t["end"] - t["start"]).total_seconds() for t in baseline_strat.trade_log
-    )
-    m, s = divmod(base_total_seconds, 60)
-    h, m = divmod(m, 60)
-    d, h = divmod(h, 24)
-    base_time_in_trade = f"{int(d)}d {int(h):02d}:{int(m):02d}:{int(s):02d}"
-
-    print("[Baseline Metrics]")
-    print(
-        tabulate(
-            [
-                [
-                    f"{base_start_date} to {base_end_date}",
-                    base_days,
-                    base_time_in_trade,
-                    f"${base_net_profit:,.2f}",
-                    f"${base_max_dd:,.2f}",
-                    f"{base_np_dd_ratio:.2f}",
-                    f"{base_profit_factor:.2f}",
-                    f"${base_expectancy:.2f}",
-                    f"{base_sharpe:.2f}",
-                    baseline_strat.trades,
-                    f"{len(base_wins)}/{len(base_losses)}",
-                    f"{base_win_rate:.2f}%",
-                    f"${base_final_balance:,.2f}",
-                ]
-            ],
-            headers=[
-                "Period",
-                "Days",
-                "TimeInTrade",
-                "NetProfit",
-                "MaxDD",
-                "NP/DD",
-                "PF",
-                "Expectancy",
-                "Sharpe",
-                "Trades",
-                "W/L",
-                "Win%",
-                "FinalBalance",
-            ],
-            tablefmt="simple",
-        )
-    )
-
-    # Persist baseline metrics (CSV)
-    os.makedirs("reports", exist_ok=True)
-    baseline_ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    baseline_csv = os.path.join("reports", f"baseline_metrics_{baseline_ts}.csv")
-    baseline_row = {
-        "Timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "PeriodStart": str(base_start_date),
-        "PeriodEnd": str(base_end_date),
-        "Days": base_days,
-        "TimeInTrade": base_time_in_trade,
-        "NetProfit": round(base_net_profit, 2),
-        "MaxDD": round(base_max_dd, 2),
-        "NP_DD_Ratio": round(base_np_dd_ratio, 2),
-        "ProfitFactor": round(base_profit_factor, 2),
-        "Expectancy": round(base_expectancy, 2),
-        "Sharpe": round(base_sharpe, 2),
-        "Trades": baseline_strat.trades,
-        "Wins": len(base_wins),
-        "Losses": len(base_losses),
-        "WinRate": round(base_win_rate, 2),
-        "FinalBalance": round(base_final_balance, 2),
-    }
-    pd.DataFrame([baseline_row]).to_csv(baseline_csv, index=False)
-    print(f"[Baseline Saved] {baseline_csv}\n")
-
-    # 2. Build Grid
-    keys = list(OPTIMIZATION_MATRIX.keys())
-    values = list(OPTIMIZATION_MATRIX.values())
-    combinations = list(itertools.product(*values))
-    total_combos = len(combinations)
-    
-    estimated_total_sec = baseline_duration * total_combos
+    estimated_total_sec = baseline_duration * total_combos_all_phases
     estimated_min = estimated_total_sec / 60
     
-    print(f"[2/3] Optimization Plan:")
-    print(f"  -> Parameters: {', '.join(keys)}")
-    print(f"  -> Total Combinations: {total_combos}")
+    print(f"[2/4] Optimization Plan (Segmented):")
+    for i, seg in enumerate(OPTIMIZATION_SEGMENTS):
+        vals = list(seg['params'].values())
+        combos = len(list(itertools.product(*vals)))
+        print(f"  Phase {i+1}: {seg['name']} | {combos} combos")
+    print(f"  -> Total Combinations: {total_combos_all_phases}")
     print(f"  -> Estimated Time: {estimated_min:.1f} minutes")
     print("-" * 30)
     
-    confirm = input("Proceed with optimization? (y/n): ")
-    if confirm.lower() != 'y':
-        print("Aborted.")
-        return
+    if not auto_confirm:
+        confirm = input("Proceed with optimization? (y/n): ")
+        if confirm.lower() != 'y':
+            print("Aborted.")
+            return
+    else:
+        print("Auto-confirming proceed...")
 
-    # 3. Execution
-    print(f"\n[3/3] Executing Grid Search...")
-    results = []
+    # 3. Execution Loop
+    current_best_cfg = copy.deepcopy(base_s_cfg)
+    cumulative_results = []
     
-    for i, combo in enumerate(combinations):
-        s_cfg = copy.deepcopy(base_s_cfg)
-        params_dict = dict(zip(keys, combo))
-        
-        # Apply params
-        for k, v in params_dict.items():
-            setattr(s_cfg, k, v)
-            
-        print(f"  [{i+1}/{total_combos}] Running...", end="\r")
-        
-        # Run Backtest (Silent mode for performance)
-        strat = run_backtest_headless(s_cfg, run_cfg, 
-                                      preloaded_df=full_df, 
-                                      preloaded_options=preloaded_options,
-                                      preloaded_sync=preloaded_sync,
-                                      verbose=False)
-        
-        if strat is not None:
-            net_profit = strat.pnl
-            final_balance = run_cfg.backtest_cash + net_profit
-            max_dd = max(strat.drawdowns) if strat.drawdowns else 0.0
-            
-            # Professional Metrics
-            wins = [t for t in strat.trade_log if t["result"] == "win"]
-            losses = [t for t in strat.trade_log if t["result"] == "loss"]
-            
-            gross_profit = sum(t["amount"] for t in wins)
-            gross_loss = abs(sum(t["amount"] for t in losses))
-            
-            # Profit Factor
-            profit_factor = gross_profit / gross_loss if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0.0)
-            
-            win_rate = (len(wins) / strat.trades * 100) if strat.trades > 0 else 0
-            loss_rate = 100 - win_rate
-            
-            avg_win = sum(t["amount"] for t in wins) / len(wins) if wins else 0
-            avg_loss = abs(sum(t["amount"] for t in losses)) / len(losses) if losses else 0
-            expectancy = ((avg_win * win_rate/100) - (avg_loss * loss_rate/100))
-            
-            # Primary Sorting Ratio: Net Profit / Max Drawdown
-            np_dd_ratio = net_profit / max_dd if max_dd > 0 else 0.0
-            
-            # Annualized Sharpe (Assuming 5-min bars: 78/day * 252 days)
-            sharpe = 0.0
-            if len(strat.equity_series) > 1:
-                equity_curve = np.array(strat.equity_series)
-                returns = np.diff(equity_curve) / equity_curve[:-1]
-                if np.std(returns) > 0:
-                    sharpe = (np.mean(returns) / np.std(returns)) * np.sqrt(252 * 78)
+    start_time_global = time.time()
 
-            results.append({
-                "params": params_dict,
-                "net_profit": net_profit,
-                "final_balance": final_balance,
-                "max_dd": max_dd,
-                "np_dd_ratio": np_dd_ratio,
-                "sharpe": sharpe,
-                "profit_factor": profit_factor,
-                "expectancy": expectancy,
-                "trades": strat.trades,
-                "wins": len(wins),
-                "losses": len(losses),
-                "win_rate": win_rate
-            })
+    for phase_idx, segment in enumerate(OPTIMIZATION_SEGMENTS):
+        print(f"\n[{phase_idx+1}/{len(OPTIMIZATION_SEGMENTS)}] Executing: {segment['name']}")
+        print(f"  Desc: {segment['description']}")
+        
+        keys = list(segment['params'].keys())
+        values = list(segment['params'].values())
+        combinations = list(itertools.product(*values))
+        phase_results = []
+        
+        print(f"  Progress: 0/{len(combinations)}...", end="\r")
+        
+        for i, combo in enumerate(combinations):
+            # Start with the best config from previous phase
+            s_cfg = copy.deepcopy(current_best_cfg)
+            
+            # Apply current phase params
+            params_dict = dict(zip(keys, combo))
+            for k, v in params_dict.items():
+                setattr(s_cfg, k, v)
+                
+            # Run Backtest
+            strat = run_backtest_headless(s_cfg, run_cfg, 
+                                          preloaded_df=full_df, 
+                                          preloaded_options=preloaded_options,
+                                          preloaded_sync=preloaded_sync,
+                                          verbose=False)
+            
+            if strat is not None:
+                # Capture Metrics
+                net_profit = strat.pnl
+                max_dd = max(strat.drawdowns) if strat.drawdowns else 0.0
+                np_dd_ratio = net_profit / max_dd if max_dd > 0 else 0.0
+                
+                # Basic stats for reporting
+                wins = [t for t in strat.trade_log if t["result"] == "win"]
+                losses = [t for t in strat.trade_log if t["result"] == "loss"]
+                gross_profit = sum(t["amount"] for t in wins)
+                gross_loss = abs(sum(t["amount"] for t in losses))
+                profit_factor = gross_profit / gross_loss if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0.0)
+                win_rate = (len(wins) / len(strat.trade_log) * 100) if strat.trade_log else 0.0
+                
+                result_entry = {
+                    "phase": phase_idx + 1,
+                    "params": params_dict, # Only the params changed in this phase
+                    "full_config": copy.deepcopy(s_cfg), # Snapshot of full state
+                    "net_profit": net_profit,
+                    "max_dd": max_dd,
+                    "np_dd_ratio": np_dd_ratio,
+                    "profit_factor": profit_factor,
+                    "trades": len(strat.trade_log),
+                    "win_rate": win_rate
+                }
+                phase_results.append(result_entry)
+            
+            if (i+1) % 5 == 0:
+                print(f"  Progress: {i+1}/{len(combinations)}...", end="\r")
 
-    print(f"\n\nDone. Processing {len(results)} valid results...")
+        print(f"  Progress: {len(combinations)}/{len(combinations)} [DONE]")
+        
+        # Analyze Phase Results
+        if not phase_results:
+            print("  [WARNING] No valid results in this phase. Keeping previous config.")
+            continue
+            
+        # Sort by NP/DD Ratio
+        sorted_phase = sorted(phase_results, key=lambda x: x['np_dd_ratio'], reverse=True)
+        best_in_phase = sorted_phase[0]
+        
+        print(f"  -> Best Result in Phase: NP=${best_in_phase['net_profit']:.0f} | DD=${best_in_phase['max_dd']:.0f} | Ratio={best_in_phase['np_dd_ratio']:.2f}")
+        print(f"  -> Params: {best_in_phase['params']}")
+        
+        # Upgrade the global best config for the next phase
+        current_best_cfg = best_in_phase['full_config']
+        cumulative_results.extend(sorted_phase) # Keep history
 
-    # 4. Reporting (Top 100)
-    sorted_results = sorted(results, key=lambda x: x['np_dd_ratio'], reverse=True)
-    top_100 = sorted_results[:100]
+    total_time = (time.time() - start_time_global) / 60
+    print(f"\n[4/4] Optimization Complete in {total_time:.1f} minutes.")
     
-    # 4.1 Persistence (New: Save to CSV)
-    if top_100:
-        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        report_path = os.path.join("reports", f"top100_{now_str}.csv")
-        os.makedirs("reports", exist_ok=True)
-        
-        # Flatten and save
-        csv_data = []
-        for rank, res in enumerate(top_100, 1):
-            row = {"Rank": rank}
-            row.update(res['params'])
-            row.update({
-                "Balance": round(res['final_balance'], 2),
-                "NetProfit": round(res['net_profit'], 2),
-                "MaxDD": round(res['max_dd'], 2),
-                "NP_DD_Ratio": round(res['np_dd_ratio'], 2),
-                "ProfitFactor": round(res['profit_factor'], 2),
-                "Expectancy": round(res['expectancy'], 2),
-                "Sharpe": round(res['sharpe'], 2),
-                "Trades": res['trades'],
-                "Wins": res['wins'],
-                "Losses": res['losses'],
-                "WinRate": round(res['win_rate'], 2)
-            })
-            csv_data.append(row)
-        
-        pd.DataFrame(csv_data).to_csv(report_path, index=False)
-        print(f"\n[Report Saved] {report_path}")
+    # 4. Reporting (Top Global)
+    # We want to see the best configuration encountered at the very end (or best of final phase)
+    # But usually the last phase contains the most refined version.
+    # Let's show the final config parameters.
     
-    table_headers = ["Rank", "Params", "Profit", "DD", "NP/DD", "PF", "Exp.", "Sharpe", "T", "W/L", "Win%"]
-    table_rows = []
+    print("\n" + "="*80)
+    print(" FINAL OPTIMIZED CONFIGURATION")
+    print("="*80)
     
-    for rank, res in enumerate(top_100, 1):
-        p = res['params']
-        param_summary = ", ".join([f"{k}={v}" for k, v in p.items()])
-        table_rows.append([
-            rank,
-            param_summary,
-            f"${res['net_profit']:,.2f}",
-            f"${res['max_dd']:,.2f}",
-            f"{res['np_dd_ratio']:.2f}",
-            f"{res['profit_factor']:.2f}",
-            f"${res['expectancy']:.2f}",
-            f"{res['sharpe']:.2f}",
-            res['trades'],
-            f"{res['wins']}/{res['losses']}",
-            f"{res['win_rate']:.2f}%"
-        ])
-
-    print("\n" + "="*120)
-    print(f" TOP {len(top_100)} OPTIMIZATION RESULTS (Ranked by Profit/DD)")
-    print("="*120)
-    print(tabulate(table_rows, headers=table_headers, tablefmt="simple"))
-    print("="*120 + "\n")
-
-    # 5. Apply Choice
-    if sorted_results:
-        print("Selection Interface:")
-        print("  - Enter '1' to '100' to apply a specific configuration.")
-        print("  - Enter 'n' to quit without applying.")
+    final_params = {}
+    # Extract keys we care about from the final config object
+    relevant_keys = set()
+    for seg in OPTIMIZATION_SEGMENTS:
+        relevant_keys.update(seg['params'].keys())
         
-        choice = input("\nSelect Rank to apply: ")
-        if choice.isdigit():
-            idx = int(choice) - 1
-            if 0 <= idx < len(sorted_results):
-                chosen = sorted_results[idx]
-                print(f"APPLYING CONFIG #{choice}: {chosen['params']}")
-                apply_best_params(chosen['params'])
-                print("Configuration updated in core/config.template.py.")
-            else:
-                print("Invalid rank.")
-        else:
-            print("Selection ignored.")
+    for k in relevant_keys:
+        final_params[k] = getattr(current_best_cfg, k)
+        print(f"  {k} = {final_params[k]}")
+
+    # Save to file
+    now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = os.path.join("reports", f"optimization_final_{now_str}.csv")
+    os.makedirs("reports", exist_ok=True)
+    
+    # Save the Cumulative top 50 across all phases (just for analysis)
+    top_50 = sorted(cumulative_results, key=lambda x: x['np_dd_ratio'], reverse=True)[:50]
+    csv_data = []
+    for rank, res in enumerate(top_50, 1):
+        row = {
+            "Rank": rank,
+            "Phase": res['phase'],
+            "NP_DD_Ratio": round(res['np_dd_ratio'], 2),
+            "NetProfit": round(res['net_profit'], 2),
+            "MaxDD": round(res['max_dd'], 2),
+            "ProfitFactor": round(res['profit_factor'], 2),
+            "Trades": res['trades'],
+            "WinRate": round(res['win_rate'], 2)
+        }
+        # Flatten params
+        for k, v in res['params'].items():
+            row[f"param_{k}"] = v
+        csv_data.append(row)
+        
+    pd.DataFrame(csv_data).to_csv(report_path, index=False)
+    print(f"\n[Report Saved] {report_path}")
+
+    # Apply Best Params to Config Files
+    print(f"\n[Auto-Apply] Updating configuration files with best parameters...")
+    apply_best_params(final_params)
+
 
 def apply_params_to_file(params, config_path):
     """Update a specific file with parameters."""
@@ -418,25 +288,29 @@ def apply_params_to_file(params, config_path):
     new_lines = []
     for line in lines:
         updated = False
-        # We only want to replace lines that look like: key = val or key: type = val
         stripped = line.strip()
         if "=" in stripped:
             first_part = stripped.split("=")[0].strip()
-            # Handle type hints: "dte_min: int" -> "dte_min"
             key_candidate = first_part.split(":")[0].strip()
             
             if key_candidate in params:
                 val = params[key_candidate]
-                indent = line[:line.find(line.strip())]
+                # Format float/int correctly
+                if isinstance(val, float):
+                    val_str = f"{val:.2f}"
+                else:
+                    val_str = str(val)
+
+                indent = line[:line.find(line.strip())] if line.strip() else ""
                 parts = line.split("#")
                 comment = "#" + parts[1] if len(parts) > 1 else ""
                 
-                # Reconstruct with original formatting / type hints
+                # Reconstruct
                 if ":" in first_part:
                     type_part = first_part.split(":")[1]
-                    new_line = f"{indent}{key_candidate}: {type_part} = {val}  {comment}\n"
+                    new_line = f"{indent}{key_candidate}: {type_part} = {val_str}  {comment}\n"
                 else:
-                    new_line = f"{indent}{key_candidate} = {val}  {comment}\n"
+                    new_line = f"{indent}{key_candidate} = {val_str}  {comment}\n"
                 
                 new_lines.append(new_line)
                 updated = True
