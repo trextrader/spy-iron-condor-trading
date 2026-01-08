@@ -195,6 +195,8 @@ class RunConfig:
     backtest_cash: float = 25000.0
     backtest_plot: bool = True
     backtest_samples: int = 500
+    options_data_path: str = None  # Path to options data CSV (with Greeks)
+    prefer_intraday: bool = True   # Prefer high-density intraday data if available
     
     # === Position Sizing ===
     quantity: int = 1

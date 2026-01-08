@@ -95,6 +95,8 @@ Examples:
     parser.add_argument("--bt-start", type=str, default="2024-01-01")
     parser.add_argument("--bt-end", type=str, default="2024-12-31")
     parser.add_argument("--bt-samples", type=int, default=500)
+    parser.add_argument("--options-data", type=str, default=None,
+                        help="Path to options data CSV file with Greeks for backtesting")
     parser.add_argument("--no-plot", action="store_true")
 
     # --- Sizing ---
@@ -279,13 +281,20 @@ def main():
         if args.alpaca_secret:
             run_config.alpaca_secret = args.alpaca_secret
 
-        # --- DATA SYNC CHECK ---
-        # Construct path (assuming standard synthetic structure)
-        # In a real app, this path comes from DataFactory config
-        opt_path = os.path.join("data", "synthetic_options", f"{strategy_config.underlying.lower()}_options_marks.csv")
+        # --- OPTIONS DATA PATH ---
+        # Use provided options data path or default to synthetic data
+        if args.options_data:
+            opt_path = args.options_data
+            print(f"[Data] Using custom options data: {opt_path}")
+        else:
+            # Default to synthetic options structure
+            opt_path = os.path.join("data", "synthetic_options", f"{strategy_config.underlying.lower()}_options_marks.csv")
         
+        # Store in run_config for backtest engine
+        run_config.options_data_path = opt_path
+        
+        # --- DATA SYNC CHECK ---
         # Only validate if we are NOT sampling 0 (which usually means quick test)
-        # Actually, even for 0 samples, we want to know if data exists for the period.
         if os.path.exists(opt_path):
             print(f"[Data Validator] Checking coverage for {strategy_config.underlying}...")
             is_valid = validate_data_coverage(opt_path, run_config.backtest_start, run_config.backtest_end, strategy_config.underlying)

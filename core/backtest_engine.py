@@ -71,6 +71,68 @@ def compute_iv_rank_proxy(current_vol: float, vol_history: list, lookback: int =
     return round(ivr, 2)
 
 
+def load_intraday_options(file_path: str, start_date=None, end_date=None) -> dict:
+    """
+    Load intraday options data with Greeks from CSV.
+    Optimized for fast lookup by timestamp.
+    
+    Structure: {timestamp: {symbol: {data}}}
+    """
+    if not os.path.exists(file_path):
+        print(f"[ERROR] Intraday options file not found: {file_path}")
+        return {}
+
+    print(f"[Data] Loading intraday options: {file_path}...")
+    
+    # Load specific columns to save memory
+    use_cols = [
+        'timestamp', 'symbol', 'expiration', 'strike', 'option_type', 
+        'close', 'delta_intraday', 'theta_intraday', 'gamma_intraday', 
+        'vega_intraday', 'iv_intraday'
+    ]
+    
+    # Read CSV
+    df = pd.read_csv(file_path, parse_dates=['timestamp', 'expiration'])
+    
+    # Filter by date range
+    if start_date:
+        df = df[df['timestamp'] >= pd.Timestamp(start_date, tz='UTC')]
+    if end_date:
+        df = df[df['timestamp'] <= pd.Timestamp(end_date, tz='UTC')]
+        
+    print(f"[Data] Loaded {len(df):,} intraday option records.")
+    
+    # Index by timestamp for fast backtest lookup
+    # Group by timestamp -> dict of symbols
+    options_by_time = {}
+    
+    # Optimize grouping
+    for timestamp, group in df.groupby('timestamp'):
+        # Localize to None to match backtrader (if needed)
+        ts_key = timestamp.replace(tzinfo=None) if timestamp.tzinfo else timestamp
+        
+        # Convert group to dict of dicts: {symbol: {fields}}
+        group_dict = {}
+        for row in group.itertuples():
+            sym = row.symbol
+            expiration = row.expiration.date() if hasattr(row.expiration, 'date') else row.expiration
+            
+            group_dict[sym] = {
+                'price': row.close,
+                'strike': row.strike,
+                'expiration': expiration,
+                'type': 'call' if row.option_type == 'call' else 'put',
+                'delta': row.delta_intraday,
+                'theta': row.theta_intraday,
+                'gamma': row.gamma_intraday,
+                'vega': row.vega_intraday,
+                'iv': row.iv_intraday
+            }
+        options_by_time[ts_key] = group_dict
+        
+    return options_by_time
+
+
 
 
 def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=None, preloaded_options=None, preloaded_sync=None, verbose=True):
@@ -119,34 +181,51 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
         total_bars = len(df)
         if verbose: print(f"[Data] Loaded {total_bars:,} bars from {df.index.min().date()} to {df.index.max().date()}")
     
-    # === Load Synthetic Options Data ===
+    # === Load Options Data (Intraday or Synthetic) ===
     if preloaded_options is not None:
         options_by_date = preloaded_options
+        is_intraday = getattr(r_cfg, 'use_intraday_data', False) # Check config if preloaded
     else:
-        options_path = os.path.join("data", "synthetic_options", f"{s_cfg.underlying.lower()}_options_marks.csv")
-        if not os.path.exists(options_path):
-            print(f"[ERROR] Synthetic options data not found: {options_path}")
+        # Check for Intraday Data First
+        intraday_path = os.path.join("data", "alpaca_options", "spy_options_intraday_with_greeks.csv")
+        synthetic_path = os.path.join("data", "synthetic_options", f"{s_cfg.underlying.lower()}_options_marks.csv")
+        
+        # Check if we should use intraday data (file exists and not explicitly disabled)
+        use_intraday = os.path.exists(intraday_path) and getattr(r_cfg, 'prefer_intraday', True)
+        
+        if use_intraday:
+            if verbose: print(f"[Data] Using Intraday Options Data: {intraday_path}")
+            # Determine date range for loading
+            start_load = r_cfg.backtest_start if hasattr(r_cfg, 'backtest_start') else None
+            end_load = r_cfg.backtest_end if hasattr(r_cfg, 'backtest_end') else None
+            
+            # Load using new function
+            options_by_date = load_intraday_options(intraday_path, start_load, end_load)
+            is_intraday = True
+        
+        elif os.path.exists(synthetic_path):
+            if verbose: print(f"[Data] Using Synthetic Options Data: {synthetic_path}")
+            
+            # Memory optimization: Load with chunking and filter by date range
+            options_df = pd.read_csv(synthetic_path, parse_dates=["date", "expiration"])
+            
+            # Filter to backtest date range BEFORE grouping to save memory
+            if hasattr(r_cfg, 'backtest_start') and r_cfg.backtest_start:
+                start_dt = pd.Timestamp(r_cfg.backtest_start).date()
+                options_df = options_df[options_df['date'].dt.date >= start_dt]
+            if hasattr(r_cfg, 'backtest_end') and r_cfg.backtest_end:
+                end_dt = pd.Timestamp(r_cfg.backtest_end).date()
+                options_df = options_df[options_df['date'].dt.date <= end_dt]
+            
+            if verbose: print(f"[Data] Filtered options to {len(options_df):,} rows for date range.")
+            
+            options_by_date = {}
+            for date, group in options_df.groupby('date'):
+                options_by_date[date.date()] = group.to_dict('records')
+            is_intraday = False
+        else:
+            print(f"[ERROR] No options data found (checked {intraday_path} and {synthetic_path})")
             return None
-        
-        # Load and optimize for fast lookup
-        if verbose: print(f"[Data] Loading synthetic options: {options_path}...")
-        
-        # Memory optimization: Load with chunking and filter by date range
-        options_df = pd.read_csv(options_path, parse_dates=["date", "expiration"])
-        
-        # Filter to backtest date range BEFORE grouping to save memory
-        if hasattr(r_cfg, 'backtest_start') and r_cfg.backtest_start:
-            start_dt = pd.Timestamp(r_cfg.backtest_start).date()
-            options_df = options_df[options_df['date'].dt.date >= start_dt]
-        if hasattr(r_cfg, 'backtest_end') and r_cfg.backtest_end:
-            end_dt = pd.Timestamp(r_cfg.backtest_end).date()
-            options_df = options_df[options_df['date'].dt.date <= end_dt]
-        
-        if verbose: print(f"[Data] Filtered options to {len(options_df):,} rows for date range.")
-        
-        options_by_date = {}
-        for date, group in options_df.groupby('date'):
-            options_by_date[date.date()] = group.to_dict('records')
     
     # === Initialize MTF Sync Engine ===
     if preloaded_sync is not None:
@@ -156,13 +235,14 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
 
     # === Strategy Definition ===
     class IronCondorStrategy(bt.Strategy):
-        params = dict(s_cfg=None, r_cfg=None, sync_engine=None, options_data=None, verbose=True)
+        params = dict(s_cfg=None, r_cfg=None, sync_engine=None, options_data=None, is_intraday=False, verbose=True)
 
         def __init__(self):
             self.s_cfg = self.params.s_cfg
             self.r_cfg = self.params.r_cfg
             self.sync = self.params.sync_engine
             self.options_data = self.params.options_data
+            self.is_intraday = self.params.is_intraday
             self.verbose = self.params.verbose
             
             # Performance Tracking
@@ -384,33 +464,62 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                 return
 
             # 3. Entry Logic
-            chain_records = self.options_data.get(date_now, [])
+            chain_records = []
+            if self.is_intraday:
+                # Intraday Lookup: Exact timestamp match
+                # Convert backtrader datetime to python datetime
+                dt_key = dt_now.replace(tzinfo=None)
+                chain_dict = self.options_data.get(dt_key, {})
+                if chain_dict:
+                    # Convert dict of dicts to list of OptionQuote objects directly
+                    # Structure: {symbol: {price, strike, expiration, type, delta...}}
+                    quote_chain = []
+                    for sym, data in chain_dict.items():
+                        quote_chain.append(OptionQuote(
+                            symbol=sym,
+                            expiration=data['expiration'],
+                            strike=data['strike'],
+                            is_call=(data['type'] == 'call'),
+                            bid=data['price'], # Use close as bid/ask/mid proxy for intraday
+                            ask=data['price'],
+                            mid=data['price'],
+                            delta=data['delta'],
+                            iv=data['iv'],
+                            gamma=data.get('gamma', 0.0),
+                            vega=data.get('vega', 0.0),
+                            theta=data.get('theta', 0.0)
+                        ))
+                    chain_records = quote_chain # Use directly
+            else:
+                # EOD/Synthetic Lookup: Date match
+                chain_records = self.options_data.get(date_now, [])
             
             # Debug: Print once on first attempt after cooldown
             if self.bar_count == 101 and self.verbose:
-                opt_keys = list(self.options_data.keys())[:5]
-                print(f"[DEBUG] Looking for date: {date_now} (type: {type(date_now)})")
-                print(f"[DEBUG] Options keys sample: {opt_keys} (type: {type(opt_keys[0]) if opt_keys else 'N/A'})")
-                print(f"[DEBUG] Chain records found: {len(chain_records)}")
+                print(f"[DEBUG] Mode: {'Intraday' if self.is_intraday else 'Synthetic'}")
+                print(f"[DEBUG] Looking for: {dt_now if self.is_intraday else date_now}")
+                print(f"[DEBUG] Records found: {len(chain_records)}")
             
             if not chain_records:
                 return
-                
-            quote_chain = [OptionQuote(
-                symbol=r['option_symbol'],
-                expiration=r['expiration'].date(),
-                strike=r['strike'],
-                is_call=(r['contract_type'] == 'call'),
-                bid=r['bid'],
-                ask=r['ask'],
-                mid=r['last_price'],
-                delta=r['delta'],
-                iv=r['implied_volatility'],
-                # Stage 3: Greeks for Risk Management
-                gamma=r.get('gamma', 0.0) or 0.0,
-                vega=r.get('vega', 0.0) or 0.0,
-                theta=r.get('theta', 0.0) or 0.0
-            ) for r in chain_records]
+            
+            if not self.is_intraday:
+                # Standard conversion for Synthetic data (list of records)
+                quote_chain = [OptionQuote(
+                    symbol=r['option_symbol'],
+                    expiration=r['expiration'].date(),
+                    strike=r['strike'],
+                    is_call=(r['contract_type'] == 'call'),
+                    bid=r['bid'],
+                    ask=r['ask'],
+                    mid=r['last_price'],
+                    delta=r['delta'],
+                    iv=r['implied_volatility'],
+                    # Stage 3: Greeks for Risk Management
+                    gamma=r.get('gamma', 0.0) or 0.0,
+                    vega=r.get('vega', 0.0) or 0.0,
+                    theta=r.get('theta', 0.0) or 0.0
+                ) for r in chain_records]
 
             # === Market Realism (Stage 1) ===
             # Calculate Realized Volatility
@@ -772,7 +881,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
     cerebro = bt.Cerebro()
     cerebro.broker.setcash(r_cfg.backtest_cash)
     cerebro.adddata(PandasData(dataname=df))
-    cerebro.addstrategy(IronCondorStrategy, s_cfg=s_cfg, r_cfg=r_cfg, sync_engine=sync_engine, options_data=options_by_date)
+    cerebro.addstrategy(IronCondorStrategy, s_cfg=s_cfg, r_cfg=r_cfg, sync_engine=sync_engine, options_data=options_by_date, is_intraday=is_intraday)
     
     # Add Analyzers
     # Run quietly
