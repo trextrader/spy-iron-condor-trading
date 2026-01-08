@@ -37,49 +37,60 @@ def get_trading_dates(start_date: dt.date, end_date: dt.date) -> list:
     return dates
 
 
-def fetch_options_chain_for_date(symbol: str, trade_date: str) -> pd.DataFrame:
+def fetch_options_chain_for_date(symbol: str, trade_date: str, max_retries=5) -> pd.DataFrame:
     """
-    Fetch option chain IDs for a given date.
-    Get options with 25-65 DTE (wider range for production).
+    Fetch option chain IDs for a given date with Retry Logic.
+    Get options with 25-65 DTE.
     """
-    try:
-        # Calculate expiration range (25-65 DTE)
-        date_obj = dt.datetime.strptime(trade_date, "%Y-%m-%d").date()
-        exp_from = (date_obj + dt.timedelta(days=25)).strftime("%Y-%m-%d")
-        exp_to = (date_obj + dt.timedelta(days=65)).strftime("%Y-%m-%d")
-        
-        getOptsChain = ivol.setMethod('/equities/eod/option-series-on-date')
-        
-        # Get both calls and puts
-        calls = getOptsChain(
-            symbol=symbol,
-            date=trade_date,
-            expFrom=exp_from,
-            expTo=exp_to,
-            callPut='C'
-        )
-        
-        puts = getOptsChain(
-            symbol=symbol,
-            date=trade_date,
-            expFrom=exp_from,
-            expTo=exp_to,
-            callPut='P'
-        )
-        
-        # Combine
-        if calls is not None and puts is not None:
-            return pd.concat([calls, puts], ignore_index=True)
-        elif calls is not None:
-            return calls
-        elif puts is not None:
-            return puts
-        
-        return pd.DataFrame()
-        
-    except Exception as e:
-        print(f"Error fetching chain for {trade_date}: {e}")
-        return pd.DataFrame()
+    for attempt in range(max_retries):
+        try:
+            # Calculate expiration range (25-65 DTE)
+            date_obj = dt.datetime.strptime(trade_date, "%Y-%m-%d").date()
+            exp_from = (date_obj + dt.timedelta(days=25)).strftime("%Y-%m-%d")
+            exp_to = (date_obj + dt.timedelta(days=65)).strftime("%Y-%m-%d")
+            
+            getOptsChain = ivol.setMethod('/equities/eod/option-series-on-date')
+            
+            # Get both calls and puts
+            calls = getOptsChain(
+                symbol=symbol,
+                date=trade_date,
+                expFrom=exp_from,
+                expTo=exp_to,
+                callPut='C'
+            )
+            
+            puts = getOptsChain(
+                symbol=symbol,
+                date=trade_date,
+                expFrom=exp_from,
+                expTo=exp_to,
+                callPut='P'
+            )
+            
+            # Combine
+            if calls is not None and puts is not None:
+                return pd.concat([calls, puts], ignore_index=True)
+            elif calls is not None:
+                return calls
+            elif puts is not None:
+                return puts
+            
+            return pd.DataFrame()
+            
+        except Exception as e:
+            msg = str(e)
+            if "429" in msg or "Too Many Requests" in msg:
+                wait = (attempt + 1) * 2 + random.uniform(1, 3)
+                print(f"  429 Limit hit (chain). Retrying in {wait:.1f}s...")
+                time.sleep(wait)
+                continue
+            else:
+                print(f"Error fetching chain for {trade_date}: {e}")
+                return pd.DataFrame()
+    
+    print(f"  Failed to fetch chain after {max_retries} retries.")
+    return pd.DataFrame()
 
 
 def fetch_option_with_retry(option_id: int, trade_date: str, max_retries=3) -> pd.DataFrame:
@@ -123,26 +134,44 @@ def download_spy_options_year():
     print(f"Workers: {MAX_WORKERS}")
     print(f"Output: {output_path}")
     print("=" * 70, flush=True)
-    
+
     all_dates = get_trading_dates(start_date, end_date)
     # No sampling! We want the full dataset if possible, or maybe sample every 2 days?
     # User said "full eod dataset".
     sample_dates = all_dates # Full resolution
     
-    # Check existing data to resume
+    # Load spot prices from existing EOD file for smart filtering
+    spot_map = {}
+    eod_file = os.path.join(OUTPUT_DIR, "spy_options_ivol_1year.csv")
+    if os.path.exists(eod_file):
+        try:
+            spot_df = pd.read_csv(eod_file, usecols=['date', 'underlying_price'])
+            spot_df['date'] = pd.to_datetime(spot_df['date']).dt.date
+            spot_map = spot_df.drop_duplicates('date').set_index('date')['underlying_price'].to_dict()
+            print(f"Loaded {len(spot_map)} spot prices from local file.")
+        except Exception:
+            pass
+
+    # FORCE FRESH START for Large File (Overwrite bad data)
+    if os.path.exists(output_path) and os.path.getsize(output_path) < 10 * 1024 * 1024:
+        print("Existing file is small (likely bad run). Overwriting...")
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except: pass
+            
+    # Re-check existence
     existing_dates = set()
     first_write = True
     if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
         try:
             df_exist = pd.read_csv(output_path, usecols=['date'])
-            # Assuming 'date' column exists
             dates = pd.to_datetime(df_exist['date']).dt.date
             existing_dates = set(dates)
             print(f"Found {len(existing_dates)} existing dates. Resuming...", flush=True)
             first_write = False
-        except Exception as e:
-            print(f"Warning/Error reading existing: {e}. Starting fresh/append.")
-            first_write = False # Safe default to append if file exists
+        except Exception:
+            first_write = False
     
     total_records = 0
     
@@ -161,44 +190,48 @@ def download_spy_options_year():
             print(f"  No options found", flush=True)
             continue
         
-        # Step 2: Intelligent Filter (Top N by Liquid)
-        # Note: chain returned by 'option-series-on-date' does NOT have volume/OI info directly :(
-        # We checked this in Step Id: 2287.
-        # It only has: ['OptionSymbol', 'callPut', 'strike', 'expirationDate', 'optionId']
+        # Step 2: Intelligent Filter (ATM via Spot Price)
+        # ------------------------------------------------
+        spot_price = spot_map.get(trade_date)
         
-        # CRITICAL: We cannot sort by volume if we don't have it!
-        # Strategy pivot: We must approximate liquidity by "Near the Data".
-        # ATM options are usually most liquid.
-        # We will take a wider ATM band.
-        
+        if spot_price is None:
+            # Fallback: Fetch from API
+            print("  Spot price missing locally. Fetching from API...", end=" ", flush=True)
+            try:
+                getPrices = ivol.setMethod('/equities/eod/stock-prices-on-date')
+                spot_data = getPrices(symbol='SPY', date=date_str)
+                if spot_data is not None and not spot_data.empty:
+                    spot_price = float(spot_data.iloc[0]['close'])
+                    print(f"Got {spot_price}")
+                    # Cache it? No need, loop is once per date.
+                else:
+                    print("Failed.")
+            except Exception as e:
+                print(f"Error fetching spot: {e}")
+
+        if spot_price is None:
+            print("  Warning: Spot price unavailable. Using chain middle.")
+        else:
+             print(f"  Spot Price: {spot_price}")
+
         if 'strike' in chain.columns:
             chain['strike'] = pd.to_numeric(chain['strike'])
-            unique_strikes = sorted(chain['strike'].unique())
-            mid_idx = len(unique_strikes) // 2
             
-            # Select 60 strikes around ATM (30 up, 30 down)
-            # Typically strikes are $0.5 or $1 apart. 60 strikes = $30-$60 range.
-            # This covers the high volume area reasonably well.
-            atm_strikes = unique_strikes[max(0, mid_idx-60):min(len(unique_strikes), mid_idx+60)]
-            
-            mask = chain['strike'].isin(atm_strikes)
-            liquid_candidates = chain[mask]
-            
-            # If we still have too many, subsample?
-            # Or just take them all.
-            # We want up to 500.
-            if len(liquid_candidates) > TARGET_OPTIONS_PER_DAY:
-                 # Prioritize near-term? No, standard sort.
-                 # Just take the first N (closest to ATM usually if sorted by strike?)
-                 # Actually unique_strikes is sorted.
-                 # We selected a band around ATM.
-                 # We can take random? Or just take the center?
-                 pass
+            if spot_price:
+                 chain['distance'] = abs(chain['strike'] - spot_price)
+                 liquid_candidates = chain.sort_values('distance')
+            else:
+                unique_strikes = sorted(chain['strike'].unique())
+                mid_idx = len(unique_strikes) // 2
+                atm_strikes = unique_strikes[max(0, mid_idx-60):min(len(unique_strikes), mid_idx+60)]
+                mask = chain['strike'].isin(atm_strikes)
+                liquid_candidates = chain[mask]
+
             option_ids = liquid_candidates['optionId'].unique()[:TARGET_OPTIONS_PER_DAY]
         else:
              option_ids = chain['optionId'].unique()[:TARGET_OPTIONS_PER_DAY]
 
-        print(f"  Fetching Greeks for {len(option_ids)} options (Threaded)...", flush=True)
+        print(f"  Fetching Greeks for {len(option_ids)} options (Threaded, ATM)...", flush=True)
         
         day_rows = []
         
