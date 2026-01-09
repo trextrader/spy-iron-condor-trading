@@ -490,6 +490,67 @@ pytest -q tests/
 
 ---
 
+## 🔄 Production Data Pipeline
+
+### Overview
+The system includes a fully automated data pipeline that generates high-density options data for backtesting.
+
+### Pipeline Scripts
+| Script | Purpose |
+|--------|---------|
+| `scripts/run_production_pipeline.py` | **Master orchestrator** - Runs all steps sequentially |
+| `data_factory/download_ivolatility_options.py` | Downloads Greeks from IVolatility (Top 100 ATM/day) |
+| `data_factory/download_alpaca_matched.py` | Fetches M1 bars from Alpaca |
+| `data_factory/merge_intraday_with_greeks.py` | Merges and resamples to M1/M5/M15 |
+
+### Run Full Pipeline
+```bash
+py scripts/run_production_pipeline.py
+# Runtime: ~3-4 hours (API rate limits)
+```
+
+### Data Directory Structure
+```
+data/
+├── ivolatility/
+│   └── spy_options_ivol_large.csv      # IVolatility Greeks (pipeline output)
+├── alpaca_options/
+│   ├── spy_options_bars.csv            # Historical bars
+│   ├── spy_options_bars_with_greeks.csv # Bars + Greeks (legacy)
+│   └── spy_options_intraday_large_with_greeks_m1.csv  # MTF M1 data (pipeline)
+└── synthetic_options/
+    └── spy_options_marks.csv           # 2.2GB synthetic data
+```
+
+---
+
+## 🧪 Backtest Scripts
+
+### MTF Backtest (Multi-Timeframe)
+Uses M1/M5/M15 intraday data with multi-timeframe consensus filtering:
+```bash
+py scripts/run_backtest_mtf.py
+```
+- **Data**: `spy_options_intraday_large_with_greeks_m1.csv`
+- **MTF Filter**: Enabled (`use_mtf=True`)
+- **Timeframes**: 1m, 5m, 15m consensus
+
+### Standard Backtest (Non-MTF)
+Uses synthetic options data without MTF filtering:
+```bash
+py scripts/run_backtest_standard.py
+```
+- **Data**: `spy_options_marks.csv` (2.2GB)
+- **MTF Filter**: Disabled (`use_mtf=False`)
+- **Mode**: EOD-style processing
+
+### Custom Backtest
+```bash
+py scripts/run_full_backtest.py
+```
+
+---
+
 ## 📈 Performance Metrics
 
 ### Key Metrics Tracked
