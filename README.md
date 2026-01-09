@@ -475,8 +475,47 @@ pip install -r requirements.txt
 
 ### Run Backtest
 ```bash
-py -3.12 core/main.py --mode backtest --bt-start 2025-07-01 --bt-end 2025-12-31
+py core/main.py --mode backtest --bt-start 2025-07-01 --bt-end 2025-12-31
 ```
+
+### CLI Options Reference
+
+| Category | Option | Default | Description |
+|----------|--------|---------|-------------|
+| **Mode** | `--mode` | `backtest` | `backtest` or `live` |
+| **Backtest** | `--bt-start` | `2024-01-01` | Start date (YYYY-MM-DD) |
+| | `--bt-end` | `2024-12-31` | End date (YYYY-MM-DD) |
+| | `--bt-cash` | `25000.0` | Starting capital |
+| | `--options-data` | None | Path to options CSV with Greeks |
+| | `--no-plot` | False | Disable equity curve plot |
+| **Strategy** | `--underlying` | `SPY` | Symbol to trade |
+| | `--quantity` | `1` | Contracts per trade |
+| | `--dte-min` | `30` | Minimum days to expiration |
+| | `--dte-max` | `45` | Maximum days to expiration |
+| **Delta** | `--delta-low` | `0.10` | Lower delta bound |
+| | `--delta-high` | `0.25` | Upper delta bound |
+| **Wings** | `--wing-min` | `5.0` | Minimum wing width ($) |
+| | `--wing-max` | `10.0` | Maximum wing width ($) |
+| | `--min-credit-ratio` | `0.15` | Minimum credit/width ratio |
+| **Filters** | `--ivr-min` | `0.0` | Minimum IV Rank |
+| | `--vix-max` | `25.0` | Maximum VIX for entry |
+| **Exits** | `--profit-pct` | `0.50` | Profit take (% of credit) |
+| | `--loss-multiple` | `1.5` | Stop loss (multiple of credit) |
+| | `--max-hold-days` | `14` | Maximum holding period |
+| **Positions** | `--max-positions` | `3` | Max concurrent positions |
+| | `--max-alloc` | `0.15` | Max portfolio allocation |
+| **MTF** | `--use-mtf` | False | Enable MTF consensus filter |
+| | `--no-mtf-filter` | False | Disable MTF filter |
+| | `--mtf-timeframes` | `1,5,15` | Timeframes (comma-separated) |
+| | `--mtf-consensus-min` | `0.40` | Min consensus score |
+| | `--mtf-consensus-max` | `0.60` | Max consensus score |
+| **Sizing** | `--dynamic-sizing` | False | Enable dynamic position sizing |
+| | `--position-size-pct` | `0.05` | Position size (% of equity) |
+| **Hedging** | `--enable-hedge` | False | Enable delta hedging |
+| | `--hedge-threshold` | `0.10` | Delta threshold for hedge |
+| **Other** | `--use-optimizer` | False | Run parameter optimizer |
+| | `--alpaca` | False | Use Alpaca broker |
+| | `--no-liquidity-gate` | False | Disable liquidity checks |
 
 ### Run Optimizer
 ```bash
