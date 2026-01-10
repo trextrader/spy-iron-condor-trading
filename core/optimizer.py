@@ -266,6 +266,10 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             if chunk.empty:
                 continue
 
+            # Deduplicate within chunk to save RAM
+            if 'date' in chunk.columns and 'option_symbol' in chunk.columns:
+                 chunk.drop_duplicates(subset=['date', 'option_symbol'], keep='first', inplace=True)
+
             chunks.append(chunk)
             
             if i % 5 == 0:
@@ -273,6 +277,12 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
                 
         print(f"      ...Consolidating {len(chunks)} chunks...")
         options_df = pd.concat(chunks, ignore_index=True, copy=False)
+        
+        # Deduplicate globally (Handle duplicates across chunks)
+        if 'date' in options_df.columns and 'option_symbol' in options_df.columns:
+             print(f"      ...Deduplicating {len(options_df)} records...")
+             options_df.drop_duplicates(subset=['date', 'option_symbol'], keep='first', inplace=True)
+             print(f"      ...Unique records: {len(options_df)}")
         del chunks
         import gc; gc.collect()
         
