@@ -197,7 +197,13 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
     # === Load Options Data (Intraday or Synthetic) ===
     if preloaded_options is not None:
         options_by_date = preloaded_options
-        is_intraday = getattr(r_cfg, 'use_intraday_data', False) # Check config if preloaded
+        # Auto-detect intraday by checking keys
+        sample_keys = list(preloaded_options.keys())[:10]
+        has_datetime_keys = any(isinstance(k, dt.datetime) for k in sample_keys)
+        is_intraday = has_datetime_keys or getattr(r_cfg, 'use_intraday_data', False)
+        
+        # Ensure total_bars is defined for progress tracking
+        total_bars = len(df) if df is not None else 0
     else:
         # Use explicit path if provided, otherwise fallback to defaults
         if r_cfg.options_data_path and os.path.exists(r_cfg.options_data_path):
@@ -318,7 +324,8 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
 
     # === Strategy Definition ===
     class IronCondorStrategy(bt.Strategy):
-        params = dict(s_cfg=None, r_cfg=None, sync_engine=None, options_data=None, is_intraday=False, neural_forecasts=None, verbose=True)
+        params = dict(s_cfg=None, r_cfg=None, sync_engine=None, options_data=None, 
+                      is_intraday=False, neural_forecasts=None, verbose=True, total_bars=0)
 
         def __init__(self):
             self.s_cfg = self.params.s_cfg
@@ -328,6 +335,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             self.is_intraday = self.params.is_intraday
             self.neural_forecasts = self.params.neural_forecasts # Cached DF
             self.verbose = self.params.verbose
+            self.total_bars = self.params.total_bars
             
             # Performance Tracking
             self.pnl = 0.0
@@ -345,10 +353,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
 
             self.bars_since_trade = 100 
             self.price_cache = {} # Persistent cache for leg prices: {symbol: last_price}
-            
-            # Progress tracking
             self.bar_count = 0
-            self.total_bars = len(self.datas[0])
             self.last_progress_pct = -1
             
             # Log throttling for spammy filter messages
@@ -1097,7 +1102,9 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
     cerebro = bt.Cerebro()
     cerebro.broker.setcash(r_cfg.backtest_cash)
     cerebro.adddata(PandasData(dataname=df))
-    cerebro.addstrategy(IronCondorStrategy, s_cfg=s_cfg, r_cfg=r_cfg, sync_engine=sync_engine, options_data=options_by_date, is_intraday=is_intraday, neural_forecasts=neural_forecasts, verbose=verbose)
+    cerebro.addstrategy(IronCondorStrategy, s_cfg=s_cfg, r_cfg=r_cfg, sync_engine=sync_engine, 
+                        options_data=options_by_date, is_intraday=is_intraday, 
+                        neural_forecasts=neural_forecasts, verbose=verbose, total_bars=total_bars)
     
     # Add Analyzers
     # Run quietly
