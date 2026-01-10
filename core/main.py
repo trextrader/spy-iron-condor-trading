@@ -60,6 +60,8 @@ Examples:
     # --- Filters ---
     parser.add_argument("--ivr-min", type=float, default=0.0)
     parser.add_argument("--vix-max", type=float, default=25.0)
+    parser.add_argument("--min-volume", type=int, default=100, help="Minimum volume threshold for option legs")
+
 
     # --- Exits ---
     parser.add_argument("--profit-pct", type=float, default=0.50)
@@ -190,6 +192,7 @@ def main():
 
     strategy_config.iv_rank_min = args.ivr_min
     strategy_config.vix_threshold = args.vix_max
+    strategy_config.min_volume_threshold = args.min_volume
 
     strategy_config.profit_take_pct = args.profit_pct
     strategy_config.loss_close_multiple = args.loss_multiple
