@@ -1,76 +1,83 @@
 
 digraph OptimizationPipeline {
     rankdir=LR;
+    nodesep=0.6; 
+    ranksep=0.7;
     splines=ortho;
-    node [shape=box, style="filled,rounded", fontname="Arial", fontsize=10, margin=0.2];
-    edge [fontname="Arial", fontsize=9, color="#555555"];
+    compound=true;
+    node [shape=rect, style="filled,rounded", fontname="Helvetica", fontsize=11, margin="0.2,0.1"];
+    edge [fontname="Helvetica", fontsize=9, color="#444444", arrowsize=0.8];
+
+    # Title
+    labelloc="t";
+    label="Mamba 2 Neural Iron Condor System\nEnd-to-End Optimization Architecture";
+    fontsize=18;
 
     # --- Data Sources ---
     subgraph cluster_data {
-        label = "Layer 1: Data Factory";
-        style=dashed;
+        label = "1. Data Acquisition";
+        style="dashed,rounded";
         color="#888888";
-        fontcolor="#888888";
+        bgcolor="#F9F9F9";
         
-        Alpaca [label="Alpaca API\n(15-Min Intraday Bars)", fillcolor="#D1E8FF", color="#4A90E2"];
-        OptionsData [label="Option Feed\n(IVolatility / Synthetic)", fillcolor="#D1E8FF", color="#4A90E2"];
+        {rank=same; Alpaca; OptionsData}
+        Alpaca [label="Alpaca Intraday\n(15-Min Bars)", fillcolor="#E3F2FD", color="#2196F3"];
+        OptionsData [label="Option Feed\n(IVolatility)", fillcolor="#E3F2FD", color="#2196F3"];
     }
 
     # --- Training Pipeline ---
     subgraph cluster_training {
-        label = "Layer 2: Intelligence Training (Offline/Periodic)";
-        style=filled;
-        color="#F0F4F8";
+        label = "2. Neural Training (Offline)";
+        style="filled,rounded";
+        color="#E8EAF6";
+        bgcolor="#E8EAF6";
         
-        TrainScript [label="intelligence/train_mamba.py\n(Training Harness)", shape=component, fillcolor="#FFD6CC", color="#D0021B"];
+        TrainScript [label="Train Harness\n(train_mamba.py)", shape=component, fillcolor="#FFCDD2", color="#D32F2F"];
         
-        subgraph cluster_mamba_arch {
-            label = "DeepMamba 2 Architecture (GPU)";
+        subgraph cluster_model {
+            label = "DeepMamba 2 Network";
             style=filled;
             color="white";
             
-            Inputs [label="Features:\nLogRet, RSI, ATR, Vol", shape=ellipse, style=filled, fillcolor="#FFF0F0"];
-            SSM [label="Mamba 2 Block Stack\n(32 Layers / 1024 Dim)\n[State Space Duality]", shape=octagon, fillcolor="#FF9999", color="#D0021B"];
-            Outputs [label="Target:\nNext Return", shape=ellipse, style=filled, fillcolor="#FFF0F0"];
-            
-            Inputs -> SSM -> Outputs;
+            SSM [label="Mamba 2 Block Stack\n(32 Layers / 1024 Dim)\n[State Space Duality]", shape=octagon, fillcolor="#EF9A9A", color="#C62828"];
         }
 
-        ModelFile [label="models/mamba_active.pth\n(Optimized Weights)", shape=note, fillcolor="#FFF8C6", color="#F5A623"];
+        ModelWeights [label="Model Weights\n(mamba_active.pth)", shape=note, fillcolor="#FFF9C4", color="#FBC02D"];
         
         Alpaca -> TrainScript [label="Fetch History"];
-        TrainScript -> Inputs;
-        Outputs -> ModelFile [label="Save State"];
+        TrainScript -> SSM [label="Train (GPU)"];
+        SSM -> ModelWeights [label="Save State"];
     }
 
-    # --- Optimization Pipeline ---
-    subgraph cluster_optimization {
-        label = "Layer 3: Production Optimizer (Runtime)";
-        style=filled;
-        color="#F0FFF0";
+    # --- Production Runtime ---
+    subgraph cluster_runtime {
+        label = "3. Production Optimizer (Runtime)";
+        style="filled,rounded";
+        color="#E8F5E9";
+        bgcolor="#E8F5E9";
         
-        Optimizer [label="core/optimizer.py\n(Segmented Manager)", shape=hexagon, fillcolor="#D6FFD6", color="#417505", fontsize=11];
+        Optimizer [label="Optimizer Engine\n(Segmented Grid Search)", shape=hexagon, fillcolor="#A5D6A7", color="#2E7D32", fontsize=12, penwidth=2];
         
         subgraph cluster_backtest {
-            label = "Backtest Engine Instance";
+            label = "Backtest Instance";
             style=filled;
             color="white";
             
-            Inference [label="Mamba Inference Engine\n(Batch GPU Pre-Compute)", fillcolor="#FFCCBC", color="#D0021B"];
-            Strategy [label="Iron Condor Strategy\n(4-Leg Execution)", shape=folder, fillcolor="#E0FFE0", color="#417505"];
-            Filters [label="Logic Gates:\n- Neural Forecast\n- Fuzzy Sizing\n- VIX Regime", shape=record, fillcolor="#FFFFFF"];
+            Inference [label="Inference Engine\n(Batch GPU Pre-Compute)", fillcolor="#FFCCBC", color="#D84315"];
+            Strategy [label="Iron Condor Strategy\n(4-Leg Execution)", shape=folder, fillcolor="#C8E6C9", color="#2E7D32"];
             
-            Inference -> Filters [label="Regime Signal"];
-            Filters -> Strategy [label="Entry/Exit"];
+            Inference -> Strategy [label="Regime Signal"];
         }
 
-        Metrics [label="Analytics:\nNet Profit / MaxDD", shape=ellipse, fillcolor="#E8E8E8"];
-
-        Optimizer -> Strategy [label="Inject Params\n(Gen N)"];
-        OptionsData -> Strategy [label="Tick Data"];
-        ModelFile -> Inference [label="Load Brain"];
+        Metrics [label="Profit / MaxDD\nReport", shape=ellipse, fillcolor="#EEEEEE"];
         
-        Strategy -> Metrics [label="Performance"];
-        Metrics -> Optimizer [label="Feedback Loop"];
+        Optimizer -> Strategy [label="Inject Params", style=dashed];
+        Strategy -> Metrics [label="Result"];
+        Metrics -> Optimizer [label="Feedback"];
     }
+
+    # Inter-Cluster Edges
+    ModelWeights -> Inference [label="Load Weights", lhead=cluster_backtest];
+    OptionsData -> Strategy [label="Tick Data"];
+    
 }
