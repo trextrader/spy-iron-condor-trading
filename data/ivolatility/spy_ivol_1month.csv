@@ -1,4 +1,4 @@
-﻿symbol,exchange,date,underlying_price,option_symbol,expiration,strike,call_put,style,ask,bid,mean_price,volume,open_interest,iv,iv_raw,delta,gamma,vega,theta,rho,oi_2,option_id,trade_date_fetch
+symbol,exchange,date,underlying_price,option_symbol,expiration,strike,call_put,style,ask,bid,mean_price,volume,open_interest,iv,iv_raw,delta,gamma,vega,theta,rho,oi_2,option_id,trade_date_fetch
 SPY,NYSEArca,2026-01-02,683.17,SPY   260130C00582000,2026-01-30,582.0,C,A,104.89,102.1,103.494995,0,683.17,0.315577,0.315577,0.97194,0.001078,0.121792,-0.125878,0.429976,0,6,2026-01-02
 SPY,NYSEArca,2026-01-02,683.17,SPY   260130C00583000,2026-01-30,583.0,C,A,103.9,101.12,102.51,0,683.17,0.313765,0.313765,0.97134,0.001103,0.123952,-0.126753,0.430418,0,0,2026-01-02
 SPY,NYSEArca,2026-01-02,683.17,SPY   260130C00584000,2026-01-30,584.0,C,A,102.91,100.13,101.520004,0,683.17,0.311534,0.311534,0.970888,0.001126,0.125578,-0.127233,0.43094,0,1,2026-01-02
