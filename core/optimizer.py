@@ -413,7 +413,13 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             
             if strat is not None:
                 # Capture Metrics
-                net_profit = strat.pnl
+                # FIX: Use Mark-to-Market Equity (Unrealized P&L) for optimization logic
+                # This ensures the optimizer works even if trades haven't closed yet (short backtest window)
+                final_value = strat.broker.get_value()
+                starting_cash = strat.broker.startingcash
+                net_profit = final_value - starting_cash
+                
+                # net_profit = strat.pnl # OLD: Only counted closed trades
                 max_dd = max(strat.drawdowns) if strat.drawdowns else 0.0
                 np_dd_ratio = net_profit / max_dd if max_dd > 0 else 0.0
                 
