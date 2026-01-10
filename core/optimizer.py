@@ -139,9 +139,17 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
         end_dt = pd.Timestamp(run_cfg.backtest_end) + pd.Timedelta(days=1)
         full_df = full_df[full_df.index < end_dt]
     
-    if run_cfg.backtest_samples and run_cfg.backtest_samples > 0:
-        if len(full_df) > run_cfg.backtest_samples:
-            full_df = full_df.iloc[-run_cfg.backtest_samples:]
+    # Select Options Data Source (determine BEFORE applying sample limit)
+    using_custom_options = getattr(run_cfg, 'options_data_path', None) and os.path.exists(run_cfg.options_data_path)
+    
+    # Apply backtest_samples limit ONLY if NOT using custom high-fidelity options data
+    # This ensures full date range coverage for validation runs
+    if not using_custom_options:
+        if run_cfg.backtest_samples and run_cfg.backtest_samples > 0:
+            if len(full_df) > run_cfg.backtest_samples:
+                full_df = full_df.iloc[-run_cfg.backtest_samples:]
+    else:
+        print(f"      [High-Fidelity Mode] Using FULL Spot Data ({len(full_df)} bars) for validation.")
             
     
     # Select Options Data Source
