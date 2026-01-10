@@ -413,11 +413,17 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             
             if strat is not None:
                 # Capture Metrics
-                # FIX: Use Mark-to-Market Equity (Unrealized P&L) for optimization logic
-                # This ensures the optimizer works even if trades haven't closed yet (short backtest window)
-                final_value = strat.broker.get_value()
-                starting_cash = strat.broker.startingcash
-                net_profit = final_value - starting_cash
+                # Capture Metrics
+                # FIX: Strategy uses Manual Accounting (Simulated Broker).
+                # Current Equity = Realized PnL (strat.pnl) + Unrealized PnL (strat.current_unrealized_pnl)
+                # Backtrader broker.get_value() is invalid because self.buy() is not called in this mode.
+                realized_pnl = getattr(strat, 'pnl', 0.0)
+                unrealized_pnl = getattr(strat, 'current_unrealized_pnl', 0.0)
+                
+                net_profit = realized_pnl + unrealized_pnl
+                
+                # Debug output to verify fix (temporary, can be removed later)
+                # print(f"       [DEBUG] Realized=${realized_pnl:.0f} Unrealized=${unrealized_pnl:.0f} Net=${net_profit:.0f}")
                 
                 # net_profit = strat.pnl # OLD: Only counted closed trades
                 max_dd = max(strat.drawdowns) if strat.drawdowns else 0.0
