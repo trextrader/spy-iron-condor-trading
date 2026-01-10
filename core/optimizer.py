@@ -199,6 +199,22 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             final_cols = [c for c in essential_cols if c in chunk.columns]
             chunk = chunk[final_cols]
             
+            # === CRITICAL MEMORY OPTIMIZATION: Filter by Date IMMEDIATELY ===
+            # Convert date col to normalize
+            chunk['date'] = pd.to_datetime(chunk['date'])
+            
+            if hasattr(run_cfg, 'backtest_start') and run_cfg.backtest_start:
+                s_dt = pd.Timestamp(run_cfg.backtest_start)
+                chunk = chunk[chunk['date'] >= s_dt]
+            
+            if hasattr(run_cfg, 'backtest_end') and run_cfg.backtest_end:
+                e_dt = pd.Timestamp(run_cfg.backtest_end) + pd.Timedelta(days=1)
+                chunk = chunk[chunk['date'] < e_dt]
+                
+            if chunk.empty:
+                continue
+            # ================================================================
+
             # Append processed chunk
             chunks.append(chunk)
             
