@@ -1,6 +1,7 @@
 
 import os
 import time
+import argparse
 import numpy as np
 import pandas as pd
 import torch
@@ -8,53 +9,83 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import pandas_ta as ta
+from datetime import datetime, timedelta
 
-# Try to import yfinance, else fail gracefully
-try:
-    import yfinance as yf
-except ImportError:
-    print("Please install yfinance: pip install yfinance")
-    yf = None
+# Alpaca Imports
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockBarsRequest
+from alpaca.data.timeframe import TimeFrame
 
 from intelligence.mamba_engine import DeepMamba, HAS_MAMBA
 
-# Configuration
-CONFIG = {
+# Configuration defaults
+DEFAULT_CONFIG = {
     'symbol': 'SPY',
-    'start_date': '2015-01-01',
-    'end_date': '2024-12-31', # Train up to end of 2024
-    'interval': '1h',         # 1-hour bars for stability (or 15m if data allows)
     'lookback': 60,
-    'd_model': 256,           # Match Inference defaults (or 1024 if Pro)
-    'layers': 6,
-    'epochs': 20,
-    'batch_size': 64,
-    'lr': 1e-4,
+    'd_model': 1024,   # Default to Large
+    'layers': 32,
+    'epochs': 50,
+    'batch_size': 128,
+    'lr': 5e-5,
     'model_path': 'models/mamba_active.pth'
 }
 
-def download_data():
-    if not yf:
-        raise ImportError("yfinance not installed")
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train Mamba on Alpaca Intraday Data")
+    parser.add_argument("--key", type=str, required=True, help="Alpaca API Key")
+    parser.add_argument("--secret", type=str, required=True, help="Alpaca Secret Key")
+    parser.add_argument("--symbol", type=str, default="SPY")
+    parser.add_argument("--years", type=int, default=2, help="Years of history to fetch")
+    parser.add_argument("--timeframe", type=str, default="15Min", choices=["1Min", "5Min", "15Min", "1Hour"])
+    parser.add_argument("--d-model", type=int, default=1024)
+    parser.add_argument("--layers", type=int, default=32)
+    return parser.parse_args()
+
+def download_alpaca_data(key, secret, symbol, years=2, tf_str="15Min"):
+    print(f"[Alpaca] Connecting to fetch {years} years of {tf_str} data for {symbol}...")
+    client = StockHistoricalDataClient(key, secret)
     
-    print(f"Downloading {CONFIG['symbol']} data from {CONFIG['start_date']}...")
-    df = yf.download(CONFIG['symbol'], start=CONFIG['start_date'], end=CONFIG['end_date'], interval=CONFIG['interval'])
-    if df.empty:
-        raise ValueError("No data downloaded")
+    end_dt = datetime.now()
+    start_dt = end_dt - timedelta(days=365 * years)
     
-    # Flatten MultiIndex if necessary
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+    # Map timeframe string to Alpaca Object
+    if tf_str == "15Min":
+        tf = TimeFrame(15, TimeFrame.Minute)
+    elif tf_str == "5Min":
+        tf = TimeFrame(5, TimeFrame.Minute)
+    elif tf_str == "1Min":
+        tf = TimeFrame.Minute
+    else:
+        tf = TimeFrame.Hour
+
+    req = StockBarsRequest(
+        symbol_or_symbols=symbol,
+        timeframe=tf,
+        start=start_dt,
+        end=end_dt
+    )
     
-    # Standardize columns
-    df = df.rename(columns={
-        'Open': 'open', 'High': 'high', 'Low': 'low', 
-        'Close': 'close', 'Volume': 'volume'
-    })
-    return df
+    try:
+        bars = client.get_stock_bars(req)
+        df = bars.df
+        
+        # MultiIndex cleanup (symbol, timestamp) -> just timestamp
+        if isinstance(df.index, pd.MultiIndex):
+            df = df.reset_index(level=0, drop=True) # Drop symbol level
+        
+        print(f"[Alpaca] Downloaded {len(df)} bars.")
+        return df
+    except Exception as e:
+        print(f"[Error] Alpaca download failed: {e}")
+        return pd.DataFrame()
 
 def prepare_features(df):
+    if df.empty:
+        raise ValueError("Cannot prepare features for empty DataFrame")
+        
     print("Feature Engineering...")
+    # Ensure lowercase columns
+    df.columns = [c.lower() for c in df.columns]
     
     # Matches logic in mamba_engine.py precompute_all
     closes = df['close']
@@ -101,19 +132,20 @@ def create_sequences(X, y, lookback):
     Xs, ys = [], []
     for i in range(len(X) - lookback):
         Xs.append(X[i:(i + lookback)])
-        ys.append(y[i + lookback - 1]) # Predict NEXT step after sequence? 
-        # Actually standard forecasting predicts y[i+lookback] (the step AFTER the window)
-        # Our 'y' is already shifted (-1).
-        # So X[0..59] (Bar 0 to 59) predicts y[59] (which is ret[60]).
+        ys.append(y[i + lookback - 1]) 
     
     return np.array(Xs), np.array(ys)
 
 def train():
+    args = parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Training on {device}...")
     
     # 1. Data
-    df = download_data()
+    df = download_alpaca_data(args.key, args.secret, args.symbol, args.years, args.timeframe)
+    if df.empty:
+        return
+
     X, y = prepare_features(df)
     
     # Split
@@ -122,16 +154,16 @@ def train():
     y_train, y_val = y[:split], y[split:]
     
     # Sequences
-    X_train_seq, y_train_seq = create_sequences(X_train, y_train, CONFIG['lookback'])
-    X_val_seq, y_val_seq = create_sequences(X_val, y_val, CONFIG['lookback'])
+    X_train_seq, y_train_seq = create_sequences(X_train, y_train, DEFAULT_CONFIG['lookback'])
+    X_val_seq, y_val_seq = create_sequences(X_val, y_val, DEFAULT_CONFIG['lookback'])
     
     print(f"Train samples: {len(X_train_seq)} | Val samples: {len(X_val_seq)}")
-    
+
     # Loaders
     train_loader = DataLoader(TensorDataset(torch.from_numpy(X_train_seq), torch.from_numpy(y_train_seq)), 
-                              batch_size=CONFIG['batch_size'], shuffle=True)
+                              batch_size=DEFAULT_CONFIG['batch_size'], shuffle=True)
     val_loader = DataLoader(TensorDataset(torch.from_numpy(X_val_seq), torch.from_numpy(y_val_seq)), 
-                            batch_size=CONFIG['batch_size'])
+                            batch_size=DEFAULT_CONFIG['batch_size'])
     
     # 2. Model
     if not HAS_MAMBA:
@@ -139,21 +171,26 @@ def train():
         return
 
     # Use Pro config if available
+    d_model = args.d_model
+    layers = args.layers
+    
+    print(f"Using DeepMamba Config: d_model={d_model}, layers={layers}")
+
     model = DeepMamba(
-        d_model=CONFIG['d_model'],
-        n_layers=CONFIG['layers'],
+        d_model=d_model,
+        n_layers=layers,
         d_state=32,
         d_conv=4,
         expand=2
     ).to(device)
     
     criterion = nn.MSELoss()
-    optimizer = optim.AdamW(model.parameters(), lr=CONFIG['lr'], weight_decay=1e-5)
+    optimizer = optim.AdamW(model.parameters(), lr=DEFAULT_CONFIG['lr'], weight_decay=1e-5)
     
     # 3. Loop
     best_loss = float('inf')
     
-    for epoch in range(CONFIG['epochs']):
+    for epoch in range(DEFAULT_CONFIG['epochs']):
         model.train()
         train_loss = 0.0
         
@@ -161,20 +198,14 @@ def train():
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             
             optimizer.zero_grad()
-            # Padding to d_model happens here if needed? 
-            # DeepMamba expects input (B, L, d_model).
-            # Our X is (B, L, 4).
-            # We need a projection layer! 
-            # Wait, DeepMamba in mamba_engine doesn't have an input projection?
-            # Let's check mamba_engine source.
             
-            # Temporary Fix: Pad with zeros to d_model inside loop
+            # Pad with zeros to d_model
             B, L, F = X_batch.shape
-            X_pad = torch.zeros((B, L, CONFIG['d_model']), device=device)
+            X_pad = torch.zeros((B, L, d_model), device=device)
             X_pad[:, :, :F] = X_batch
             
             # Forward
-            out = model(X_pad) # (B, 1) or (B, L, D)? DeepMamba returns (B, 1) usually via head
+            out = model(X_pad) # (B, 1)
             
             loss = criterion(out.squeeze(), y_batch)
             loss.backward()
@@ -188,7 +219,7 @@ def train():
             for X_batch, y_batch in val_loader:
                 X_batch, y_batch = X_batch.to(device), y_batch.to(device)
                 B, L, F = X_batch.shape
-                X_pad = torch.zeros((B, L, CONFIG['d_model']), device=device)
+                X_pad = torch.zeros((B, L, d_model), device=device)
                 X_pad[:, :, :F] = X_batch
                 
                 out = model(X_pad)
@@ -197,13 +228,13 @@ def train():
         avg_train = train_loss / len(train_loader)
         avg_val = val_loss / len(val_loader)
         
-        print(f"Epoch {epoch+1}/{CONFIG['epochs']} | Train Loss: {avg_train:.4f} | Val Loss: {avg_val:.4f}")
+        print(f"Epoch {epoch+1}/{DEFAULT_CONFIG['epochs']} | Train Loss: {avg_train:.4f} | Val Loss: {avg_val:.4f}")
         
         if avg_val < best_loss:
             best_loss = avg_val
             # Save
             os.makedirs('models', exist_ok=True)
-            torch.save(model.state_dict(), CONFIG['model_path'])
+            torch.save(model.state_dict(), DEFAULT_CONFIG['model_path'])
             print(f"  [Saved] New best model: {avg_val:.4f}")
 
     print("Training Complete.")
