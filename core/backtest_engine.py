@@ -21,6 +21,9 @@ from strategies.options_strategy import (
 )
 from intelligence.regime_filter import classify_regime, MarketRegime
 from core.risk_manager import RiskManager, PortfolioGreeks
+from intelligence.fuzzy_engine import calculate_atr_stop_multiplier
+from qtmf.models import TradeIntent
+from qtmf.facade import benchmark_and_size
 
 # Safe import for Mamba
 try:
@@ -438,7 +441,8 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                             atr_pct = tf_snapshot.get(primary_tf, {}).get('atr_pct', 0.01) if tf_snapshot and tf_snapshot.get(primary_tf) else 0.01
                             
                             # Import and calculate dynamic multiplier
-                            from intelligence.fuzzy_engine import calculate_atr_stop_multiplier
+                            # from intelligence.fuzzy_engine import calculate_atr_stop_multiplier # Moved to top
+
                             atr_base = getattr(self.s_cfg, 'atr_stop_base_multiplier', 1.5)
                             dynamic_multiplier = calculate_atr_stop_multiplier(atr_pct, atr_base)
                             stop_loss = self.active_position.credit_received * (1 + dynamic_multiplier)
@@ -855,8 +859,8 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                          print(f"[Neural:GPU] Conf={neural_forecast_data['confidence']:.2f} | Bull={neural_forecast_data['prob_bull']:.2f}")
 
             # === Sizing via QTMF Facade (Neuro-Fuzzy) ===
-            from qtmf.models import TradeIntent
-            from qtmf.facade import benchmark_and_size
+            # from qtmf.models import TradeIntent # Moved to top
+            # from qtmf.facade import benchmark_and_size # Moved to top
 
             # Calculate Gaussian Confidence from Fuzzy Memberships
             gaussian_confidence = (
