@@ -144,14 +144,27 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
     # Optimized Chunked Loader to prevent OOM
     print("      ...Reading CSV in chunks to optimize memory...")
     
-    # 1. Define required columns and mapping
-    opt_dtypes = {
-        'strike': 'float32', 'bid_1545': 'float32', 'ask_1545': 'float32', 
-        'underlying_last': 'float32', 'delta_1545': 'float32', 
-        'gamma_1545': 'float32', 'vega_1545': 'float32', 
-        'theta_1545': 'float32', 'iv_1545': 'float32'
+    # 1. Define dtypes for memory efficiency
+    # Note: 'date' and 'expiration' are parsed as dates
+    dtypes_map = {
+        'strike': 'float32', 
+        'bid': 'float32', 'ask': 'float32', 'last_price': 'float32',
+        'delta': 'float32', 'gamma': 'float32', 'vega': 'float32', 'theta': 'float32',
+        'implied_volatility': 'float32',
+        'underlying_last': 'float32',
+        'contract_type': 'category',
+        'option_symbol': 'str' # 'string' or object
     }
     
+    # Fallback mappings for old files
+    dtypes_input = dtypes_map.copy()
+    dtypes_input.update({
+        'bid_1545': 'float32', 'ask_1545': 'float32',
+        'delta_1545': 'float32', 'gamma_1545': 'float32',
+        'vega_1545': 'float32', 'theta_1545': 'float32',
+        'iv_1545': 'float32'
+    })
+
     chunk_size = 500000
     chunks = []
     
@@ -159,7 +172,8 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
         reader = pd.read_csv(
             options_path, 
             parse_dates=["date", "expiration"], 
-            chunksize=chunk_size
+            chunksize=chunk_size,
+            dtype=dtypes_input
         )
         
         for i, chunk in enumerate(reader):
@@ -178,10 +192,20 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
                 if col not in chunk.columns:
                     chunk[col] = 0.0
             
+            # Ensure float32 (in case default was 0.0 float64)
+            float_cols = ['strike', 'bid', 'ask', 'last_price', 'delta', 'gamma', 'vega', 'theta', 'implied_volatility']
+            for c in float_cols:
+                if c in chunk.columns:
+                    chunk[c] = chunk[c].astype('float32')
+
             if 'contract_type' not in chunk.columns:
                 if 'type' in chunk.columns: chunk['contract_type'] = chunk['type']
                 elif 'cp_flag' in chunk.columns: chunk['contract_type'] = chunk['cp_flag']
                 else: chunk['contract_type'] = 'C' # Fallback
+            
+            # Convert category
+            if chunk['contract_type'].dtype == 'object':
+                 chunk['contract_type'] = chunk['contract_type'].astype('category')
                 
             if 'bid' not in chunk.columns: chunk['bid'] = 0.0
             if 'ask' not in chunk.columns: chunk['ask'] = 0.0
@@ -198,22 +222,19 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
                     chunk['strike'].astype(str)
                  )
 
-            # Prune to essentials
+            # Prune to essentials (Exclude volume/oi to save RAM)
             essential_cols = [
                 'date', 'expiration', 'strike', 'contract_type', 
-                'bid', 'ask', 'underlying_last', 'last_price',
+                'bid', 'ask', 'last_price',
                 'delta', 'gamma', 'vega', 'theta', 'implied_volatility',
                 'option_symbol'
             ]
             
-            # Ensure only existing are selected (safe intersection)
+            # Ensure only existing are selected
             final_cols = [c for c in essential_cols if c in chunk.columns]
             chunk = chunk[final_cols]
             
-            # === CRITICAL MEMORY OPTIMIZATION: Filter by Date IMMEDIATELY ===
-            # Convert date col to normalize
-            chunk['date'] = pd.to_datetime(chunk['date'])
-            
+            # Filter by Date
             if hasattr(run_cfg, 'backtest_start') and run_cfg.backtest_start:
                 s_dt = pd.Timestamp(run_cfg.backtest_start)
                 chunk = chunk[chunk['date'] >= s_dt]
@@ -224,27 +245,26 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
                 
             if chunk.empty:
                 continue
-            # ================================================================
 
-            # Append processed chunk
             chunks.append(chunk)
             
-            # Debug progress
             if i % 5 == 0:
                 print(f"      ...Processed chunk {i+1}...", end="\r")
                 
         print(f"      ...Consolidating {len(chunks)} chunks...")
-        options_df = pd.concat(chunks, ignore_index=True)
-        del chunks # Free chunk list list
+        options_df = pd.concat(chunks, ignore_index=True, copy=False)
+        del chunks
         import gc; gc.collect()
         
     except Exception as e:
         print(f"[ERROR] Failed to load options data: {e}")
         return
 
+    # Optimized: Dict of DataFrames (Reference, no copy)
     preloaded_options = {}
     for date, group in options_df.groupby('date'):
-        preloaded_options[date.date()] = group.to_dict('records')
+        preloaded_options[date.date()] = group 
+        # NOT .to_dict('records') -> saves huge memory
     
     # Final cleanup
     del options_df

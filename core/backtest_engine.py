@@ -532,26 +532,48 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                 print(f"[DEBUG] Looking for: {dt_now if self.is_intraday else date_now}")
                 print(f"[DEBUG] Records found: {len(chain_records)}")
             
-            if not chain_records:
+            if chain_records is None or (isinstance(chain_records, list) and not chain_records) or (isinstance(chain_records, pd.DataFrame) and chain_records.empty):
                 return
             
             if not self.is_intraday:
-                # Standard conversion for Synthetic data (list of records)
-                quote_chain = [OptionQuote(
-                    symbol=r['option_symbol'],
-                    expiration=r['expiration'].date(),
-                    strike=r['strike'],
-                    is_call=(r['contract_type'] == 'call'),
-                    bid=r['bid'],
-                    ask=r['ask'],
-                    mid=r['last_price'],
-                    delta=r['delta'],
-                    iv=r['implied_volatility'],
-                    # Stage 3: Greeks for Risk Management
-                    gamma=r.get('gamma', 0.0) or 0.0,
-                    vega=r.get('vega', 0.0) or 0.0,
-                    theta=r.get('theta', 0.0) or 0.0
-                ) for r in chain_records]
+                # Standard conversion for Synthetic data (DataFrame or list of records)
+                if isinstance(chain_records, pd.DataFrame):
+                    # Iterate dataframe efficiently using itertuples
+                    quote_chain = []
+                    for r in chain_records.itertuples():
+                        # Handle potential missing columns with getattr
+                        quote_chain.append(OptionQuote(
+                            symbol=getattr(r, 'option_symbol'),
+                            expiration=getattr(r, 'expiration').date(),
+                            strike=getattr(r, 'strike'),
+                            is_call=(getattr(r, 'contract_type') == 'call'),
+                            bid=getattr(r, 'bid'),
+                            ask=getattr(r, 'ask'),
+                            mid=getattr(r, 'last_price'),
+                            delta=getattr(r, 'delta'),
+                            iv=getattr(r, 'implied_volatility'),
+                            # Stage 3: Greeks for Risk Management
+                            gamma=getattr(r, 'gamma', 0.0),
+                            vega=getattr(r, 'vega', 0.0),
+                            theta=getattr(r, 'theta', 0.0)
+                        ))
+                else:
+                    # Legacy: List of dicts
+                    quote_chain = [OptionQuote(
+                        symbol=r['option_symbol'],
+                        expiration=r['expiration'].date(),
+                        strike=r['strike'],
+                        is_call=(r['contract_type'] == 'call'),
+                        bid=r['bid'],
+                        ask=r['ask'],
+                        mid=r['last_price'],
+                        delta=r['delta'],
+                        iv=r['implied_volatility'],
+                        # Stage 3: Greeks for Risk Management
+                        gamma=r.get('gamma', 0.0) or 0.0,
+                        vega=r.get('vega', 0.0) or 0.0,
+                        theta=r.get('theta', 0.0) or 0.0
+                    ) for r in chain_records]
 
             # === Market Realism (Stage 1) ===
             # Calculate Realized Volatility
