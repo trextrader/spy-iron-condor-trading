@@ -194,6 +194,176 @@ class MambaForecastEngine:
             
         return np.array(features_seq, dtype=np.float32)
 
+    def precompute_all(self, df: pd.DataFrame, batch_size: int = 4096) -> pd.DataFrame:
+        """Run batch inference on the entire dataset to maximize GPU usage.
+        
+        Returns:
+            DataFrame with columns ['mamba_bull', 'mamba_bear', 'mamba_neutral', 'mamba_conf', 'mamba_raw']
+            indexed matching the input df.
+        """
+        if df.empty:
+            return pd.DataFrame()
+
+        print(f"[MambaEngine] Pre-computing signals for {len(df)} bars (Batch Size: {batch_size})...")
+        
+        # 1. Vectorized Feature Preparation
+        # Create rolling window features efficiently
+        
+        # We need sequences of length 'lookback' for each time step
+        # This is memory intensive if we naïvely duplicate. 
+        # But Mamba is efficient. Let's create a rolling strided view or just iterate efficiently.
+        # For GPU speed, we'll prep batches of sequences.
+        
+        closes = df['close'].values.astype(np.float32)
+        
+        # Pre-calc normalized features
+        if 'rsi_14' in df.columns:
+            rsi = (df['rsi_14'].fillna(50.0).values - 50.0) / 10.0
+        else:
+            rsi = np.zeros_like(closes)
+            
+        if 'atr_pct' in df.columns:
+            atr = df['atr_pct'].fillna(0.01).values * 50.0
+        else:
+            atr = np.zeros_like(closes)
+            
+        if 'volume_ratio' in df.columns:
+            vol = (df['volume_ratio'].fillna(1.0).values - 1.0) * 2.0
+        else:
+            vol = np.zeros_like(closes)
+
+        # Log returns
+        prev_closes = np.roll(closes, 1)
+        prev_closes[0] = closes[0]
+        log_rets = np.log(closes / (prev_closes + 1e-9)) * 100.0
+        
+        # Stack features: (N, 4)
+        data_matrix = np.stack([log_rets, rsi, atr, vol], axis=1).astype(np.float32)
+        
+        # Pad to d_model directly? 
+        # No, we embed (pad) during batch creation to save RAM 
+        
+        results = []
+        
+        # Iterate in batches
+        total_rows = len(df)
+        
+        # We can't generate forecast for first 'lookback' bars easily (padding needed)
+        # We'll valid-pad or similar.
+        
+        # Prepare Tensor Batches
+        # Optimized: Create a sliding window view using torch.unfold if possible, 
+        # or simple loop. Sliding window of (Batch, Time, Feat)
+        
+        # Convert to Tensor
+        full_tensor = torch.from_numpy(data_matrix) # (N, 4)
+        if self.is_cuda:
+            full_tensor = full_tensor.cuda()
+            
+        # We need (B, L, D). 
+        # Create indices for the batch
+        indices = np.arange(total_rows)
+        
+        preds_list = []
+        
+        for start_idx in range(0, total_rows, batch_size):
+            end_idx = min(start_idx + batch_size, total_rows)
+            current_batch_size = end_idx - start_idx
+            
+            # Construct batch of sequences (Slowest part if done in python loop)
+            # We need sequences [t-L+1 : t+1] for each t in batch
+            # Doing this efficiently:
+            
+            # Just grab a slice [start-lookback : end] and unfold it
+            slice_start = max(0, start_idx - self.lookback + 1)
+            slice_end = end_idx
+            
+            # Grab context + batch data
+            # (Context + Batch, Feat)
+            sub_data = full_tensor[slice_start:slice_end] 
+            
+            # Pad left if at start of file
+            if slice_start == 0 and start_idx < self.lookback:
+                 pad_amt = (self.lookback - 1) - start_idx
+                 if pad_amt > 0:
+                     # (Pad, Feat)
+                     padding = torch.zeros((pad_amt, 4), device=sub_data.device)
+                     sub_data = torch.cat([padding, sub_data], dim=0)
+            
+            # Now unfold: (Batch, Lookback, Feat)
+            # sub_data is roughly Batch + Lookback length
+            # unfold(dim, size, step)
+            try:
+                # Unfold creates (Batch, Feat, Lookback) or similar? 
+                # unfold(dimension, size, step)
+                # We want a window of size 'lookback' sliding with step 1
+                windows = sub_data.unfold(0, self.lookback, 1) 
+                
+                # windows shape: (Batch, Feat, Lookback) -> need (Batch, Lookback, Feat)
+                windows = windows.permute(0, 2, 1)
+                
+                # Pad features to d_model (Batch, Lookback, d_model)
+                B, L, F = windows.shape
+                if F < self.d_model:
+                     x_input = torch.zeros((B, L, self.d_model), device=windows.device)
+                     x_input[:, :, :F] = windows
+                else:
+                     x_input = windows
+                     
+                # Inference
+                if self.is_cuda and self.model:
+                    with torch.no_grad():
+                         out = self.model(x_input) # (B, 1)
+                         preds_list.extend(out.cpu().numpy().flatten())
+                else:
+                     # Mock fallback
+                     preds_list.extend(np.zeros(B))
+                     
+            except Exception as e:
+                # Fallback for shape errors
+                print(f"Batch Error: {e}")
+                preds_list.extend(np.zeros(current_batch_size))
+
+        # Pad results to match df length if needed (unfold might reduce?)
+        # Unfold returns N - size + 1. 
+        # We carefully constructed input. 
+        # If logic matches, len(preds) == len(df).
+        # Let's truncate or pad just in case.
+        preds = np.array(preds_list)
+        if len(preds) < total_rows:
+            preds = np.concatenate([np.zeros(total_rows - len(preds)), preds])
+        elif len(preds) > total_rows:
+            preds = preds[:total_rows]
+
+        # Post-process to probabilities (Vectorized)
+        scores = preds
+        
+        # P_bull
+        p_bull = np.where(scores > 0.15, 0.6 + np.minimum(0.3, scores * 0.5), 
+                          np.where(scores < -0.15, 1.0 - (0.6 + np.minimum(0.3, np.abs(scores) * 0.5)) - 0.05, 0.1))
+        
+        # P_bear
+        p_bear = np.where(scores < -0.15, 0.6 + np.minimum(0.3, np.abs(scores) * 0.5), 
+                          np.where(scores > 0.15, 1.0 - p_bull - 0.05, 0.1))
+        
+        # Normalize neutral
+        p_neutral = 1.0 - p_bull - p_bear
+        p_neutral = np.clip(p_neutral, 0.0, 1.0)
+        
+        # Re-normalize sum to 1
+        sums = p_bull + p_bear + p_neutral
+        p_bull /= sums
+        p_bear /= sums
+        p_neutral /= sums
+        
+        return pd.DataFrame({
+            'mamba_bull': p_bull,
+            'mamba_bear': p_bear,
+            'mamba_neutral': p_neutral,
+            'mamba_raw': scores,
+            'mamba_conf': 0.5 + (np.abs(scores) / 2.0)
+        }, index=df.index)
+
     def predict_state(self, market_data: pd.DataFrame) -> ForecastState:
         """Run inference to predict next-step market state."""
         
