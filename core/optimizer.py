@@ -99,6 +99,17 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
     full_df['timestamp'] = pd.to_datetime(full_df['timestamp']).dt.tz_localize(None)
     full_df.set_index("timestamp", inplace=True)
     full_df.sort_index(inplace=True)
+    
+    # === PERFORMANCE OPTIMIZATION: Resample Spot Data to 15-Min ===
+    print("[Speed] Resampling Spot Data to 15-Minute Bars (15T)...")
+    full_df = full_df.resample('15min').agg({
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'volume': 'sum'
+    }).dropna()
+    # ==============================================================
 
     # Filter by date range if specified (Crucial for performance)
     if hasattr(run_cfg, 'backtest_start') and run_cfg.backtest_start:
