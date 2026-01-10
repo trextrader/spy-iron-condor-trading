@@ -198,12 +198,20 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
     try:
         reader = pd.read_csv(
             options_path, 
-            parse_dates=["date", "expiration"], 
+            # parse_dates=["date", "expiration"], # Removed to prevent errors on files missing these cols
             chunksize=chunk_size,
             dtype=dtypes_input
         )
         
         for i, chunk in enumerate(reader):
+            # Explicit Parsing to handle string dates
+            if 'date' in chunk.columns and chunk['date'].dtype == 'object':
+                chunk['date'] = pd.to_datetime(chunk['date'])
+            if 'expiration' in chunk.columns and chunk['expiration'].dtype == 'object':
+                chunk['expiration'] = pd.to_datetime(chunk['expiration'])
+            if 'timestamp' in chunk.columns and chunk['timestamp'].dtype == 'object':
+                chunk['timestamp'] = pd.to_datetime(chunk['timestamp'])
+
             # Map columns explicitly per chunk
             cols_map = {
                 'bid_1545': 'bid', 'ask_1545': 'ask', 'cp_flag': 'contract_type',
