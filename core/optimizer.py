@@ -143,7 +143,7 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
     essential_cols = [
         'date', 'expiration', 'strike', 'cp_flag', 
         'bid_1545', 'ask_1545', 'underlying_last', 
-        'delta_1545', 'gamma_1545', 'vega_1545', 'theta_1545',
+        'delta_1545', 'gamma_1545', 'vega_1545', 'theta_1545', 'iv_1545',
         'option_symbol', 'contract_type', 'type', 'bid', 'ask'
     ]
     # Filter only if they exist
@@ -151,23 +151,30 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
     options_df = options_df[existing_essential]
 
     # Standardize column names for Backtest Engine
-    # Engine expects: 'bid', 'ask', 'contract_type'
-    # Data might have: 'bid_1545', 'ask_1545', 'cp_flag'
-    
+    # Map ALL 1545 suffixes to base names used by engine
     cols_map = {
         'bid_1545': 'bid',
         'ask_1545': 'ask',
-        'cp_flag': 'contract_type' # Engine wants 'contract_type'
+        'cp_flag': 'contract_type',
+        'delta_1545': 'delta',
+        'gamma_1545': 'gamma',
+        'vega_1545': 'vega',
+        'theta_1545': 'theta',
+        'iv_1545': 'implied_volatility'
     }
     options_df.rename(columns=cols_map, inplace=True)
     
-    # Safety Check: If rename didn't catch it (because maybe col was already named 'type')
-    # Synthetic data usually uses 'cp_flag' for Call/Put
+    # Safety Check: If rename didn't catch it
     if 'contract_type' not in options_df.columns:
         if 'type' in options_df.columns:
             options_df['contract_type'] = options_df['type']
         elif 'cp_flag' in options_df.columns:
              options_df['contract_type'] = options_df['cp_flag']
+
+    # Synthesize last_price (mid) if missing
+    if 'last_price' not in options_df.columns:
+        # Use simple mid-point as proxy for last price in synthetic data
+        options_df['last_price'] = (options_df['bid'] + options_df['ask']) / 2.0
 
     # Ensure option_symbol exists
     if 'option_symbol' not in options_df.columns:
