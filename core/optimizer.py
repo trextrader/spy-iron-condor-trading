@@ -203,7 +203,12 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
                 'delta_1545': 'delta', 'gamma_1545': 'gamma',
                 'vega_1545': 'vega', 'theta_1545': 'theta', 
                 'iv_1545': 'implied_volatility',
-                'last_price': 'last_price' # identity if exists
+                'last_price': 'last_price', # identity
+                # Expanded Intraday Mappings
+                'delta_intraday': 'delta', 'gamma_intraday': 'gamma',
+                'theta_intraday': 'theta', 'vega_intraday': 'vega',
+                'rho_intraday': 'rho', 'iv_intraday': 'implied_volatility',
+                'close': 'last_price', 'symbol': 'option_symbol'
             }
             chunk.rename(columns=cols_map, inplace=True)
             
@@ -227,24 +232,43 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             if chunk['contract_type'].dtype == 'object':
                  chunk['contract_type'] = chunk['contract_type'].astype('category')
                 
-            if 'bid' not in chunk.columns: chunk['bid'] = 0.0
-            if 'ask' not in chunk.columns: chunk['ask'] = 0.0
+            if 'bid' not in chunk.columns: 
+                if 'last_price' in chunk.columns: chunk['bid'] = chunk['last_price']
+                else: chunk['bid'] = 0.0
+            if 'ask' not in chunk.columns: 
+                if 'last_price' in chunk.columns: chunk['ask'] = chunk['last_price']
+                else: chunk['ask'] = 0.0
             
             if 'last_price' not in chunk.columns:
                  chunk['last_price'] = (chunk['bid'] + chunk['ask']) / 2.0
                  
-            # Create option_symbol if missing
-            if 'option_symbol' not in chunk.columns:
+            # Create option_symbol if missing (iVolatility style)
+            if 'option_symbol' not in chunk.columns and 'expiration' in chunk.columns and 'strike' in chunk.columns:
                  chunk['option_symbol'] = (
                     "SPY_" + 
                     chunk['expiration'].astype(str) + "_" + 
                     chunk['contract_type'].astype(str) + "_" + 
                     chunk['strike'].astype(str)
                  )
+            
+            # Parse components from option_symbol if missing (Expanded style)
+            if 'option_symbol' in chunk.columns and ('expiration' not in chunk.columns or 'strike' not in chunk.columns):
+                # Regex for standard OCC: Root(6) + YYMMDD + T(1) + Strike(8) = 21 chars typically
+                # Example: SPY250725C00613000
+                # We assume standard format
+                extracted = chunk['option_symbol'].str.extract(r'([A-Z]+)(\d{6})([CP])(\d{8})')
+                if not extracted.empty and extracted.isnull().sum().sum() == 0:
+                    chunk['expiration'] = pd.to_datetime(extracted[1], format='%y%m%d', errors='coerce')
+                    chunk['contract_type'] = extracted[2]
+                    chunk['strike'] = extracted[3].astype(float) / 1000.0
+                    if 'date' not in chunk.columns and 'timestamp' in chunk.columns:
+                         chunk['date'] = pd.to_datetime(chunk['timestamp']).dt.date
+                         # Ensure date is date object
+                         chunk['date'] = pd.to_datetime(chunk['date'])
 
             # Prune to essentials (Exclude volume/oi to save RAM)
             essential_cols = [
-                'date', 'expiration', 'strike', 'contract_type', 
+                'date', 'timestamp', 'expiration', 'strike', 'contract_type', 
                 'bid', 'ask', 'last_price',
                 'delta', 'gamma', 'vega', 'theta', 'implied_volatility',
                 'option_symbol'
@@ -267,7 +291,10 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
                 continue
 
             # Deduplicate within chunk to save RAM
-            if 'date' in chunk.columns and 'option_symbol' in chunk.columns:
+            # Deduplicate within chunk to save RAM (Conditional)
+            if 'timestamp' in chunk.columns and 'option_symbol' in chunk.columns:
+                 chunk.drop_duplicates(subset=['timestamp', 'option_symbol'], keep='last', inplace=True)
+            elif 'date' in chunk.columns and 'option_symbol' in chunk.columns:
                  chunk.drop_duplicates(subset=['date', 'option_symbol'], keep='last', inplace=True)
 
             chunks.append(chunk)
@@ -278,11 +305,17 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
         print(f"      ...Consolidating {len(chunks)} chunks...")
         options_df = pd.concat(chunks, ignore_index=True, copy=False)
         
-        # Deduplicate globally (Handle duplicates across chunks)
-        if 'date' in options_df.columns and 'option_symbol' in options_df.columns:
-             print(f"      ...Deduplicating {len(options_df)} records...")
+        # Deduplicate and Sort globally
+        print(f"      ...Sorting and Deduplicating {len(options_df)} records...")
+        
+        if 'timestamp' in options_df.columns:
+             options_df.sort_values(by=['timestamp', 'option_symbol'], inplace=True)
+             options_df.drop_duplicates(subset=['timestamp', 'option_symbol'], keep='last', inplace=True)
+        elif 'date' in options_df.columns and 'option_symbol' in options_df.columns:
+             options_df.sort_values(by=['date', 'option_symbol'], inplace=True)
              options_df.drop_duplicates(subset=['date', 'option_symbol'], keep='last', inplace=True)
-             print(f"      ...Unique records: {len(options_df)}")
+             
+        print(f"      ...Unique records: {len(options_df)}")
         del chunks
         import gc; gc.collect()
         
