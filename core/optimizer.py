@@ -323,11 +323,48 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
         print(f"[ERROR] Failed to load options data: {e}")
         return
 
-    # Optimized: Dict of DataFrames (Reference, no copy)
+    # Optimized: Indexing for fast retrieval
+    print("      ...Indexing data for Backtest Engine...")
     preloaded_options = {}
-    for date, group in options_df.groupby('date'):
-        preloaded_options[date.date()] = group 
-        # NOT .to_dict('records') -> saves huge memory
+    
+    if 'timestamp' in options_df.columns:
+        # Intraday Path: Convert to {timestamp: {symbol: record_dict}}
+        # This matches backtest_engine's Intraday expectation (Dict of Dicts)
+        # Rename columns to match what `core/backtest_engine.py` Intraday logic expects
+        # Expects: 'type' (call/put), 'price', 'iv', 'delta', 'expiration', 'strike'
+        rename_map = {
+            'contract_type': 'type',
+            'last_price': 'price',
+            'implied_volatility': 'iv'
+        }
+        
+        # Ensure timestamp sorting before grouping
+        options_df.sort_values('timestamp', inplace=True)
+        
+        grouped = options_df.groupby('timestamp')
+        for ts, group in grouped:
+            # Create formatted records
+            g_renamed = group.rename(columns=rename_map)
+            
+            # Create {symbol: {data}} structure
+            # We exclude 'timestamp' from the inner dict as it's the key
+            cols_to_dict = [c for c in g_renamed.columns if c not in ['timestamp', 'option_symbol']]
+            
+            # Using set_index to create the dict structure efficiently
+            # Force conversion to native Python types for safety (float, str) where possible
+            # But mostly handled by to_dict
+            records = g_renamed.set_index('option_symbol')[cols_to_dict].to_dict('index')
+            
+            # Key Normalization: Ensure Naive Datetime for lookup
+            # BacktestEngine strips tzinfo: dt_now.replace(tzinfo=None)
+            ts_key = pd.Timestamp(ts).tz_localize(None).to_pydatetime()
+            preloaded_options[ts_key] = records
+            
+    else:
+        # Daily Path: Dict of DataFrames (Reference, no copy)
+        # Matches backtest_engine's Daily expectation (DataFrame itertuples)
+        for date, group in options_df.groupby('date'):
+            preloaded_options[date.date()] = group
     
     # Final cleanup
     del options_df
