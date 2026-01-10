@@ -158,9 +158,9 @@ class MambaForecastEngine:
         closes = window['close'].values
         opens = window['open'].values if 'open' in window.columns else closes
         # safe access
-        rsi = window['rsi_14'].fillna(50.0).values if 'rsi_14' in window.columns else np.full(len(window), 50.0)
-        atr_pct = window['atr_pct'].fillna(0.01).values if 'atr_pct' in window.columns else np.full(len(window), 0.01)
-        vol_ratio = window['volume_ratio'].fillna(1.0).values if 'volume_ratio' in window.columns else np.full(len(window), 1.0)
+        rsi = window['rsi_14'].fillna(50.0).infer_objects(copy=False).values if 'rsi_14' in window.columns else np.full(len(window), 50.0)
+        atr_pct = window['atr_pct'].fillna(0.01).infer_objects(copy=False).values if 'atr_pct' in window.columns else np.full(len(window), 0.01)
+        vol_ratio = window['volume_ratio'].fillna(1.0).infer_objects(copy=False).values if 'volume_ratio' in window.columns else np.full(len(window), 1.0)
         
         prev_closes = np.roll(closes, 1)
         prev_closes[0] = closes[0]

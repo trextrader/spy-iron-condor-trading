@@ -345,7 +345,14 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             
             if self.active_position:
                 chain_records = self.options_data.get(date_now, [])
-                if chain_records:
+                # Safe check for DataFrame or List
+                has_records = False
+                if isinstance(chain_records, pd.DataFrame):
+                    has_records = not chain_records.empty
+                else: 
+                    has_records = bool(chain_records)
+                
+                if has_records:
                     leg_symbols = [
                         self.active_position.legs.short_call.symbol,
                         self.active_position.legs.long_call.symbol,
@@ -354,9 +361,15 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     ]
                     
                     # Update cache with current bar's prices
-                    for r in chain_records:
-                        if r['option_symbol'] in leg_symbols:
-                            self.price_cache[r['option_symbol']] = r['last_price']
+                    if isinstance(chain_records, pd.DataFrame):
+                        for r in chain_records.itertuples():
+                            sym = getattr(r, 'option_symbol')
+                            if sym in leg_symbols:
+                                self.price_cache[sym] = getattr(r, 'last_price')
+                    else:
+                        for r in chain_records:
+                            if r['option_symbol'] in leg_symbols:
+                                self.price_cache[r['option_symbol']] = r['last_price']
                     
                     # Try to get all prices (current or cached)
                     current_prices = {s: self.price_cache.get(s) for s in leg_symbols if s in self.price_cache}
