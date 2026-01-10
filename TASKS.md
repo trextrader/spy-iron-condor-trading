@@ -19,6 +19,7 @@
 - [x] **Phase 6**: Fuzzy Weight Optimization (Neural, MTF, IV, Regime, RSI, ADX).
 - [x] **Metrics**: Net Profit / Max Drawdown targeting.
 - [x] **Integration**: Seamless loading of `models/mamba_active.pth`.
+- [x] **Performance**: Optimized backtest loop (300x speedup via deduplication).
 
 ### Data Factory
 - [x] **Intraday Expansion**: `expand_options_intraday.py` generates 1-min and 5-min synthetic options from daily ivolatility.
