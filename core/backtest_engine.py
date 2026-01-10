@@ -601,16 +601,29 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                 if isinstance(chain_records, pd.DataFrame):
                     # Iterate dataframe efficiently using itertuples
                     quote_chain = []
+                    seen_contracts = set() # Deduplication
                     for r in chain_records.itertuples():
-                        # OPTIMIZATION: Skip useless strikes (Delta < 0.005)
+                        # OPTIMIZATION 1: Skip useless strikes (Delta < 0.005)
                         if abs(getattr(r, 'delta', 0) or 0) < 0.005:
                             continue
+                        
+                        # Extract Key Params
+                        strike = getattr(r, 'strike')
+                        expiration = getattr(r, 'expiration').date()
+                        is_call = (getattr(r, 'contract_type') == 'call')
+                        
+                        # OPTIMIZATION 2: Deduplicate
+                        k = (expiration, strike, is_call)
+                        if k in seen_contracts:
+                            continue
+                        seen_contracts.add(k)
+
                         # Handle potential missing columns with getattr
                         quote_chain.append(OptionQuote(
                             symbol=getattr(r, 'option_symbol'),
-                            expiration=getattr(r, 'expiration').date(),
-                            strike=getattr(r, 'strike'),
-                            is_call=(getattr(r, 'contract_type') == 'call'),
+                            expiration=expiration,
+                            strike=strike,
+                            is_call=is_call,
                             bid=getattr(r, 'bid'),
                             ask=getattr(r, 'ask'),
                             mid=getattr(r, 'last_price'),
@@ -623,21 +636,39 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                         ))
                 else:
                     # Legacy: List of dicts
-                    quote_chain = [OptionQuote(
-                        symbol=r['option_symbol'],
-                        expiration=r['expiration'].date(),
-                        strike=r['strike'],
-                        is_call=(r['contract_type'] == 'call'),
-                        bid=r['bid'],
-                        ask=r['ask'],
-                        mid=r['last_price'],
-                        delta=r['delta'],
-                        iv=r['implied_volatility'],
-                        # Stage 3: Greeks for Risk Management
-                        gamma=r.get('gamma', 0.0) or 0.0,
-                        vega=r.get('vega', 0.0) or 0.0,
-                        theta=r.get('theta', 0.0) or 0.0
-                    ) for r in chain_records if abs(r.get('delta', 0) or 0) > 0.005] # OPTIMIZATION: Filter
+                    quote_chain = []
+                    seen_contracts = set() # Deduplication
+                    for r in chain_records:
+                        # OPTIMIZATION 1: Skip useless strikes
+                        if abs(r.get('delta', 0) or 0) < 0.005:
+                            continue
+
+                        # Extract Key Params
+                        strike = r['strike']
+                        expiration = r['expiration'].date()
+                        is_call = (r['contract_type'] == 'call')
+
+                        # OPTIMIZATION 2: Deduplicate
+                        k = (expiration, strike, is_call)
+                        if k in seen_contracts:
+                            continue
+                        seen_contracts.add(k)
+
+                        quote_chain.append(OptionQuote(
+                            symbol=r['option_symbol'],
+                            expiration=expiration,
+                            strike=strike,
+                            is_call=is_call,
+                            bid=r['bid'],
+                            ask=r['ask'],
+                            mid=r['last_price'],
+                            delta=r['delta'],
+                            iv=r['implied_volatility'],
+                            # Stage 3: Greeks for Risk Management
+                            gamma=r.get('gamma', 0.0) or 0.0,
+                            vega=r.get('vega', 0.0) or 0.0,
+                            theta=r.get('theta', 0.0) or 0.0
+                        ))
 
             
             t_load_end = time.time()
