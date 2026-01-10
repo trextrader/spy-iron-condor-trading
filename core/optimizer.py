@@ -235,6 +235,14 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             }
             chunk.rename(columns=cols_map, inplace=True)
             
+            # DERIVE MISSING COLUMNS IMMEDIATELY
+            if 'date' not in chunk.columns:
+                if 'timestamp' in chunk.columns:
+                    # If timestamp is object, it was already converted at 221
+                    chunk['date'] = pd.to_datetime(chunk['timestamp']).dt.date
+                elif 'expiration' in chunk.columns: # Extreme fallback
+                    chunk['date'] = pd.to_datetime(chunk['expiration']).dt.date
+            
             # Robust defaults for missing columns
             for col in ['delta', 'gamma', 'vega', 'theta', 'implied_volatility']:
                 if col not in chunk.columns:
