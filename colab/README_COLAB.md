@@ -21,15 +21,16 @@ This guide explains how to migrate your local project to Google Colab to leverag
 3.  **High-RAM**: Recommended if you have >10GB of CSV data.
 
 ## 4. Execution
-1.  **Mount Drive**: Run Cell 1. You will be asked to authorize Google Drive access.
-2.  **Setup Workspace**: Run Cell 2. This copies your files from Drive (slow) to the Colab VM (fast SSD).
-3.  **Install**: Run Cell 3. This installs `mamba-ssm`, `torch`, and project requirements.
-4.  **Optimize**: Run Cell 4.
-    *   This executes the `core/optimizer.py` logic.
-    *   It will run the 5-Phase Optimization Matrix.
-5.  **Save Results**: Run Cell 6.
-    *   **Crucial Step**: Colab deletes all files when the runtime disconnects.
-    *   This cell copies the `reports/` folder back to your Google Drive (`reports_colab_YYYYMMDD_...`).
+1.  **Mount Drive & Authenticate**: Run Cell 1.
+    *   **GitHub Auth**: Since the repo is private, you will be prompted for credentials.
+    *   **Username**: Your GitHub username.
+    *   **Token**: A Personal Access Token (PAT).
+        *   Go to **GitHub Settings > Developer Settings > Personal Access Tokens > Tokens (classic)**.
+        *   Generate a new token with `repo` scope.
+        *   Copy/Paste this token into the Colab prompt (input is hidden for security).
+2.  **Install**: Run Cell 2 to install dependencies.
+3.  **Optimize**: Run Cell 3 to begin the 5-Phase Optimization.
+4.  **Save**: Run Cell 4 to copy results back to Drive.
 
 ## 💡 Troubleshooting
 *   **"Mamba-SSM not found"**: Ensure you selected a **GPU Runtime**. The pre-built wheels for Mamba require CUDA.
