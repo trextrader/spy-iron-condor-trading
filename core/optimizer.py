@@ -143,9 +143,16 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
         if len(full_df) > run_cfg.backtest_samples:
             full_df = full_df.iloc[-run_cfg.backtest_samples:]
             
-    options_path = os.path.join("data", "synthetic_options", f"{base_s_cfg.underlying.lower()}_options_marks.csv")
+    
+    # Select Options Data Source
+    if getattr(run_cfg, 'options_data_path', None) and os.path.exists(run_cfg.options_data_path):
+        options_path = run_cfg.options_data_path
+        print(f"      [Data] Using Configured Options File: {options_path}")
+    else:
+        options_path = os.path.join("data", "synthetic_options", f"{base_s_cfg.underlying.lower()}_options_marks.csv")
+    
     if not os.path.exists(options_path):
-        print(f"[ERROR] Synthetic options not found at {options_path}.")
+        print(f"[ERROR] Options data not found at {options_path}.")
         return
 
     # Optimize memory usage with explicit types
