@@ -141,10 +141,13 @@ def load_intraday_options(file_path: str, start_date=None, end_date=None) -> dic
 
 
 
-def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=None, preloaded_options=None, preloaded_sync=None, verbose=True):
+def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=None, preloaded_options=None, preloaded_sync=None, preloaded_neural_forecasts=None, verbose=True):
     """
     Run backtest without generating reports, returning raw strategy object
     Used for optimization loops.
+    
+    Args:
+        preloaded_neural_forecasts: Pre-computed neural forecasts to skip Mamba init (for optimizer)
     """
     class PandasData(bt.feeds.PandasData):
         params = (
@@ -266,8 +269,12 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             return None
     
     # === Pre-Calculate Indicators & Neural Forecasts (Batch Mode) ===
-    neural_forecasts = None
-    if getattr(s_cfg, 'use_mamba_model', False) and HAS_MAMBA and not df.empty:
+    # OPTIMIZATION: Use preloaded forecasts if available (from optimizer)
+    if preloaded_neural_forecasts is not None:
+        neural_forecasts = preloaded_neural_forecasts
+        # Indicators should already be on df if preloaded
+    elif getattr(s_cfg, 'use_mamba_model', False) and HAS_MAMBA and not df.empty:
+        neural_forecasts = None
         try:
             import pandas_ta as ta
             # Ensure indicators exist for Mamba
@@ -296,6 +303,8 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             
         except Exception as e:
             print(f"[Warning] Failed to batch-compute Mamba signals: {e}")
+    else:
+        neural_forecasts = None
 
     # === Initialize MTF Sync Engine ===
     if preloaded_sync is not None:

@@ -296,6 +296,31 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
     if run_cfg.use_mtf:
         preloaded_sync = MTFSyncEngine(base_s_cfg.underlying, run_cfg.mtf_timeframes)
 
+    # === OPTIMIZATION: Pre-compute Neural Forecasts ONCE ===
+    preloaded_neural = None
+    if getattr(base_s_cfg, 'use_mamba_model', False):
+        try:
+            import pandas_ta as ta
+            # Pre-calculate indicators on full_df (once)
+            if 'rsi_14' not in full_df.columns:
+                full_df['rsi_14'] = ta.rsi(full_df['close'], length=14)
+            if 'atr_pct' not in full_df.columns:
+                atr = ta.atr(full_df['high'], full_df['low'], full_df['close'], length=14)
+                full_df['atr_pct'] = atr / full_df['close']
+            if 'volume_ratio' not in full_df.columns:
+                vol_sma = ta.sma(full_df['volume'], length=20)
+                full_df['volume_ratio'] = full_df['volume'] / (vol_sma + 1.0)
+            
+            # Pre-compute Mamba signals (GPU batch)
+            from intelligence.mamba_engine import MambaForecastEngine
+            d_model = getattr(base_s_cfg, 'mamba_d_model', 256)
+            layers = getattr(base_s_cfg, 'mamba_layers', 12)
+            mamba_engine = MambaForecastEngine(d_model=d_model, layers=layers)
+            preloaded_neural = mamba_engine.precompute_all(full_df, batch_size=4096)
+            print(f"[Optimizer] Neural Signals Pre-Computed ONCE: {len(preloaded_neural)} bars")
+        except Exception as e:
+            print(f"[Optimizer] Neural pre-compute failed: {e}")
+
     bench_start = time.time()
     baseline_strat = run_backtest_headless(
         base_s_cfg,
@@ -303,6 +328,7 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
         preloaded_df=full_df,
         preloaded_options=preloaded_options,
         preloaded_sync=preloaded_sync,
+        preloaded_neural_forecasts=preloaded_neural,
         verbose=False, # Baseline run can be quiet
     )
     bench_end = time.time()
@@ -367,11 +393,12 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             settings_str = " | ".join([f"{k}={v}" for k, v in params_dict.items()])
             print(f"  [{i+1}/{phase_total}] {settings_str}")
                 
-            # Run Backtest
+            # Run Backtest (with pre-computed neural signals)
             strat = run_backtest_headless(s_cfg, run_cfg, 
                                           preloaded_df=full_df, 
                                           preloaded_options=preloaded_options,
                                           preloaded_sync=preloaded_sync,
+                                          preloaded_neural_forecasts=preloaded_neural,
                                           verbose=False)
             
             if strat is not None:
