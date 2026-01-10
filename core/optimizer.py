@@ -281,6 +281,15 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             # Filter by Date
             if hasattr(run_cfg, 'backtest_start') and run_cfg.backtest_start:
                 s_dt = pd.Timestamp(run_cfg.backtest_start)
+                # Debug Dates
+                if i == 0:
+                    print(f"      [DEBUG] Filter Start: {s_dt}")
+                    if 'date' in chunk.columns:
+                        print(f"      [DEBUG] Chunk Dates (Head): {chunk['date'].head().values}")
+                        print(f"      [DEBUG] Chunk Dates (Tail): {chunk['date'].tail().values}")
+                    else:
+                        print(f"      [DEBUG] 'date' column MISSING in chunk!")
+                        
                 chunk = chunk[chunk['date'] >= s_dt]
             
             if hasattr(run_cfg, 'backtest_end') and run_cfg.backtest_end:
@@ -288,6 +297,7 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
                 chunk = chunk[chunk['date'] < e_dt]
                 
             if chunk.empty:
+                if i == 0: print("      [DEBUG] Chunk 0 empty after filtering!")
                 continue
 
             # Deduplicate within chunk to save RAM
