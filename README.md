@@ -1,7 +1,10 @@
 # Quantor-MTFuzz: Advanced Options Trading System
 ## Iron Condor Algorithmic Trading with Neuro-Fuzzy Intelligence
 
-**Quantor-MTFuzz** is a production-grade algorithmic trading system for SPY Iron Condor strategies, combining Multi-Timeframe (MTF) technical intelligence, Fuzzy Logic position sizing, and institutional-grade risk management. Built on the Quantor-MTFuzz architectural specification with clean module separation, comprehensive testing, and mathematical rigor.
+**Quantor-MTFuzz** is a production-grade algorithmic trading system for SPY Iron Condor strategies, combining Multi-Timeframe (MTF) technical intelligence, Fuzzy Logic position sizing, and institutional-grade risk management.# 🦅 SPY Option Trader (Quantor-MTFuzz)
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/trextrader/spy-iron-condor-trading/blob/main/colab/spyt_cloud_optimizer.ipynb)
+ architectural specification with clean module separation, comprehensive testing, and mathematical rigor.
 
 ---
 
