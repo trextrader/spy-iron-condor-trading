@@ -87,6 +87,7 @@ class StrategyConfig:
     
     # === MTF Enhancements ===
     use_mtf_filter: bool = True
+    use_fuzzy_sizing: bool = True    # Enable fuzzy logic position sizing
     mtf_consensus_min: float = 0.20  # Min consensus (-1 to 1) to allow entry
     mtf_consensus_max: float = 0.80  # Max consensus (avoid strong trends)
     use_liquidity_gate: bool = True
@@ -137,6 +138,11 @@ class StrategyConfig:
     volume_ma_period: int = 20
     volume_min_ratio: float = 0.8  # Min 80% of average volume
 
+    # Parabolic SAR Settings (10th Indicator)
+    use_psar_filter: bool = True
+    psar_acceleration: float = 0.02  # AF starting value
+    psar_max_acceleration: float = 0.20  # AF max value
+
     # === EXIT LOGIC ENHANCEMENTS ===
 
     # ATR-Based Dynamic Stops
@@ -155,17 +161,19 @@ class StrategyConfig:
     use_bbands_exit: bool = True
     bbands_exit_touch_threshold: float = 0.95  # Exit if position > 95% or < 5%
 
-    # === REBALANCED FUZZY WEIGHTS (9 Indicators) ===
-    fuzzy_weight_mtf: float = 0.25      # Multi-timeframe consensus
-    fuzzy_weight_iv: float = 0.18       # IV Rank
-    fuzzy_weight_regime: float = 0.15   # VIX regime
-    fuzzy_weight_rsi: float = 0.10      # RSI neutrality
-    fuzzy_weight_adx: float = 0.10      # Trend strength
-    fuzzy_weight_stoch: float = 0.07    # Stochastic momentum
-    fuzzy_weight_bbands: float = 0.08   # Bollinger position/squeeze
-    fuzzy_weight_volume: float = 0.04   # Volume confirmation
-    fuzzy_weight_sma: float = 0.03      # SMA distance
-    # Total: 1.00
+    # === 10-FACTOR FUZZY WEIGHTS (Sum = 1.00) ===
+    # Ft = Σ(w_j × μ_j) for j=1 to 10
+    fuzzy_weight_mtf: float = 0.18       # Multi-timeframe consensus
+    fuzzy_weight_iv: float = 0.14        # IV Rank
+    fuzzy_weight_regime: float = 0.11    # VIX regime
+    fuzzy_weight_rsi: float = 0.10       # RSI neutrality
+    fuzzy_weight_adx: float = 0.10       # Trend strength
+    fuzzy_weight_bbands: float = 0.09    # Bollinger position/squeeze
+    fuzzy_weight_stoch: float = 0.08     # Stochastic momentum
+    fuzzy_weight_volume: float = 0.07    # Volume confirmation
+    fuzzy_weight_sma: float = 0.06       # SMA distance
+    fuzzy_weight_psar: float = 0.07      # Parabolic SAR (10th)
+    # Total: 0.18+0.14+0.11+0.10+0.10+0.09+0.08+0.07+0.06+0.07 = 1.00
 
     # === Mamba Neural Forecasting ===
     use_mamba_model: bool = True               # Enable Mamba 2 neural engine

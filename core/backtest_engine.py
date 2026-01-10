@@ -188,23 +188,52 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
     else:
         # Use explicit path if provided, otherwise fallback to defaults
         if r_cfg.options_data_path and os.path.exists(r_cfg.options_data_path):
-            intraday_path = r_cfg.options_data_path
+            data_path = r_cfg.options_data_path
         else:
-            intraday_path = os.path.join("data", "alpaca_options", "spy_options_intraday_with_greeks.csv")
+            data_path = os.path.join("data", "alpaca_options", "spy_options_intraday_with_greeks.csv")
         synthetic_path = os.path.join("data", "synthetic_options", f"{s_cfg.underlying.lower()}_options_marks.csv")
         
-        # Check if we should use intraday data (file exists and not explicitly disabled)
-        use_intraday = os.path.exists(intraday_path) and getattr(r_cfg, 'prefer_intraday', True)
+        # Detect data format by reading header
+        is_synthetic_format = False
+        if os.path.exists(data_path):
+            with open(data_path, 'r') as f:
+                header = f.readline().lower()
+                # Synthetic data has 'option_symbol' and 'expiration' columns
+                is_synthetic_format = 'option_symbol' in header and 'expiration' in header
+        
+        # Check if we should use intraday data (file exists, has correct format, and not explicitly disabled)
+        use_intraday = os.path.exists(data_path) and not is_synthetic_format and getattr(r_cfg, 'prefer_intraday', True)
         
         if use_intraday:
-            if verbose: print(f"[Data] Using Intraday Options Data: {intraday_path}")
+            if verbose: print(f"[Data] Using Intraday Options Data: {data_path}")
             # Determine date range for loading
             start_load = r_cfg.backtest_start if hasattr(r_cfg, 'backtest_start') else None
             end_load = r_cfg.backtest_end if hasattr(r_cfg, 'backtest_end') else None
             
             # Load using new function
-            options_by_date = load_intraday_options(intraday_path, start_load, end_load)
+            options_by_date = load_intraday_options(data_path, start_load, end_load)
             is_intraday = True
+        
+        elif os.path.exists(data_path) and is_synthetic_format:
+            if verbose: print(f"[Data] Using Synthetic Options Data: {data_path}")
+            
+            # Memory optimization: Load with chunking and filter by date range
+            options_df = pd.read_csv(data_path, parse_dates=["date", "expiration"])
+            
+            # Filter to backtest date range BEFORE grouping to save memory
+            if hasattr(r_cfg, 'backtest_start') and r_cfg.backtest_start:
+                start_dt = pd.Timestamp(r_cfg.backtest_start).date()
+                options_df = options_df[options_df['date'].dt.date >= start_dt]
+            if hasattr(r_cfg, 'backtest_end') and r_cfg.backtest_end:
+                end_dt = pd.Timestamp(r_cfg.backtest_end).date()
+                options_df = options_df[options_df['date'].dt.date <= end_dt]
+            
+            if verbose: print(f"[Data] Filtered options to {len(options_df):,} rows for date range.")
+            
+            options_by_date = {}
+            for date, group in options_df.groupby('date'):
+                options_by_date[date.date()] = group.to_dict('records')
+            is_intraday = False
         
         elif os.path.exists(synthetic_path):
             if verbose: print(f"[Data] Using Synthetic Options Data: {synthetic_path}")
@@ -227,7 +256,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                 options_by_date[date.date()] = group.to_dict('records')
             is_intraday = False
         else:
-            print(f"[ERROR] No options data found (checked {intraday_path} and {synthetic_path})")
+            print(f"[ERROR] No options data found (checked {data_path} and {synthetic_path})")
             return None
     
     # === Initialize MTF Sync Engine ===

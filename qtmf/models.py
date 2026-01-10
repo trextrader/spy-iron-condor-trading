@@ -23,7 +23,7 @@ class TradeIntent:
     realized_vol: Optional[float] = None
     mtf_snapshot: Optional[Dict[str, Any]] = None
     
-    # Advanced Indicator Fields (9-Factor Fuzzy)
+    # Advanced Indicator Fields (10-Factor Fuzzy)
     rsi: Optional[float] = None
     adx: Optional[float] = None
     bb_position: Optional[float] = None
@@ -31,6 +31,7 @@ class TradeIntent:
     stoch_k: Optional[float] = None
     volume_ratio: Optional[float] = None
     sma_distance: Optional[float] = None
+    psar_position: Optional[float] = None  # -1=below (bullish), +1=above (bearish), 0=neutral
     
     # Neural Market State
     neural_forecast: Optional[Dict[str, Any]] = None  # {regime: 'volatile', trend: 'bull', conf: 0.8}

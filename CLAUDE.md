@@ -67,14 +67,14 @@ The system uses two separate data sources that must be understood together:
 - **Data**: `pandas`, `numpy`, `polygon-api-client`
 - **Technical Analysis**: `pandas-ta` (Indicators: RSI, ADX, BBands, Stoch, etc.)
 - **Intelligence**: 
-  - **Fuzzy Logic**: 9-Factor Inference Engine (`qtmf.facade`)
+  - **Fuzzy Logic**: 10-Factor Inference Engine (`qtmf.facade`)
   - **Neural**: Mamba 2 State-Space Model (`intelligence.mamba_engine`)
 
 ## Architecture
 - **Core**: `main.py` -> `RunConfig` -> `BacktestEngine`
 - **Data Layer**: `MTFSyncEngine` (1m, 5m, 15m) + `SyntheticOptionsEngine` (Pricing)
 - **Intelligence Layer**: 
-  - `qtmf/`: Central Neuro-Fuzzy Facade (Adaptive Credit Logic + 9-Factor Filters)
+  - `qtmf/`: Central Neuro-Fuzzy Facade (Adaptive Credit Logic + 10-Factor Filters)
   - `intelligence/mamba_engine.py`: Neural Market State Forecasting (Truthful Mamba Backend: Mock/Real)
   - `intelligence/fuzzy_engine.py`: Membership Functions
 - **Strategy**: `ZeroDTE_IC` (Iron Condor) located in `core/backtest_engine.py`
@@ -128,10 +128,10 @@ The `MTFSyncEngine` (`data_factory/sync_engine.py:5`) loads all timeframes (1m, 
 - `data_factory/sync_engine.py` → Loads multi-timeframe data for aligned lookups
 
 ### Intelligence Modules
-- `intelligence/fuzzy_engine.py` - Implements 9-factor Fuzzy Logic Position Sizing:
+- `intelligence/fuzzy_engine.py` - Implements 10-factor Fuzzy Logic Position Sizing:
   - **Core**: MTF Consensus, IV Rank, VIX Regime
   - **Momentum**: RSI (40-60 neutral), Stochastic (30-70 neutral)
-  - **Trend**: ADX (<25 weak trend), SMA Distance (<2%)
+  - **Trend**: ADX (<25 weak trend), SMA Distance (<2%), **Parabolic SAR** (crossover detection)
   - **Volatility**: Bollinger Bands (Squeeze & Range)
   - **Volume**: Relative Volume Ratio (>0.8)
 - `data_factory/sync_engine.py` - Calcluates all indicators during data load (autodetects `pandas-ta`, falls back to robust manual calculation if missing).

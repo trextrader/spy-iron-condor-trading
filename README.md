@@ -10,7 +10,7 @@
 ### Core Capabilities
 - **High-Fidelity Backtesting**: 5-minute bar simulation with accurate mark-to-market P&L, leg-by-leg exit logic, and realistic slippage/commissions
 - **Phased Serial Optimization**: Grid-search engine optimizing for **Net Profit / Max Drawdown** ratio with hardware benchmarking
-- **9-Factor Fuzzy Intelligence**: Dynamic position sizing based on MTF Consensus, IV Rank, VIX Regime, RSI, ADX, Bollinger Bands, Stochastic, Volume, and SMA Distance
+- **10-Factor Fuzzy Intelligence**: Dynamic position sizing based on MTF Consensus, IV Rank, VIX Regime, RSI, ADX, Bollinger Bands, Stochastic, Volume, SMA Distance, and **Parabolic SAR**
 - **Mamba 2 Neural Forecasting**: State-space model predicting market regimes (Bear/Neutral/Bull) and volatility states
 - **Enhanced Risk Controls**: Portfolio Greeks tracking, drawdown caps, and beta-weighted delta limits
 - **Alpaca Integration**: Seamless live paper trading via Alpaca-Py SDK
@@ -323,6 +323,34 @@ $$
 $$
 IVR = 100 \cdot \frac{IV_t - \min(IV_{window})}{\max(IV_{window}) - \min(IV_{window})}
 $$
+
+#### Parabolic SAR (10th Factor)
+
+**Theory**: Parabolic SAR identifies potential trend reversals. For Iron Condors, crossover points indicate equilibrium—optimal for range-bound strategies.
+
+$$
+SAR_{t+1} = SAR_t + AF \cdot (EP - SAR_t)
+$$
+
+Where:
+- $SAR_t$ = Current SAR value
+- $AF$ = Acceleration Factor (starts at 0.02, max 0.20)
+- $EP$ = Extreme Point (highest high in uptrend, lowest low in downtrend)
+
+**Membership Function**:
+$$
+\mu_{PSAR} = 1 - |P_{position}|
+$$
+
+Where $P_{position} \in [-1, +1]$:
+- $P_{position} = -1$: PSAR below price (strong bullish trend)
+- $P_{position} = +1$: PSAR above price (strong bearish trend)
+- $P_{position} = 0$: PSAR crossover (reversal point, ideal for IC)
+
+**Interpretation**:
+- $\mu_{PSAR} = 1.0$: At crossover → **Optimal** (range-bound likely)
+- $\mu_{PSAR} = 0.5$: Moderate trend → **Reduce size**
+- $\mu_{PSAR} = 0.0$: Strong trend → **Skip entry**
 
 **Implementation**:
 ```python

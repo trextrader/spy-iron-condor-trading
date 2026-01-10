@@ -87,6 +87,10 @@ Examples:
     parser.add_argument("--mtf-consensus-max", type=float, default=0.60)
     parser.add_argument("--mtf-timeframes", type=str, default="1,5,15")
 
+    # --- Fuzzy Logic ---
+    parser.add_argument("--use-fuzzy", action="store_true", help="Enable fuzzy logic position sizing")
+    parser.add_argument("--no-fuzzy", action="store_true", help="Disable fuzzy logic (use fixed sizing)")
+
     # --- Liquidity ---
     parser.add_argument("--no-liquidity-gate", action="store_true")
 
@@ -209,6 +213,16 @@ def main():
     strategy_config.mtf_consensus_min = args.mtf_consensus_min
     strategy_config.mtf_consensus_max = args.mtf_consensus_max
     strategy_config.mtf_timeframes = args.mtf_timeframes.split(",")
+
+    # -------------------------
+    # FUZZY LOGIC
+    # -------------------------
+    # Default: fuzzy enabled
+    strategy_config.use_fuzzy_sizing = True
+    if args.use_fuzzy:
+        strategy_config.use_fuzzy_sizing = True
+    if args.no_fuzzy:
+        strategy_config.use_fuzzy_sizing = False
 
     # -------------------------
     # LIQUIDITY GATE (HARD SAFETY)

@@ -164,31 +164,32 @@ def calculate_divergence(spy_close: float, es_price: float) -> float:
 
 ![Fuzzy Sizing Pipeline](architecture/fuzzy_sizing_pipeline.png)
 
-**9-Factor Dynamic Position Sizing**: The fuzzy sizing pipeline combines RSI, ADX, SMA Distance, Bollinger Bands, MTF Consensus, VIX Regime, Volume, Stochastic, and IV Rank into a confidence score (Ft), then applies volatility dampening to produce the final scaling factor:
+**10-Factor Dynamic Position Sizing**: The fuzzy sizing pipeline combines RSI, ADX, SMA Distance, Bollinger Bands, MTF Consensus, VIX Regime, Volume, Stochastic, IV Rank, and **Parabolic SAR** into a confidence score (Ft), then applies volatility dampening to produce the final scaling factor:
 
 $$g = F_t \times (1 - \sigma^*)$$
 $$Q_{final} = Q_0 \times g$$
 
 Where:
-- **Ft** = Fuzzy confidence score (0-1) from weighted aggregation
+- **Ft** = Fuzzy confidence score (0-1) from weighted aggregation: $F_t = \sum_{j=1}^{10} w_j \cdot \mu_j$
 - **σ*** = Volatility percentile (risk dampening factor)
 - **Q₀** = Base position size (max contracts)
 - **Q** = Final position size
 
 **Example**: With Ft=0.65, σ*=0.30, and Q₀=5 lots → **Q=2 lots** (45.5% sizing)
 
-## 5.2 Membership Function Weights (Default)
+## 5.2 Membership Function Weights (10-Factor)
 | Factor | Weight | Type |
 |--------|--------|------|
-| MTF Consensus | 0.25 | Trapezoidal |
-| IV Rank | 0.18 | Linear |
-| Regime Stability | 0.15 | Linear Decay |
+| MTF Consensus | 0.18 | Trapezoidal |
+| IV Rank | 0.14 | Linear |
+| Regime Stability | 0.11 | Linear Decay |
 | RSI | 0.10 | Gaussian |
 | ADX | 0.10 | Linear Decay |
-| Stochastics | 0.07 | Gaussian |
-| Bollinger Bands | 0.08 | Gaussian |
-| Volume | 0.04 | Linear |
-| SMA Distance | 0.03 | Linear Decay |
+| Bollinger Bands | 0.09 | Gaussian |
+| Stochastics | 0.08 | Gaussian |
+| Volume | 0.07 | Linear |
+| SMA Distance | 0.06 | Linear Decay |
+| **Parabolic SAR** | **0.07** | **Crossover** |
 
 ## 5.3 Mamba 2 Neural Integration
 - **Architecture**: State-Space Model (CPU-fallback mock available)
@@ -261,16 +262,18 @@ bwb_skew_threshold: float = 140.0
 enable_spy_es_divergence: bool = False
 divergence_threshold_pct: float = 0.005
 
-# Fuzzy Weights (Stage 5)
-fuzzy_weight_mtf: float = 0.25
-fuzzy_weight_iv: float = 0.18
-fuzzy_weight_regime: float = 0.15
+# Fuzzy Weights (Stage 5 - 10 Factor)
+fuzzy_weight_mtf: float = 0.18
+fuzzy_weight_iv: float = 0.14
+fuzzy_weight_regime: float = 0.11
 fuzzy_weight_rsi: float = 0.10
 fuzzy_weight_adx: float = 0.10
-fuzzy_weight_stoch: float = 0.07
-fuzzy_weight_bbands: float = 0.08
-fuzzy_weight_volume: float = 0.04
-fuzzy_weight_sma: float = 0.03
+fuzzy_weight_bbands: float = 0.09
+fuzzy_weight_stoch: float = 0.08
+fuzzy_weight_volume: float = 0.07
+fuzzy_weight_sma: float = 0.06
+fuzzy_weight_psar: float = 0.07  # Parabolic SAR
+# Total = 1.00
 ```
 
 ---

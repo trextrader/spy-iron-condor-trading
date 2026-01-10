@@ -14,13 +14,14 @@ from intelligence.fuzzy_engine import (
     calculate_mtf_membership,
     calculate_iv_membership,
     calculate_regime_membership,
-    # Advanced
+    # Advanced (10-Factor)
     calculate_rsi_membership,
     calculate_adx_membership,
     calculate_bbands_membership,
     calculate_stoch_membership,
     calculate_volume_membership,
     calculate_sma_distance_membership,
+    calculate_psar_membership,  # 10th factor
 )
 
 
@@ -97,7 +98,7 @@ def benchmark_and_size(
             ivr=trade_intent.get("ivr"),
             realized_vol=trade_intent.get("realized_vol"),
             mtf_snapshot=trade_intent.get("mtf_snapshot"),
-            # New Fields
+            # 10-Factor Fuzzy Fields
             rsi=trade_intent.get("rsi"),
             adx=trade_intent.get("adx"),
             bb_position=trade_intent.get("bb_position"),
@@ -105,6 +106,7 @@ def benchmark_and_size(
             stoch_k=trade_intent.get("stoch_k"),
             volume_ratio=trade_intent.get("volume_ratio"),
             sma_distance=trade_intent.get("sma_distance"),
+            psar_position=trade_intent.get("psar_position"),  # 10th factor
             neural_forecast=trade_intent.get("neural_forecast"),
             suggested_total_qty=trade_intent.get("suggested_total_qty"),
             extras=trade_intent.get("extras"),
@@ -198,6 +200,8 @@ def benchmark_and_size(
         
     sma_mu = calculate_sma_distance_membership(ti.sma_distance,
         float(extras.get('sma_max_distance', 0.02))) if ti.sma_distance is not None else 0.5
+    
+    psar_mu = calculate_psar_membership(ti.psar_position) if ti.psar_position is not None else 0.5
 
     memberships = {
         "mtf": float(mtf_mu),
@@ -209,18 +213,23 @@ def benchmark_and_size(
         "stoch": float(stoch_mu),
         "volume": float(vol_mu),
         "sma": float(sma_mu),
+        "psar": float(psar_mu),  # 10th factor
     }
     
+    # 10-Factor Fuzzy Weights (must sum to 1.0)
+    # Weighted sum: Ft = Σ(w_j × μ_j) for j=1 to 10
     weights = {
-        "mtf": float(extras.get("w_mtf", 0.25)),
-        "iv": float(extras.get("w_iv", 0.20)),
-        "regime": float(extras.get("w_regime", 0.15)),
-        "rsi": float(extras.get("w_rsi", 0.10)),
-        "adx": float(extras.get("w_adx", 0.10)),
-        "bbands": float(extras.get("w_bbands", 0.10)),
-        "volume": float(extras.get("w_volume", 0.05)),
-        "sma": float(extras.get("w_sma", 0.05)),
-    }
+        "mtf": float(extras.get("w_mtf", 0.18)),       # MTF Consensus - most important for IC
+        "iv": float(extras.get("w_iv", 0.14)),         # IV Rank  
+        "regime": float(extras.get("w_regime", 0.11)), # VIX Regime
+        "rsi": float(extras.get("w_rsi", 0.10)),       # RSI neutrality
+        "adx": float(extras.get("w_adx", 0.10)),       # Trend strength
+        "bbands": float(extras.get("w_bbands", 0.09)), # Bollinger position
+        "stoch": float(extras.get("w_stoch", 0.08)),   # Stochastic
+        "volume": float(extras.get("w_volume", 0.07)), # Volume confirmation
+        "sma": float(extras.get("w_sma", 0.06)),       # SMA distance
+        "psar": float(extras.get("w_psar", 0.07)),     # Parabolic SAR (10th)
+    }  # Total: 0.18+0.14+0.11+0.10+0.10+0.09+0.08+0.07+0.06+0.07 = 1.00
 
     Ft = compute_fuzzy_confidence(memberships, weights)
 

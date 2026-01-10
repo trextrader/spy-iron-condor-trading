@@ -339,6 +339,27 @@ def calculate_sma_distance_membership(sma_distance: float, max_distance: float =
         return 0.0
 
 
+def calculate_psar_membership(psar_position: float) -> float:
+    """
+    Parabolic SAR membership for trend/reversal detection.
+    
+    For Iron Condor, we want NEUTRAL conditions:
+    - PSAR below price (psar_position = -1) = bullish trend = less favorable
+    - PSAR above price (psar_position = +1) = bearish trend = less favorable
+    - PSAR near crossover (psar_position ~ 0) = potential reversal = more favorable
+    
+    The closer to 0 (crossover), the better for range-bound IC strategy.
+    """
+    if psar_position is None or np.isnan(psar_position):
+        return 0.5  # Neutral default
+    
+    # Membership based on proximity to crossover (0)
+    # |psar_position| = 0 -> 1.0 (perfect for IC)
+    # |psar_position| = 1 -> 0.0 (strong trend, avoid)
+    abs_pos = abs(psar_position)
+    return max(0.0, 1.0 - abs_pos)
+
+
 # =============================================================================
 # EXIT INDICATOR FUNCTIONS
 # =============================================================================

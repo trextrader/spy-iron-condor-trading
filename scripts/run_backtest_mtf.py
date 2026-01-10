@@ -29,24 +29,24 @@ def main():
     )
     
     # MTF requires M1 data (M5/M15 derived internally)
-    # Pipeline generates: spy_options_intraday_large_with_greeks_m1.csv
-    options_data_path = "data/alpaca_options/spy_options_intraday_large_with_greeks_m1.csv"
+    # Using synthetic data with full strike chain
+    options_data_path = "data/synthetic_options/spy_options_marks.csv"
     
     if not os.path.exists(options_data_path):
         print(f"ERROR: MTF data file not found: {options_data_path}")
-        print("Run: py scripts/run_production_pipeline.py")
+        print("Generate using: py -3.12 data_factory/SyntheticOptionsEngine.py")
         return
     
     r_cfg = RunConfig(
-        backtest_start=dt.date(2025, 6, 30),
-        backtest_end=dt.date(2026, 1, 6),
+        backtest_start=dt.date(2025, 1, 1),
+        backtest_end=dt.date(2025, 12, 31),
         options_data_path=options_data_path,
         prefer_intraday=True,
         use_mtf=True,                   # ENABLE MTF processing
         mtf_timeframes=['1', '5', '15'],
         starting_cash=100_000.0,
         backtest_cash=100_000.0,
-        backtest_samples=0,             # Load ALL data, not just last 500 bars
+        backtest_samples=0,             # Load ALL data
         dynamic_sizing=True,
         backtest_plot=True
     )
