@@ -364,6 +364,26 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             
             # Mamba is handled via cached self.neural_forecasts now
 
+        def close_position(self, reason, cost, dt, pnl):
+            self.pnl += pnl
+            
+            # Log Logic for Analyzer
+            trade_record = {
+                "start": self.active_position.open_time,
+                "end": dt,
+                "amount": pnl, # Net PnL
+                "reason": reason,
+                "result": "win" if pnl > 0 else "loss",
+                "metadata": self.active_position.metadata
+            }
+            self.trade_log.append(trade_record)
+            
+            if self.verbose:
+                print(f"[Trade] Closed | Reason: {reason} | PnL: ${pnl:.2f} | CloseCost: ${cost:.2f}")
+
+            self.active_position = None
+            self.current_unrealized_pnl = 0.0
+
         def next(self):
             dt_now = self.datas[0].datetime.datetime(0)
             date_now = dt_now.date()
@@ -674,6 +694,42 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             t_load_end = time.time()
             if t_load_end - t_load_start > 0.05:
                 print(f"[Slow Load] {self.data.datetime.date(0)}: {t_load_end - t_load_start:.4f}s | Records: {len(chain_records)}")
+
+            # === EXIT LOGIC (Restored) ===
+            if self.active_position:
+                # Map current prices
+                current_prices = {q.symbol: q.mid for q in quote_chain}
+                legs = self.active_position.legs
+                syms = [legs.short_call.symbol, legs.long_call.symbol, legs.short_put.symbol, legs.long_put.symbol]
+                
+                # Check mark-to-market if we have prices
+                if all(s in current_prices for s in syms):
+                    # Calculate Cost to Close (Mark-to-Market)
+                    # Cost = (Shorts - Longs)
+                    cost = (current_prices[legs.short_call.symbol] + current_prices[legs.short_put.symbol]) - \
+                           (current_prices[legs.long_call.symbol] + current_prices[legs.long_put.symbol])
+                    
+                    # PnL = (Credit - Cost) * Qty * 100
+                    unrealized_pnl = (self.active_position.credit_received - cost) * self.active_position.quantity * 100
+                    self.current_unrealized_pnl = unrealized_pnl
+                    
+                    exit_reason = None
+                    # 1. Profit Take
+                    target = (self.active_position.credit_received * self.active_position.quantity * 100 * self.s_cfg.profit_take_pct)
+                    if unrealized_pnl >= target:
+                        exit_reason = "profit_take"
+                    
+                    # 2. Stop Loss (Cost exceeds credit by multiple)
+                    elif cost >= (self.active_position.credit_received * (1 + self.s_cfg.loss_close_multiple)):
+                        exit_reason = "stop_loss"
+                        
+                    # 3. Max Hold
+                    elif (dt_now.replace(tzinfo=None) - self.active_position.open_time.replace(tzinfo=None)).days >= self.s_cfg.max_hold_days:
+                         exit_reason = "max_hold"
+                    
+                    if exit_reason:
+                        self.close_position(exit_reason, cost, dt_now, unrealized_pnl)
+                        return # Skip entry logic if just closed
 
             # === Market Realism (Stage 1) ===
             # Calculate Realized Volatility
