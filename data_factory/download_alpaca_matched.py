@@ -27,7 +27,16 @@ def load_ivol_targets(ivol_file: str, min_date: dt.date) -> dict:
     df = pd.read_csv(ivol_file)
     
     # Handle column names
-    date_col = 'date' if 'date' in df.columns else 'greeks_date'
+    # Detect date column
+    if 'date' in df.columns:
+        date_col = 'date'
+    elif 'greeks_date' in df.columns:
+        date_col = 'greeks_date'
+    elif 'trade_date' in df.columns:
+        date_col = 'trade_date'
+    else:
+        print(f"Available columns: {df.columns.tolist()}")
+        raise KeyError("No date column found in IVolatility file")
     
     if 'option symbol' in df.columns:
         sym_col = 'option symbol'
@@ -36,8 +45,8 @@ def load_ivol_targets(ivol_file: str, min_date: dt.date) -> dict:
     else:
         sym_col = 'ivol_symbol'
     
-    # Filter repeated headers
-    df = df[df[date_col] != 'date'].copy()
+    # Filter repeated headers (if date column contains string 'date')
+    df = df[df[date_col].astype(str) != date_col].copy()
     
     # Parse date
     df['dt'] = pd.to_datetime(df[date_col]).dt.date

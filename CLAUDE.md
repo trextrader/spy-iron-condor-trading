@@ -52,7 +52,7 @@ python data_factory/AlpacaGetData.py
 ### Dual-Data Engine (Critical Concept)
 The system uses two separate data sources that must be understood together:
 
-1. **Strategy Clock** (`reports/SPY/SPY_1.csv`, `SPY_5.csv`, `SPY_15.csv`)
+1. **Strategy Clock** (`data/spot/SPY_1.csv`, `SPY_5.csv`, `SPY_15.csv`)
    - Drives entry/exit timing via Multi-Timeframe technical indicators
    - Provides spot price for delta-based strike selection
    - Never modify timeframes without regenerating MTF sync data
@@ -123,7 +123,7 @@ The `MTFSyncEngine` (`data_factory/sync_engine.py:5`) loads all timeframes (1m, 
 4. Exit logic in backtest engine checks profit/loss thresholds from `StrategyConfig.profit_take_pct` and `loss_close_multiple`
 
 ### Data Factory Pipeline
-- `data_factory/AlpacaGetData.py` → Downloads raw 5-minute bars → Saves to `reports/SPY/`
+- `data_factory/AlpacaGetData.py` → Downloads raw 5-minute bars → Saves to `data/spot/`
 - `data_factory/SyntheticOptionsEngine.py` → Reads spot prices → Generates option chains using Black-Scholes → Saves to `data/synthetic_options/`
 - `data_factory/sync_engine.py` → Loads multi-timeframe data for aligned lookups
 

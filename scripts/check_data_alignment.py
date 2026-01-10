@@ -1,7 +1,7 @@
 import pandas as pd
 
 # Check spot data
-spot_df = pd.read_csv('reports/SPY/SPY_5.csv')
+spot_df = pd.read_csv('data/spot/SPY_5.csv')
 spot_df['timestamp'] = pd.to_datetime(spot_df['timestamp'], utc=True)
 print("=== Spot Data (SPY_5.csv) ===")
 print(f"Total rows: {len(spot_df)}")

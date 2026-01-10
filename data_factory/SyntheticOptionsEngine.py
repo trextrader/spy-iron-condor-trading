@@ -183,7 +183,7 @@ class SyntheticOptionsEngine:
 
         # project root resolution (script is in data_factory/)
         self.PROJECT_ROOT = Path(__file__).resolve().parent.parent
-        self.reports_dir = self.PROJECT_ROOT / "reports" / "spy"
+        self.reports_dir = self.PROJECT_ROOT / "data" / "spot"
         self.data_dir = self.PROJECT_ROOT / "data" / "synthetic_options"
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -203,13 +203,13 @@ class SyntheticOptionsEngine:
         candidates = [
             self.reports_dir / f"{sym}_{tf}.csv",
             self.reports_dir / f"{symbol.upper()}_{tf}.csv",
-            self.PROJECT_ROOT / "reports" / symbol.upper() / f"{symbol.upper()}_{tf}.csv",
-            self.PROJECT_ROOT / "reports" / sym / f"{sym}_{tf}.csv",
+            self.PROJECT_ROOT / "data" / "spot" / f"{symbol.upper()}_{tf}.csv",
+            self.PROJECT_ROOT / "data" / "spot" / f"{sym}_{tf}.csv",
         ]
         src = next((p for p in candidates if p.exists()), None)
         if src is None:
             raise FileNotFoundError(
-                f"Could not find underlying CSV for {symbol} tf={tf} in reports/spy or legacy folders."
+                f"Could not find underlying CSV for {symbol} tf={tf} in data/spot folder."
             )
 
         df = pd.read_csv(src, parse_dates=["timestamp"])

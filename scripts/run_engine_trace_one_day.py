@@ -28,9 +28,9 @@ def main() -> int:
     
     # Provide the file mapping for 1/5/15
     setattr(cfg, "spot_bars_csv_map", {
-        1: "reports/SPY/SPY_1.csv",
-        5: "reports/SPY/SPY_5.csv",
-        15: "reports/SPY/SPY_15.csv",
+        1: "data/spot/SPY_1.csv",
+        5: "data/spot/SPY_5.csv",
+        15: "data/spot/SPY_15.csv",
     })
 
     # Point to your options marks file
