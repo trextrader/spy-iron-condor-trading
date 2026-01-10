@@ -561,8 +561,11 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                 if chain_dict:
                     # Convert dict of dicts to list of OptionQuote objects directly
                     # Structure: {symbol: {price, strike, expiration, type, delta...}}
-                    quote_chain = []
+                quote_chain = []
                     for sym, data in chain_dict.items():
+                        # OPTIMIZATION: Skip useless strikes (Delta < 0.005)
+                        if abs(data.get('delta', 0) or 0) < 0.005:
+                            continue
                         quote_chain.append(OptionQuote(
                             symbol=sym,
                             expiration=data['expiration'],
@@ -597,6 +600,9 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     # Iterate dataframe efficiently using itertuples
                     quote_chain = []
                     for r in chain_records.itertuples():
+                        # OPTIMIZATION: Skip useless strikes (Delta < 0.005)
+                        if abs(getattr(r, 'delta', 0) or 0) < 0.005:
+                            continue
                         # Handle potential missing columns with getattr
                         quote_chain.append(OptionQuote(
                             symbol=getattr(r, 'option_symbol'),
@@ -629,7 +635,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                         gamma=r.get('gamma', 0.0) or 0.0,
                         vega=r.get('vega', 0.0) or 0.0,
                         theta=r.get('theta', 0.0) or 0.0
-                    ) for r in chain_records]
+                    ) for r in chain_records if abs(r.get('delta', 0) or 0) > 0.005] # OPTIMIZATION: Filter
 
             # === Market Realism (Stage 1) ===
             # Calculate Realized Volatility
