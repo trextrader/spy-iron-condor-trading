@@ -402,6 +402,13 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             # But mostly handled by to_dict
             records = g_renamed.set_index('option_symbol')[cols_to_dict].to_dict('index')
             
+            # Convert Expiration to date() to avoid Timestamp vs date comparison errors
+            for sym in records:
+                if 'expiration' in records[sym]:
+                    exp = records[sym]['expiration']
+                    if hasattr(exp, 'date'):
+                        records[sym]['expiration'] = exp.date()
+            
             # Key Normalization: Ensure Naive Datetime for lookup
             # BacktestEngine strips tzinfo: dt_now.replace(tzinfo=None)
             ts_key = pd.Timestamp(ts).tz_localize(None).to_pydatetime()

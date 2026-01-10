@@ -552,7 +552,12 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                 # 0. Expiration Check (Critical Fix)
                 # If we are past expiration, we must exit immediately.
                 # Settlement is handled by intrinsic value if data is missing.
-                if date_now >= legs.short_call.expiration:
+                # Use .date() to ensure compatibility with datetime.date (fixes Timestamp error)
+                short_exp = legs.short_call.expiration
+                if hasattr(short_exp, 'date'):
+                    short_exp = short_exp.date()
+                
+                if date_now >= short_exp:
                     # Calculate Settlement Value (Intrinsic)
                     spot = self.data.close[0]
                     
