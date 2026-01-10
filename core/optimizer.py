@@ -117,10 +117,46 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
         print(f"[ERROR] Synthetic options not found at {options_path}.")
         return
 
-    options_df = pd.read_csv(options_path, parse_dates=["date", "expiration"])
+    # Optimize memory usage with explicit types
+    opt_dtypes = {
+        'strike': 'float32', 
+        'bid_1545': 'float32', 
+        'ask_1545': 'float32', 
+        'underlying_last': 'float32',
+        'delta_1545': 'float32',
+        'gamma_1545': 'float32',
+        'vega_1545': 'float32',
+        'theta_1545': 'float32',
+        'iv_1545': 'float32'
+    }
+
+    # Only load columns we actually need if possible, but for safety we load what we know
+    # Not using usecols to avoid missing col errors, but float32 saves 50% RAM
+    print("      ...Reading CSV with float32 precision to save RAM...")
+    options_df = pd.read_csv(
+        options_path, 
+        parse_dates=["date", "expiration"], 
+        dtype=opt_dtypes
+    )
+    
+    # Prune immediately to essential columns to free more RAM
+    essential_cols = [
+        'date', 'expiration', 'strike', 'cp_flag', 
+        'bid_1545', 'ask_1545', 'underlying_last', 
+        'delta_1545', 'gamma_1545', 'vega_1545', 'theta_1545'
+    ]
+    # Filter only if they exist
+    existing_essential = [c for c in essential_cols if c in options_df.columns]
+    options_df = options_df[existing_essential]
+
     preloaded_options = {}
     for date, group in options_df.groupby('date'):
         preloaded_options[date.date()] = group.to_dict('records')
+    
+    # Manual garbage collection hint
+    del options_df
+    import gc
+    gc.collect()
 
     # Pre-load MTF Sync Engine if requested
     preloaded_sync = None
