@@ -22,6 +22,12 @@ from strategies.options_strategy import (
 from intelligence.regime_filter import classify_regime, MarketRegime
 from core.risk_manager import RiskManager, PortfolioGreeks
 
+# Safe import for Mamba
+try:
+    from intelligence.mamba_engine import HAS_MAMBA
+except ImportError:
+    HAS_MAMBA = False
+
 
 # ==========================================================
 # MARKET REALISM HELPERS (Stage 1)
@@ -259,6 +265,38 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             print(f"[ERROR] No options data found (checked {data_path} and {synthetic_path})")
             return None
     
+    # === Pre-Calculate Indicators & Neural Forecasts (Batch Mode) ===
+    neural_forecasts = None
+    if getattr(s_cfg, 'use_mamba_model', False) and HAS_MAMBA and not df.empty:
+        try:
+            import pandas_ta as ta
+            # Ensure indicators exist for Mamba
+            # RSI 14
+            if 'rsi_14' not in df.columns:
+                df['rsi_14'] = ta.rsi(df['close'], length=14)
+            # ATR Pct (approx)
+            if 'atr_pct' not in df.columns:
+                atr = ta.atr(df['high'], df['low'], df['close'], length=14)
+                df['atr_pct'] = atr / df['close']
+            # Volume Ratio
+            if 'volume_ratio' not in df.columns:
+                vol_sma = ta.sma(df['volume'], length=20)
+                df['volume_ratio'] = df['volume'] / (vol_sma + 1.0)
+            
+            # Init Mamba
+            from intelligence.mamba_engine import MambaForecastEngine
+            # Use LARGE model if configured, else default
+            d_model = getattr(s_cfg, 'mamba_d_model', 1024)
+            layers = getattr(s_cfg, 'mamba_layers', 32) 
+            mamba_engine = MambaForecastEngine(d_model=d_model, layers=layers)
+            
+            # GPU Batch Inference
+            neural_forecasts = mamba_engine.precompute_all(df, batch_size=4096)
+            print(f"[BacktestEngine] Neural Signals Pre-Computed: {len(neural_forecasts)}")
+            
+        except Exception as e:
+            print(f"[Warning] Failed to batch-compute Mamba signals: {e}")
+
     # === Initialize MTF Sync Engine ===
     if preloaded_sync is not None:
         sync_engine = preloaded_sync
@@ -267,7 +305,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
 
     # === Strategy Definition ===
     class IronCondorStrategy(bt.Strategy):
-        params = dict(s_cfg=None, r_cfg=None, sync_engine=None, options_data=None, is_intraday=False, verbose=True)
+        params = dict(s_cfg=None, r_cfg=None, sync_engine=None, options_data=None, is_intraday=False, neural_forecasts=None, verbose=True)
 
         def __init__(self):
             self.s_cfg = self.params.s_cfg
@@ -275,6 +313,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             self.sync = self.params.sync_engine
             self.options_data = self.params.options_data
             self.is_intraday = self.params.is_intraday
+            self.neural_forecasts = self.params.neural_forecasts # Cached DF
             self.verbose = self.params.verbose
             
             # Performance Tracking
@@ -310,16 +349,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             # Risk Manager (Stage 3)
             self.risk_manager = RiskManager(self.s_cfg)
             
-            # Initialize Mamba Neural Engine
-            if getattr(self.s_cfg, 'use_mamba_model', False):
-                try:
-                    from intelligence.mamba_engine import MambaForecastEngine
-                    self.mamba_engine = MambaForecastEngine(d_model=getattr(self.s_cfg, 'mamba_d_model', 64))
-                    if self.verbose:
-                        print(f"[{self.__class__.__name__}] Mamba Neural Engine Initialized")
-                except Exception as e:
-                    print(f"[Warning] Failed to init Mamba Engine: {e}")
-                    self.mamba_engine = None
+            # Mamba is handled via cached self.neural_forecasts now
 
         def next(self):
             dt_now = self.datas[0].datetime.datetime(0)
@@ -796,22 +826,24 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
 
             # === Neural Forecasting (Mamba 2) ===
             neural_forecast_data = None
-            if getattr(self.s_cfg, 'use_mamba_model', False) and hasattr(self, 'mamba_engine'):
-                # Pass recent data context to Mamba
-                # Creating a small DF context for the mock/inference
-                ctx_df = pd.DataFrame([{
-                    'close': self.data.close[0],
-                    'rsi_14': rsi_current,
-                    'atr_pct': 0.01, # Simplified for mock
-                    'volume_ratio': volume_ratio
-                }])
-                
-                # Predict Market State
-                forecast_state = self.mamba_engine.predict_state(ctx_df)
-                neural_forecast_data = forecast_state.to_dict()
-                
-                if self.verbose and self.bar_count % 100 == 0:
-                    print(f"[Neural:{forecast_state.model_backend}] Conf={forecast_state.confidence:.2f} | P(Bull)={forecast_state.prob_bull:.2f} | P(Bear)={forecast_state.prob_bear:.2f}")
+            if self.neural_forecasts is not None and not self.neural_forecasts.empty:
+                # Fast Lookup from Cache
+                # Backtrader 'len(self)' gives current length. self.bar_count tracks it too.
+                # Safest to use iloc with self.bar_count which we manually increment or len(self)-1
+                idx = len(self) - 1
+                if 0 <= idx < len(self.neural_forecasts):
+                    row = self.neural_forecasts.iloc[idx]
+                    neural_forecast_data = {
+                        'model_backend': 'Mamba2-Batch',
+                        'confidence': float(row['mamba_conf']),
+                        'prob_bull': float(row['mamba_bull']),
+                        'prob_bear': float(row['mamba_bear']),
+                        'prob_neutral': float(row['mamba_neutral']),
+                        'regime_vol': 0 # Optional
+                    }
+                    
+                    if self.verbose and self.bar_count % 500 == 0:
+                         print(f"[Neural:GPU] Conf={neural_forecast_data['confidence']:.2f} | Bull={neural_forecast_data['prob_bull']:.2f}")
 
             # === Sizing via QTMF Facade (Neuro-Fuzzy) ===
             from qtmf.models import TradeIntent
@@ -948,7 +980,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
     cerebro = bt.Cerebro()
     cerebro.broker.setcash(r_cfg.backtest_cash)
     cerebro.adddata(PandasData(dataname=df))
-    cerebro.addstrategy(IronCondorStrategy, s_cfg=s_cfg, r_cfg=r_cfg, sync_engine=sync_engine, options_data=options_by_date, is_intraday=is_intraday)
+    cerebro.addstrategy(IronCondorStrategy, s_cfg=s_cfg, r_cfg=r_cfg, sync_engine=sync_engine, options_data=options_by_date, is_intraday=is_intraday, neural_forecasts=neural_forecasts)
     
     # Add Analyzers
     # Run quietly
