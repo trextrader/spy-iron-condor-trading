@@ -151,20 +151,34 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
     options_df = options_df[existing_essential]
 
     # Standardize column names for Backtest Engine
+    # Engine expects: 'bid', 'ask', 'contract_type'
+    # Data might have: 'bid_1545', 'ask_1545', 'cp_flag'
+    
     cols_map = {
         'bid_1545': 'bid',
         'ask_1545': 'ask',
-        'contract_type': 'type'
+        'cp_flag': 'contract_type' # Engine wants 'contract_type'
     }
     options_df.rename(columns=cols_map, inplace=True)
+    
+    # Safety Check: If rename didn't catch it (because maybe col was already named 'type')
+    # Synthetic data usually uses 'cp_flag' for Call/Put
+    if 'contract_type' not in options_df.columns:
+        if 'type' in options_df.columns:
+            options_df['contract_type'] = options_df['type']
+        elif 'cp_flag' in options_df.columns:
+             options_df['contract_type'] = options_df['cp_flag']
 
     # Ensure option_symbol exists
     if 'option_symbol' not in options_df.columns:
         # Reconstruct if missing: SPY_20250102_C_500.0
+        # Be robust to column names
+        c_flag = options_df['contract_type'] if 'contract_type' in options_df.columns else (options_df['cp_flag'] if 'cp_flag' in options_df.columns else 'C')
+        
         options_df['option_symbol'] = (
             "SPY" + "_" +
             options_df['expiration'].astype(str) + "_" +
-            options_df['cp_flag'].astype(str) + "_" +
+            c_flag.astype(str) + "_" +
             options_df['strike'].astype(str)
         )
 
