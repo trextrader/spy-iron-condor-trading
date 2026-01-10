@@ -989,7 +989,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
     cerebro = bt.Cerebro()
     cerebro.broker.setcash(r_cfg.backtest_cash)
     cerebro.adddata(PandasData(dataname=df))
-    cerebro.addstrategy(IronCondorStrategy, s_cfg=s_cfg, r_cfg=r_cfg, sync_engine=sync_engine, options_data=options_by_date, is_intraday=is_intraday, neural_forecasts=neural_forecasts)
+    cerebro.addstrategy(IronCondorStrategy, s_cfg=s_cfg, r_cfg=r_cfg, sync_engine=sync_engine, options_data=options_by_date, is_intraday=is_intraday, neural_forecasts=neural_forecasts, verbose=verbose)
     
     # Add Analyzers
     # Run quietly
