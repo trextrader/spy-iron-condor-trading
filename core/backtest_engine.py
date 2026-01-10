@@ -572,6 +572,10 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             if self.bars_since_trade < 100:
                 return
 
+            # Heartbeat (Once per 500 bars if verbose)
+            if self.verbose and self.bar_count % 500 == 0:
+                print(f"      [Heartbeat] Bar {self.bar_count}/{self.total_bars} | Price: ${self.data.close[0]:.2f} | Time: {dt_now}")
+
             # 3. Entry Logic
             chain_records = []
             t_load_start = time.time() # Start Profile
