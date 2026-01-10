@@ -17,7 +17,7 @@ from core.config import RunConfig
 try:
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
-    from alpaca.data.timeframe import TimeFrame
+    from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 except ImportError:
     pass
 
@@ -63,11 +63,11 @@ def download_alpaca_data(key, secret, symbol, years=2, tf_str="15Min"):
     
     # Map timeframe string to Alpaca Object
     if tf_str == "15Min":
-        tf = TimeFrame(15, TimeFrame.Minute)
+        tf = TimeFrame(15, TimeFrameUnit.Minute)
     elif tf_str == "5Min":
-        tf = TimeFrame(5, TimeFrame.Minute)
+        tf = TimeFrame(5, TimeFrameUnit.Minute)
     elif tf_str == "1Min":
-        tf = TimeFrame.Minute
+        tf = TimeFrame.Minute # Or TimeFrame(1, TimeFrameUnit.Minute)
     else:
         tf = TimeFrame.Hour
 
