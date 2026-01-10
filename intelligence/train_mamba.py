@@ -11,6 +11,8 @@ from torch.utils.data import DataLoader, TensorDataset
 import pandas_ta as ta
 from datetime import datetime, timedelta
 
+from core.config import RunConfig
+
 # Alpaca Imports
 try:
     from alpaca.data.historical import StockHistoricalDataClient
@@ -21,23 +23,14 @@ except ImportError:
 
 from intelligence.mamba_engine import DeepMamba, HAS_MAMBA
 
-# Configuration defaults
-DEFAULT_CONFIG = {
-    'symbol': 'SPY',
-    'lookback': 60,
-    'd_model': 1024,   # Default to Large
-    'layers': 32,
-    'epochs': 50,
-    'batch_size': 128,
-    'lr': 5e-5,
-    'model_path': 'models/mamba_active.pth'
-}
+# ... (Configuration defaults remains same) ...
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train Mamba on Alpaca Intraday Data")
-    parser.add_argument("--key", type=str, help="Alpaca API Key (if downloading)")
-    parser.add_argument("--secret", type=str, help="Alpaca Secret Key (if downloading)")
+    parser.add_argument("--key", type=str, help="Alpaca API Key (optional if in config.py)")
+    parser.add_argument("--secret", type=str, help="Alpaca Secret Key (optional if in config.py)")
     parser.add_argument("--symbol", type=str, default="SPY")
+# ... (rest of args) ...
     parser.add_argument("--years", type=int, default=2, help="Years of history to fetch")
     parser.add_argument("--timeframe", type=str, default="15Min", choices=["1Min", "5Min", "15Min", "1Hour"])
     parser.add_argument("--d-model", type=int, default=1024)
@@ -159,15 +152,29 @@ def train():
         print(f"[Core] Loading local data from {args.local_data}...")
         try:
             df = pd.read_csv(args.local_data)
-            # Ensure index is datetime if needed (mostly for display, not training)
         except Exception as e:
             print(f"[Error] Failed to load local CSV: {e}")
             return
-    elif args.key:
-        df = download_alpaca_data(args.key, args.secret, args.symbol, args.years, args.timeframe)
     else:
-        print("[Error] Must provide either --local-data or --key/--secret")
-        return
+        # Resolve Keys
+        api_key = args.key
+        api_secret = args.secret
+        
+        if not api_key:
+            try:
+                cfg = RunConfig()
+                api_key = cfg.alpaca_api_key
+                api_secret = cfg.alpaca_secret_key
+                if api_key and "YOUR_" not in api_key:
+                    print("[Config] Using Alpaca Keys from config.py")
+            except Exception as e:
+                print(f"[Warning] Could not load config: {e}")
+                
+        if api_key and api_secret:
+             df = download_alpaca_data(api_key, api_secret, args.symbol, args.years, args.timeframe)
+        else:
+             print("[Error] Must provide --local-data OR Alpaca Keys (via CLI or config.py)")
+             return
 
     # Check Empty
     if df.empty:
