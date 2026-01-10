@@ -143,7 +143,8 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
     essential_cols = [
         'date', 'expiration', 'strike', 'cp_flag', 
         'bid_1545', 'ask_1545', 'underlying_last', 
-        'delta_1545', 'gamma_1545', 'vega_1545', 'theta_1545'
+        'delta_1545', 'gamma_1545', 'vega_1545', 'theta_1545',
+        'option_symbol'
     ]
     # Filter only if they exist
     existing_essential = [c for c in essential_cols if c in options_df.columns]
