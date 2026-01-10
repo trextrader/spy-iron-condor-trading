@@ -73,13 +73,20 @@ OPTIMIZATION_SEGMENTS = [
         "name": "Phase 6: Fuzzy Weights (The Blend)",
         "description": "Optimizing the 11-factor fuzzy weight blend including Neural Network influence.",
         "params": {
-            # Key weights to optimize (6 total = 243 combinations)
+            # === ACTIVE WEIGHTS (6 total = 729 combinations) ===
             "fuzzy_weight_neural": [0.10, 0.20, 0.30],    # Neural Net influence
             "fuzzy_weight_mtf": [0.10, 0.18, 0.25],       # Multi-Timeframe consensus
             "fuzzy_weight_iv": [0.10, 0.14, 0.20],        # IV Rank
             "fuzzy_weight_regime": [0.08, 0.11, 0.15],    # VIX Regime
             "fuzzy_weight_rsi": [0.05, 0.10, 0.15],       # RSI neutrality
             "fuzzy_weight_adx": [0.05, 0.10, 0.15],       # Trend strength (ADX)
+            
+            # === COMMENTED OUT (Uncomment to expand search - WARNING: exponential growth!) ===
+            # "fuzzy_weight_bbands": [0.05, 0.09, 0.12],  # Bollinger position/squeeze
+            # "fuzzy_weight_stoch": [0.04, 0.08, 0.12],   # Stochastic momentum
+            # "fuzzy_weight_volume": [0.04, 0.07, 0.10],  # Volume confirmation
+            # "fuzzy_weight_sma": [0.03, 0.06, 0.09],     # SMA distance
+            # "fuzzy_weight_psar": [0.04, 0.07, 0.10],    # Parabolic SAR
         }
     }
 ]
