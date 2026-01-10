@@ -186,8 +186,11 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
         options_by_date = preloaded_options
         is_intraday = getattr(r_cfg, 'use_intraday_data', False) # Check config if preloaded
     else:
-        # Check for Intraday Data First
-        intraday_path = os.path.join("data", "alpaca_options", "spy_options_intraday_with_greeks.csv")
+        # Use explicit path if provided, otherwise fallback to defaults
+        if r_cfg.options_data_path and os.path.exists(r_cfg.options_data_path):
+            intraday_path = r_cfg.options_data_path
+        else:
+            intraday_path = os.path.join("data", "alpaca_options", "spy_options_intraday_with_greeks.csv")
         synthetic_path = os.path.join("data", "synthetic_options", f"{s_cfg.underlying.lower()}_options_marks.csv")
         
         # Check if we should use intraday data (file exists and not explicitly disabled)

@@ -46,6 +46,7 @@ def main():
         mtf_timeframes=['1', '5', '15'],
         starting_cash=100_000.0,
         backtest_cash=100_000.0,
+        backtest_samples=0,             # Load ALL data, not just last 500 bars
         dynamic_sizing=True,
         backtest_plot=True
     )

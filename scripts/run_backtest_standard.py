@@ -1,6 +1,6 @@
 """
-Non-MTF Backtest Script (Standard/Synthetic)
-Uses: Large synthetic options marks data (2.2GB)
+Non-MTF Backtest Script (Standard)
+Uses: New IVolatility/Alpaca M1 data WITHOUT MTF filtering
 """
 import sys
 import os
@@ -13,36 +13,36 @@ from core.backtest_engine import run_backtest_and_report
 
 def main():
     print("=" * 70)
-    print("STANDARD BACKTEST - No MTF (Synthetic Data)")
+    print("STANDARD BACKTEST - No MTF (New Data)")
     print("=" * 70)
     
     # Strategy WITHOUT MTF filtering
     s_cfg = StrategyConfig(
         underlying="SPY",
         use_mtf_filter=False,          # DISABLE MTF
-        use_liquidity_gate=False,      # Synthetic data has no liquidity info
+        use_liquidity_gate=False,
         max_positions=3,
         profit_take_pct=0.50,
         loss_close_multiple=1.00,
     )
     
-    # Use synthetic marks data (2.2GB)
-    options_data_path = "data/synthetic_options/spy_options_marks.csv"
+    # Use new IVolatility/Alpaca data
+    options_data_path = "data/alpaca_options/spy_options_intraday_large_with_greeks_m1.csv"
     
     if not os.path.exists(options_data_path):
-        print(f"ERROR: Synthetic data file not found: {options_data_path}")
-        print("Generate using: py data_factory/SyntheticOptionsEngine.py")
+        print(f"ERROR: Data file not found: {options_data_path}")
+        print("Run: py -3.12 scripts/run_production_pipeline.py")
         return
     
     r_cfg = RunConfig(
-        backtest_start=dt.date(2024, 1, 1),
-        backtest_end=dt.date(2024, 12, 31),
+        backtest_start=dt.date(2025, 6, 30),
+        backtest_end=dt.date(2026, 1, 6),
         options_data_path=options_data_path,
-        prefer_intraday=False,          # Use EOD-style processing
+        prefer_intraday=True,
         use_mtf=False,                  # DISABLE MTF
-        use_synthetic_options=True,     # Flag for synthetic data handling
         starting_cash=100_000.0,
         backtest_cash=100_000.0,
+        backtest_samples=0,             # Load ALL data, not just last 500 bars
         dynamic_sizing=True,
         backtest_plot=True
     )
