@@ -12,9 +12,12 @@ import pandas_ta as ta
 from datetime import datetime, timedelta
 
 # Alpaca Imports
-from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
+try:
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+except ImportError:
+    pass
 
 from intelligence.mamba_engine import DeepMamba, HAS_MAMBA
 
@@ -32,16 +35,26 @@ DEFAULT_CONFIG = {
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train Mamba on Alpaca Intraday Data")
-    parser.add_argument("--key", type=str, required=True, help="Alpaca API Key")
-    parser.add_argument("--secret", type=str, required=True, help="Alpaca Secret Key")
+    parser.add_argument("--key", type=str, help="Alpaca API Key (if downloading)")
+    parser.add_argument("--secret", type=str, help="Alpaca Secret Key (if downloading)")
     parser.add_argument("--symbol", type=str, default="SPY")
     parser.add_argument("--years", type=int, default=2, help="Years of history to fetch")
     parser.add_argument("--timeframe", type=str, default="15Min", choices=["1Min", "5Min", "15Min", "1Hour"])
     parser.add_argument("--d-model", type=int, default=1024)
     parser.add_argument("--layers", type=int, default=32)
+    
+    # Workflow flags
+    parser.add_argument("--save-only", action="store_true", help="Download data and save to CSV, then exit")
+    parser.add_argument("--local-data", type=str, help="Path to local CSV to use for training instead of downloading")
+    parser.add_argument("--output-csv", type=str, default="data/spy_training_data.csv")
+    
     return parser.parse_args()
 
 def download_alpaca_data(key, secret, symbol, years=2, tf_str="15Min"):
+    if not key or not secret:
+        print("[Error] Alpaca Keys required for download.")
+        return pd.DataFrame()
+
     print(f"[Alpaca] Connecting to fetch {years} years of {tf_str} data for {symbol}...")
     client = StockHistoricalDataClient(key, secret)
     
@@ -138,14 +151,40 @@ def create_sequences(X, y, lookback):
 
 def train():
     args = parse_args()
+    
+    # 1. Data Source Logic
+    df = pd.DataFrame()
+    
+    if args.local_data:
+        print(f"[Core] Loading local data from {args.local_data}...")
+        try:
+            df = pd.read_csv(args.local_data)
+            # Ensure index is datetime if needed (mostly for display, not training)
+        except Exception as e:
+            print(f"[Error] Failed to load local CSV: {e}")
+            return
+    elif args.key:
+        df = download_alpaca_data(args.key, args.secret, args.symbol, args.years, args.timeframe)
+    else:
+        print("[Error] Must provide either --local-data or --key/--secret")
+        return
+
+    # Check Empty
+    if df.empty:
+        print("No data available.")
+        return
+
+    # Save Only Mode
+    if args.save_only:
+        os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
+        df.to_csv(args.output_csv, index=False)
+        print(f"[Success] Data saved to {args.output_csv}. Exiting.")
+        return
+
+    # 2. Training Logic
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Training on {device}...")
     
-    # 1. Data
-    df = download_alpaca_data(args.key, args.secret, args.symbol, args.years, args.timeframe)
-    if df.empty:
-        return
-
     X, y = prepare_features(df)
     
     # Split
@@ -165,12 +204,11 @@ def train():
     val_loader = DataLoader(TensorDataset(torch.from_numpy(X_val_seq), torch.from_numpy(y_val_seq)), 
                             batch_size=DEFAULT_CONFIG['batch_size'])
     
-    # 2. Model
+    # Model
     if not HAS_MAMBA:
         print("Mamba not found. Cannot train.")
         return
 
-    # Use Pro config if available
     d_model = args.d_model
     layers = args.layers
     
@@ -187,7 +225,7 @@ def train():
     criterion = nn.MSELoss()
     optimizer = optim.AdamW(model.parameters(), lr=DEFAULT_CONFIG['lr'], weight_decay=1e-5)
     
-    # 3. Loop
+    # Loop
     best_loss = float('inf')
     
     for epoch in range(DEFAULT_CONFIG['epochs']):
@@ -205,7 +243,7 @@ def train():
             X_pad[:, :, :F] = X_batch
             
             # Forward
-            out = model(X_pad) # (B, 1)
+            out = model(X_pad) 
             
             loss = criterion(out.squeeze(), y_batch)
             loss.backward()
