@@ -61,10 +61,10 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
     # Pre-load data once
     from data_factory.sync_engine import MTFSyncEngine
     
-    csv_path = os.path.join("reports", base_s_cfg.underlying, f"{base_s_cfg.underlying}_5.csv")
+    csv_path = os.path.join("data", "spot", f"{base_s_cfg.underlying}_5.csv")
     if not os.path.exists(csv_path):
          # Fallback to daily or other available source
-         csv_path = os.path.join("reports", base_s_cfg.underlying, f"{base_s_cfg.underlying}_1.csv")
+         csv_path = os.path.join("data", "spot", f"{base_s_cfg.underlying}_1.csv")
 
     if not os.path.exists(csv_path):
          print(f"[ERROR] No data found at {csv_path}. Cannot optimize.")

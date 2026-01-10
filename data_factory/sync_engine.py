@@ -144,7 +144,7 @@ class MTFSyncEngine:
     def _load_all(self):
         print(f"\n[DataSync] Syncing Timeframes for {self.symbol}...")
         for tf in self.timeframes:
-            path = os.path.join("reports", self.symbol, f"{self.symbol}_{tf}.csv")
+            path = os.path.join("data", "spot", f"{self.symbol}_{tf}.csv")
             
             if os.path.exists(path):
                 df = pd.read_csv(path, parse_dates=['timestamp'])

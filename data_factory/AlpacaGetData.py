@@ -82,8 +82,8 @@ def main():
         "M":   TimeFrame(1, TimeFrameUnit.Month)
     }
 
-    # ✅ Always save under project root/reports/<SYMBOL>
-    base_dir = os.path.join(PROJECT_ROOT, "reports", symbol)
+    # ✅ Always save under project root/data/spot
+    base_dir = os.path.join(PROJECT_ROOT, "data", "spot")
     os.makedirs(base_dir, exist_ok=True)
 
     summary_stats = []

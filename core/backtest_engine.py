@@ -156,7 +156,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
         df = preloaded_df
     else:
         # Fallback to loading from disk (standard backtest behavior)
-        csv_path = os.path.join("reports", s_cfg.underlying, f"{s_cfg.underlying}_1.csv")
+        csv_path = os.path.join("data", "spot", f"{s_cfg.underlying}_1.csv")
         if not os.path.exists(csv_path):
             print(f"[ERROR] Data not found: {csv_path}")
             return None
@@ -1054,7 +1054,7 @@ def run_backtest_and_report(s_cfg: StrategyConfig, r_cfg: RunConfig):
     # Save PDF Report
     if r_cfg.backtest_plot:
         # Re-load DF just for plotting (inefficient but cleaner for now)
-        csv_path = os.path.join("reports", s_cfg.underlying, f"{s_cfg.underlying}_5.csv")
+        csv_path = os.path.join("data", "spot", f"{s_cfg.underlying}_5.csv")
         df = pd.read_csv(csv_path, parse_dates=["timestamp"])
         df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
         df.set_index("timestamp", inplace=True)
