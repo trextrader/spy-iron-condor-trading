@@ -14,7 +14,49 @@
 - **High-Fidelity Backtesting**: 5-minute bar simulation with accurate mark-to-market P&L, leg-by-leg exit logic, and realistic slippage/commissions
 - **Phased Serial Optimization**: Grid-search engine optimizing for **Net Profit / Max Drawdown** ratio with hardware benchmarking
 - **10-Factor Fuzzy Intelligence**: Dynamic position sizing based on MTF Consensus, IV Rank, VIX Regime, RSI, ADX, Bollinger Bands, Stochastic, Volume, SMA Distance, and **Parabolic SAR**
-- **Mamba 2 Neural Forecasting**: Deep State-Space Model (6-layer, 256-dim) predicting market regimes (Bear/Neutral/Bull) with CUDA acceleration
+- **Mamba 2 Neural Forecasting**: Deep State-Space Model (12-32 layers, 256-1024 dim) trained on **Alpaca 15-Min Intraday Data** (2023-2025). Uses Structurated State Space Duality (SSD) to predict next-bar returns with GPU acceleration.
+
+## 🧠 DeepMamba 2 Neural Engine
+
+The system uses a custom **DeepMamba** architecture based on the Mamba 2 State-Space Model (SSM). Unlike Transformers, Mamba 2 offers linear scaling with sequence length, allowing the model to digest weeks of 15-minute bars (Lookback: 60-500) efficiently.
+
+### Mathematical Foundation
+The core mechanism is a discretized State Space Model:
+
+$$ h'(t) = \mathbf{A}h(t) + \mathbf{B}x(t) $$
+$$ y(t) = \mathbf{C}h(t) $$
+
+Where:
+*   $h(t)$ is the hidden state (memory)
+*   $x(t)$ is the input vector (Log Returns, RSI, ATR, Vol Ratio)
+*   $\mathbf{A}$ is the evolution matrix (diagonalized in Mamba 2 via SSD)
+
+In the **DeepMamba** implementation:
+*   **Input**: $(B, L, 4)$ tensor [LogRet, NormRSI, NormATR, NormVol]
+*   **Backbone**: $N$ layers of Mamba 2 Blocks (Residual + RMSNorm)
+*   **Output**: Next-bar Log Return prediction (Regression)
+
+### Training Workflow
+The model creates its own "Brain" using historical intraday data.
+
+**1. Data Acquisition (Local)**
+```powershell
+# Fetch 2 years of 15-min bars from Alpaca
+python intelligence/train_mamba.py --save-only
+```
+
+**2. GPU Training (Colab)**
+```python
+# Train the 12-layer model (Fast & Accurate)
+!python intelligence/train_mamba.py --local-data data/spy_training_data.csv --d-model 256 --layers 12
+```
+
+**3. Inference (Backtest)**
+The optimizer automatically loads `models/mamba_active.pth` and uses the GPU for batch inference (processing 500+ bars in parallel).
+
+```python
+!python core/main.py --use-optimizer --mamba-d-model 256 --mamba-layers 12
+```
 - **Enhanced Risk Controls**: Portfolio Greeks tracking, drawdown caps, and beta-weighted delta limits
 - **Alpaca Integration**: Seamless live paper trading via Alpaca-Py SDK
 - **Professional Reporting**: Automated PDF reports with equity curves, strike overlays, P&L distributions
