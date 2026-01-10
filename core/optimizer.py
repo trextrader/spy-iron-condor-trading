@@ -238,10 +238,10 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             # DERIVE MISSING COLUMNS IMMEDIATELY
             if 'date' not in chunk.columns:
                 if 'timestamp' in chunk.columns:
-                    # If timestamp is object, it was already converted at 221
-                    chunk['date'] = pd.to_datetime(chunk['timestamp']).dt.date
+                    # Use normalize() to keep as pd.Timestamp (Time=00:00:00) for comparison compatibility
+                    chunk['date'] = pd.to_datetime(chunk['timestamp']).dt.normalize()
                 elif 'expiration' in chunk.columns: # Extreme fallback
-                    chunk['date'] = pd.to_datetime(chunk['expiration']).dt.date
+                    chunk['date'] = pd.to_datetime(chunk['expiration']).dt.normalize()
             
             # Robust defaults for missing columns
             for col in ['delta', 'gamma', 'vega', 'theta', 'implied_volatility']:
@@ -293,9 +293,7 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
                     chunk['contract_type'] = extracted[2]
                     chunk['strike'] = extracted[3].astype(float) / 1000.0
                     if 'date' not in chunk.columns and 'timestamp' in chunk.columns:
-                         chunk['date'] = pd.to_datetime(chunk['timestamp']).dt.date
-                         # Ensure date is date object
-                         chunk['date'] = pd.to_datetime(chunk['date'])
+                         chunk['date'] = pd.to_datetime(chunk['timestamp']).dt.normalize()
 
             # Prune to essentials (Exclude volume/oi to save RAM)
             essential_cols = [
