@@ -372,6 +372,10 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
 
         def close_position(self, reason, cost, dt, pnl):
             self.pnl += pnl
+            self.bars_since_trade = 0 # Cooling Period
+            self.trades += 1
+            if pnl > 0: self.wins += 1
+            else: self.losses += 1
             
             # Log Logic for Analyzer
             trade_record = {
@@ -404,179 +408,15 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     pos_status = "IN POSITION" if self.active_position else "SCANNING"
                     print(f"[Progress] {progress_pct:3d}% | Bar {self.bar_count:,}/{self.total_bars:,} | {dt_now.strftime('%Y-%m-%d %H:%M')} | Equity: ${equity:,.2f} | Trades: {self.trades} | {pos_status}")
             
-            # 1. Update Equity tracking for every bar
+            # 1. Update Basic Accounting
             current_equity = self.r_cfg.backtest_cash + self.pnl
+            unrealized_pnl = self.current_unrealized_pnl if self.active_position else 0.0
             
-            # If we provide an option chain for this date, calculate floating P&L
-            unrealized_pnl = 0.0
-            exit_triggered = False
-            exit_reason = ""
-            
-            if self.active_position:
-                chain_records = self.options_data.get(date_now, [])
-                # Safe check for DataFrame or List
-                has_records = False
-                if isinstance(chain_records, pd.DataFrame):
-                    has_records = not chain_records.empty
-                else: 
-                    has_records = bool(chain_records)
-                
-                if has_records:
-                    leg_symbols = [
-                        self.active_position.legs.short_call.symbol,
-                        self.active_position.legs.long_call.symbol,
-                        self.active_position.legs.short_put.symbol,
-                        self.active_position.legs.long_put.symbol
-                    ]
-                    
-                    # Update cache with current bar's prices
-                    if isinstance(chain_records, pd.DataFrame):
-                        for r in chain_records.itertuples():
-                            sym = getattr(r, 'option_symbol')
-                            if sym in leg_symbols:
-                                self.price_cache[sym] = getattr(r, 'last_price')
-                    else:
-                        for r in chain_records:
-                            if r['option_symbol'] in leg_symbols:
-                                self.price_cache[r['option_symbol']] = r['last_price']
-                    
-                    # Try to get all prices (current or cached)
-                    current_prices = {s: self.price_cache.get(s) for s in leg_symbols if s in self.price_cache}
-                    
-                    if len(current_prices) == 4:
-                        # Current replacement cost (to close)
-                        current_cost = (
-                            current_prices[self.active_position.legs.short_call.symbol] - 
-                            current_prices[self.active_position.legs.long_call.symbol] +
-                            current_prices[self.active_position.legs.short_put.symbol] -
-                            current_prices[self.active_position.legs.long_put.symbol]
-                        )
-                        
-                        unrealized_pnl = (self.active_position.credit_received - current_cost) * self.active_position.quantity * 100
-                        self.current_unrealized_pnl = unrealized_pnl
-                        
-                        # Exit Rule: Profit Take
-                        target_profit = self.active_position.credit_received * self.s_cfg.profit_take_pct
-                        
-                        # Exit Rule: Dynamic Stop Loss (ATR-based)
-                        base_multiplier = self.s_cfg.loss_close_multiple
-                        use_atr_stops = getattr(self.s_cfg, 'use_atr_stops', False)
-                        if use_atr_stops and self.sync:
-                            # Get current ATR from primary timeframe
-                            primary_tf = self.r_cfg.mtf_timeframes[0] if self.r_cfg.mtf_timeframes else '1'
-                            tf_snapshot = self.sync.get_snapshot(dt_now)
-                            atr_pct = tf_snapshot.get(primary_tf, {}).get('atr_pct', 0.01) if tf_snapshot and tf_snapshot.get(primary_tf) else 0.01
-                            
-                            # Import and calculate dynamic multiplier
-                            # from intelligence.fuzzy_engine import calculate_atr_stop_multiplier # Moved to top
-
-                            atr_base = getattr(self.s_cfg, 'atr_stop_base_multiplier', 1.5)
-                            dynamic_multiplier = calculate_atr_stop_multiplier(atr_pct, atr_base)
-                            stop_loss = self.active_position.credit_received * (1 + dynamic_multiplier)
-                        else:
-                            stop_loss = self.active_position.credit_received * (1 + base_multiplier)
-                        
-                        # Exit Rule: Trailing Stop
-                        use_trailing = getattr(self.s_cfg, 'use_trailing_stop', False)
-                        if use_trailing and unrealized_pnl > 0:
-                            # Check if trailing stop is activated
-                            profit_ratio = unrealized_pnl / (self.active_position.credit_received * self.active_position.quantity * 100)
-                            activation_pct = getattr(self.s_cfg, 'trailing_stop_activation_pct', 0.50)
-                            distance_pct = getattr(self.s_cfg, 'trailing_stop_distance_pct', 0.25)
-                            if profit_ratio >= activation_pct:
-                                # Set trailing stop distance
-                                trailing_floor = self.active_position.credit_received * (1 - activation_pct + distance_pct)
-                                if current_cost <= trailing_floor:
-                                    exit_triggered = True
-                                    exit_reason = "Trailing Stop"
-                        
-                        if current_cost <= target_profit:
-                            exit_triggered = True
-                            exit_reason = "Profit Take"
-                        elif current_cost >= stop_loss:
-                            exit_triggered = True
-                            exit_reason = "Stop Loss"
-                    
-                    # Exit Rule: Expiration (Date based, always checked)
-                    dte = (self.active_position.legs.short_call.expiration - date_now).days
-                    if dte <= 0:
-                        exit_triggered = True
-                        exit_reason = "Expiration"
-                    
-                    # Periodic Status
-                    if self.verbose and len(self.equity_series) % 100 == 0:
-                        cost_str = f"${current_cost:.2f}" if 'current_cost' in locals() else "N/A"
-                        print(f"  [Position] PnL: ${unrealized_pnl:.2f} | Cost: {cost_str} | DTE: {dte}")
-                            
-                        if exit_triggered:
-                            # === Apply Exit Costs (Stage 1: Market Realism) ===
-                            qty = self.active_position.quantity
-                            slippage_rate = self.active_position.metadata.get("slippage_rate", 0.02)
-                            commission_rate = self.active_position.metadata.get("commission_rate", 0.65)
-                            entry_commission = self.active_position.metadata.get("entry_commission", 0.0)
-                            
-                            # Exit slippage: we pay more to buy back due to adverse fills
-                            exit_slippage = slippage_rate * qty * 4
-                            # Exit commission
-                            exit_commission = commission_rate * qty * 4
-                            # Total commission (entry + exit)
-                            total_commission = entry_commission + exit_commission
-                            
-                            # Adjusted realized P&L = gross P&L - exit slippage - total commission
-                            gross_pnl = unrealized_pnl
-                            realized_pnl = gross_pnl - exit_slippage - total_commission
-                            
-                            self.pnl += realized_pnl
-                            self.trades += 1
-                            if realized_pnl > 0: self.wins += 1
-                            else: self.losses += 1
-                            
-                            print(f"[Trade] Closed: {exit_reason} | PnL: ${realized_pnl:.2f} (gross: ${gross_pnl:.2f}, costs: ${exit_slippage + total_commission:.2f})")
-
-                            # Market context at exit
-                            exit_ohlcv = {
-                                "open": self.data.open[0],
-                                "high": self.data.high[0],
-                                "low": self.data.low[0],
-                                "close": self.data.close[0],
-                                "volume": self.data.volume[0]
-                            }
-                            
-                            self.trade_log.append({
-                                "start": self.active_position.open_time,
-                                "end": dt_now,
-                                "result": "win" if realized_pnl > 0 else "loss",
-                                "amount": realized_pnl,
-                                "contracts": self.active_position.quantity,
-                                "exit_reason": exit_reason,
-                                "credit": self.active_position.credit_received,
-                                "exit_cost": current_cost if 'current_cost' in locals() else 0.0,
-                                "symbols": leg_symbols,
-                                "ivr": self.active_position.metadata.get("ivr", 0),
-                                "vix": self.active_position.metadata.get("vix", 0),
-                                "mtf_consensus": self.active_position.mtf_consensus,
-                                "wing_width": self.active_position.metadata.get("width", 0),
-                                "strikes": self.active_position.metadata.get("strikes", {}),
-                                "entry_ohlcv": self.active_position.metadata.get("entry_ohlcv", {}),
-                                "exit_ohlcv": exit_ohlcv
-                            })
-                            self.active_position = None
-                            unrealized_pnl = 0.0
-                            self.bars_since_trade = 0 # Cooling Period
-
-            # Track total equity including floating gain/loss
+            # Update Equity series (Critical for Drawdown/Sharpe)
             total_equity = current_equity + unrealized_pnl
             self.peak = max(self.peak, total_equity)
             self.drawdowns.append(self.peak - total_equity)
             self.equity_series.append(total_equity)
-
-            # 2. Skip if already in position or cooling down
-            if self.active_position:
-                return
-                
-            self.bars_since_trade += 1
-            if self.bars_since_trade < 100:
-                return
 
             # Heartbeat (Once per 500 bars if verbose)
             if self.verbose and self.bar_count % 500 == 0:
@@ -707,19 +547,36 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
 
             # === EXIT LOGIC (Restored) ===
             if self.active_position:
-                # Map current prices
-                current_prices = {q.symbol: q.mid for q in quote_chain}
                 legs = self.active_position.legs
+                
+                # 0. Expiration Check (Critical Fix)
+                # If we are past expiration, we must exit immediately.
+                # Settlement is handled by intrinsic value if data is missing.
+                if date_now >= legs.short_call.expiration:
+                    # Calculate Settlement Value (Intrinsic)
+                    spot = self.data.close[0]
+                    
+                    # Call side
+                    call_val = max(0, spot - legs.short_call.strike) - max(0, spot - legs.long_call.strike)
+                    # Put side
+                    put_val = max(0, legs.short_put.strike - spot) - max(0, legs.long_put.strike - spot)
+                    
+                    settlement_cost = call_val + put_val
+                    unrealized_pnl = (self.active_position.credit_received - settlement_cost) * self.active_position.quantity * 100
+                    
+                    self.close_position("expired", settlement_cost, dt_now, unrealized_pnl)
+                    return
+
+                # Map current prices for active legs
+                current_prices = {q.symbol: q.mid for q in quote_chain}
                 syms = [legs.short_call.symbol, legs.long_call.symbol, legs.short_put.symbol, legs.long_put.symbol]
                 
                 # Check mark-to-market if we have prices
                 if all(s in current_prices for s in syms):
                     # Calculate Cost to Close (Mark-to-Market)
-                    # Cost = (Shorts - Longs)
                     cost = (current_prices[legs.short_call.symbol] + current_prices[legs.short_put.symbol]) - \
                            (current_prices[legs.long_call.symbol] + current_prices[legs.long_put.symbol])
                     
-                    # PnL = (Credit - Cost) * Qty * 100
                     unrealized_pnl = (self.active_position.credit_received - cost) * self.active_position.quantity * 100
                     self.current_unrealized_pnl = unrealized_pnl
                     
@@ -729,7 +586,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     if unrealized_pnl >= target:
                         exit_reason = "profit_take"
                     
-                    # 2. Stop Loss (Cost exceeds credit by multiple)
+                    # 2. Stop Loss
                     elif cost >= (self.active_position.credit_received * (1 + self.s_cfg.loss_close_multiple)):
                         exit_reason = "stop_loss"
                         
@@ -739,7 +596,16 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     
                     if exit_reason:
                         self.close_position(exit_reason, cost, dt_now, unrealized_pnl)
-                        return # Skip entry logic if just closed
+                        return
+                    
+                # If we are in a position, we skip entry logic entirely
+                return
+
+            self.bars_since_trade += 1
+            if self.bars_since_trade < 100:
+                if self.verbose and self.bar_count % 500 == 0:
+                    print(f"      [Cooling] Bar {self.bar_count} | Cooldown: {self.bars_since_trade}/100")
+                return
 
             # === Market Realism (Stage 1) ===
             # Calculate Realized Volatility
