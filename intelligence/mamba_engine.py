@@ -127,6 +127,8 @@ class MambaForecastEngine:
                     expand=2
                 ).cuda()
                 self.model.eval() # Inference mode (no dropout etc)
+                mem_alloc = torch.cuda.memory_allocated() / 1e6
+                logger.info(f"Model loaded on GPU. VRAM used: {mem_alloc:.2f} MB")
             except Exception as e:
                 logger.error(f"Failed to init CUDA model: {e}. Fallback to CPU.")
                 self.is_cuda = False
