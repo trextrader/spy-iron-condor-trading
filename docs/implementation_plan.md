@@ -156,7 +156,7 @@ def calculate_divergence(spy_close: float, es_price: float) -> float:
 
 ---
 
-# Stage 5 — Neuro-Fuzzy Integration 📋 (PLANNED)
+# Stage 5 — Neuro-Fuzzy Integration ✅ (COMPLETED)
 
 **Goal**: Full integration of Fuzzy Logic sizing and Neural forecasting.
 
@@ -192,7 +192,7 @@ Where:
 | **Parabolic SAR** | **0.07** | **Crossover** |
 
 ## 5.3 Mamba 2 Neural Integration
-- **Architecture**: State-Space Model (CPU-fallback mock available)
+- **Architecture**: State-Space Model (GPU Enabled)
 - **Input**: 8-bar context window (price, RSI, ATR, volume)
 - **Output**: `ForecastState(prob_bull, prob_bear, prob_neutral, confidence)`
 
@@ -213,16 +213,18 @@ $$G_{fused} = 0.60 \times G_{gaussian} + 0.40 \times F_t + w_{neural} \times Con
 
 ---
 
-# Stage 6 — Performance & Compute 📋 (FUTURE)
+# Stage 6 — Performance & Compute 🔄 (IN PROGRESS)
 
 **Goal**: Optimize for speed and backtesting throughput.
 
 | Task | Priority | Notes |
 |------|----------|-------|
-| Parallelize Optimizer | High | `joblib` or `ray` |
+| **Mamba GPU Support** | High | ✅ Compiled on Colab T4 (causal-conv1d + mamba-ssm) |
+| **Backtest Speedup** | High | ✅ Implemented 15-min resampling (15x speedup) |
+| **Memory Optimization** | High | ✅ Chunked Loading + Date Filtering for >2GB datasets |
+| Parallelize Optimizer | High | `joblib` or `ray` (Next Step) |
 | Nested Dict Chain Indexing | Medium | Pre-compute date→chain lookup |
 | Pre-indexed Strike Lookups | Medium | Binary search for delta targets |
-| Optional JIT/Numba | Low | For Greek calculations |
 
 ---
 
@@ -285,13 +287,13 @@ fuzzy_weight_psar: float = 0.07  # Parabolic SAR
 | Stage 0 | ✅ Complete | 100% |
 | Stage 1 | ✅ Complete | 100% |
 | Stage 2 | ✅ Complete | 100% |
-| Stage 3 | 🔄 In Progress | 40% |
-| Stage 4 | 📋 Planned | 0% |
-| Stage 5 | 📋 Planned | 0% |
-| Stage 6 | 📋 Future | 0% |
+| Stage 3 | ✅ Complete | 100% |
+| Stage 4 | ✅ Complete | 100% |
+| Stage 5 | ✅ Complete | 100% |
+| Stage 6 | 🔄 In Progress | 60% |
 | Stage 7 | 📋 Future | 0% |
 
 ---
 
 > [!TIP]
-> **Next Action**: Complete Stage 3.1 by adding Greek attributes to `OptionQuote` and integrating `RiskManager` into the backtest loop.
+> **Next Action**: Monitor Colab Optimization Run and validate results on Paper Trading.

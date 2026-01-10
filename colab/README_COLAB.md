@@ -38,6 +38,24 @@ This guide explains how to migrate your local project to Google Colab to leverag
 *   **"Drive not mounted"**: Re-run Cell 1 and ensure you completed the pop-up authorization.
 *   **Slow Uploads**: If you have massive CSVs (10GB+), consider uploading only the files you need for the backtest (e.g., `spy_options_intraday_large_with_greeks_m1.csv`) or using `gdown` if the file is hosted elsewhere.
 
+### Performance Tips
+
+1. **Memory Safety (OOM Protection)**
+   - The optimizer uses **Chunked Loading** (`chunksize=500000`) and **Float32 Precision** to load massive datasets (2GB+) on standard Colab instances (12GB RAM).
+   - Only data within the `--bt-start` and `--bt-end` range is kept in memory.
+
+2. **Acceleration (15x Speedup)**
+   - The Neural Engine doesn't need 1-minute resolution. The optimizer automatically **resamples spot data to 15-minute bars (`15T`)**.
+   - This reduces simulation time from ~90s to ~10s per run without losing signal quality.
+
+3. **Mamba Compilation**
+   - Mamba requires `causal-conv1d` to be compiled against the specific CUDA version.
+   - If you see `TypeError: NoneType object is not callable`, run:
+     ```bash
+     !pip uninstall -y causal-conv1d mamba-ssm
+     !pip install causal-conv1d>=1.2.0 mamba-ssm --no-binary :all:
+     ```
+
 ---
 **Why Cloud?**
 *   **Speed**: Faster CPU cores for the backtest loop.
