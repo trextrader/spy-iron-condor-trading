@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import os
 
 # Try to import mamba_ssm (Linux/CUDA only)
 # If missing, we fall back to the MockMamba kernel for CPU inference
