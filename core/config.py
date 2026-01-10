@@ -178,6 +178,7 @@ class StrategyConfig:
     # === Mamba Neural Forecasting ===
     use_mamba_model: bool = True               # Enable Mamba 2 neural engine
     mamba_d_model: int = 64                    # Model dimension
+    mamba_layers: int = 16                     # Model depth
     fuzzy_weight_neural: float = 0.20          # Weight of neural signal in sizing
 
     # === Position Sizing Guardrails ===

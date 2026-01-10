@@ -108,6 +108,10 @@ Examples:
     parser.add_argument("--position-size-pct", type=float, default=0.05)
     parser.add_argument("--alpaca", action="store_true", help="Use Alpaca Broker instead of PaperBroker")
 
+    # --- Mamba Model ---
+    parser.add_argument("--mamba-d-model", type=int, default=64, help="Model dimension (must match trained weights)")
+    parser.add_argument("--mamba-layers", type=int, default=64, help="Model layers (must match trained weights)")
+
     # --- Optimizer ---
     parser.add_argument("--use-optimizer", action="store_true")
 
@@ -234,6 +238,12 @@ def main():
 
     if args.no_liquidity_gate:
         strategy_config.use_liquidity_gate = False
+
+    # -------------------------
+    # MAMBA MODEL
+    # -------------------------
+    strategy_config.mamba_d_model = args.mamba_d_model
+    strategy_config.mamba_layers = args.mamba_layers
 
     # -------------------------
     # VALIDATE CONFIG
