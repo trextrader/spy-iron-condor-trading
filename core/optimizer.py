@@ -351,7 +351,8 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
         combinations = list(itertools.product(*values))
         phase_results = []
         
-        print(f"  Progress: 0/{len(combinations)}...", end="\r")
+        phase_total = len(combinations)
+        print(f"  Testing {phase_total} combinations...")
         
         for i, combo in enumerate(combinations):
             # Start with the best config from previous phase
@@ -361,6 +362,10 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             params_dict = dict(zip(keys, combo))
             for k, v in params_dict.items():
                 setattr(s_cfg, k, v)
+            
+            # Display iteration info with settings
+            settings_str = " | ".join([f"{k}={v}" for k, v in params_dict.items()])
+            print(f"  [{i+1}/{phase_total}] {settings_str}")
                 
             # Run Backtest
             strat = run_backtest_headless(s_cfg, run_cfg, 
@@ -383,6 +388,9 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
                 profit_factor = gross_profit / gross_loss if gross_loss > 0 else (gross_profit if gross_profit > 0 else 0.0)
                 win_rate = (len(wins) / len(strat.trade_log) * 100) if strat.trade_log else 0.0
                 
+                # Show quick result
+                print(f"       -> NP=${net_profit:.0f} | DD=${max_dd:.0f} | Ratio={np_dd_ratio:.2f} | Trades={len(strat.trade_log)}")
+                
                 result_entry = {
                     "phase": phase_idx + 1,
                     "params": params_dict, # Only the params changed in this phase
@@ -395,11 +403,10 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
                     "win_rate": win_rate
                 }
                 phase_results.append(result_entry)
-            
-            if (i+1) % 5 == 0:
-                print(f"  Progress: {i+1}/{len(combinations)}...", end="\r")
+            else:
+                print(f"       -> [FAILED] No results")
 
-        print(f"  Progress: {len(combinations)}/{len(combinations)} [DONE]")
+        print(f"  Phase Complete: {phase_total}/{phase_total} [DONE]")
         
         # Analyze Phase Results
         if not phase_results:
