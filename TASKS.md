@@ -15,9 +15,14 @@
 - [x] **Inference**: Configurable `d_model`/`layers` for model sizing (256/12 vs 1024/32).
 
 ### Optimizer
-- [x] **Segmentation**: 5-Phase serial optimization strategy.
+- [x] **Segmentation**: 6-Phase serial optimization strategy.
+- [x] **Phase 6**: Fuzzy Weight Optimization (Neural, MTF, IV, Regime, RSI, ADX).
 - [x] **Metrics**: Net Profit / Max Drawdown targeting.
 - [x] **Integration**: Seamless loading of `models/mamba_active.pth`.
+
+### Data Factory
+- [x] **Intraday Expansion**: `expand_options_intraday.py` generates 1-min and 5-min synthetic options from daily ivolatility.
+- [x] **Data Validator**: Auto-detects date column in various CSV formats.
 
 ## 🚧 In Progress
 

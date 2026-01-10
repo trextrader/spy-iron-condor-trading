@@ -144,6 +144,21 @@ Below is the complete list of parameters tunable via the `core/optimizer.py` eng
 | `psar_max_acceleration` | 0.20 | 0.20, 0.25 |
 | `use_psar_filter` | True | True, False |
 
+#### 6. Phase 6: Fuzzy Weights (The Blend) - NEW
+Optimizes the 11-factor fuzzy weight blend including Neural Network influence.
+
+| Parameter | Default | Optimization Range |
+|:---|:---:|:---|
+| `fuzzy_weight_neural` | 0.20 | 0.10, 0.20, 0.30 |
+| `fuzzy_weight_mtf` | 0.18 | 0.10, 0.18, 0.25 |
+| `fuzzy_weight_iv` | 0.14 | 0.10, 0.14, 0.20 |
+| `fuzzy_weight_regime` | 0.11 | 0.08, 0.11, 0.15 |
+| `fuzzy_weight_rsi` | 0.10 | 0.05, 0.10, 0.15 |
+| `fuzzy_weight_adx` | 0.10 | 0.05, 0.10, 0.15 |
+
+*Additional weights (BBands, Stoch, Volume, SMA, PSAR) are available but commented out to reduce search space.*
+
+
 ### Phase 1+ Analytics & Data Pipeline (NEW)
 - **Volatility Risk Premium (VRP)**: Realized vs Implied volatility edge detection
 - **SPY-ES Divergence**: Z-score based divergence trading signals
