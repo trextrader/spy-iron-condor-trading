@@ -27,7 +27,12 @@ python core/main.py --mode backtest --use-mtf --dynamic-sizing --bt-samples 0 --
 ```
 - Outputs timestamped CSV reports to `reports/top100_YYYYMMDD_HHMMSS.csv`
 - Sorted by Net Profit / Max Drawdown ratio (higher is better)
-- Edit `OPTIMIZATION_MATRIX` in `core/optimizer.py:18` to modify search space
+- **5-Phase Matrix**: Edit `OPTIMIZATION_SEGMENTS` in `core/optimizer.py:17` to modify search space:
+  1. Exits & Risk
+  2. Structure & Entries
+  3. Filters & Regime
+  4. Momentum Logic
+  5. Trend & Volatility (PSAR)
 
 ### Live Paper Trading
 ```powershell

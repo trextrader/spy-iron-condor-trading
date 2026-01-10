@@ -16,6 +16,25 @@
 - **Alpaca Integration**: Seamless live paper trading via Alpaca-Py SDK
 - **Professional Reporting**: Automated PDF reports with equity curves, strike overlays, P&L distributions
 
+### 🔬 5-Phase Serial Optimization (NEW)
+The system employs a segmented optimization engine to tune 30+ parameters without overfitting:
+
+1.  **Phase 1: Exits & Risk** (Timing)
+    *   Targets: Profit targets, stop-losses, max hold days, risk limits
+    *   Goal: Optimize trade pacing and risk/reward ratios.
+2.  **Phase 2: Structure & Entries** (Mechanics)
+    *   Targets: Delta selection (0.10-0.30), wing widths, credit minimums
+    *   Goal: Tune the instrument structure for the current market.
+3.  **Phase 3: Filters & Regime** (Safety)
+    *   Targets: IV Rank gates, VIX thresholds, volatility caps
+    *   Goal: Refine entry gates to avoid high-risk environments.
+4.  **Phase 4: Momentum Logic** (Signals)
+    *   Targets: RSI/Stoch neutral zones, ADX trend thresholds
+    *   Goal: Optimize momentum-based entry logic.
+5.  **Phase 5: Trend & Volatility** (Context)
+    *   Targets: Bollinger Band squeeze, SMA distance, PSAR acceleration
+    *   Goal: Fine-tune trend-following and mean-reversion triggers.
+
 ### Phase 1+ Analytics & Data Pipeline (NEW)
 - **Volatility Risk Premium (VRP)**: Realized vs Implied volatility edge detection
 - **SPY-ES Divergence**: Z-score based divergence trading signals

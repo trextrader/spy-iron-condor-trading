@@ -17,31 +17,56 @@ from tabulate import tabulate
 OPTIMIZATION_SEGMENTS = [
     {
         "name": "Phase 1: Exits & Risk (The Pacing)",
-        "description": "Optimizing profit taking and stop-loss behavior.",
+        "description": "Optimizing profit taking, stop-loss behavior, and trade duration.",
         "params": {
-            "profit_take_pct": np.arange(0.40, 1.01, 0.1),       # 0.4, 0.5, ... 1.0
+            "profit_take_pct": np.arange(0.40, 0.95, 0.1),       # 0.4, 0.5, ... 0.9
             "loss_close_multiple": np.arange(1.0, 3.1, 0.5),     # 1.0, 1.5, 2.0, 2.5, 3.0
-            "max_hold_days": [10, 14, 21, 30]                    # Hold duration cap
+            "max_hold_days": [10, 14, 21, 30],                   # Hold duration cap
+            "max_account_risk_per_trade": [0.01, 0.02, 0.03]
         }
     },
     {
         "name": "Phase 2: Structure & Entries (The Vehicle)",
-        "description": "Optimizing delta targets and spread structure.",
+        "description": "Optimizing delta targets, spread widths, and credit requirements.",
         "params": {
-            "target_short_delta_low": [0.08, 0.10, 0.12, 0.15],
+            "target_short_delta_low": [0.10, 0.12, 0.15],
+            "target_short_delta_high": [0.20, 0.25, 0.30],
             "wing_width_min": [5.0, 10.0],
-            "min_credit_to_width": [0.10, 0.15, 0.20]
+            "min_credit_to_width": [0.10, 0.15, 0.20],
+            "use_skew_penalty": [True, False]
         }
     },
     {
-        "name": "Phase 3: Filters (The Safety)",
-        "description": "Refining entry filters to avoid bad trades.",
+        "name": "Phase 3: Filters & Regime (The Safety)",
+        "description": "Refining volatility gates and regime thresholds.",
         "params": {
             "iv_rank_min": [0.0, 10.0, 20.0, 30.0],
             "vix_threshold": [25.0, 30.0, 40.0],
+            "vix_threshold_low": [15.0, 18.0, 20.0],
+            "max_volatility_pct": [0.02, 0.03, 0.04]
+        }
+    },
+    {
+        "name": "Phase 4: Momentum Logic (RSI, Stoch, ADX)",
+        "description": "Optimizing momentum and trend strength indicators.",
+        "params": {
             "rsi_neutral_min": [30, 40],
-            # Note: rsi_neutral_max usually coupled, but we keep it simple here
-            "rsi_neutral_max": [60, 70]
+            "rsi_neutral_max": [60, 70],
+            "stoch_neutral_min": [20, 30],
+            "stoch_neutral_max": [70, 80],
+            "adx_threshold_low": [20.0, 25.0, 30.0], # Trend strength limit
+            "use_adx_filter": [True, False]
+        }
+    },
+    {
+        "name": "Phase 5: Trend & Volatility Indicators (BBands, SMA, PSAR)",
+        "description": "Optimizing Bollinger Bands, SMA distance, and Parabolic SAR.",
+        "params": {
+            "bbands_squeeze_threshold": [0.01, 0.02, 0.03],
+            "sma_max_distance": [0.01, 0.02, 0.03, 0.04],
+            "psar_acceleration": [0.02, 0.025],
+            "psar_max_acceleration": [0.20, 0.25],
+            "use_psar_filter": [True, False]
         }
     }
 ]
