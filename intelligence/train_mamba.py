@@ -4,10 +4,6 @@ import time
 import argparse
 import numpy as np
 import pandas as pd
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
 import pandas_ta as ta
 from datetime import datetime, timedelta
 
@@ -21,23 +17,30 @@ try:
 except ImportError:
     pass
 
-from intelligence.mamba_engine import DeepMamba, HAS_MAMBA
-
-# ... (Configuration defaults remains same) ...
+# Configuration defaults
+DEFAULT_CONFIG = {
+    'symbol': 'SPY',
+    'lookback': 60,
+    'd_model': 1024,   # Default to Large
+    'layers': 32,
+    'epochs': 50,
+    'batch_size': 128,
+    'lr': 5e-5,
+    'model_path': 'models/mamba_active.pth'
+}
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train Mamba on Alpaca Intraday Data")
     parser.add_argument("--key", type=str, help="Alpaca API Key (optional if in config.py)")
     parser.add_argument("--secret", type=str, help="Alpaca Secret Key (optional if in config.py)")
     parser.add_argument("--symbol", type=str, default="SPY")
-# ... (rest of args) ...
     parser.add_argument("--years", type=int, default=2, help="Years of history to fetch")
     parser.add_argument("--timeframe", type=str, default="15Min", choices=["1Min", "5Min", "15Min", "1Hour"])
     parser.add_argument("--d-model", type=int, default=1024)
     parser.add_argument("--layers", type=int, default=32)
     
     # Workflow flags
-    parser.add_argument("--save-only", action="store_true", help="Download data and save to CSV, then exit")
+    parser.add_argument("--save-only", action="store_true", help="Download data and save to CSV, then exit (No Torch required)")
     parser.add_argument("--local-data", type=str, help="Path to local CSV to use for training instead of downloading")
     parser.add_argument("--output-csv", type=str, default="data/spy_training_data.csv")
     
@@ -142,12 +145,45 @@ def create_sequences(X, y, lookback):
     
     return np.array(Xs), np.array(ys)
 
-def train():
-    args = parse_args()
+def run_download(args):
+    # Resolve Keys
+    api_key = args.key
+    api_secret = args.secret
     
-    # 1. Data Source Logic
+    if not api_key:
+        try:
+            cfg = RunConfig()
+            api_key = cfg.alpaca_api_key
+            api_secret = cfg.alpaca_secret_key
+            if api_key and "YOUR_" not in api_key:
+                print("[Config] Using Alpaca Keys from config.py")
+        except Exception as e:
+            print(f"[Warning] Could not load config: {e}")
+            
+    if api_key and api_secret:
+            df = download_alpaca_data(api_key, api_secret, args.symbol, args.years, args.timeframe)
+            if not df.empty:
+                os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
+                df.to_csv(args.output_csv, index=False)
+                print(f"[Success] Data saved to {args.output_csv}.")
+    else:
+            print("[Error] Must provide Alpaca Keys (via CLI or config.py)")
+
+def run_training(args):
+    # Lazy Imports
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+    from torch.utils.data import DataLoader, TensorDataset
+    try:
+        from intelligence.mamba_engine import DeepMamba, HAS_MAMBA
+    except ImportError:
+        HAS_MAMBA = False
+        print("[Error] Could not import Mamba/Torch.")
+        return
+
+    # Load Data
     df = pd.DataFrame()
-    
     if args.local_data:
         print(f"[Core] Loading local data from {args.local_data}...")
         try:
@@ -156,39 +192,16 @@ def train():
             print(f"[Error] Failed to load local CSV: {e}")
             return
     else:
-        # Resolve Keys
-        api_key = args.key
-        api_secret = args.secret
-        
-        if not api_key:
-            try:
-                cfg = RunConfig()
-                api_key = cfg.alpaca_api_key
-                api_secret = cfg.alpaca_secret_key
-                if api_key and "YOUR_" not in api_key:
-                    print("[Config] Using Alpaca Keys from config.py")
-            except Exception as e:
-                print(f"[Warning] Could not load config: {e}")
-                
-        if api_key and api_secret:
-             df = download_alpaca_data(api_key, api_secret, args.symbol, args.years, args.timeframe)
-        else:
-             print("[Error] Must provide --local-data OR Alpaca Keys (via CLI or config.py)")
-             return
+        # Try download via run_download helpers? 
+        # Simpler: just tell user to use save-only first if locally.
+        print("[Error] In Training Mode, --local-data is recommended. Or use download flow first.")
+        return
 
     # Check Empty
     if df.empty:
         print("No data available.")
         return
 
-    # Save Only Mode
-    if args.save_only:
-        os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
-        df.to_csv(args.output_csv, index=False)
-        print(f"[Success] Data saved to {args.output_csv}. Exiting.")
-        return
-
-    # 2. Training Logic
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Training on {device}...")
     
@@ -284,5 +297,12 @@ def train():
 
     print("Training Complete.")
 
+def main():
+    args = parse_args()
+    if args.save_only:
+        run_download(args)
+    else:
+        run_training(args)
+
 if __name__ == "__main__":
-    train()
+    main()
