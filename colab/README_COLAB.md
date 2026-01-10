@@ -29,7 +29,11 @@ This guide explains how to migrate your local project to Google Colab to leverag
         *   Click **Generate new token (classic)**.
         *   Generate a new token with `repo` scope.
         *   Copy/Paste this token into the Colab prompt (input is hidden for security).
-2.  **Install**: Run Cell 2 to install dependencies.
+2.  **Install**: Run Cell 2 (or a new cell) with:
+    ```python
+    !pip install -r requirements.txt
+    !pip install causal-conv1d>=1.4.0 mamba-ssm>=2.2.2
+    ```
 3.  **Optimize**: Run Cell 3 to begin the 5-Phase Optimization.
 4.  **Save**: Run Cell 4 to copy results back to Drive.
 
