@@ -268,7 +268,7 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
 
             # Deduplicate within chunk to save RAM
             if 'date' in chunk.columns and 'option_symbol' in chunk.columns:
-                 chunk.drop_duplicates(subset=['date', 'option_symbol'], keep='first', inplace=True)
+                 chunk.drop_duplicates(subset=['date', 'option_symbol'], keep='last', inplace=True)
 
             chunks.append(chunk)
             
@@ -281,7 +281,7 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
         # Deduplicate globally (Handle duplicates across chunks)
         if 'date' in options_df.columns and 'option_symbol' in options_df.columns:
              print(f"      ...Deduplicating {len(options_df)} records...")
-             options_df.drop_duplicates(subset=['date', 'option_symbol'], keep='first', inplace=True)
+             options_df.drop_duplicates(subset=['date', 'option_symbol'], keep='last', inplace=True)
              print(f"      ...Unique records: {len(options_df)}")
         del chunks
         import gc; gc.collect()
