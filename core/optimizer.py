@@ -144,11 +144,29 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
         'date', 'expiration', 'strike', 'cp_flag', 
         'bid_1545', 'ask_1545', 'underlying_last', 
         'delta_1545', 'gamma_1545', 'vega_1545', 'theta_1545',
-        'option_symbol', 'contract_type', 'type'
+        'option_symbol', 'contract_type', 'type', 'bid', 'ask'
     ]
     # Filter only if they exist
     existing_essential = [c for c in essential_cols if c in options_df.columns]
     options_df = options_df[existing_essential]
+
+    # Standardize column names for Backtest Engine
+    cols_map = {
+        'bid_1545': 'bid',
+        'ask_1545': 'ask',
+        'contract_type': 'type'
+    }
+    options_df.rename(columns=cols_map, inplace=True)
+
+    # Ensure option_symbol exists
+    if 'option_symbol' not in options_df.columns:
+        # Reconstruct if missing: SPY_20250102_C_500.0
+        options_df['option_symbol'] = (
+            "SPY" + "_" +
+            options_df['expiration'].astype(str) + "_" +
+            options_df['cp_flag'].astype(str) + "_" +
+            options_df['strike'].astype(str)
+        )
 
     preloaded_options = {}
     for date, group in options_df.groupby('date'):
