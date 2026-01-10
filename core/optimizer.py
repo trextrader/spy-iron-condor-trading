@@ -536,12 +536,14 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             print(f"  [{i+1}/{phase_total}] {settings_str}")
                 
             # Run Backtest (with pre-computed neural signals)
+            # Enable verbose=True for the very FIRST run to see entry filters
+            v_val = (i == 0 and phase_idx == 0)
             strat = run_backtest_headless(s_cfg, run_cfg, 
                                           preloaded_df=full_df, 
                                           preloaded_options=preloaded_options,
                                           preloaded_sync=preloaded_sync,
                                           preloaded_neural_forecasts=preloaded_neural,
-                                          verbose=False)
+                                          verbose=v_val)
             
             if strat is not None:
                 # Capture Metrics
