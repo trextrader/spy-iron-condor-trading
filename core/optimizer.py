@@ -255,13 +255,21 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
                     chunk[c] = chunk[c].astype('float32')
 
             if 'contract_type' not in chunk.columns:
-                if 'type' in chunk.columns: chunk['contract_type'] = chunk['type']
+                if 'call_put' in chunk.columns: chunk['contract_type'] = chunk['call_put']
+                elif 'type' in chunk.columns: chunk['contract_type'] = chunk['type']
                 elif 'cp_flag' in chunk.columns: chunk['contract_type'] = chunk['cp_flag']
                 else: chunk['contract_type'] = 'C' # Fallback
             
-            # Convert category
-            if chunk['contract_type'].dtype == 'object':
-                 chunk['contract_type'] = chunk['contract_type'].astype('category')
+            # Standardize 'C'/'P' to 'call'/'put'
+            if chunk['contract_type'].dtype == 'object' or chunk['contract_type'].dtype.name == 'category':
+                chunk['contract_type'] = chunk['contract_type'].replace({
+                    'C': 'call', 'P': 'put', 
+                    'Call': 'call', 'Put': 'put',
+                    'CALL': 'call', 'PUT': 'put'
+                })
+            
+            # Convert to category for memory efficiency
+            chunk['contract_type'] = chunk['contract_type'].astype('category')
                 
             if 'bid' not in chunk.columns: 
                 if 'last_price' in chunk.columns: chunk['bid'] = chunk['last_price']
@@ -284,13 +292,13 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             
             # Parse components from option_symbol if missing (Expanded style)
             if 'option_symbol' in chunk.columns and ('expiration' not in chunk.columns or 'strike' not in chunk.columns):
-                # Regex for standard OCC: Root(6) + YYMMDD + T(1) + Strike(8) = 21 chars typically
-                # Example: SPY250725C00613000
-                # We assume standard format
-                extracted = chunk['option_symbol'].str.extract(r'([A-Z]+)(\d{6})([CP])(\d{8})')
+                # Regex for standard OCC: Root(6) + YYMMDD + T(1) + Strike(8)
+                # Handle potential spaces in the root (e.g., 'SPY   ')
+                extracted = chunk['option_symbol'].str.extract(r'([A-Z]+\s*)(\d{6})([CP])(\d{8})')
                 if not extracted.empty and extracted.isnull().sum().sum() == 0:
                     chunk['expiration'] = pd.to_datetime(extracted[1], format='%y%m%d', errors='coerce')
-                    chunk['contract_type'] = extracted[2]
+                    # Standardize to 'call'/'put' to match strategy expectations
+                    chunk['contract_type'] = extracted[2].map({'C': 'call', 'P': 'put'})
                     chunk['strike'] = extracted[3].astype(float) / 1000.0
                     if 'date' not in chunk.columns and 'timestamp' in chunk.columns:
                          chunk['date'] = pd.to_datetime(chunk['timestamp']).dt.normalize()
