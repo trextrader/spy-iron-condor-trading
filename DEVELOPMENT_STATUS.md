@@ -12,6 +12,9 @@ This document provides the development team with a clear snapshot of the technic
 - **Leg Data Resilience**: Implemented a "Last Known Price" cache to handle intermittent "N/A" price gaps in synthetic options data.
 - **MTF Sync Naivety**: Normalized timezone handling across the 5m, 15m, and 60m timeframes to prevent look-ahead bias and alignment errors.
 - **Alpaca Broker Integration**: Successfully implemented the `AlpacaBroker` class; verified connectivity through smoke tests (confirmed unauthorized response with placeholder keys).
+- **Hanging Trades Fix**: Resolved a critical architectural bug where trades would stay "Open" indefinitely after expiration due to missing price data. Implemented an explicit **Expiration Exit** with intrinsic value settlement.
+- **Data Type Synchronization**: Fixed `TypeError` comparison between Pandas Timestamps and `datetime.date` objects. Standardized all expiration dates to native Python `date` objects across the optimizer and strategy engine.
+- **Optimizer Path Alignment**: Enabled auto-detection of intraday vs daily data modes in the backtest engine, ensuring 100% data coverage during optimization runs.
 
 ---
 

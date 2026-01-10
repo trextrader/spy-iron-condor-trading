@@ -86,7 +86,7 @@ The `data_factory/` directory contains tools to generate high-fidelity datasets:
    python data_factory/expand_options_intraday.py --input data/ivolatility/your_file.csv
    ```
 
-### 🔬 5-Phase Serial Optimization (NEW)
+### 🔬 6-Phase Serial Optimization (NEW)
 The system employs a segmented optimization engine to tune 30+ parameters without overfitting:
 
 1.  **Phase 1: Exits & Risk** (Timing)
@@ -104,8 +104,11 @@ The system employs a segmented optimization engine to tune 30+ parameters withou
 5.  **Phase 5: Trend & Volatility** (Context)
     *   Targets: Bollinger Band squeeze, SMA distance, PSAR acceleration
     *   Goal: Fine-tune trend-following and mean-reversion triggers.
+6.  **Phase 6: Fuzzy Weights** (The Blend)
+    *   Targets: Relative weights of MTF, IV, Regime, RSI, ADX, and Neural Forecasts.
+    *   Goal: Optimize the neuro-fuzzy decision blend for final sizing.
 
-### 🔍 Optimizable Parameter Reference (5-Phase Matrix)
+### 🔍 Optimizable Parameter Reference (6-Phase Matrix)
 
 Below is the complete list of parameters tunable via the `core/optimizer.py` engine, matched with defaults from `core/config.py`.
 

@@ -20,6 +20,8 @@
 - [x] **Metrics**: Net Profit / Max Drawdown targeting.
 - [x] **Integration**: Seamless loading of `models/mamba_active.pth`.
 - [x] **Performance**: Optimized backtest loop (300x speedup via deduplication).
+- [x] **Critical Fixes**: Resolved "Zero Trades" bug, implemented explicit Expiration Exit logic, and fixed Python/Pandas timestamp synchronization.
+- [x] **Intraday Support**: Full support for Alpaca-style intraday options data in the optimizer.
 
 ### Data Factory
 - [x] **Intraday Expansion**: `expand_options_intraday.py` generates 1-min and 5-min synthetic options from daily ivolatility.
