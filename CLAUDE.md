@@ -16,6 +16,12 @@ python core/main.py --mode backtest --use-mtf --dynamic-sizing --bt-samples 0
 # Quick backtest with 500 bars (default)
 python core/main.py --mode backtest --use-mtf --dynamic-sizing
 
+# Debug: Test MTF impact (No Fuzzy)
+python core/main.py --mode backtest --use-mtf --no-fuzzy
+
+# Debug: Test Fuzzy impact (No MTF)
+python core/main.py --mode backtest --use-fuzzy --dynamic-sizing --no-mtf-filter
+
 # Custom date range backtest
 python core/main.py --mode backtest --bt-start 2024-01-01 --bt-end 2024-06-30
 ```

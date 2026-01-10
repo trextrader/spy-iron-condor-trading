@@ -16,6 +16,22 @@
 - **Alpaca Integration**: Seamless live paper trading via Alpaca-Py SDK
 - **Professional Reporting**: Automated PDF reports with equity curves, strike overlays, P&L distributions
 
+### 💻 CLI Command Reference
+
+Execute `core/main.py` with the following flags to control strategy behavior:
+
+| Scenario | Command | Description |
+|---|---|---|
+| **Production Backtest** | `python core/main.py --mode backtest --use-mtf --use-fuzzy --dynamic-sizing --bt-samples 0` | **Recommended**: Full 10-factor fuzzy logic + MTF consensus on all data. |
+| **Optimization** | `python core/main.py --mode backtest --use-optimizer --use-mtf --use-fuzzy --dynamic-sizing` | Runs the 5-phase optimization matrix (see below). |
+| **Baseline (Simple)** | `python core/main.py --mode backtest --no-mtf-filter --no-fuzzy` | Pure mechanical Iron Condor (no intelligence). |
+| **Why MTF Only?** | `python core/main.py --mode backtest --use-mtf --no-fuzzy` | Tests impact of multi-timeframe consensus in isolation. |
+| **Why Fuzzy Only?** | `python core/main.py --mode backtest --use-fuzzy --dynamic-sizing --no-mtf-filter` | Tests impact of 10-factor position sizing in isolation. |
+| **Custom Dates** | `python core/main.py --mode backtest --bt-start 2024-01-01 --bt-end 2024-03-31` | Backtest specific historical period. |
+| **Paper Trading** | `python core/main.py --mode live --alpaca` | Connects to Alpaca Paper API for live execution. |
+
+> **Note**: `--bt-samples 0` loads the ENTIRE dataset. Remove it to default to 500 samples for quick debugging.
+
 ### 🔬 5-Phase Serial Optimization (NEW)
 The system employs a segmented optimization engine to tune 30+ parameters without overfitting:
 
