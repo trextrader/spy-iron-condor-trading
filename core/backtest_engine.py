@@ -561,7 +561,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                 if chain_dict:
                     # Convert dict of dicts to list of OptionQuote objects directly
                     # Structure: {symbol: {price, strike, expiration, type, delta...}}
-                quote_chain = []
+                    quote_chain = []
                     for sym, data in chain_dict.items():
                         # OPTIMIZATION: Skip useless strikes (Delta < 0.005)
                         if abs(data.get('delta', 0) or 0) < 0.005:
