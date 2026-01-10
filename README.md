@@ -14,7 +14,7 @@
 - **High-Fidelity Backtesting**: 5-minute bar simulation with accurate mark-to-market P&L, leg-by-leg exit logic, and realistic slippage/commissions
 - **Phased Serial Optimization**: Grid-search engine optimizing for **Net Profit / Max Drawdown** ratio with hardware benchmarking
 - **10-Factor Fuzzy Intelligence**: Dynamic position sizing based on MTF Consensus, IV Rank, VIX Regime, RSI, ADX, Bollinger Bands, Stochastic, Volume, SMA Distance, and **Parabolic SAR**
-- **Mamba 2 Neural Forecasting**: State-space model predicting market regimes (Bear/Neutral/Bull) and volatility states
+- **Mamba 2 Neural Forecasting**: Deep State-Space Model (6-layer, 256-dim) predicting market regimes (Bear/Neutral/Bull) with CUDA acceleration
 - **Enhanced Risk Controls**: Portfolio Greeks tracking, drawdown caps, and beta-weighted delta limits
 - **Alpaca Integration**: Seamless live paper trading via Alpaca-Py SDK
 - **Professional Reporting**: Automated PDF reports with equity curves, strike overlays, P&L distributions
