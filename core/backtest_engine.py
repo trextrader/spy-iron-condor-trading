@@ -12,6 +12,7 @@ import numpy as np
 from tabulate import tabulate
 import mplfinance as mpf
 import os
+import time # Added for profiling
 import csv
 from matplotlib.backends.backend_pdf import PdfPages
 from data_factory.sync_engine import MTFSyncEngine
@@ -553,6 +554,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
 
             # 3. Entry Logic
             chain_records = []
+            t_load_start = time.time() # Start Profile
             if self.is_intraday:
                 # Intraday Lookup: Exact timestamp match
                 # Convert backtrader datetime to python datetime
@@ -636,6 +638,11 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                         vega=r.get('vega', 0.0) or 0.0,
                         theta=r.get('theta', 0.0) or 0.0
                     ) for r in chain_records if abs(r.get('delta', 0) or 0) > 0.005] # OPTIMIZATION: Filter
+
+            
+            t_load_end = time.time()
+            if t_load_end - t_load_start > 0.05:
+                print(f"[Slow Load] {self.data.datetime.date(0)}: {t_load_end - t_load_start:.4f}s | Records: {len(chain_records)}")
 
             # === Market Realism (Stage 1) ===
             # Calculate Realized Volatility
