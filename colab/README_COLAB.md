@@ -25,7 +25,8 @@ This guide explains how to migrate your local project to Google Colab to leverag
     *   **GitHub Auth**: Since the repo is private, you will be prompted for credentials.
     *   **Username**: Your GitHub username.
     *   **Token**: A Personal Access Token (PAT).
-        *   Go to **GitHub Settings > Developer Settings > Personal Access Tokens > Tokens (classic)**.
+        *   **Direct Link**: [https://github.com/settings/tokens](https://github.com/settings/tokens)
+        *   Click **Generate new token (classic)**.
         *   Generate a new token with `repo` scope.
         *   Copy/Paste this token into the Colab prompt (input is hidden for security).
 2.  **Install**: Run Cell 2 to install dependencies.
