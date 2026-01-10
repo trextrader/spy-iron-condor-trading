@@ -35,6 +35,54 @@ The system employs a segmented optimization engine to tune 30+ parameters withou
     *   Targets: Bollinger Band squeeze, SMA distance, PSAR acceleration
     *   Goal: Fine-tune trend-following and mean-reversion triggers.
 
+### 🔍 Optimizable Parameter Reference (5-Phase Matrix)
+
+Below is the complete list of parameters tunable via the `core/optimizer.py` engine, matched with defaults from `core/config.py`.
+
+#### 1. Phase 1: Exits & Risk (The Pacing)
+| Parameter | Default | Optimization Range |
+|:---|:---:|:---|
+| `profit_take_pct` | 0.40 | 0.40 - 0.95 (Step 0.1) |
+| `loss_close_multiple` | 1.00 | 1.0 - 3.0 (Step 0.5) |
+| `max_hold_days` | 10 | 10, 14, 21, 30 |
+| `max_account_risk_per_trade` | 0.02 | 1%, 2%, 3% |
+
+#### 2. Phase 2: Structure & Entries (The Vehicle)
+| Parameter | Default | Optimization Range |
+|:---|:---:|:---|
+| `target_short_delta_low` | 0.08 | 0.10, 0.12, 0.15 |
+| `target_short_delta_high` | 0.25 | 0.20, 0.25, 0.30 |
+| `wing_width_min` | 5.0 | 5.0, 10.0 |
+| `min_credit_to_width` | 0.10 | 10%, 15%, 20% |
+| `use_skew_penalty` | True | True, False |
+
+#### 3. Phase 3: Filters & Regime (The Safety)
+| Parameter | Default | Optimization Range |
+|:---|:---:|:---|
+| `iv_rank_min` | 0.0 | 0.0, 10.0, 20.0, 30.0 |
+| `vix_threshold` | 25.0 | 25.0, 30.0, 40.0 |
+| `vix_threshold_low` | 20.0 | 15.0, 18.0, 20.0 |
+| `max_volatility_pct` | 0.02 | 2%, 3%, 4% |
+
+#### 4. Phase 4: Momentum Logic (RSI, Stoch, ADX)
+| Parameter | Default | Optimization Range |
+|:---|:---:|:---|
+| `rsi_neutral_min` | 30 | 30, 40 |
+| `rsi_neutral_max` | 60 | 60, 70 |
+| `stoch_neutral_min` | 30 | 20, 30 |
+| `stoch_neutral_max` | 70 | 70, 80 |
+| `adx_threshold_low` | 25.0 | 20.0, 25.0, 30.0 |
+| `use_adx_filter` | True | True, False |
+
+#### 5. Phase 5: Trend & Volatility (BBands, SMA, PSAR)
+| Parameter | Default | Optimization Range |
+|:---|:---:|:---|
+| `bbands_squeeze_threshold` | 0.02 | 1%, 2%, 3% |
+| `sma_max_distance` | 0.02 | 1%, 2%, 3%, 4% |
+| `psar_acceleration` | 0.02 | 0.02, 0.025 |
+| `psar_max_acceleration` | 0.20 | 0.20, 0.25 |
+| `use_psar_filter` | True | True, False |
+
 ### Phase 1+ Analytics & Data Pipeline (NEW)
 - **Volatility Risk Premium (VRP)**: Realized vs Implied volatility edge detection
 - **SPY-ES Divergence**: Z-score based divergence trading signals
