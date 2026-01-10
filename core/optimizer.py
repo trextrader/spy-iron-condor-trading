@@ -210,7 +210,7 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             if 'expiration' in chunk.columns and chunk['expiration'].dtype == 'object':
                 chunk['expiration'] = pd.to_datetime(chunk['expiration'])
             if 'timestamp' in chunk.columns and chunk['timestamp'].dtype == 'object':
-                chunk['timestamp'] = pd.to_datetime(chunk['timestamp'])
+                chunk['timestamp'] = pd.to_datetime(chunk['timestamp']).dt.tz_localize(None)
 
             # Map columns explicitly per chunk
             cols_map = {
