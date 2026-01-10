@@ -130,70 +130,96 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
         'iv_1545': 'float32'
     }
 
-    # Only load columns we actually need if possible, but for safety we load what we know
-    # Not using usecols to avoid missing col errors, but float32 saves 50% RAM
-    print("      ...Reading CSV with float32 precision to save RAM...")
-    options_df = pd.read_csv(
-        options_path, 
-        parse_dates=["date", "expiration"], 
-        dtype=opt_dtypes
-    )
+    # Optimized Chunked Loader to prevent OOM
+    print("      ...Reading CSV in chunks to optimize memory...")
     
-    # Prune immediately to essential columns to free more RAM
-    essential_cols = [
-        'date', 'expiration', 'strike', 'cp_flag', 
-        'bid_1545', 'ask_1545', 'underlying_last', 
-        'delta_1545', 'gamma_1545', 'vega_1545', 'theta_1545', 'iv_1545',
-        'option_symbol', 'contract_type', 'type', 'bid', 'ask'
-    ]
-    # Filter only if they exist
-    existing_essential = [c for c in essential_cols if c in options_df.columns]
-    options_df = options_df[existing_essential]
-
-    # Standardize column names for Backtest Engine
-    # Map ALL 1545 suffixes to base names used by engine
-    cols_map = {
-        'bid_1545': 'bid',
-        'ask_1545': 'ask',
-        'cp_flag': 'contract_type',
-        'delta_1545': 'delta',
-        'gamma_1545': 'gamma',
-        'vega_1545': 'vega',
-        'theta_1545': 'theta',
-        'iv_1545': 'implied_volatility'
+    # 1. Define required columns and mapping
+    opt_dtypes = {
+        'strike': 'float32', 'bid_1545': 'float32', 'ask_1545': 'float32', 
+        'underlying_last': 'float32', 'delta_1545': 'float32', 
+        'gamma_1545': 'float32', 'vega_1545': 'float32', 
+        'theta_1545': 'float32', 'iv_1545': 'float32'
     }
-    options_df.rename(columns=cols_map, inplace=True)
     
-    # Safety Check: If rename didn't catch it
-    if 'contract_type' not in options_df.columns:
-        if 'type' in options_df.columns:
-            options_df['contract_type'] = options_df['type']
-        elif 'cp_flag' in options_df.columns:
-             options_df['contract_type'] = options_df['cp_flag']
-
-    # Synthesize last_price (mid) if missing
-    if 'last_price' not in options_df.columns:
-        # Use simple mid-point as proxy for last price in synthetic data
-        options_df['last_price'] = (options_df['bid'] + options_df['ask']) / 2.0
-
-    # Ensure option_symbol exists
-    if 'option_symbol' not in options_df.columns:
-        # Reconstruct if missing: SPY_20250102_C_500.0
-        # Be robust to column names
-        c_flag = options_df['contract_type'] if 'contract_type' in options_df.columns else (options_df['cp_flag'] if 'cp_flag' in options_df.columns else 'C')
-        
-        options_df['option_symbol'] = (
-            "SPY" + "_" +
-            options_df['expiration'].astype(str) + "_" +
-            c_flag.astype(str) + "_" +
-            options_df['strike'].astype(str)
+    chunk_size = 500000
+    chunks = []
+    
+    try:
+        reader = pd.read_csv(
+            options_path, 
+            parse_dates=["date", "expiration"], 
+            chunksize=chunk_size
         )
+        
+        for i, chunk in enumerate(reader):
+            # Map columns explicitly per chunk
+            cols_map = {
+                'bid_1545': 'bid', 'ask_1545': 'ask', 'cp_flag': 'contract_type',
+                'delta_1545': 'delta', 'gamma_1545': 'gamma',
+                'vega_1545': 'vega', 'theta_1545': 'theta', 
+                'iv_1545': 'implied_volatility',
+                'last_price': 'last_price' # identity if exists
+            }
+            chunk.rename(columns=cols_map, inplace=True)
+            
+            # Robust defaults for missing columns
+            for col in ['delta', 'gamma', 'vega', 'theta', 'implied_volatility']:
+                if col not in chunk.columns:
+                    chunk[col] = 0.0
+            
+            if 'contract_type' not in chunk.columns:
+                if 'type' in chunk.columns: chunk['contract_type'] = chunk['type']
+                elif 'cp_flag' in chunk.columns: chunk['contract_type'] = chunk['cp_flag']
+                else: chunk['contract_type'] = 'C' # Fallback
+                
+            if 'bid' not in chunk.columns: chunk['bid'] = 0.0
+            if 'ask' not in chunk.columns: chunk['ask'] = 0.0
+            
+            if 'last_price' not in chunk.columns:
+                 chunk['last_price'] = (chunk['bid'] + chunk['ask']) / 2.0
+                 
+            # Create option_symbol if missing
+            if 'option_symbol' not in chunk.columns:
+                 chunk['option_symbol'] = (
+                    "SPY_" + 
+                    chunk['expiration'].astype(str) + "_" + 
+                    chunk['contract_type'].astype(str) + "_" + 
+                    chunk['strike'].astype(str)
+                 )
+
+            # Prune to essentials
+            essential_cols = [
+                'date', 'expiration', 'strike', 'contract_type', 
+                'bid', 'ask', 'underlying_last', 'last_price',
+                'delta', 'gamma', 'vega', 'theta', 'implied_volatility',
+                'option_symbol'
+            ]
+            
+            # Ensure only existing are selected (safe intersection)
+            final_cols = [c for c in essential_cols if c in chunk.columns]
+            chunk = chunk[final_cols]
+            
+            # Append processed chunk
+            chunks.append(chunk)
+            
+            # Debug progress
+            if i % 5 == 0:
+                print(f"      ...Processed chunk {i+1}...", end="\r")
+                
+        print(f"      ...Consolidating {len(chunks)} chunks...")
+        options_df = pd.concat(chunks, ignore_index=True)
+        del chunks # Free chunk list list
+        import gc; gc.collect()
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to load options data: {e}")
+        return
 
     preloaded_options = {}
     for date, group in options_df.groupby('date'):
         preloaded_options[date.date()] = group.to_dict('records')
     
-    # Manual garbage collection hint
+    # Final cleanup
     del options_df
     import gc
     gc.collect()
