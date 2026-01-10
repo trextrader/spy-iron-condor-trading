@@ -77,6 +77,15 @@ Execute `core/main.py` with the following flags to control strategy behavior:
 
 > **Note**: `--bt-samples 0` loads the ENTIRE dataset. Remove it to default to 500 samples for quick debugging.
 
+### 🛠 Data Factory Tools
+The `data_factory/` directory contains tools to generate high-fidelity datasets:
+
+1. **Option Expansion (`expand_options_intraday.py`)**:
+   Synthesizes 1-minute and 5-minute option chains from daily snapshots using Black-Scholes interpolation + real intraday spot data.
+   ```bash
+   python data_factory/expand_options_intraday.py --input data/ivolatility/your_file.csv
+   ```
+
 ### 🔬 5-Phase Serial Optimization (NEW)
 The system employs a segmented optimization engine to tune 30+ parameters without overfitting:
 
