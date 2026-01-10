@@ -6,29 +6,30 @@ digraph FuzzySizingPipeline {
     node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
     edge [fontname="Helvetica", fontcolor="#b0b0b0", color="#606060"];
 
-    label=<<b>Fuzzy Position Sizing Pipeline</b><br/>Dynamic Risk Allocation via Multi-Factor Confidence>;
+    label=<<b>10-Factor Fuzzy Position Sizing Pipeline</b><br/>Dynamic Risk Allocation via Multi-Factor Confidence>;
     labelloc="t";
     fontsize=20;
 
-    // Input Layer
+    // Input Layer - 10 Factors
     subgraph cluster_inputs {
-        label=<<b>Input Features (Membership Functions)</b>>;
+        label=<<b>Input Features (10-Factor Membership Functions)</b>>;
         style=filled;
         fillcolor="#2d2d2d";
         
-        rsi [label=<<b>RSI</b><br/>Momentum<br/>(0-1)>, shape=box, fillcolor="#e74c3c", fontsize=11];
-        adx [label=<<b>ADX</b><br/>Trend Strength<br/>(0-1)>, shape=box, fillcolor="#e67e22", fontsize=11];
-        sma_dist [label=<<b>SMA Distance</b><br/>Price Position<br/>(normalized)>, shape=box, fillcolor="#f39c12", fontsize=11];
-        bbands [label=<<b>BBands</b><br/>Volatility Regime<br/>(0-1)>, shape=box, fillcolor="#16a085", fontsize=11];
-        mtf [label=<<b>MTF Consensus</b><br/>Multi-Timeframe<br/>(-1 to +1)>, shape=box, fillcolor="#3498db", fontsize=11];
-        vix [label=<<b>VIX Regime</b><br/>Market Fear<br/>(0-1)>, shape=box, fillcolor="#9b59b6", fontsize=11];
-        volume [label=<<b>Volume</b><br/>Liquidity<br/>(0-1)>, shape=box, fillcolor="#1abc9c", fontsize=11];
-        stoch [label=<<b>Stochastic</b><br/>Oscillator<br/>(0-1)>, shape=box, fillcolor="#2ecc71", fontsize=11];
-        iv_rank [label=<<b>IV Rank</b><br/>Vol Percentile<br/>(0-1)>, shape=box, fillcolor="#34495e", fontsize=11];
+        mtf [label=<<b>MTF Consensus</b><br/>Multi-Timeframe<br/>w=0.18>, shape=box, fillcolor="#3498db", fontsize=11];
+        iv_rank [label=<<b>IV Rank</b><br/>Vol Percentile<br/>w=0.14>, shape=box, fillcolor="#34495e", fontsize=11];
+        vix [label=<<b>VIX Regime</b><br/>Market Fear<br/>w=0.11>, shape=box, fillcolor="#9b59b6", fontsize=11];
+        rsi [label=<<b>RSI</b><br/>Momentum<br/>w=0.10>, shape=box, fillcolor="#e74c3c", fontsize=11];
+        adx [label=<<b>ADX</b><br/>Trend Strength<br/>w=0.10>, shape=box, fillcolor="#e67e22", fontsize=11];
+        bbands [label=<<b>BBands</b><br/>Volatility Regime<br/>w=0.09>, shape=box, fillcolor="#16a085", fontsize=11];
+        stoch [label=<<b>Stochastic</b><br/>Oscillator<br/>w=0.08>, shape=box, fillcolor="#2ecc71", fontsize=11];
+        volume [label=<<b>Volume</b><br/>Liquidity<br/>w=0.07>, shape=box, fillcolor="#1abc9c", fontsize=11];
+        sma_dist [label=<<b>SMA Distance</b><br/>Price Position<br/>w=0.06>, shape=box, fillcolor="#f39c12", fontsize=11];
+        psar [label=<<b>PSAR</b><br/>Trend Reversal<br/>w=0.07>, shape=box, fillcolor="#d35400", fontsize=11];
     }
 
     // Aggregation Layer
-    weighted_sum [label=<<b>Weighted Aggregation</b><br/><i>Σ (w<SUB>i</SUB> × feature<SUB>i</SUB>)</i><br/>w = [0.15, 0.15, 0.10, ...]>, shape=component, fillcolor="#5dade2", fontsize=12];
+    weighted_sum [label=<<b>Weighted Aggregation</b><br/><i>Ft = Σ (w<SUB>j</SUB> × μ<SUB>j</SUB>)</i><br/>10 factors, Σw = 1.00>, shape=component, fillcolor="#5dade2", fontsize=12];
 
     // Confidence Score
     confidence [label=<<b>Confidence Score</b><br/>F<SUB>t</SUB> ∈ [0, 1]<br/><i>Reflects market favorability</i>>, shape=ellipse, fillcolor="#f39c12", fontsize=12];
@@ -48,27 +49,28 @@ digraph FuzzySizingPipeline {
     // Example Values
     example [label=<<table border="0" cellborder="1" cellspacing="0">
         <tr><td bgcolor="#34495e" colspan="2"><b>Example Calculation</b></td></tr>
-        <tr><td align="left">RSI (neutral)</td><td align="right">0.50</td></tr>
-        <tr><td align="left">ADX (trending)</td><td align="right">0.70</td></tr>
         <tr><td align="left">MTF Consensus</td><td align="right">0.60</td></tr>
         <tr><td align="left">IV Rank (high)</td><td align="right">0.80</td></tr>
-        <tr><td bgcolor="#85c1e9" align="left">→ F<SUB>t</SUB></td><td bgcolor="#85c1e9" align="right">0.65</td></tr>
+        <tr><td align="left">ADX (trending)</td><td align="right">0.70</td></tr>
+        <tr><td align="left">PSAR (crossover)</td><td align="right">0.90</td></tr>
+        <tr><td bgcolor="#85c1e9" align="left">→ F<SUB>t</SUB></td><td bgcolor="#85c1e9" align="right">0.68</td></tr>
         <tr><td align="left">σ* (vol pctl)</td><td align="right">0.30</td></tr>
-        <tr><td bgcolor="#aed6f1" align="left">→ g</td><td bgcolor="#aed6f1" align="right">0.455</td></tr>
+        <tr><td bgcolor="#aed6f1" align="left">→ g</td><td bgcolor="#aed6f1" align="right">0.476</td></tr>
         <tr><td align="left">Q₀ (base)</td><td align="right">5 lots</td></tr>
         <tr><td bgcolor="#76d7c4" align="left"><b>→ Q (final)</b></td><td bgcolor="#76d7c4" align="right"><b>2 lots</b></td></tr>
     </table>>, shape=plaintext];
 
-    // Flow - Inputs to Weighted Sum
-    rsi -> weighted_sum [label="w₁=0.15", fontsize=9];
-    adx -> weighted_sum [label="w₂=0.15", fontsize=9];
-    sma_dist -> weighted_sum [label="w₃=0.10", fontsize=9];
-    bbands -> weighted_sum [label="w₄=0.10", fontsize=9];
-    mtf -> weighted_sum [label="w₅=0.20", fontsize=9];
-    vix -> weighted_sum [label="w₆=0.10", fontsize=9];
-    volume -> weighted_sum [label="w₇=0.05", fontsize=9];
-    stoch -> weighted_sum [label="w₈=0.10", fontsize=9];
-    iv_rank -> weighted_sum [label="w₉=0.05", fontsize=9];
+    // Flow - Inputs to Weighted Sum (10 factors with correct weights)
+    mtf -> weighted_sum [label="0.18", fontsize=9];
+    iv_rank -> weighted_sum [label="0.14", fontsize=9];
+    vix -> weighted_sum [label="0.11", fontsize=9];
+    rsi -> weighted_sum [label="0.10", fontsize=9];
+    adx -> weighted_sum [label="0.10", fontsize=9];
+    bbands -> weighted_sum [label="0.09", fontsize=9];
+    stoch -> weighted_sum [label="0.08", fontsize=9];
+    volume -> weighted_sum [label="0.07", fontsize=9];
+    sma_dist -> weighted_sum [label="0.06", fontsize=9];
+    psar -> weighted_sum [label="0.07", fontsize=9];
 
     // Flow - Aggregation to Confidence
     weighted_sum -> confidence [label="normalize", fontcolor="#f39c12"];
@@ -85,5 +87,6 @@ digraph FuzzySizingPipeline {
     final_size -> example [style=dashed, color="#85c1e9", label="example"];
 
     // Mathematical footnote
-    note [label="Key:\nF_t = Fuzzy confidence (favorability)\nσ* = Volatility percentile (risk dampening)\ng = Final scaling factor\nQ₀ = Base position size", shape=note, fillcolor="#2c3e50", fontcolor="#ecf0f1"];
+    note [label="Key:\nF_t = Fuzzy confidence (10-factor weighted sum)\nσ* = Volatility percentile (risk dampening)\ng = Final scaling factor\nQ₀ = Base position size\n\nPSAR Membership: μ = 1 - |position|\n  crossover=1.0, trending=0.0", shape=note, fillcolor="#2c3e50", fontcolor="#ecf0f1"];
 }
+

@@ -38,9 +38,9 @@ digraph QuantorMTFuzzArchitecture {
         style=filled;
         fillcolor="#2d2d2d";
         
-        fuzzifier [label="Fuzzifier\n• Extract ADX/RSI\n• IV Rank\n• Membership degrees", shape=box, fillcolor="#9b59b6"];
+        fuzzifier [label="Fuzzifier\n• Extract ADX/RSI/PSAR\n• IV Rank\n• Membership degrees", shape=box, fillcolor="#9b59b6"];
         regime_filter [label="Regime Filter\n• Liquidity gate\n• Trend detection\n• Volatility regime", shape=box, fillcolor="#9b59b6"];
-        fuzzy_engine [label="Fuzzy Engine\n• MTF consensus\n• Rule evaluation\n• Defuzzification", shape=box, fillcolor="#9b59b6"];
+        fuzzy_engine [label="Fuzzy Engine\n• 10-Factor consensus\n• PSAR crossover\n• Defuzzification", shape=box, fillcolor="#9b59b6"];
     }
 
     // Analytics Layer
