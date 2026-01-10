@@ -18,8 +18,8 @@ import random
 IVOL_API_KEY = "MFGkqVygN5NSgF2I"
 OUTPUT_DIR = "data/ivolatility"
 OUTPUT_FILE = "spy_options_ivol_large.csv" # Separate large dataset
-MAX_WORKERS = 3
-TARGET_OPTIONS_PER_DAY = 100
+MAX_WORKERS = 10 # Increase threads for speed
+TARGET_OPTIONS_PER_DAY = 1000 # Enough for 10% OTM wings
 
 def setup_ivol():
     """Initialize IVolatility API connection."""
@@ -118,27 +118,27 @@ def fetch_option_with_retry(option_id: int, trade_date: str, max_retries=3) -> p
 def download_spy_options_year():
     """
     Download SPY options data using Threading.
-    Scales to Top 500 options per day.
+    Scales to Top 1000 options per day for Iron Condor breadth.
     """
     setup_ivol()
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    # Date range: RESUME from 2025-06-28 to 2026-01-06
-    end_date = dt.date(2026, 1, 6)
-    start_date = dt.date(2025, 6, 28) 
+    # Date range: Match Optimization Period (Jan 2025 - Mar 2025)
+    end_date = dt.date(2025, 3, 31)
+    start_date = dt.date(2025, 1, 2) 
     
     output_path = os.path.join(OUTPUT_DIR, OUTPUT_FILE)
     
     print("=" * 70)
     print(f"IVolatility MASSIVE Download (Target: Top {TARGET_OPTIONS_PER_DAY}/day)")
     print(f"Workers: {MAX_WORKERS}")
+    print(f"Range: {start_date} to {end_date}")
     print(f"Output: {output_path}")
     print("=" * 70, flush=True)
 
     all_dates = get_trading_dates(start_date, end_date)
-    # No sampling! We want the full dataset if possible, or maybe sample every 2 days?
-    # User said "full eod dataset".
-    sample_dates = all_dates # Full resolution
+    # Full resolution
+    sample_dates = all_dates 
     
     # Load spot prices from existing EOD file for smart filtering
     spot_map = {}
@@ -153,7 +153,7 @@ def download_spy_options_year():
             pass
 
     # FORCE FRESH START for Large File (Overwrite bad data)
-    if os.path.exists(output_path) and os.path.getsize(output_path) < 10 * 1024 * 1024:
+    if os.path.exists(output_path) and os.path.getsize(output_path) < 100 * 1024:
         print("Existing file is small (likely bad run). Overwriting...")
         if os.path.exists(output_path):
             try:
@@ -196,37 +196,51 @@ def download_spy_options_year():
         
         if spot_price is None:
             # Fallback: Fetch from API
-            print("  Spot price missing locally. Fetching from API...", end=" ", flush=True)
             try:
                 getPrices = ivol.setMethod('/equities/eod/stock-prices-on-date')
                 spot_data = getPrices(symbol='SPY', date=date_str)
                 if spot_data is not None and not spot_data.empty:
                     spot_price = float(spot_data.iloc[0]['close'])
-                    print(f"Got {spot_price}")
-                    # Cache it? No need, loop is once per date.
+                    print(f"  Fetched Spot: {spot_price}")
                 else:
-                    print("Failed.")
+                    pass
             except Exception as e:
                 print(f"Error fetching spot: {e}")
 
         if spot_price is None:
             print("  Warning: Spot price unavailable. Using chain middle.")
         else:
-             print(f"  Spot Price: {spot_price}")
+             pass # Already printed
 
         if 'strike' in chain.columns:
             chain['strike'] = pd.to_numeric(chain['strike'])
             
             if spot_price:
-                 chain['distance'] = abs(chain['strike'] - spot_price)
-                 liquid_candidates = chain.sort_values('distance')
+                 # WIDE Filtering: ±15% OTM to Capture Iron Condor Wings (Delta ~0.05)
+                 lower_bound = spot_price * 0.85
+                 upper_bound = spot_price * 1.15
+                 
+                 # Filter by Strike Range first
+                 mask = (chain['strike'] >= lower_bound) & (chain['strike'] <= upper_bound)
+                 filtered_chain = chain[mask]
+                 
+                 if filtered_chain.empty:
+                     # Fallback to nearest if filter is empty (e.g. erratic spot data)
+                     chain['distance'] = abs(chain['strike'] - spot_price)
+                     liquid_candidates = chain.sort_values('distance')
+                 else:
+                     # Sort inside the valid range by distance to center
+                     filtered_chain['distance'] = abs(filtered_chain['strike'] - spot_price)
+                     liquid_candidates = filtered_chain.sort_values('distance')
+                     
             else:
                 unique_strikes = sorted(chain['strike'].unique())
                 mid_idx = len(unique_strikes) // 2
-                atm_strikes = unique_strikes[max(0, mid_idx-60):min(len(unique_strikes), mid_idx+60)]
+                atm_strikes = unique_strikes[max(0, mid_idx-100):min(len(unique_strikes), mid_idx+100)]
                 mask = chain['strike'].isin(atm_strikes)
                 liquid_candidates = chain[mask]
 
+            # Take top N candidates
             option_ids = liquid_candidates['optionId'].unique()[:TARGET_OPTIONS_PER_DAY]
         else:
              option_ids = chain['optionId'].unique()[:TARGET_OPTIONS_PER_DAY]
