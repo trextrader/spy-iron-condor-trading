@@ -157,8 +157,8 @@ def run_download(args):
     if not api_key:
         try:
             cfg = RunConfig()
-            api_key = cfg.alpaca_api_key
-            api_secret = cfg.alpaca_secret_key
+            api_key = cfg.alpaca_key # Corrected attribute name
+            api_secret = cfg.alpaca_secret # Corrected attribute name
             if api_key and "YOUR_" not in api_key:
                 print("[Config] Using Alpaca Keys from config.py")
         except Exception as e:
