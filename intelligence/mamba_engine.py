@@ -105,7 +105,7 @@ class DeepMamba(nn.Module):
 class MambaForecastEngine:
     """Next-Gen Neural Forecasting using Mamba 2 Architecture."""
     
-    def __init__(self, d_model: int = 256, lookback: int = 60, layers: int = 6):
+    def __init__(self, d_model: int = 1024, lookback: int = 60, layers: int = 32):
         self.d_model = d_model
         self.lookback = lookback
         self.layers = layers
