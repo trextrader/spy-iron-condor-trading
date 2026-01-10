@@ -1,11 +1,15 @@
 
 import os
+import sys
 import time
 import argparse
 import numpy as np
 import pandas as pd
 import pandas_ta as ta
 from datetime import datetime, timedelta
+
+# Add project root to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.config import RunConfig
 
