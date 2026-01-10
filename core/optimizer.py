@@ -396,6 +396,21 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
     import gc
     gc.collect()
 
+    # === DEBUG: Check Keys Alignment ===
+    print(f"      [DEBUG] Spot Data Type (Index): {type(full_df.index)}")
+    if len(full_df) > 0:
+        print(f"      [DEBUG] Spot Sample (First 3): {full_df.index[:3]}")
+    else:
+        print(f"      [DEBUG] Spot Data is EMPTY!")
+
+    if len(preloaded_options) > 0:
+        sample_keys = list(preloaded_options.keys())[:3]
+        print(f"      [DEBUG] Options Keys Type (Element): {[type(k) for k in sample_keys]}")
+        print(f"      [DEBUG] Options Keys Sample (First 3): {sample_keys}")
+    else:
+        print(f"      [DEBUG] Options Data (preloaded_options) is EMPTY!")
+    # ===================================
+
     # Pre-load MTF Sync Engine if requested
     preloaded_sync = None
     if run_cfg.use_mtf:
