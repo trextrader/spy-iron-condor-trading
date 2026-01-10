@@ -285,9 +285,81 @@ if basis < 0:
 
 ---
 
-### 6. Technical Indicators - `analytics/indicators.py`
+### 6. Technical Indicators (10-Factor Fuzzy System) - `intelligence/fuzzy_engine.py`
 
-#### RSI (Wilder Smoothing)
+The fuzzy position sizing system uses 10 indicators, each with a membership function that maps to [0, 1]:
+
+$$F_t = \sum_{j=1}^{10} w_j \cdot \mu_j$$
+
+| # | Factor | Weight | Description |
+|---|--------|--------|-------------|
+| 1 | MTF Consensus | 0.18 | Multi-timeframe alignment |
+| 2 | IV Rank | 0.14 | Implied volatility percentile |
+| 3 | VIX Regime | 0.11 | Market fear index |
+| 4 | RSI | 0.10 | Momentum oscillator |
+| 5 | ADX | 0.10 | Trend strength |
+| 6 | Bollinger Bands | 0.09 | Volatility regime |
+| 7 | Stochastic | 0.08 | Overbought/Oversold |
+| 8 | PSAR | 0.07 | Trend reversal |
+| 9 | Volume | 0.07 | Liquidity confirmation |
+| 10 | SMA Distance | 0.06 | Mean reversion |
+
+---
+
+#### 6.1 MTF Consensus (w = 0.18)
+
+**Theory**: Multi-timeframe alignment measures agreement across 1m, 5m, and 15m timeframes. Neutral consensus favors Iron Condors.
+
+$$
+\mu_{MTF} = 1 - |C_{1/5/15} - 0.5| \times 2
+$$
+
+Where $C_{1/5/15} \in [0, 1]$ is the weighted consensus:
+- $C = 0.5$: Perfect neutral → $\mu = 1.0$ (ideal for IC)
+- $C = 0$ or $1$: Strong trend → $\mu = 0.0$ (avoid)
+
+---
+
+#### 6.2 IV Rank (w = 0.14)
+
+**Theory**: High IV Rank means elevated implied volatility relative to history—favorable for selling premium.
+
+$$
+IVR = 100 \cdot \frac{IV_t - \min(IV_{window})}{\max(IV_{window}) - \min(IV_{window})}
+$$
+
+**Membership**:
+$$
+\mu_{IV} = \min\left(1.0, \frac{IVR}{60}\right)
+$$
+
+- $IVR \geq 60$: $\mu = 1.0$ (excellent for premium selling)
+- $IVR = 30$: $\mu = 0.5$ (moderate)
+- $IVR = 0$: $\mu = 0.0$ (avoid selling premium)
+
+---
+
+#### 6.3 VIX Regime (w = 0.11)
+
+**Theory**: Low VIX indicates stable markets; high VIX signals fear and potential oversized moves.
+
+**Membership**:
+$$
+\mu_{VIX} = \begin{cases}
+1.0 & \text{if } VIX \leq 12 \\
+1 - \frac{VIX - 12}{18} & \text{if } 12 < VIX < 30 \\
+0.0 & \text{if } VIX \geq 30
+\end{cases}
+$$
+
+- $VIX \leq 12$: $\mu = 1.0$ (calm market, ideal)
+- $VIX = 20$: $\mu \approx 0.56$ (moderate caution)
+- $VIX \geq 30$: $\mu = 0.0$ (high risk, skip)
+
+---
+
+#### 6.4 RSI (w = 0.10) - Wilder Smoothing
+
 $$
 RS = \frac{EMA_{\alpha}(\text{Gain})}{EMA_{\alpha}(\text{Loss})}
 $$
@@ -296,9 +368,24 @@ $$
 RSI = 100 - \frac{100}{1 + RS}
 $$
 
-Where $\alpha = \frac{1}{period}$ (e.g., $period = 14$)
+Where $\alpha = \frac{1}{period}$ (default $period = 14$)
 
-#### ADX (Wilder Smoothing)
+**Membership** (neutral zone 40-60 is optimal):
+$$
+\mu_{RSI} = \begin{cases}
+1.0 & \text{if } 40 \leq RSI \leq 60 \\
+\frac{RSI}{40} & \text{if } RSI < 40 \\
+\frac{100 - RSI}{40} & \text{if } RSI > 60
+\end{cases}
+$$
+
+- $RSI \in [40, 60]$: $\mu = 1.0$ (neutral momentum, ideal)
+- $RSI < 30$ or $RSI > 70$: $\mu \to 0$ (extreme, avoid)
+
+---
+
+#### 6.5 ADX (w = 0.10) - Wilder Smoothing
+
 $$
 +DI = 100 \cdot \frac{EMA_{\alpha}(+DM)}{ATR}
 $$
@@ -315,58 +402,159 @@ $$
 ADX = EMA_{\alpha}(DX)
 $$
 
-**Interpretation**:
-- $ADX < 20$: Ranging market (favorable for Iron Condors)
-- $ADX > 25$: Trending market (reduce size or skip)
-
-#### IV Rank
+**Membership** (low ADX = weak trend = favorable):
 $$
-IVR = 100 \cdot \frac{IV_t - \min(IV_{window})}{\max(IV_{window}) - \min(IV_{window})}
+\mu_{ADX} = \begin{cases}
+1.0 & \text{if } ADX \leq 25 \\
+1 - \frac{ADX - 25}{15} & \text{if } 25 < ADX < 40 \\
+0.0 & \text{if } ADX \geq 40
+\end{cases}
 $$
 
-#### Parabolic SAR (10th Factor)
+- $ADX < 25$: $\mu = 1.0$ (ranging market, ideal)
+- $ADX > 40$: $\mu = 0.0$ (strong trend, avoid)
 
-**Theory**: Parabolic SAR identifies potential trend reversals. For Iron Condors, crossover points indicate equilibrium—optimal for range-bound strategies.
+---
+
+#### 6.6 Bollinger Bands (w = 0.09)
+
+$$
+\text{Upper} = SMA_{20} + 2 \cdot \sigma_{20}
+$$
+
+$$
+\text{Lower} = SMA_{20} - 2 \cdot \sigma_{20}
+$$
+
+$$
+BB_{position} = \frac{Price - Lower}{Upper - Lower}
+$$
+
+$$
+BB_{width} = \frac{Upper - Lower}{SMA_{20}}
+$$
+
+**Membership** (middle of bands = ideal):
+$$
+\mu_{BB} = 0.7 \times (1 - |BB_{position} - 0.5| \times 2) + 0.3 \times \max(0, 1 - \frac{BB_{width}}{0.04})
+$$
+
+- $BB_{position} = 0.5$: $\mu \to 1.0$ (price at center)
+- $BB_{position} < 0.05$ or $> 0.95$: $\mu \to 0$ (touching bands, avoid)
+
+---
+
+#### 6.7 Stochastic Oscillator (w = 0.08)
+
+$$
+\%K = 100 \cdot \frac{Close - Low_{14}}{High_{14} - Low_{14}}
+$$
+
+$$
+\%D = SMA_3(\%K)
+$$
+
+**Membership** (neutral zone 30-70 is optimal):
+$$
+\mu_{Stoch} = \begin{cases}
+1.0 & \text{if } 30 \leq \%K \leq 70 \\
+\frac{\%K}{30} & \text{if } \%K < 30 \\
+\frac{100 - \%K}{30} & \text{if } \%K > 70
+\end{cases}
+$$
+
+- $\%K \in [30, 70]$: $\mu = 1.0$ (neutral, ideal)
+- $\%K < 20$ or $> 80$: $\mu \to 0$ (extreme, avoid)
+
+---
+
+#### 6.8 Parabolic SAR (w = 0.07)
 
 $$
 SAR_{t+1} = SAR_t + AF \cdot (EP - SAR_t)
 $$
 
 Where:
-- $SAR_t$ = Current SAR value
-- $AF$ = Acceleration Factor (starts at 0.02, max 0.20)
-- $EP$ = Extreme Point (highest high in uptrend, lowest low in downtrend)
+- $AF$ = Acceleration Factor (0.02 → 0.20)
+- $EP$ = Extreme Point (highest high / lowest low)
 
-**Membership Function**:
+**Membership** (crossover = ideal):
 $$
 \mu_{PSAR} = 1 - |P_{position}|
 $$
 
 Where $P_{position} \in [-1, +1]$:
-- $P_{position} = -1$: PSAR below price (strong bullish trend)
-- $P_{position} = +1$: PSAR above price (strong bearish trend)
-- $P_{position} = 0$: PSAR crossover (reversal point, ideal for IC)
+- $P_{position} = 0$: PSAR crossover → $\mu = 1.0$ (ideal for IC)
+- $|P_{position}| = 1$: Strong trend → $\mu = 0.0$ (avoid)
 
-**Interpretation**:
-- $\mu_{PSAR} = 1.0$: At crossover → **Optimal** (range-bound likely)
-- $\mu_{PSAR} = 0.5$: Moderate trend → **Reduce size**
-- $\mu_{PSAR} = 0.0$: Strong trend → **Skip entry**
+---
+
+#### 6.9 Volume Ratio (w = 0.07)
+
+$$
+V_{ratio} = \frac{Volume_t}{SMA_{20}(Volume)}
+$$
+
+**Membership** (adequate liquidity required):
+$$
+\mu_{Vol} = \min\left(1.0, \frac{V_{ratio}}{0.8}\right)
+$$
+
+- $V_{ratio} \geq 0.8$: $\mu = 1.0$ (adequate liquidity)
+- $V_{ratio} < 0.4$: $\mu < 0.5$ (poor fills likely)
+
+---
+
+#### 6.10 SMA Distance (w = 0.06)
+
+$$
+D_{SMA} = \frac{Price - SMA_{20}}{SMA_{20}}
+$$
+
+**Membership** (near equilibrium = ideal):
+$$
+\mu_{SMA} = \begin{cases}
+1 - \frac{|D_{SMA}|}{0.02} & \text{if } |D_{SMA}| \leq 0.02 \\
+0.0 & \text{if } |D_{SMA}| > 0.02
+\end{cases}
+$$
+
+- $|D_{SMA}| = 0$: $\mu = 1.0$ (at equilibrium)
+- $|D_{SMA}| > 2\%$: $\mu = 0.0$ (extended, mean reversion risk)
+
+---
 
 **Implementation**:
 ```python
-from analytics.indicators import IndicatorPack
-
-indicators = IndicatorPack.from_inputs(
-    bars=df_5m,
-    iv_atm_series=iv_series,
-    adx_period=14,
-    rsi_period=14,
-    iv_rank_window=78*60  # ~60 trading days
+from intelligence.fuzzy_engine import (
+    calculate_mtf_membership,
+    calculate_iv_membership,
+    calculate_regime_membership,
+    calculate_rsi_membership,
+    calculate_adx_membership,
+    calculate_bbands_membership,
+    calculate_stoch_membership,
+    calculate_psar_membership,
+    calculate_volume_membership,
+    calculate_sma_distance_membership,
+    compute_fuzzy_confidence
 )
 
-print(f"ADX: {indicators.adx:.2f}")
-print(f"RSI: {indicators.rsi:.2f}")
-print(f"IV Rank: {indicators.iv_rank:.1f}")
+# All memberships in [0, 1]
+memberships = {
+    "mtf": 0.60, "iv": 0.80, "regime": 0.70,
+    "rsi": 0.50, "adx": 0.85, "bbands": 0.65,
+    "stoch": 0.55, "psar": 0.90, "volume": 0.75, "sma": 0.80
+}
+
+weights = {
+    "mtf": 0.18, "iv": 0.14, "regime": 0.11, "rsi": 0.10,
+    "adx": 0.10, "bbands": 0.09, "stoch": 0.08, "psar": 0.07,
+    "volume": 0.07, "sma": 0.06
+}
+
+Ft = compute_fuzzy_confidence(memberships, weights)
+print(f"Fuzzy Confidence: {Ft:.2f}")  # → 0.71
 ```
 
 ---
