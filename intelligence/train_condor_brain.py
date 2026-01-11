@@ -239,14 +239,12 @@ def train_condor_brain(args):
         input_dim=len(FEATURE_COLS)
     ).to(device)
     
-    # JIT compile for maximum speed (PyTorch 2.0+)
-    if hasattr(torch, 'compile'):
-        print("[CondorBrain] Compiling model with torch.compile()...")
-        model = torch.compile(model, mode='reduce-overhead')
-        print("[CondorBrain] Model compiled!")
+    # NOTE: torch.compile() disabled - incompatible with Mamba's custom selective_scan_cuda kernels
+    # Mamba already uses optimized Triton kernels internally
     
     n_params = sum(p.numel() for p in model.parameters())
     print(f"[CondorBrain] Model parameters: {n_params:,}")
+
     
     criterion = CondorLoss()
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
