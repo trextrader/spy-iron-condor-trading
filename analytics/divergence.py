@@ -12,15 +12,15 @@ import pandas as pd
 
 class DivergenceZScore:
     """
-    Computes Z-score of SPY-ES spread for divergence trading.
+    Computes Z-score of SPY-QQQ price ratio for relative strength divergence.
     
     Theory:
-        spread = SPY_price - (ES_price / 10)
+        spread = SPY_price / QQQ_price
         z = (spread - μ) / σ
         
     Signal:
-        z > +2 → SPY overvalued vs ES (bearish bias)
-        z < -2 → SPY undervalued vs ES (bullish bias)
+        z > +2 → SPY overvalued vs QQQ (bearish SPY bias)
+        z < -2 → SPY undervalued vs QQQ (bullish SPY bias)
     """
 
     def zscore(self, spread_series: pd.Series, lookback: int) -> float:
@@ -30,7 +30,7 @@ class DivergenceZScore:
         Parameters
         ----------
         spread_series : pd.Series or array-like
-            Historical spread values (SPY - ES_adjusted).
+            Historical spread values (SPY / QQQ ratio).
         lookback : int
             Rolling window for mean/std calculation.
 
@@ -53,20 +53,22 @@ class DivergenceZScore:
             
         return (float(x[-1]) - mu) / sd
     
-    def compute_spread(self, spy_price: float, es_price: float) -> float:
+    def compute_spread(self, spy_price: float, qqq_price: float) -> float:
         """
-        Compute SPY-ES spread with proper scaling.
+        Compute SPY/QQQ ratio.
         
         Parameters
         ----------
         spy_price : float
             SPY spot price.
-        es_price : float
-            ES futures price.
+        qqq_price : float
+            QQQ spot price.
 
         Returns
         -------
         float
-            Spread = SPY - (ES / 10)
+            Spread = SPY / QQQ
         """
-        return spy_price - (es_price / 10.0)
+        if qqq_price == 0:
+            return 1.0
+        return spy_price / qqq_price

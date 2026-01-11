@@ -269,19 +269,18 @@ if vrp > 0.02:
 
 ---
 
-### 2. SPY-ES Divergence Trading - `analytics/divergence.py`
+### 2. SPY-QQQ Divergence Trading - `analytics/divergence.py`
 
-**Theory**: ES futures and SPY ETF should track closely due to arbitrage. Divergences signal temporary mispricing.
+**Theory**: SPY (Broad Market) and QQQ (Tech) usually correlate. Divergences in their ratio signal temporary over-extension of one sector versus the other.
 
-#### Spread Calculation
+#### Spread Calculation (Ratio)
 $$
-S_t = P_{SPY,t} - \frac{P_{ES,t}}{10}
+S_t = \frac{P_{\mathrm{SPY},t}}{P_{\mathrm{QQQ},t}}
 $$
 
 Where:
-- $P_{SPY,t}$ = SPY spot price
-- $P_{ES,t}$ = ES futures price
-- Factor of 10 accounts for ES contract multiplier ($SPY \approx ES / 10$)
+- $P_{\mathrm{SPY},t}$ = SPY spot price
+- $P_{\mathrm{QQQ},t}$ = QQQ spot price
 
 #### Z-Score Normalization
 $$
@@ -289,21 +288,21 @@ z_t = \frac{S_t - \mu_S}{\sigma_S}
 $$
 
 Where:
-- $\mu_S = \frac{1}{N}\sum_{i=t-N+1}^{t} S_i$ = rolling mean of spread
+- $\mu_S = \frac{1}{N}\sum_{i=t-N+1}^{t} S_i$ = rolling mean of ratio
 - $\sigma_S = \sqrt{\frac{1}{N-1}\sum_{i=t-N+1}^{t} (S_i - \mu_S)^2}$ = rolling std dev
 
 **Trading Signals**:
-- $z > +2$: SPY overvalued vs ES → **Bearish bias** (widen put wing or reduce size)
-- $z < -2$: SPY undervalued vs ES → **Bullish bias** (widen call wing)
-- $|z| \leq 2$: Neutral (standard Iron Condor)
+- $z > +2$: SPY overvalued vs QQQ → **Bearish SPY bias** (widen put wing for SPY)
+- $z < -2$: SPY undervalued vs QQQ → **Bullish SPY bias** (widen call wing for SPY)
+- $|z| \leq 2$: Neutral relative strength
 
 **Implementation**:
 ```python
 from analytics.divergence import DivergenceZScore
 
 div = DivergenceZScore()
-spread = div.compute_spread(spy_price=580.0, es_price=5800.0)
-z = div.zscore(spread_series, lookback=50)
+spread = div.compute_spread(spy_price=580.0, qqq_price=480.0)
+z = div.zscore(ratio_series, lookback=50)
 
 if z > 2.0:
     bias = "bearish"
