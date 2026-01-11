@@ -1,23 +1,21 @@
 """
-CondorBrain Training Script (GPU-Optimized)
+CondorBrain Training Script (Fast In-Memory)
 
-A100-optimized training with:
-- Streaming data loading (no full dataset in CPU RAM)
-- Pinned memory for fast CPU→GPU transfer
-- On-GPU sequence creation
-- CUDA prefetching
+Uses proven pattern from train_mamba.py:
+- Load all data into memory (works for datasets that fit in RAM)
+- Create sequences with numpy
+- Use TensorDataset + DataLoader for training
 """
 import sys
 import os
 import time
 import argparse
-import gc
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset, IterableDataset
+from torch.utils.data import DataLoader, TensorDataset
 from torch.amp import autocast, GradScaler
 
 # Add project root
@@ -39,208 +37,82 @@ DEFAULT_CONFIG = {
     'model_path': 'models/condor_brain.pth'
 }
 
+FEATURE_COLS = [
+    'open', 'high', 'low', 'close', 'volume', 
+    'strike', 'cp_num', 'delta', 'gamma', 'vega', 'theta', 'iv', 'ivr', 'spread_ratio', 'te',
+    'rsi', 'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 'psar', 'psar_mark'
+]
+
 # ============================================================================
-# GPU-OPTIMIZED STREAMING DATASET
+# DATA PREPARATION (Fast In-Memory)
 # ============================================================================
 
-class StreamingCondorDataset(IterableDataset):
-    """
-    Memory-efficient streaming dataset that:
-    - Reads CSV in chunks (not all at once)
-    - Creates sequences on-the-fly
-    - Uses pinned memory for fast GPU transfer
-    """
+def prepare_features(df: pd.DataFrame) -> tuple:
+    """Prepare features and targets for CondorBrain training."""
+    print("[CondorBrain] Preparing features...")
     
-    def __init__(
-        self, 
-        csv_path: str, 
-        lookback: int = 240, 
-        chunk_size: int = 100000,
-        max_rows: int = 0,
-        feature_cols: list = None,
-        is_train: bool = True,
-        train_ratio: float = 0.8
-    ):
-        self.csv_path = csv_path
-        self.lookback = lookback
-        self.chunk_size = chunk_size
-        self.max_rows = max_rows
-        self.is_train = is_train
-        self.train_ratio = train_ratio
-        
-        self.feature_cols = feature_cols or [
-            'open', 'high', 'low', 'close', 'volume', 
-            'strike', 'cp_num', 'delta', 'gamma', 'vega', 'theta', 'iv', 'ivr', 'spread_ratio', 'te',
-            'rsi', 'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 'psar', 'psar_mark'
-        ]
-        
-        self.target_cols = [
-            'target_call_offset', 'target_put_offset', 'target_wing_width', 'target_dte',
-            'was_profitable', 'realized_roi', 'realized_max_loss', 'confidence_target'
-        ]
-        
-        # Count total rows (quick scan)
-        self._count_rows()
-        
-    def _count_rows(self):
-        """Quick row count without loading data."""
-        with open(self.csv_path, 'r') as f:
-            self.total_rows = sum(1 for _ in f) - 1  # Minus header
-        if self.max_rows > 0:
-            self.total_rows = min(self.total_rows, self.max_rows)
-        
-        # Train/val split point
-        self.split_row = int(self.total_rows * self.train_ratio)
-        
-        if self.is_train:
-            self.start_row = 0
-            self.end_row = self.split_row
+    # Handle call_put encoding
+    if 'call_put' in df.columns and 'cp_num' not in df.columns:
+        df['cp_num'] = df['call_put'].map({'C': 1.0, 'P': -1.0}).fillna(0)
+    
+    # Generate synthetic targets (default offsets)
+    df['target_call_offset'] = 2.0
+    df['target_put_offset'] = 2.0
+    df['target_wing_width'] = 5.0
+    df['target_dte'] = 14.0
+    df['was_profitable'] = 0.5
+    df['realized_roi'] = 0.0
+    df['realized_max_loss'] = 0.2
+    df['confidence_target'] = 0.5
+    
+    # Regime labeling
+    if 'regime_label' not in df.columns:
+        if 'ivr' in df.columns:
+            df['regime_label'] = pd.cut(
+                df['ivr'], 
+                bins=[-0.1, 30, 70, 101], 
+                labels=[0, 1, 2]
+            ).astype(int)
         else:
-            self.start_row = self.split_row
-            self.end_row = self.total_rows
-            
-        self.n_samples = self.end_row - self.start_row - self.lookback
-        print(f"[StreamingDataset] {'Train' if self.is_train else 'Val'}: {self.n_samples:,} samples")
+            df['regime_label'] = 1
     
-    def __len__(self):
-        return self.n_samples
+    # Fill NaNs
+    df = df.ffill().fillna(0)
     
-    def __iter__(self):
-        """Stream chunks and yield sequences."""
-        buffer = None
-        buffer_start_idx = 0
-        
-        # Read CSV in chunks
-        reader = pd.read_csv(
-            self.csv_path, 
-            chunksize=self.chunk_size,
-            nrows=self.max_rows if self.max_rows > 0 else None
-        )
-        
-        current_idx = 0
-        
-        for chunk in reader:
-            # Prepare chunk
-            chunk = self._prepare_chunk(chunk)
-            
-            # Determine if chunk is in our split range
-            chunk_end = current_idx + len(chunk)
-            
-            if chunk_end < self.start_row:
-                current_idx = chunk_end
-                continue
-            
-            if current_idx > self.end_row:
-                break
-            
-            # Maintain rolling buffer for lookback
-            if buffer is None:
-                buffer = chunk
-                buffer_start_idx = current_idx
-            else:
-                buffer = pd.concat([buffer, chunk], ignore_index=True)
-                # Trim buffer to save memory (keep only what we need)
-                if len(buffer) > self.chunk_size + self.lookback:
-                    trim_amount = len(buffer) - self.chunk_size - self.lookback
-                    buffer = buffer.iloc[trim_amount:].reset_index(drop=True)
-                    buffer_start_idx += trim_amount
-            
-            # Generate sequences from buffer
-            for i in range(max(0, self.start_row - buffer_start_idx), min(len(buffer) - self.lookback, self.end_row - buffer_start_idx)):
-                seq_start = i
-                seq_end = i + self.lookback
-                
-                X_seq = buffer[self.feature_cols].iloc[seq_start:seq_end].values.astype(np.float32)
-                y = buffer[self.target_cols].iloc[seq_end].values.astype(np.float32)
-                regime = int(buffer['regime_label'].iloc[seq_end])
-                
-                yield torch.from_numpy(X_seq), torch.from_numpy(y), torch.tensor(regime, dtype=torch.long)
-            
-            current_idx = chunk_end
-        
-    def _prepare_chunk(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Prepare a single chunk."""
-        # Handle call_put encoding
-        if 'call_put' in df.columns and 'cp_num' not in df.columns:
-            df['cp_num'] = df['call_put'].map({'C': 1.0, 'P': -1.0}).fillna(0)
-        
-        # Generate synthetic targets if not present
-        for col in self.target_cols:
-            if col not in df.columns:
-                if col == 'target_call_offset':
-                    df[col] = 2.0
-                elif col == 'target_put_offset':
-                    df[col] = 2.0
-                elif col == 'target_wing_width':
-                    df[col] = 5.0
-                elif col == 'target_dte':
-                    df[col] = 14.0
-                elif col == 'was_profitable':
-                    df[col] = 0.5
-                elif col == 'realized_roi':
-                    df[col] = 0.0
-                elif col == 'realized_max_loss':
-                    df[col] = 0.2
-                elif col == 'confidence_target':
-                    df[col] = 0.5
-        
-        # Regime labeling
-        if 'regime_label' not in df.columns:
-            if 'ivr' in df.columns:
-                df['regime_label'] = pd.cut(
-                    df['ivr'], 
-                    bins=[-0.1, 30, 70, 101], 
-                    labels=[0, 1, 2]
-                ).astype(int)
-            else:
-                df['regime_label'] = 1
-        
-        # Fill NaNs
-        df = df.ffill().fillna(0)
-        
-        return df
+    # Build arrays
+    target_cols = [
+        'target_call_offset', 'target_put_offset', 'target_wing_width', 'target_dte',
+        'was_profitable', 'realized_roi', 'realized_max_loss', 'confidence_target'
+    ]
+    
+    X = df[FEATURE_COLS].values.astype(np.float32)
+    y = df[target_cols].values.astype(np.float32)
+    regime = df['regime_label'].values.astype(np.int64)
+    
+    print(f"[CondorBrain] Features: {X.shape}, Targets: {y.shape}")
+    return X, y, regime
 
 
-# ============================================================================
-# CUDA-OPTIMIZED DATA LOADER
-# ============================================================================
-
-def create_gpu_dataloaders(args, device):
-    """Create streaming dataloaders with CUDA prefetching."""
+def create_sequences_fast(X, y, regime, lookback):
+    """Create sequences using numpy stride tricks for speed."""
+    n_samples = len(X) - lookback
+    n_features = X.shape[1]
     
-    train_dataset = StreamingCondorDataset(
-        csv_path=args.local_data,
-        lookback=args.lookback,
-        chunk_size=50000,  # 50k rows per chunk
-        max_rows=args.max_rows,
-        is_train=True
-    )
+    print(f"[CondorBrain] Creating {n_samples:,} sequences (lookback={lookback})...")
     
-    val_dataset = StreamingCondorDataset(
-        csv_path=args.local_data,
-        lookback=args.lookback,
-        chunk_size=50000,
-        max_rows=args.max_rows,
-        is_train=False
-    )
+    # Use stride tricks for efficient view (no memory copy!)
+    from numpy.lib.stride_tricks import as_strided
     
-    # NOTE: IterableDataset with num_workers>0 can cause issues
-    # Using num_workers=0 for reliability, GPU still handles compute
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        num_workers=0,  # Single-process for IterableDataset reliability
-        pin_memory=True
-    )
+    X_seq = as_strided(
+        X,
+        shape=(n_samples, lookback, n_features),
+        strides=(X.strides[0], X.strides[0], X.strides[1])
+    ).copy()  # Copy to ensure contiguous memory
     
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=args.batch_size,
-        num_workers=0,
-        pin_memory=True
-    )
+    y_seq = y[lookback:].copy()
+    r_seq = regime[lookback:].copy()
     
-    return train_loader, val_loader, train_dataset.n_samples
+    return X_seq, y_seq, r_seq
 
 
 # ============================================================================
@@ -248,7 +120,7 @@ def create_gpu_dataloaders(args, device):
 # ============================================================================
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train CondorBrain (GPU-Optimized)")
+    parser = argparse.ArgumentParser(description="Train CondorBrain")
     parser.add_argument("--local-data", type=str, required=True, help="Path to institutional CSV")
     parser.add_argument("--output", type=str, default="auto", help="Output model path ('auto' = generate from params)")
     parser.add_argument("--d-model", type=int, default=1024)
@@ -274,7 +146,7 @@ def parse_args():
 # ============================================================================
 
 def train_condor_brain(args):
-    """GPU-optimized training."""
+    """Training with proven in-memory pattern."""
     
     if not HAS_MAMBA:
         print("[Error] mamba-ssm not available.")
@@ -286,23 +158,68 @@ def train_condor_brain(args):
     if device.type == 'cuda':
         print(f"[CondorBrain] GPU: {torch.cuda.get_device_name(0)}")
         print(f"[CondorBrain] GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-        # Enable TF32 for A100
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
     
-    # Create streaming dataloaders (minimal CPU RAM usage)
-    print(f"\n[CondorBrain] Creating streaming dataloaders...")
-    train_loader, val_loader, n_train_samples = create_gpu_dataloaders(args, device)
+    # Load data
+    print(f"\n[CondorBrain] Loading data from {args.local_data}...")
+    if args.max_rows > 0:
+        df = pd.read_csv(args.local_data, nrows=args.max_rows)
+    else:
+        df = pd.read_csv(args.local_data)
+    print(f"[CondorBrain] Loaded {len(df):,} rows")
     
-    # Model (created directly on GPU)
-    print(f"[CondorBrain] Initializing model on GPU...")
+    # Prepare features
+    X, y, regime = prepare_features(df)
+    
+    # Free dataframe memory
+    del df
+    import gc
+    gc.collect()
+    
+    # Create sequences (FAST with stride tricks)
+    X_seq, y_seq, r_seq = create_sequences_fast(X, y, regime, args.lookback)
+    
+    # Free original arrays
+    del X, y, regime
+    gc.collect()
+    
+    # Train/Val split (80/20)
+    split = int(0.8 * len(X_seq))
+    X_train, X_val = X_seq[:split], X_seq[split:]
+    y_train, y_val = y_seq[:split], y_seq[split:]
+    r_train, r_val = r_seq[:split], r_seq[split:]
+    
+    print(f"[CondorBrain] Train: {len(X_train):,} | Val: {len(X_val):,}")
+    
+    # DataLoaders
+    train_loader = DataLoader(
+        TensorDataset(
+            torch.from_numpy(X_train),
+            torch.from_numpy(y_train),
+            torch.from_numpy(r_train)
+        ),
+        batch_size=args.batch_size,
+        shuffle=True,
+        pin_memory=True
+    )
+    val_loader = DataLoader(
+        TensorDataset(
+            torch.from_numpy(X_val),
+            torch.from_numpy(y_val),
+            torch.from_numpy(r_val)
+        ),
+        batch_size=args.batch_size,
+        pin_memory=True
+    )
+    
+    # Model
     model = CondorBrain(
         d_model=args.d_model,
         n_layers=args.layers,
-        input_dim=24
+        input_dim=len(FEATURE_COLS)
     ).to(device)
     
-    # Count parameters
     n_params = sum(p.numel() for p in model.parameters())
     print(f"[CondorBrain] Model parameters: {n_params:,}")
     
@@ -313,11 +230,11 @@ def train_condor_brain(args):
     
     # Training
     print(f"\n{'='*60}")
-    print(f"CONDORBRAIN A100 TRAINING")
+    print(f"CONDORBRAIN TRAINING")
     print(f"{'='*60}")
     print(f"Model: {args.d_model}d x {args.layers} layers ({n_params/1e6:.1f}M params)")
     print(f"Epochs: {args.epochs}, Batch: {args.batch_size}, LR: {args.lr}")
-    print(f"Samples: {n_train_samples:,}")
+    print(f"Output: {args.output}")
     print(f"{'='*60}\n")
     
     best_loss = float('inf')
@@ -330,12 +247,11 @@ def train_condor_brain(args):
         epoch_start = time.time()
         
         for batch_x, batch_y, batch_r in train_loader:
-            # Move to GPU (non-blocking with pinned memory)
             batch_x = batch_x.to(device, non_blocking=True)
             batch_y = batch_y.to(device, non_blocking=True)
             batch_r = batch_r.to(device, non_blocking=True)
             
-            optimizer.zero_grad(set_to_none=True)  # Faster than zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             
             with autocast('cuda'):
                 outputs, regime_probs, _ = model(batch_x, return_regime=True, forecast_days=0)
@@ -373,7 +289,6 @@ def train_condor_brain(args):
         epoch_time = time.time() - epoch_start
         lr = optimizer.param_groups[0]['lr']
         
-        # GPU memory stats
         if device.type == 'cuda':
             gpu_mem = torch.cuda.memory_allocated() / 1e9
             print(f"Epoch {epoch+1:3d}/{args.epochs} | Train: {train_loss:.4f} | Val: {val_loss:.4f} | "
