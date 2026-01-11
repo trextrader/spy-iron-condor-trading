@@ -266,8 +266,10 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     configs = [
-        # The "Big One" (High Performance Production Config)
-        {'d_model': 512, 'layers': 24, 'lr': 5e-5, 'batch_size': 256},
+        # THE BEAST (Full Production Model)
+        # 1024d x 32 Layers ~100M Params
+        # Batch 512 to saturate H100
+        {'d_model': 1024, 'layers': 32, 'lr': 1e-5, 'batch_size': 512},
     ]
     
     results = []
