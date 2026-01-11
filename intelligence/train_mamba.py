@@ -22,11 +22,13 @@ except ImportError:
     print("Command: cp core/config.template.py core/config.py\n")
     sys.exit(1)
 
-# Alpaca Imports
+# Alpaca Imports (Optional, only for download)
+HAS_ALPACA = False
 try:
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+    HAS_ALPACA = True
 except ImportError:
     pass
 
@@ -65,6 +67,11 @@ def parse_args():
     return parser.parse_args()
 
 def download_alpaca_data(key, secret, symbol, years=2, tf_str="15Min"):
+    if not HAS_ALPACA:
+        print("[Error] Alpaca SDK (alpaca-py) not found.")
+        print("Install it with: pip install alpaca-py")
+        return pd.DataFrame()
+        
     if not key or not secret:
         print("[Error] Alpaca Keys required for download.")
         return pd.DataFrame()
