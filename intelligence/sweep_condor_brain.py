@@ -266,10 +266,8 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     configs = [
-        {'d_model': 256, 'layers': 12, 'lr': 1e-4, 'batch_size': 512},
-        {'d_model': 512, 'layers': 16, 'lr': 5e-5, 'batch_size': 256},
+        # The "Big One" (High Performance Production Config)
         {'d_model': 512, 'layers': 24, 'lr': 5e-5, 'batch_size': 256},
-        {'d_model': 1024, 'layers': 32, 'lr': 1e-5, 'batch_size': 128}, # Smaller batch for huge model
     ]
     
     results = []
