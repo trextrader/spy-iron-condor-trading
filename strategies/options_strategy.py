@@ -1,13 +1,23 @@
-# strategies/options_strategy.py - Iron Condor with MTF Intelligence
+# strategies/options_strategy.py - Iron Condor with MTF Intelligence + CondorBrain
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict, Any
 import datetime as dt
 import sys
 import os
+import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from intelligence.fuzzy_engine import get_fuzzy_consensus
 from intelligence.regime_filter import check_liquidity_gate
+
+# CondorBrain Neural Integration (Optional - falls back to rule-based if not available)
+try:
+    from intelligence.condor_brain import CondorBrainEngine, CondorSignal, HAS_MAMBA
+    HAS_CONDOR_BRAIN = HAS_MAMBA and os.path.exists("models/condor_brain.pth")
+except ImportError:
+    HAS_CONDOR_BRAIN = False
+    CondorBrainEngine = None
+    CondorSignal = None
 
 # === Core Types ===
 def lag_weighted_edge(edge: float, iv_conf: float, align_mode: str, cfg: Any) -> float:
@@ -295,6 +305,126 @@ def build_condor(chain: List[OptionQuote], cfg, today: dt.date,
         net_credit=net_credit,
         max_loss=max_loss
     )
+
+# === Neural-Driven Build Condor (CondorBrain) ===
+_condor_brain_engine = None
+
+def get_condor_brain() -> Optional[Any]:
+    """Lazy-load CondorBrain engine."""
+    global _condor_brain_engine
+    if not HAS_CONDOR_BRAIN:
+        return None
+    if _condor_brain_engine is None:
+        try:
+            _condor_brain_engine = CondorBrainEngine()
+        except Exception as e:
+            print(f"[CondorBrain] Failed to load: {e}")
+            return None
+    return _condor_brain_engine
+
+def build_condor_neural(
+    chain: List[OptionQuote], 
+    cfg, 
+    today: dt.date, 
+    spot: float,
+    features: np.ndarray = None
+) -> Tuple[Optional[IronCondorLegs], Optional[Any]]:
+    """
+    Build Iron Condor using CondorBrain neural predictions.
+    
+    Falls back to rule-based build_condor if CondorBrain unavailable.
+    
+    Args:
+        chain: List of OptionQuote objects
+        cfg: Configuration
+        today: Current date
+        spot: Current spot price
+        features: Pre-computed feature array (lookback, 24) for CondorBrain
+        
+    Returns:
+        (IronCondorLegs, CondorSignal) or (None, None)
+    """
+    brain = get_condor_brain()
+    
+    if brain is None or features is None:
+        # Fallback to rule-based
+        legs = build_condor(chain, cfg, today, spot, cfg.wing_width_min)
+        return legs, None
+    
+    # Get neural prediction
+    try:
+        signal: CondorSignal = brain.predict(features)
+    except Exception as e:
+        print(f"[CondorBrain] Prediction failed: {e}")
+        legs = build_condor(chain, cfg, today, spot, cfg.wing_width_min)
+        return legs, None
+    
+    # Check if signal is valid
+    if not signal.is_valid_trade(min_confidence=0.5, min_pop=0.4):
+        print(f"[CondorBrain] Signal rejected: conf={signal.confidence:.2f}, pop={signal.prob_profit:.2f}")
+        return None, signal
+    
+    # Validate strikes against predicted price range
+    call_safe, put_safe = signal.strikes_are_safe(spot)
+    if not call_safe or not put_safe:
+        print(f"[CondorBrain] Price trajectory breach risk: call_safe={call_safe}, put_safe={put_safe}")
+        # Widen the offsets if trajectory predicts breach
+        if not call_safe:
+            signal.short_call_offset = min(5.0, signal.short_call_offset + 0.5)
+        if not put_safe:
+            signal.short_put_offset = min(5.0, signal.short_put_offset + 0.5)
+    
+    # Convert neural offsets to strikes
+    neural_short_call = spot * (1 + signal.short_call_offset / 100)
+    neural_short_put = spot * (1 - signal.short_put_offset / 100)
+    neural_wing = signal.wing_width
+    
+    # Find actual chain strikes closest to neural targets
+    calls = [q for q in chain if q.is_call]
+    puts = [q for q in chain if not q.is_call]
+    
+    if not calls or not puts:
+        print("[CondorBrain] Empty chain")
+        return None, signal
+    
+    # Find closest strikes
+    short_call = min(calls, key=lambda q: abs(q.strike - neural_short_call))
+    short_put = min(puts, key=lambda q: abs(q.strike - neural_short_put))
+    
+    # Pick long legs by neural wing width
+    long_call = pick_long_by_width(chain, short_call, True, neural_wing)
+    long_put = pick_long_by_width(chain, short_put, False, neural_wing)
+    
+    if not long_call or not long_put:
+        print(f"[CondorBrain] Could not find wings at width {neural_wing}")
+        # Fall back to minimum width
+        long_call = pick_long_by_width(chain, short_call, True, cfg.wing_width_min)
+        long_put = pick_long_by_width(chain, short_put, False, cfg.wing_width_min)
+        
+    if not long_call or not long_put:
+        return None, signal
+    
+    # Calculate credit and max loss
+    net_credit = (short_call.mid + short_put.mid) - (long_call.mid + long_put.mid)
+    
+    call_width = abs(long_call.strike - short_call.strike)
+    put_width = abs(short_put.strike - long_put.strike)
+    wing_width = max(call_width, put_width)
+    max_loss = (wing_width * 100) - (net_credit * 100)
+    
+    legs = IronCondorLegs(
+        short_call=short_call,
+        long_call=long_call,
+        short_put=short_put,
+        long_put=long_put,
+        net_credit=net_credit,
+        max_loss=max_loss
+    )
+    
+    print(f"[CondorBrain] Neural IC: SC={short_call.strike}, SP={short_put.strike}, "
+          f"width={neural_wing:.1f}, conf={signal.confidence:.2f}, pop={signal.prob_profit:.2f}")
+    
+    return legs, signal
 
 # === Entry Filters ===
 def can_enter_trade(broker, cfg) -> Tuple[bool, str]:

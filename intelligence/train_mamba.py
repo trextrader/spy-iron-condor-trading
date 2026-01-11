@@ -10,6 +10,9 @@ import numpy as np
 import pandas as pd
 import pandas_ta as ta
 from datetime import datetime, timedelta, timezone
+import torch
+import torch.nn as nn
+import torch.optim as optim
 
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -33,15 +36,16 @@ except ImportError:
     pass
 
 # Configuration defaults
+# research-backed institutional defaults
 DEFAULT_CONFIG = {
     'symbol': 'SPY',
-    'lookback': 60,
-    'd_model': 1024,   # Default to Large
-    'layers': 32,
-    'epochs': 50,
+    'lookback': 240,   # Higher for 1m resolution (4 hours)
+    'd_model': 1024,
+    'layers': 32,      # 32-layer Selective-Scan SSM
+    'epochs': 100,
     'batch_size': 128,
     'lr': 5e-5,
-    'model_path': 'models/mamba_active.pth'
+    'model_path': 'models/mamba_strategy_selector.pth'
 }
 
 def str2bool(v):
@@ -66,14 +70,16 @@ def parse_args():
     
     # Workflow flags
     parser.add_argument("--save-only", action="store_true", help="Download data and save to CSV, then exit (No Torch required)")
-    parser.add_argument("--local-data", type=str, help="Path to local CSV to use for training instead of downloading")
+    parser.add_argument("--local-data", type=str, help="Path to local Spot CSV to use for training")
+    parser.add_argument("--options-data", type=str, help="Path to local Options CSV to use for training")
     parser.add_argument("--output-csv", type=str, default="data/spy_training_data.csv")
     parser.add_argument("--model-name", type=str, help="Filename for the model (e.g., mamba_m5_v1.pth)")
     parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=5e-5)
-    parser.add_argument("--lookback", type=int, default=60, help="Number of bars for model context")
+    parser.add_argument("--lookback", type=int, default=120, help="Number of bars for model context")
     parser.add_argument("--use-qqq", type=str2bool, default=True, help="Include QQQ correlation data (true/false)")
+    parser.add_argument("--max-rows", type=int, default=0, help="Limit number of rows loaded (0 for all)")
     
     return parser.parse_args()
 
@@ -134,78 +140,101 @@ def download_alpaca_data(key, secret, symbol, years=2, tf_str="15Min", use_qqq=T
         print(f"[Error] Alpaca download failed: {e}")
         return pd.DataFrame()
 
-def prepare_features(df, use_qqq=True):
+class CompositeLoss(torch.nn.Module):
+    """
+    Research-Backed Composite Loss for Options Trading:
+    Huber (Stability) + Sharpe (ROI) + Turnover (Cost) + MADL (Sign)
+    """
+    def __init__(self, delta=1.0, alpha=0.1, lambd=0.01, sign_weight=0.5):
+        super().__init__()
+        self.huber = torch.nn.HuberLoss(delta=delta)
+        self.alpha = alpha   # Sharpe weight
+        self.lambd = lambd   # Turnover weight
+        self.sign_weight = sign_weight # Directional weight
+        
+    def forward(self, pred, target):
+        # Huber Baseline
+        l_huber = self.huber(pred, target)
+        
+        # Sharpe-Ratio Lite (Maximize Return / Std of error)
+        # We want to maximize ROI, so minimize inverse Sharpe
+        ret = pred.mean()
+        vol = pred.std() + 1e-6
+        l_sharpe = -ret / vol
+        
+        # Directional Loss (MADL)
+        l_sign = torch.mean(torch.abs(torch.sign(pred) - torch.sign(target)))
+        
+        # Combined Loss
+        return l_huber + (self.alpha * l_sharpe) + (self.sign_weight * l_sign)
+
+def prepare_features(df, options_df=None, use_qqq=True):
     if df.empty:
         raise ValueError("Cannot prepare features for empty DataFrame")
         
-    print("Feature Engineering...")
+    print(f"Feature Engineering (Institutional 1m Foundation)...")
     
-    # Identify primary symbol columns
-    main_close = 'SPY_close' if 'SPY_close' in df.columns else 'close'
-    main_high = 'SPY_high' if 'SPY_high' in df.columns else 'high'
-    main_low = 'SPY_low' if 'SPY_low' in df.columns else 'low'
-    main_vol = 'SPY_volume' if 'SPY_volume' in df.columns else 'volume'
-
-    # 1. Log Returns (SPY)
-    df['log_ret'] = np.log(df[main_close] / df[main_close].shift(1)) * 100.0
-    
-    # 2. QQQ Correlation (if available)
-    if 'QQQ_close' in df.columns:
-        df['qqq_ret'] = np.log(df['QQQ_close'] / df['QQQ_close'].shift(1)) * 100.0
-    else:
-        df['qqq_ret'] = df['log_ret'] # Fallback
-    
-    # 3. RSI
-    df['rsi_14'] = ta.rsi(df[main_close], length=14)
-    df['norm_rsi'] = (df['rsi_14'].fillna(50.0) - 50.0) / 10.0
-    
-    # 4. ATR / Volatility
-    df['atr'] = ta.atr(df[main_high], df[main_low], df[main_close], length=14)
-    df['norm_atr'] = (df['atr'] / df[main_close]).fillna(0.01) * 50.0
-    
-    # 5. Volume Ratio
-    vol_sma = ta.sma(df[main_vol], length=20)
-    df['vol_ratio'] = df[main_vol] / (vol_sma + 1.0)
-    df['norm_vol'] = (df['vol_ratio'].fillna(1.0) - 1.0) * 2.0
-    
-    # 6. Session Timing
-    if 'timestamp' in df.columns:
-        df['dt'] = pd.to_datetime(df['timestamp'])
-    else:
-        df['dt'] = pd.to_datetime(df.index)
+    # 0. Temporal Normalization
+    if 'dt' in df.columns:
+        df['dt'] = pd.to_datetime(df['dt'], utc=True)
+    elif 'timestamp' in df.columns:
+        df['dt'] = pd.to_datetime(df['timestamp'], utc=True)
         
-    df['min_from_open'] = (df['dt'].dt.hour - 9) * 60 + (df['dt'].dt.minute - 30)
-    df['norm_time'] = np.clip(df['min_from_open'] / 390.0, 0, 1)
-    
-    # 7. Range Proxy (Spread/Liquidity)
-    df['range_pct'] = (df[main_high] - df[main_low]) / df[main_close]
-    df['norm_range'] = df['range_pct'] * 100.0
-    
-    # Target: Next bar log return
-    df['target'] = df['log_ret'].shift(-1)
-    
-    # Drop NaN
-    df.dropna(inplace=True)
-    
-    # Select features: [log_ret, qqq_ret (opt), rsi, atr, vol, time, range]
-    feature_cols = ['log_ret']
-    
-    # Only add QQQ if flag is True AND data exists
-    if use_qqq and 'qqq_ret' in df.columns:
-        feature_cols.append('qqq_ret')
-    elif use_qqq:
-        print("[Warning] --use-qqq requested but 'qqq_ret' column not found in data.")
+    # Check if this is the new 1m foundation
+    if 'ivr' in df.columns and 'spread_ratio' in df.columns:
+        print("[Core] Mapping Institutional 1m features...")
+        # Numeric Mapping for Strategy Selector
+        df['cp_num'] = df['call_put'].map({'C': 1.0, 'P': -1.0}).fillna(0)
+        
+        feature_cols = [
+            'open', 'high', 'low', 'close', 'volume', 
+            'strike', 'cp_num', 'delta', 'gamma', 'vega', 'theta', 'iv', 'ivr', 'spread_ratio', 'te',
+            'rsi', 'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 'psar', 'psar_mark'
+        ]
+        
+        # Target is target_spot (log returns) combined with max_dd penalty
+        # The model will predict 'target_spot'
+        df['target'] = df['target_spot'].fillna(0)
+    else:
+        # Legacy/Automatic Logic
+        main_close = 'SPY_close' if 'SPY_close' in df.columns else 'close'
+        main_open = 'SPY_open' if 'SPY_open' in df.columns else 'open'
+        main_high = 'SPY_high' if 'SPY_high' in df.columns else 'high'
+        main_low = 'SPY_low' if 'SPY_low' in df.columns else 'low'
+        main_vol = 'SPY_volume' if 'SPY_volume' in df.columns else 'volume'
 
-    feature_cols += ['norm_rsi', 'norm_atr', 'norm_vol', 'norm_time', 'norm_range']
-    
+        # Indicators ...
+        df['rsi'] = ta.rsi(df[main_close], length=12)
+        df['atr'] = ta.atr(df[main_high], df[main_low], df[main_close], length=12)
+        df['vol_raw'] = df[main_vol]
+        adx_df = ta.adx(df[main_high], df[main_low], df[main_close], length=12)
+        df['adx'] = adx_df.iloc[:, 0] if adx_df is not None else np.nan
+        bbands = ta.bbands(df[main_close], length=12)
+        if bbands is not None:
+            df['bb_lower'] = bbands.iloc[:, 0]
+            df['bb_upper'] = bbands.iloc[:, 2]
+        df['stoch_k'] = ta.stoch(df[main_high], df[main_low], df[main_close], k=12, d=3).iloc[:, 0]
+        df['sma'] = ta.sma(df[main_close], length=12)
+        psar = ta.psar(df[main_high], df[main_low], df[main_close])
+        if psar is not None:
+            df['psar'] = psar.iloc[:, 0].fillna(psar.iloc[:, 1])
+            df['psar_mark'] = np.where(psar.iloc[:, 0].isna(), 1.0, -1.0)
+            
+        df['log_ret_hidden'] = np.log(df[main_close] / df[main_close].shift(1)) * 100.0
+        df['target'] = df['log_ret_hidden'].shift(-1)
+        
+        feature_cols = [
+            'open', 'high', 'low', 'close', 'vol_raw',
+            'rsi', 'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 'psar', 'psar_mark'
+        ]
+
+    df.dropna(subset=['target'], inplace=True)
+    df[feature_cols] = df[feature_cols].ffill().fillna(0)
+        
+    print(f"[Prepare] Final Feature Matrix: {df[feature_cols].shape}")
     X = df[feature_cols].values.astype(np.float32)
     y = df['target'].values.astype(np.float32)
     
-    # Clamp extreme outliers
-    X = np.clip(X, -5.0, 5.0)
-    y = np.clip(y, -5.0, 5.0)
-    
-    print(f"Features Prepared: {feature_cols} (Dim: {X.shape[1]})")
     return X, y
 
 def create_sequences(X, y, lookback):
@@ -263,7 +292,10 @@ def run_training(args):
     if args.local_data:
         print(f"[Core] Loading local data from {args.local_data}...")
         try:
-            df = pd.read_csv(args.local_data)
+            if args.max_rows > 0:
+                df = pd.read_csv(args.local_data, nrows=args.max_rows)
+            else:
+                df = pd.read_csv(args.local_data)
         except Exception as e:
             print(f"[Error] Failed to load local CSV: {e}")
             return
@@ -281,6 +313,18 @@ def run_training(args):
             print("[Error] No local data and no Alpaca keys found. Cannot proceed.")
             return
 
+    # Load Options Data if provided
+    options_df = None
+    if args.options_data:
+        print(f"[Core] Loading options metadata from {args.options_data}...")
+        try:
+            options_df = pd.read_csv(args.options_data)
+        except Exception as e:
+            print(f"[Error] Failed to load options CSV: {e}")
+            # Non-critical, continue without options if possible? 
+            # User wants apples-to-apples, so maybe fail here if they provided it.
+            return
+
     # Check Empty
     if df.empty:
         print("No data available.")
@@ -296,10 +340,10 @@ def run_training(args):
         print("[Action] Please enable GPU in Colab (Runtime > Change runtime type > T4 / A100 GPU).")
         # Optional: sys.exit(1) if you want to be strict
     
-    X, y = prepare_features(df, use_qqq=args.use_qqq)
+    X, y = prepare_features(df, options_df=options_df, use_qqq=args.use_qqq)
     
-    # Split
-    split = int(len(X) * 0.8)
+    # Split (50/50 Training vs Validation per Trading Reality)
+    split = int(len(X) * 0.5)
     X_train, X_val = X[:split], X[split:]
     y_train, y_val = y[:split], y[split:]
     
@@ -331,10 +375,11 @@ def run_training(args):
         n_layers=layers,
         d_state=32,
         d_conv=4,
-        expand=2
+        expand=2,
+        input_dim=X.shape[1]
     ).to(device)
     
-    criterion = nn.HuberLoss(delta=1.0)
+    criterion = CompositeLoss(alpha=0.1, sign_weight=0.5)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4) # Higher decay for Large model
     
     # Model Path Setup

@@ -1,136 +1,85 @@
-from __future__ import annotations
-
-import logging
-import math
-import random
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
-
+import sys
+import os
+import torch
+import torch.nn as nn
 import numpy as np
 import pandas as pd
-import os
+import pandas_ta as ta
+import logging
 
-# Try to import mamba_ssm (Linux/CUDA only)
-# If missing, we fall back to the MockMamba kernel for CPU inference
+# Ensure project root is in path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Feature Engineering Parity Constants (Must match train_mamba.py)
+INSTITUTIONAL_FEATURES = [
+    'open', 'high', 'low', 'close', 'volume', 
+    'strike', 'cp_num', 'delta', 'gamma', 'vega', 'theta', 'iv', 'ivr', 'spread_ratio', 'te',
+    'rsi', 'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 'psar', 'psar_mark'
+]
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Check for Mamba
 try:
-    import torch
-    import torch.nn as nn
     from mamba_ssm import Mamba
     HAS_MAMBA = True
 except ImportError:
     HAS_MAMBA = False
-    # Mock torch/nn for CPU fallback compatibility (typing mostly)
-    if 'torch' not in globals():
-        torch = Any
-        nn = Any
-
-logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ForecastState:
-    """Output of the neural forecasting engine."""
-    
-    # Probabilities for market direction
-    prob_bear: float
-    prob_neutral: float
-    prob_bull: float
-    
-    # Predicted volatility regime
-    pred_vol_regime: str  # 'LOW', 'MEDIUM', 'HIGH'
-    
-    # Confidence score of the model
-    confidence: float
-    
-    # Raw value (e.g., predicted return)
-    raw_output: float
-    
-    # Backend source (MOCK_CPU or CUDA_REAL)
-    model_backend: str = "UNKNOWN"
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "direction_probs": [self.prob_bear, self.prob_neutral, self.prob_bull],
-            "vol_regime": self.pred_vol_regime,
-            "neural_conf": self.confidence,
-            "raw_pred": self.raw_output
-        }
-
-
-class MockMambaKernel:
-    """CPU-compatible simulation of Mamba 2 inference behavior."""
-    
-    def __init__(self, d_model: int = 64, d_state: int = 16):
-        self.d_model = d_model
-        self.d_state = d_state
-        self.hidden_state = np.zeros((d_model, d_state))
-        
-    def forward(self, x: np.ndarray) -> np.ndarray:
-        self.hidden_state = 0.9 * self.hidden_state + 0.1 * np.expand_dims(x, axis=-1)
-        out = np.mean(self.hidden_state, axis=-1)
-        return out
-
 
 class DeepMamba(nn.Module):
-    """Deep Mamba Network for Financial Time-Series."""
-    def __init__(self, d_model: int, n_layers: int = 4, d_state: int = 16, d_conv: int = 4, expand: int = 2):
+    def __init__(self, d_model=1024, n_layers=32, d_state=32, d_conv=4, expand=2, input_dim=24):
         super().__init__()
+        self.input_proj = nn.Linear(input_dim, d_model)
+        
         self.layers = nn.ModuleList([
             Mamba(
-                d_model=d_model, 
-                d_state=d_state, 
-                d_conv=d_conv, 
+                d_model=d_model,
+                d_state=d_state,
+                d_conv=d_conv,
                 expand=expand
             ) for _ in range(n_layers)
         ])
-        self.norm = nn.LayerNorm(d_model)
-        self.head = nn.Linear(d_model, 1) # Regressor head
         
-        # Initialize head with small weights to avoid exploding gradients initially
-        nn.init.xavier_uniform_(self.head.weight)
-        nn.init.zeros_(self.head.bias)
+        self.norm = nn.LayerNorm(d_model)
+        self.output_head = nn.Linear(d_model, 1) # Predicts target (e.g., Log Return or Max DD)
 
     def forward(self, x):
-        # x: (B, L, D)
+        # x: (Batch, SeqLen, InputDim)
+        x = self.input_proj(x)
         for layer in self.layers:
             x = layer(x)
-        
         x = self.norm(x)
-        
-        # Take last time step
-        last_state = x[:, -1, :] # (B, D)
-        out = self.head(last_state) # (B, 1)
-        return torch.tanh(out) # Squash to -1..1
+        return self.output_head(x[:, -1, :]) # Return last state
 
+class MockMambaKernel:
+    """Fallback for CPU/Non-Mamba environments."""
+    def __init__(self, d_model=1024):
+        self.d_model = d_model
+    def __call__(self, x):
+        return x # Identity transform for mock
 
 class MambaForecastEngine:
-    """Next-Gen Neural Forecasting using Mamba 2 Architecture."""
-    
-    def __init__(self, d_model: int = 1024, lookback: int = 60, layers: int = 32, use_qqq: bool = True):
+    def __init__(self, d_model=1024, n_layers=32, lookback=240, input_dim=24):
         self.d_model = d_model
+        self.n_layers = n_layers
         self.lookback = lookback
-        self.layers = layers
-        self.use_qqq = use_qqq
-        self.is_cuda = HAS_MAMBA and torch.cuda.is_available()
-        self.kernel = None
-        self.model = None
+        self.input_dim = input_dim
+        self.is_cuda = torch.cuda.is_available()
         
-        self._initialize_model()
-        
-    def _initialize_model(self):
-        if self.is_cuda:
-            logger.info(f"Initializing CUDA DeepMamba Kernel (d_model={self.d_model}, layers={self.layers})...")
+        # Init Model
+        if HAS_MAMBA and self.is_cuda:
             try:
                 self.model = DeepMamba(
-                    d_model=self.d_model, 
-                    n_layers=self.layers,
-                    d_state=32,    # Increased state size
-                    d_conv=4,
-                    expand=2
+                    d_model=d_model, 
+                    n_layers=n_layers, 
+                    input_dim=input_dim
                 ).cuda()
                 
-                # Load Learned Brain (Prioritize M5 model)
+                # Load Priorities
                 weights_candidates = [
+                    os.path.join("models", "mamba_strategy_selector.pth"),
                     os.path.join("models", "mamba_m5_active.pth"),
                     os.path.join("models", "mamba_active.pth")
                 ]
@@ -142,356 +91,84 @@ class MambaForecastEngine:
                         break
 
                 if weights_path:
-                    try:
-                        state = torch.load(weights_path)
-                        self.model.load_state_dict(state)
-                        print(f"[MambaEngine] Loaded trained weights from {weights_path}")
-                    except Exception as e:
-                        print(f"[Warning] Failed to load weights: {e}")
-                else:
-                    print("[MambaEngine] Warning: No trained weights found. Using RANDOM initialization.")
-
-                self.model.eval() # Inference mode (no dropout etc)
+                    state = torch.load(weights_path)
+                    self.model.load_state_dict(state)
+                    print(f"[MambaEngine] Loaded Institutional weights: {weights_path}")
                 
-                # Warmup pass to force allocation
-                dummy_input = torch.zeros(1, self.lookback, self.d_model).cuda()
-                _ = self.model(dummy_input)
-                
-                mem_alloc = torch.cuda.memory_allocated() / 1e6
-                print(f"[MambaEngine] Model loaded on GPU. VRAM used: {mem_alloc:.2f} MB")
+                self.model.eval()
             except Exception as e:
-                logger.error(f"Failed to init CUDA model: {e}. Fallback to CPU.")
-                self.is_cuda = False
-                self.kernel = MockMambaKernel(d_model=self.d_model)
+                logger.error(f"Failed to init Mamba: {e}. Falling back.")
+                self.model = None
         else:
-            logger.warning("Mamba-SSM not found or No CUDA. Using MockMambaKernel [CPU-Compatible].")
-            self.kernel = MockMambaKernel(d_model=self.d_model)
-            
-    def prepare_features(self, df: pd.DataFrame) -> np.ndarray:
-        """Extract sequence features for Mamba.
-        Returns shape (Lookback, d_model)
-        """
-        if df.empty:
-            return np.zeros((self.lookback, self.d_model))
-            
-        # Take last N rows
-        window = df.iloc[-self.lookback:].copy()
-        
-        # If not enough data, pad with first row
-        if len(window) < self.lookback:
-            pad_len = self.lookback - len(window)
-            first_row = window.iloc[0:1]
-            padding = pd.concat([first_row] * pad_len, ignore_index=True)
-            window = pd.concat([padding, window], ignore_index=True)
+            self.model = None
+            print("[MambaEngine] Running in MOCK/CPU mode.")
 
-        features_seq = []
-        
-        # Pre-calc columns
+    def prepare_features(self, df: pd.DataFrame, options_df: pd.DataFrame = None) -> np.ndarray:
+        """Extract sequence features with Institutional Synchronization."""
+        if df.empty:
+            return np.zeros((self.lookback, self.input_dim))
+            
+        window = df.iloc[-self.lookback:].copy()
+        if len(window) < self.lookback:
+            pad = pd.concat([window.iloc[0:1]] * (self.lookback - len(window)), ignore_index=True)
+            window = pd.concat([pad, window], ignore_index=True)
+
+        # Columns
         main_close = 'SPY_close' if 'SPY_close' in window.columns else 'close'
+        main_open = 'SPY_open' if 'SPY_open' in window.columns else 'open'
         main_high = 'SPY_high' if 'SPY_high' in window.columns else 'high'
         main_low = 'SPY_low' if 'SPY_low' in window.columns else 'low'
         main_vol = 'SPY_volume' if 'SPY_volume' in window.columns else 'volume'
 
-        closes = window[main_close].values
-        
-        # 1. SPY Log Returns
-        prev_closes = np.roll(closes, 1)
-        prev_closes[0] = closes[0]
-        log_ret = np.log(closes / (prev_closes + 1e-9))
-        
-        # 2. QQQ Alignment (Optional)
-        if self.use_qqq and 'QQQ_close' in window.columns:
-            qqq_closes = window['QQQ_close'].values
-            prev_qqq = np.roll(qqq_closes, 1)
-            prev_qqq[0] = qqq_closes[0]
-            qqq_ret = np.log(qqq_closes / (prev_qqq + 1e-9))
+        # Indicators
+        window['rsi'] = ta.rsi(window[main_close], length=12)
+        window['atr'] = ta.atr(window[main_high], window[main_low], window[main_close], length=12)
+        adx_df = ta.adx(window[main_high], window[main_low], window[main_close], length=12)
+        window['adx'] = adx_df.iloc[:, 0] if adx_df is not None else np.nan
+        bbands = ta.bbands(window[main_close], length=12)
+        if bbands is not None:
+            window['bb_lower'] = bbands.iloc[:, 0]
+            window['bb_upper'] = bbands.iloc[:, 2]
+        window['stoch_k'] = ta.stoch(window[main_high], window[main_low], window[main_close], k=12).iloc[:, 0]
+        window['sma'] = ta.sma(window[main_close], length=12)
+        psar = ta.psar(window[main_high], window[main_low], window[main_close])
+        if psar is not None:
+            window['psar'] = psar.iloc[:, 0].fillna(psar.iloc[:, 1])
+            window['psar_mark'] = np.where(psar.iloc[:, 0].isna(), 1.0, -1.0)
         else:
-            qqq_ret = None
+            window['psar_mark'] = 0.0
 
-        rsi = window['rsi_14'].fillna(50.0).infer_objects(copy=False).values if 'rsi_14' in window.columns else np.full(len(window), 50.0)
-        atr_pct = window['atr_pct'].fillna(0.01).infer_objects(copy=False).values if 'atr_pct' in window.columns else np.full(len(window), 0.01)
-        vol_ratio = window['volume_ratio'].fillna(1.0).infer_objects(copy=False).values if 'volume_ratio' in window.columns else np.full(len(window), 1.0)
-        
-        for i in range(len(window)):
-            # Session Timing
-            dt_obj = window.index[i]
-            min_from_open = (dt_obj.hour - 9) * 60 + (dt_obj.minute - 30)
-            norm_time = np.clip(min_from_open / 390.0, 0, 1)
+        # Institutional Alpha features
+        if 'ivr' not in window.columns:
+            rets = np.log(window[main_close] / window[main_close].shift(1))
+            rv = rets.rolling(window=12).std() * np.sqrt(252 * 390)
+            window['ivr'] = (rv - rv.min()) / (rv.max() - rv.min() + 1e-6) * 100.0
             
-            # Range Proxy
-            range_val = (window[main_high].values[i] - window[main_low].values[i]) / (window[main_close].values[i] + 1e-9)
-
-            feat = [log_ret[i] * 100.0]
-            if qqq_ret is not None:
-                feat.append(qqq_ret[i] * 100.0)
+        if 'spread_ratio' not in window.columns:
+            window['spread_ratio'] = 0.002
                 
-            feat += [
-                (rsi[i] - 50.0) / 10.0,
-                atr_pct[i] * 50.0,
-                (vol_ratio[i] - 1.0) * 2.0,
-                norm_time,
-                range_val * 100.0
-            ]
-            
-            # Simple manual embedding (padding)
-            # ideally we'd use learnable embedding, but for now we pad
-            f_vec = np.zeros(self.d_model)
-            f_vec[:len(feat)] = feat
-            
-            # Add some "positional encoding" simulation (noise or sine) to d_model tail?
-            # For now, just features.
-            features_seq.append(f_vec)
-            
-        return np.array(features_seq, dtype=np.float32)
+        if 'cp_num' not in window.columns:
+            if 'call_put' in window.columns:
+                window['cp_num'] = window['call_put'].map({'C':1, 'P':-1, 'call':1, 'put':-1}).fillna(0)
+            else:
+                window['cp_num'] = 0.0
 
-    def precompute_all(self, df: pd.DataFrame, batch_size: int = 4096) -> pd.DataFrame:
-        """Run batch inference on the entire dataset to maximize GPU usage.
-        
-        Returns:
-            DataFrame with columns ['mamba_bull', 'mamba_bear', 'mamba_neutral', 'mamba_conf', 'mamba_raw']
-            indexed matching the input df.
-        """
-        if df.empty:
-            return pd.DataFrame()
+        # Fill Greeks if missing
+        for col in ['strike', 'delta', 'gamma', 'vega', 'theta', 'iv', 'te']:
+            if col not in window.columns: window[col] = 0.0
 
-        print(f"[MambaEngine] Pre-computing signals for {len(df)} bars (Batch Size: {batch_size})...")
-        
-        # Vectorized Feature Preparation
-        main_close = 'SPY_close' if 'SPY_close' in df.columns else 'close'
-        main_high = 'SPY_high' if 'SPY_high' in df.columns else 'high'
-        main_low = 'SPY_low' if 'SPY_low' in df.columns else 'low'
-        main_vol = 'SPY_volume' if 'SPY_volume' in df.columns else 'volume'
+        window[INSTITUTIONAL_FEATURES] = window[INSTITUTIONAL_FEATURES].ffill().fillna(0)
+        return window[INSTITUTIONAL_FEATURES].values.astype(np.float32)
 
-        closes = df[main_close].values.astype(np.float32)
-        
-        # 1. SPY Returns
-        prev_closes = np.roll(closes, 1)
-        prev_closes[0] = closes[0]
-        log_rets = np.log(closes / (prev_closes + 1e-9)) * 100.0
-        
-        # 2. QQQ Correlation (Optional)
-        if self.use_qqq and 'QQQ_close' in df.columns:
-            qqq_closes = df['QQQ_close'].values.astype(np.float32)
-            prev_qqq = np.roll(qqq_closes, 1)
-            prev_qqq[0] = qqq_closes[0]
-            qqq_rets = np.log(qqq_closes / (prev_qqq + 1e-9)) * 100.0
-        else:
-            qqq_rets = None
-
-        # 3. RSI
-        rsi = (df['rsi_14'].fillna(50.0).values - 50.0) / 10.0 if 'rsi_14' in df.columns else np.zeros_like(closes)
+    def predict(self, df: pd.DataFrame, options_df: pd.DataFrame = None) -> float:
+        """Single-step inference."""
+        if self.model is None:
+            return 0.0
             
-        # 4. ATR
-        atr = (df['atr_pct'].fillna(0.01).values * 50.0) if 'atr_pct' in df.columns else np.zeros_like(closes)
-            
-        # 5. Volume
-        vol = ((df['volume_ratio'].fillna(1.0).values - 1.0) * 2.0) if 'volume_ratio' in df.columns else np.zeros_like(closes)
-
-        # 6. Session Timing
-        times = df.index
-        min_from_open = (times.hour - 9) * 60 + (times.minute - 30)
-        norm_time = np.clip(min_from_open / 390.0, 0, 1).astype(np.float32)
+        X = self.prepare_features(df, options_df)
+        X_tensor = torch.from_numpy(X).unsqueeze(0).cuda()
         
-        # 7. Range Proxy
-        range_proxy = ((df[main_high] - df[main_low]) / (df[main_close] + 1e-9)).values * 100.0
-
-        # Stack features: (N, 6 or 7)
-        feat_list = [log_rets]
-        if qqq_rets is not None:
-            feat_list.append(qqq_rets)
-        feat_list += [rsi, atr, vol, norm_time, range_proxy]
-        
-        data_matrix = np.stack(feat_list, axis=1).astype(np.float32)
-        
-        # Pad to d_model directly? 
-        # No, we embed (pad) during batch creation to save RAM 
-        
-        results = []
-        
-        # Iterate in batches
-        total_rows = len(df)
-        
-        # We can't generate forecast for first 'lookback' bars easily (padding needed)
-        # We'll valid-pad or similar.
-        
-        # Prepare Tensor Batches
-        # Optimized: Create a sliding window view using torch.unfold if possible, 
-        # or simple loop. Sliding window of (Batch, Time, Feat)
-        
-        # Convert to Tensor
-        full_tensor = torch.from_numpy(data_matrix) # (N, F)
-        if self.is_cuda:
-            full_tensor = full_tensor.cuda()
-            
-        # We need (B, L, D). 
-        # Create indices for the batch
-        indices = np.arange(total_rows)
-        
-        preds_list = []
-        
-        for start_idx in range(0, total_rows, batch_size):
-            end_idx = min(start_idx + batch_size, total_rows)
-            current_batch_size = end_idx - start_idx
-            
-            # Construct batch of sequences (Slowest part if done in python loop)
-            # We need sequences [t-L+1 : t+1] for each t in batch
-            # Doing this efficiently:
-            
-            # Just grab a slice [start-lookback : end] and unfold it
-            slice_start = max(0, start_idx - self.lookback + 1)
-            slice_end = end_idx
-            
-            # Grab context + batch data
-            # (Context + Batch, Feat)
-            sub_data = full_tensor[slice_start:slice_end] 
-            
-            # Pad left if at start of file
-            if slice_start == 0 and start_idx < self.lookback:
-                 pad_amt = (self.lookback - 1) - start_idx
-                 if pad_amt > 0:
-                     # (Pad, Feat)
-                     padding = torch.zeros((pad_amt, data_matrix.shape[1]), device=sub_data.device)
-                     sub_data = torch.cat([padding, sub_data], dim=0)
-            
-            # Now unfold: (Batch, Lookback, Feat)
-            # sub_data is roughly Batch + Lookback length
-            # unfold(dim, size, step)
-            try:
-                # Unfold creates (Batch, Feat, Lookback) or similar? 
-                # unfold(dimension, size, step)
-                # We want a window of size 'lookback' sliding with step 1
-                windows = sub_data.unfold(0, self.lookback, 1) 
-                
-                # windows shape: (Batch, Feat, Lookback) -> need (Batch, Lookback, Feat)
-                windows = windows.permute(0, 2, 1)
-                
-                # Pad features to d_model (Batch, Lookback, d_model)
-                B, L, F = windows.shape
-                if F < self.d_model:
-                     x_input = torch.zeros((B, L, self.d_model), device=windows.device)
-                     x_input[:, :, :F] = windows
-                else:
-                     x_input = windows
-                     
-                # Inference
-                if self.is_cuda and self.model:
-                    with torch.no_grad():
-                         out = self.model(x_input) # (B, 1)
-                         preds_list.extend(out.cpu().numpy().flatten())
-                else:
-                     # Mock fallback
-                     preds_list.extend(np.zeros(B))
-                     
-            except Exception as e:
-                # Fallback for shape errors
-                print(f"Batch Error: {e}")
-                preds_list.extend(np.zeros(current_batch_size))
-
-        # Pad results to match df length if needed (unfold might reduce?)
-        # Unfold returns N - size + 1. 
-        # We carefully constructed input. 
-        # If logic matches, len(preds) == len(df).
-        # Let's truncate or pad just in case.
-        preds = np.array(preds_list)
-        if len(preds) < total_rows:
-            preds = np.concatenate([np.zeros(total_rows - len(preds)), preds])
-        elif len(preds) > total_rows:
-            preds = preds[:total_rows]
-
-        # Post-process to probabilities (Vectorized)
-        scores = preds
-        
-        # P_bull
-        p_bull = np.where(scores > 0.15, 0.6 + np.minimum(0.3, scores * 0.5), 
-                          np.where(scores < -0.15, 1.0 - (0.6 + np.minimum(0.3, np.abs(scores) * 0.5)) - 0.05, 0.1))
-        
-        # P_bear
-        p_bear = np.where(scores < -0.15, 0.6 + np.minimum(0.3, np.abs(scores) * 0.5), 
-                          np.where(scores > 0.15, 1.0 - p_bull - 0.05, 0.1))
-        
-        # Normalize neutral
-        p_neutral = 1.0 - p_bull - p_bear
-        p_neutral = np.clip(p_neutral, 0.0, 1.0)
-        
-        # Re-normalize sum to 1
-        sums = p_bull + p_bear + p_neutral
-        p_bull /= sums
-        p_bear /= sums
-        p_neutral /= sums
-        
-        return pd.DataFrame({
-            'mamba_bull': p_bull,
-            'mamba_bear': p_bear,
-            'mamba_neutral': p_neutral,
-            'mamba_raw': scores,
-            'mamba_conf': 0.5 + (np.abs(scores) / 2.0)
-        }, index=df.index)
-
-    def predict_state(self, market_data: pd.DataFrame) -> ForecastState:
-        """Run inference to predict next-step market state."""
-        
-        # 1. Feature Engineering
-        x_seq = self.prepare_features(market_data) # (L, D)
-        
-        raw_output = 0.0
-        
-        # 2. Inference
-        if self.is_cuda and self.model is not None:
-            with torch.no_grad():
-                # Convert to Tensor (B=1, L, D)
-                x_tensor = torch.from_numpy(x_seq).unsqueeze(0).cuda()
-                
-                # Forward
-                try:
-                    out = self.model(x_tensor) # (1, 1) due to tanh head
-                    raw_output = float(out.item())
-                except Exception as e:
-                    logger.error(f"Inference error: {e}")
-                    raw_output = 0.0
-        else:
-            # Run Mock Kernel (just use last step)
-            last_vec = x_seq[-1]
-            out_vec = self.kernel.forward(last_vec)
-            raw_output = np.tanh(out_vec[0])
-            
-        # 3. Interpret Output
-        # Signal > 0.2 => Bullish, < -0.2 => Bearish
-        
-        p_bull = 0.33
-        p_bear = 0.33
-        p_neutral = 0.34
-        
-        # Add some gain to raw_output for probability separation
-        score = raw_output
-        
-        if score > 0.15:
-            p_bull = 0.6 + min(0.3, score * 0.5)
-            p_neutral = max(0.05, 1.0 - p_bull - 0.1)
-            p_bear = 1.0 - p_bull - p_neutral
-        elif score < -0.15:
-            p_bear = 0.6 + min(0.3, abs(score) * 0.5)
-            p_neutral = max(0.05, 1.0 - p_bear - 0.1)
-            p_bull = 1.0 - p_bear - p_neutral
-        else:
-            p_neutral = 0.8
-            p_bull = 0.1
-            p_bear = 0.1
-            
-        # Regime detection
-        vol_score = abs(score)
-        if vol_score > 0.7:
-            regime = 'HIGH'
-        elif vol_score > 0.3:
-            regime = 'MEDIUM'
-        else:
-            regime = 'LOW'
-            
-        return ForecastState(
-            prob_bear=p_bear,
-            prob_neutral=p_neutral,
-            prob_bull=p_bull,
-            pred_vol_regime=regime,
-            confidence=0.5 + (abs(score) / 2),
-            raw_output=score,
-            model_backend="CUDA_DEEP_MAMBA" if self.is_cuda else "MOCK_CPU"
-        )
+        with torch.no_grad():
+            with torch.amp.autocast('cuda'):
+                pred = self.model(X_tensor)
+        return pred.item()
