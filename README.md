@@ -557,16 +557,27 @@ $$
 
 #### 6.6 Bollinger Bands (w = 0.09)
 
-$$ \text{Upper} = SMA_{20} + 2 \cdot \sigma_{20} $$
+$$
+\text{Upper} = SMA_{20} + 2 \cdot \sigma_{20}
+$$
 
-$$ \text{Lower} = SMA_{20} - 2 \cdot \sigma_{20} $$
+$$
+\text{Lower} = SMA_{20} - 2 \cdot \sigma_{20}
+$$
 
-$$ BB_{position} = \frac{Price - Lower}{Upper - Lower} $$
+$$
+BB_{\mathrm{position}} = \frac{Price - \text{Lower}}{\text{Upper} - \text{Lower}}
+$$
 
-$$ BB_{width} = \frac{Upper - Lower}{SMA_{20}} $$
+$$
+BB_{\mathrm{width}} = \frac{\text{Upper} - \text{Lower}}{SMA_{20}}
+$$
 
 **Membership** (middle of bands = ideal):
-$$ \mu_{BB} = 0.7 \times (1 - |BB_{position} - 0.5| \times 2) + 0.3 \times \max(0, 1 - \frac{BB_{width}}{0.04}) $$
+
+$$
+\mu_{\mathrm{BB}} = 0.7 \times (1 - |BB_{\mathrm{position}} - 0.5| \times 2) + 0.3 \times \max\left(0, 1 - \frac{BB_{\mathrm{width}}}{0.04}\right)
+$$
 
 - $BB_{position} = 0.5$: $\mu \to 1.0$ (price at center)
 - $BB_{position} < 0.05$ or $> 0.95$: $\mu \to 0$ (touching bands, avoid)
@@ -575,9 +586,13 @@ $$ \mu_{BB} = 0.7 \times (1 - |BB_{position} - 0.5| \times 2) + 0.3 \times \max(
 
 #### 6.7 Stochastic Oscillator (w = 0.08)
 
-$$ \%K = 100 \cdot \frac{Close - Low_{14}}{High_{14} - Low_{14}} $$
+$$
+\%K = 100 \cdot \frac{Close - Low_{14}}{High_{14} - Low_{14}}
+$$
 
-$$ \%D = SMA_3(\%K) $$
+$$
+\%D = SMA_3(\%K)
+$$
 
 **Membership** (neutral zone 30-70 is optimal):
 
