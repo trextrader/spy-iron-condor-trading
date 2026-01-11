@@ -240,23 +240,17 @@ tests/                [Phase 1]
 **Theory**: The VRP is the edge captured by selling options when implied volatility exceeds realized volatility.
 
 #### Realized Volatility Calculation
-$$
-RV^2 = \frac{252}{N} \sum_{t=1}^{N} r_t^2
-$$
+$$ RV^2 = \frac{252}{N} \sum_{t=1}^{N} r_t^2 $$
 
 Where:
 - $r_t = \ln\left(\frac{P_t}{P_{t-1}}\right)$ = log return at time $t$
 - $N$ = rolling window length (e.g., 78 bars for 1 trading day of 5-min data)
 - $252$ = annualization factor (trading days per year)
 
-$$
-RV = \sqrt{RV^2}
-$$
+$$ RV = \sqrt{RV^2} $$
 
 #### VRP Signal
-$$
-VRP = IV_{ATM} - RV
-$$
+$$ VRP = IV_{ATM} - RV $$
 
 **Entry Gate**: Trade only if $VRP > \theta_{VRP}$ (e.g., $\theta_{VRP} = 0.02$ or 2%)
 
@@ -324,9 +318,7 @@ elif z < -2.0:
 **Theory**: Put skew (higher IV for OTM puts) indicates crash risk. Steep skew suggests expensive downside protection.
 
 #### Skew Metric
-$$
-\text{Skew} = \frac{IV_{put} - IV_{call}}{IV_{ATM}}
-$$
+$$ \text{Skew} = \frac{IV_{put} - IV_{call}}{IV_{ATM}} $$
 
 Where:
 - $IV_{put}$ = Implied volatility of OTM put (e.g., 15-delta)
@@ -339,9 +331,7 @@ Where:
 - $\text{Skew} < 0$: Call skew (rare) → Potential rally risk
 
 **Risk Adjustment**:
-$$
-W_{put} = W_{base} + \Delta W \cdot \mathbb{1}_{\{\text{Skew} > \theta_{skew}\}}
-$$
+$$ W_{put} = W_{base} + \Delta W \cdot \mathbb{1}_{\{\text{Skew} > \theta_{skew}\}} $$
 
 Where:
 - $W_{put}$ = Put wing width
@@ -377,13 +367,7 @@ $$
 - $G > 0.0019$: **Large gap** → Momentum continuation → Standard entry or skip
 
 **Gap Direction**:
-$$
-\text{Direction} = \begin{cases}
-\text{Gap Up} & \text{if } P_{open} > P_{prev\_close} \cdot 1.0001 \\
-\text{Gap Down} & \text{if } P_{open} < P_{prev\_close} \cdot 0.9999 \\
-\text{No Gap} & \text{otherwise}
-\end{cases}
-$$
+$$ \text{Direction} = \begin{cases} \text{Gap Up} & \text{if } P_{open} > P_{prev\_close} \cdot 1.0001 \\ \text{Gap Down} & \text{if } P_{open} < P_{prev\_close} \cdot 0.9999 \\ \text{No Gap} & \text{otherwise} \end{cases} $$
 
 **Implementation**:
 ```python
@@ -465,9 +449,7 @@ $$F_t = \sum_{j=1}^{10} w_j \cdot \mu_j$$
 
 **Theory**: Multi-timeframe alignment measures agreement across 1m, 5m, and 15m timeframes. Neutral consensus favors Iron Condors.
 
-$$
-\mu_{MTF} = 1 - |C_{1/5/15} - 0.5| \times 2
-$$
+$$ \mu_{MTF} = 1 - |C_{1/5/15} - 0.5| \times 2 $$
 
 Where $C_{1/5/15} \in [0, 1]$ is the weighted consensus:
 - $C = 0.5$: Perfect neutral → $\mu = 1.0$ (ideal for IC)
@@ -479,14 +461,10 @@ Where $C_{1/5/15} \in [0, 1]$ is the weighted consensus:
 
 **Theory**: High IV Rank means elevated implied volatility relative to history—favorable for selling premium.
 
-$$
-IVR = 100 \cdot \frac{IV_t - \min(IV_{window})}{\max(IV_{window}) - \min(IV_{window})}
-$$
+$$ IVR = 100 \cdot \frac{IV_t - \min(IV_{window})}{\max(IV_{window}) - \min(IV_{window})} $$
 
 **Membership**:
-$$
-\mu_{IV} = \min\left(1.0, \frac{IVR}{60}\right)
-$$
+$$ \mu_{IV} = \min\left(1.0, \frac{IVR}{60}\right) $$
 
 - $IVR \geq 60$: $\mu = 1.0$ (excellent for premium selling)
 - $IVR = 30$: $\mu = 0.5$ (moderate)
@@ -499,13 +477,7 @@ $$
 **Theory**: Low VIX indicates stable markets; high VIX signals fear and potential oversized moves.
 
 **Membership**:
-$$
-\mu_{VIX} = \begin{cases}
-1.0 & \text{if } VIX \leq 12 \\
-1 - \frac{VIX - 12}{18} & \text{if } 12 < VIX < 30 \\
-0.0 & \text{if } VIX \geq 30
-\end{cases}
-$$
+$$ \mu_{VIX} = \begin{cases} 1.0 & \text{if } VIX \leq 12 \\ 1 - \frac{VIX - 12}{18} & \text{if } 12 < VIX < 30 \\ 0.0 & \text{if } VIX \geq 30 \end{cases} $$
 
 - $VIX \leq 12$: $\mu = 1.0$ (calm market, ideal)
 - $VIX = 20$: $\mu \approx 0.56$ (moderate caution)
@@ -515,24 +487,14 @@ $$
 
 #### 6.4 RSI (w = 0.10) - Wilder Smoothing
 
-$$
-RS = \frac{EMA_{\alpha}(\text{Gain})}{EMA_{\alpha}(\text{Loss})}
-$$
+$$ RS = \frac{EMA_{\alpha}(\text{Gain})}{EMA_{\alpha}(\text{Loss})} $$
 
-$$
-RSI = 100 - \frac{100}{1 + RS}
-$$
+$$ RSI = 100 - \frac{100}{1 + RS} $$
 
 Where $\alpha = \frac{1}{period}$ (default $period = 14$)
 
 **Membership** (neutral zone 40-60 is optimal):
-$$
-\mu_{RSI} = \begin{cases}
-1.0 & \text{if } 40 \leq RSI \leq 60 \\
-\frac{RSI}{40} & \text{if } RSI < 40 \\
-\frac{100 - RSI}{40} & \text{if } RSI > 60
-\end{cases}
-$$
+$$ \mu_{RSI} = \begin{cases} 1.0 & \text{if } 40 \leq RSI \leq 60 \\ \frac{RSI}{40} & \text{if } RSI < 40 \\ \frac{100 - RSI}{40} & \text{if } RSI > 60 \end{cases} $$
 
 - $RSI \in [40, 60]$: $\mu = 1.0$ (neutral momentum, ideal)
 - $RSI < 30$ or $RSI > 70$: $\mu \to 0$ (extreme, avoid)
@@ -541,30 +503,16 @@ $$
 
 #### 6.5 ADX (w = 0.10) - Wilder Smoothing
 
-$$
-+DI = 100 \cdot \frac{EMA_{\alpha}(+DM)}{ATR}
-$$
+$$ +DI = 100 \cdot \frac{EMA_{\alpha}(+DM)}{ATR} $$
 
-$$
--DI = 100 \cdot \frac{EMA_{\alpha}(-DM)}{ATR}
-$$
+$$ -DI = 100 \cdot \frac{EMA_{\alpha}(-DM)}{ATR} $$
 
-$$
-DX = 100 \cdot \frac{|+DI - (-DI)|}{+DI + (-DI)}
-$$
+$$ DX = 100 \cdot \frac{|+DI - (-DI)|}{+DI + (-DI)} $$
 
-$$
-ADX = EMA_{\alpha}(DX)
-$$
+$$ ADX = EMA_{\alpha}(DX) $$
 
 **Membership** (low ADX = weak trend = favorable):
-$$
-\mu_{ADX} = \begin{cases}
-1.0 & \text{if } ADX \leq 25 \\
-1 - \frac{ADX - 25}{15} & \text{if } 25 < ADX < 40 \\
-0.0 & \text{if } ADX \geq 40
-\end{cases}
-$$
+$$ \mu_{ADX} = \begin{cases} 1.0 & \text{if } ADX \leq 25 \\ 1 - \frac{ADX - 25}{15} & \text{if } 25 < ADX < 40 \\ 0.0 & \text{if } ADX \geq 40 \end{cases} $$
 
 - $ADX < 25$: $\mu = 1.0$ (ranging market, ideal)
 - $ADX > 40$: $\mu = 0.0$ (strong trend, avoid)
@@ -573,26 +521,16 @@ $$
 
 #### 6.6 Bollinger Bands (w = 0.09)
 
-$$
-\text{Upper} = SMA_{20} + 2 \cdot \sigma_{20}
-$$
+$$ \text{Upper} = SMA_{20} + 2 \cdot \sigma_{20} $$
 
-$$
-\text{Lower} = SMA_{20} - 2 \cdot \sigma_{20}
-$$
+$$ \text{Lower} = SMA_{20} - 2 \cdot \sigma_{20} $$
 
-$$
-BB_{position} = \frac{Price - Lower}{Upper - Lower}
-$$
+$$ BB_{position} = \frac{Price - Lower}{Upper - Lower} $$
 
-$$
-BB_{width} = \frac{Upper - Lower}{SMA_{20}}
-$$
+$$ BB_{width} = \frac{Upper - Lower}{SMA_{20}} $$
 
 **Membership** (middle of bands = ideal):
-$$
-\mu_{BB} = 0.7 \times (1 - |BB_{position} - 0.5| \times 2) + 0.3 \times \max(0, 1 - \frac{BB_{width}}{0.04})
-$$
+$$ \mu_{BB} = 0.7 \times (1 - |BB_{position} - 0.5| \times 2) + 0.3 \times \max(0, 1 - \frac{BB_{width}}{0.04}) $$
 
 - $BB_{position} = 0.5$: $\mu \to 1.0$ (price at center)
 - $BB_{position} < 0.05$ or $> 0.95$: $\mu \to 0$ (touching bands, avoid)
@@ -601,22 +539,12 @@ $$
 
 #### 6.7 Stochastic Oscillator (w = 0.08)
 
-$$
-\%K = 100 \cdot \frac{Close - Low_{14}}{High_{14} - Low_{14}}
-$$
+$$ \%K = 100 \cdot \frac{Close - Low_{14}}{High_{14} - Low_{14}} $$
 
-$$
-\%D = SMA_3(\%K)
-$$
+$$ \%D = SMA_3(\%K) $$
 
 **Membership** (neutral zone 30-70 is optimal):
-$$
-\mu_{Stoch} = \begin{cases}
-1.0 & \text{if } 30 \leq \%K \leq 70 \\
-\frac{\%K}{30} & \text{if } \%K < 30 \\
-\frac{100 - \%K}{30} & \text{if } \%K > 70
-\end{cases}
-$$
+$$ \mu_{Stoch} = \begin{cases} 1.0 & \text{if } 30 \leq \%K \leq 70 \\ \frac{\%K}{30} & \text{if } \%K < 30 \\ \frac{100 - \%K}{30} & \text{if } \%K > 70 \end{cases} $$
 
 - $\%K \in [30, 70]$: $\mu = 1.0$ (neutral, ideal)
 - $\%K < 20$ or $> 80$: $\mu \to 0$ (extreme, avoid)
@@ -625,18 +553,14 @@ $$
 
 #### 6.8 Parabolic SAR (w = 0.07)
 
-$$
-SAR_{t+1} = SAR_t + AF \cdot (EP - SAR_t)
-$$
+$$ SAR_{t+1} = SAR_t + AF \cdot (EP - SAR_t) $$
 
 Where:
 - $AF$ = Acceleration Factor (0.02 → 0.20)
 - $EP$ = Extreme Point (highest high / lowest low)
 
 **Membership** (crossover = ideal):
-$$
-\mu_{PSAR} = 1 - |P_{position}|
-$$
+$$ \mu_{PSAR} = 1 - |P_{position}| $$
 
 Where $P_{position} \in [-1, +1]$:
 - $P_{position} = 0$: PSAR crossover → $\mu = 1.0$ (ideal for IC)
@@ -646,14 +570,10 @@ Where $P_{position} \in [-1, +1]$:
 
 #### 6.9 Volume Ratio (w = 0.07)
 
-$$
-V_{ratio} = \frac{Volume_t}{SMA_{20}(Volume)}
-$$
+$$ V_{ratio} = \frac{Volume_t}{SMA_{20}(Volume)} $$
 
 **Membership** (adequate liquidity required):
-$$
-\mu_{Vol} = \min\left(1.0, \frac{V_{ratio}}{0.8}\right)
-$$
+$$ \mu_{Vol} = \min\left(1.0, \frac{V_{ratio}}{0.8}\right) $$
 
 - $V_{ratio} \geq 0.8$: $\mu = 1.0$ (adequate liquidity)
 - $V_{ratio} < 0.4$: $\mu < 0.5$ (poor fills likely)
@@ -662,17 +582,10 @@ $$
 
 #### 6.10 SMA Distance (w = 0.06)
 
-$$
-D_{SMA} = \frac{Price - SMA_{20}}{SMA_{20}}
-$$
+$$ D_{SMA} = \frac{Price - SMA_{20}}{SMA_{20}} $$
 
 **Membership** (near equilibrium = ideal):
-$$
-\mu_{SMA} = \begin{cases}
-1 - \frac{|D_{SMA}|}{0.02} & \text{if } |D_{SMA}| \leq 0.02 \\
-0.0 & \text{if } |D_{SMA}| > 0.02
-\end{cases}
-$$
+$$ \mu_{SMA} = \begin{cases} 1 - \frac{|D_{SMA}|}{0.02} & \text{if } |D_{SMA}| \leq 0.02 \\ 0.0 & \text{if } |D_{SMA}| > 0.02 \end{cases} $$
 
 - $|D_{SMA}| = 0$: $\mu = 1.0$ (at equilibrium)
 - $|D_{SMA}| > 2\%$: $\mu = 0.0$ (extended, mean reversion risk)
@@ -737,9 +650,7 @@ $$
 Where $W$ = wing width (e.g., $W = K_{C_l} - K_{C_s} = K_{P_s} - K_{P_l}$)
 
 ### Mark-to-Market P&L
-$$
-PnL_t = (Credit - Cost_t) \times Q \times 100
-$$
+$$ PnL_t = (Credit - Cost_t) \times Q \times 100 $$
 
 Where:
 - $Cost_t = (C_{s,t} - C_{l,t}) + (P_{s,t} - P_{l,t})$ = current replacement cost
@@ -749,23 +660,17 @@ Where:
 ### Exit Conditions
 
 #### Profit Take
-$$
-PnL_t \geq Credit \cdot \alpha_{PT}
-$$
+$$ PnL_t \geq Credit \cdot \alpha_{PT} $$
 
 Example: $\alpha_{PT} = 0.50$ (50% of max profit)
 
 #### Stop Loss
-$$
-PnL_t \leq -Credit \cdot \alpha_{SL}
-$$
+$$ PnL_t \leq -Credit \cdot \alpha_{SL} $$
 
 Example: $\alpha_{SL} = 2.00$ (200% of credit = max loss)
 
 #### DTE Exit
-$$
-DTE_t \leq DTE_{exit}
-$$
+$$ DTE_t \leq DTE_{exit} $$
 
 Example: $DTE_{exit} = 21$ days
 
@@ -776,41 +681,29 @@ Example: $DTE_{exit} = 21$ days
 ### Portfolio Greeks Tracking
 
 #### Delta
-$$
-\Delta_{portfolio} = \sum_{i=1}^{N} \Delta_{trade_i} \cdot Q_i
-$$
+$$ \Delta_{\mathrm{portfolio}} = \sum_{i=1}^{N} \Delta_{\mathrm{trade}_i} \cdot Q_i $$
 
-**Limit**: $|\Delta_{portfolio}| \leq \Delta_{max}$ (e.g., $\Delta_{max} = 200$)
+**Limit**: $|\Delta_{\mathrm{portfolio}}| \leq \Delta_{\mathrm{max}}$ (e.g., $\Delta_{\mathrm{max}} = 200$)
 
 #### Gamma
-$$
-\Gamma_{portfolio} = \sum_{i=1}^{N} \Gamma_{trade_i} \cdot Q_i
-$$
+$$ \Gamma_{\mathrm{portfolio}} = \sum_{i=1}^{N} \Gamma_{\mathrm{trade}_i} \cdot Q_i $$
 
-**Limit**: $|\Gamma_{portfolio}| \leq \Gamma_{max}$ (e.g., $\Gamma_{max} = 50$)
+**Limit**: $|\Gamma_{\mathrm{portfolio}}| \leq \Gamma_{\mathrm{max}}$ (e.g., $\Gamma_{\mathrm{max}} = 50$)
 
 #### Vega
-$$
-\mathcal{V}_{portfolio} = \sum_{i=1}^{N} \mathcal{V}_{trade_i} \cdot Q_i
-$$
+$$ \mathcal{V}_{\mathrm{portfolio}} = \sum_{i=1}^{N} \mathcal{V}_{\mathrm{trade}_i} \cdot Q_i $$
 
-**Limit**: $|\mathcal{V}_{portfolio}| \leq \mathcal{V}_{max}$ (e.g., $\mathcal{V}_{max} = 500$)
+**Limit**: $|\mathcal{V}_{\mathrm{portfolio}}| \leq \mathcal{V}_{\mathrm{max}}$ (e.g., $\mathcal{V}_{\mathrm{max}} = 500$)
 
 ### Drawdown Cap
-$$
-DD_t = \frac{Equity_t - Equity_{peak}}{Equity_{peak}}
-$$
+$$ DD_t = \frac{Equity_t - Equity_{peak}}{Equity_{peak}} $$
 
 **Limit**: $DD_t \geq DD_{max}$ (e.g., $DD_{max} = -0.02$ or -2%)
 
 ### Risk Budget Sizing
-$$
-Q_{risk} = \left\lfloor \frac{RiskBudget}{MaxLoss_{contract}} \right\rfloor
-$$
+$$ Q_{risk} = \left\lfloor \frac{RiskBudget}{MaxLoss_{contract}} \right\rfloor $$
 
-$$
-Q_{final} = \min(Q_{fuzzy}, Q_{risk})
-$$
+$$ Q_{final} = \min(Q_{fuzzy}, Q_{risk}) $$
 
 ---
 
@@ -839,8 +732,8 @@ pytest -q tests/
 
 ### Installation
 ```bash
-git clone https://github.com/yourusername/SPYOptionTrader.git
-cd SPYOptionTrader
+git clone https://github.com/trextrader/spy-iron-condor-trading.git
+cd spy-iron-condor-trading
 pip install -r requirements.txt
 ```
 
@@ -972,9 +865,7 @@ py scripts/run_full_backtest.py
 - **Expectancy Ratio**: Average win / Average loss
 
 ### Optimizer Objective
-$$
-\text{Fitness} = \frac{NetProfit}{|MaxDrawdown|}
-$$
+$$ \text{Fitness} = \frac{NetProfit}{|MaxDrawdown|} $$
 
 ---
 
