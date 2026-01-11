@@ -196,15 +196,23 @@ class MambaForecastEngine:
         prev_closes = np.roll(closes, 1)
         prev_closes[0] = closes[0]
         
-        log_ret = np.log(closes / prev_closes + 1e-9)
+        log_ret = np.log(closes / (prev_closes + 1e-9))
         
         for i in range(len(window)):
-            # Feature Vector (Dim 4) -> Embedded to D_Model
+            # 5. Session Timing
+            dt_obj = window.index[i]
+            # Handle localized/non-localized
+            hour = dt_obj.hour
+            minute = dt_obj.minute
+            min_from_open = (hour - 9) * 60 + (minute - 30)
+            norm_time = np.clip(min_from_open / 390.0, 0, 1)
+
             feat = [
                 log_ret[i] * 100.0,    # Scale up
                 (rsi[i] - 50.0) / 10.0,
                 atr_pct[i] * 50.0,
-                (vol_ratio[i] - 1.0) * 2.0
+                (vol_ratio[i] - 1.0) * 2.0,
+                norm_time
             ]
             
             # Simple manual embedding (padding)
@@ -256,13 +264,20 @@ class MambaForecastEngine:
         else:
             vol = np.zeros_like(closes)
 
+        # 5. Session Timing (Vectorized)
+        times = df.index
+        hours = times.hour
+        minutes = times.minute
+        min_from_open = (hours - 9) * 60 + (minutes - 30)
+        norm_time = np.clip(min_from_open / 390.0, 0, 1).astype(np.float32)
+
         # Log returns
         prev_closes = np.roll(closes, 1)
         prev_closes[0] = closes[0]
         log_rets = np.log(closes / (prev_closes + 1e-9)) * 100.0
         
-        # Stack features: (N, 4)
-        data_matrix = np.stack([log_rets, rsi, atr, vol], axis=1).astype(np.float32)
+        # Stack features: (N, 5)
+        data_matrix = np.stack([log_rets, rsi, atr, vol, norm_time], axis=1).astype(np.float32)
         
         # Pad to d_model directly? 
         # No, we embed (pad) during batch creation to save RAM 

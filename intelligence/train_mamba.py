@@ -57,6 +57,7 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=5e-5)
+    parser.add_argument("--lookback", type=int, default=60, help="Number of bars for model context")
     
     return parser.parse_args()
 
@@ -135,14 +136,26 @@ def prepare_features(df):
     # Normalize: (Ratio - 1) * 2
     df['norm_vol'] = (df['vol_ratio'].fillna(1.0) - 1.0) * 2.0
     
+    # 5. Session Timing (Minutes from market open 9:30 AM EST)
+    if 'timestamp' in df.columns:
+        df['dt'] = pd.to_datetime(df['timestamp'])
+    else:
+        # Assume index is datetime if column missing
+        df['dt'] = pd.to_datetime(df.index)
+        
+    df['hour'] = df['dt'].dt.hour
+    df['min'] = df['dt'].dt.minute
+    df['min_from_open'] = (df['hour'] - 9) * 60 + (df['min'] - 30)
+    df['norm_time'] = np.clip(df['min_from_open'] / 390.0, 0, 1) # 390 mins in session
+    
     # Target: Next bar log return
     df['target'] = df['log_ret'].shift(-1)
     
     # Drop NaN
     df.dropna(inplace=True)
     
-    # Select features matching 'precompute_all' order: [log_ret, rsi, atr, vol]
-    feature_cols = ['log_ret', 'norm_rsi', 'norm_atr', 'norm_vol']
+    # Select features: [log_ret, rsi, atr, vol, time]
+    feature_cols = ['log_ret', 'norm_rsi', 'norm_atr', 'norm_vol', 'norm_time']
     
     X = df[feature_cols].values.astype(np.float32)
     y = df['target'].values.astype(np.float32)
@@ -236,10 +249,11 @@ def run_training(args):
     y_train, y_val = y[:split], y[split:]
     
     # Sequences
-    X_train_seq, y_train_seq = create_sequences(X_train, y_train, DEFAULT_CONFIG['lookback'])
-    X_val_seq, y_val_seq = create_sequences(X_val, y_val, DEFAULT_CONFIG['lookback'])
+    lookback = args.lookback
+    X_train_seq, y_train_seq = create_sequences(X_train, y_train, lookback)
+    X_val_seq, y_val_seq = create_sequences(X_val, y_val, lookback)
     
-    print(f"Train samples: {len(X_train_seq)} | Val samples: {len(X_val_seq)}")
+    print(f"Train samples: {len(X_train_seq)} | Val samples: {len(X_val_seq)} | Lookback: {lookback}")
 
     # Loaders
     train_loader = DataLoader(TensorDataset(torch.from_numpy(X_train_seq), torch.from_numpy(y_train_seq)), 
@@ -265,8 +279,8 @@ def run_training(args):
         expand=2
     ).to(device)
     
-    criterion = nn.MSELoss()
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
+    criterion = nn.HuberLoss(delta=1.0)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4) # Higher decay for Large model
     
     # Model Path Setup
     if args.model_name:
