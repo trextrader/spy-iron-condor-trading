@@ -47,6 +47,7 @@ def parse_args():
     parser.add_argument("--save-only", action="store_true", help="Download data and save to CSV, then exit (No Torch required)")
     parser.add_argument("--local-data", type=str, help="Path to local CSV to use for training instead of downloading")
     parser.add_argument("--output-csv", type=str, default="data/spy_training_data.csv")
+    parser.add_argument("--model-name", type=str, help="Filename for the model (e.g., mamba_m5_v1.pth)")
     
     return parser.parse_args()
 
@@ -207,7 +208,14 @@ def run_training(args):
         return
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Training on {device}...")
+    print("="*60)
+    print(f" NEURAL TRAINING DEVICE: {device.type.upper()}")
+    print("="*60)
+    
+    if device.type != 'cuda':
+        print("[CRITICAL WARNING] No GPU detected. Mamba training on CPU will be extremely slow (100x slower).")
+        print("[Action] Please enable GPU in Colab (Runtime > Change runtime type > T4 / A100 GPU).")
+        # Optional: sys.exit(1) if you want to be strict
     
     X, y = prepare_features(df)
     
@@ -249,7 +257,19 @@ def run_training(args):
     criterion = nn.MSELoss()
     optimizer = optim.AdamW(model.parameters(), lr=DEFAULT_CONFIG['lr'], weight_decay=1e-5)
     
-    # Loop
+    # Model Path Setup
+    if args.model_name:
+        model_filename = args.model_name
+        if not model_filename.endswith('.pth'):
+            model_filename += '.pth'
+    elif args.timeframe == "5Min":
+        model_filename = "mamba_m5_active.pth"
+    else:
+        model_filename = "mamba_active.pth"
+        
+    model_path = os.path.join("models", model_filename)
+
+    # Best loss tracking
     best_loss = float('inf')
     
     for epoch in range(DEFAULT_CONFIG['epochs']):
@@ -296,8 +316,8 @@ def run_training(args):
             best_loss = avg_val
             # Save
             os.makedirs('models', exist_ok=True)
-            torch.save(model.state_dict(), DEFAULT_CONFIG['model_path'])
-            print(f"  [Saved] New best model: {avg_val:.4f}")
+            torch.save(model.state_dict(), model_path)
+            print(f"  [Saved] New best model ({model_path}): {avg_val:.4f}")
 
     print("Training Complete.")
 

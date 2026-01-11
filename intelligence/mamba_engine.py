@@ -128,9 +128,19 @@ class MambaForecastEngine:
                     expand=2
                 ).cuda()
                 
-                # Load Learned Brain
-                weights_path = os.path.join("models", "mamba_active.pth")
-                if os.path.exists(weights_path):
+                # Load Learned Brain (Prioritize M5 model)
+                weights_candidates = [
+                    os.path.join("models", "mamba_m5_active.pth"),
+                    os.path.join("models", "mamba_active.pth")
+                ]
+                
+                weights_path = None
+                for path in weights_candidates:
+                    if os.path.exists(path):
+                        weights_path = path
+                        break
+
+                if weights_path:
                     try:
                         state = torch.load(weights_path)
                         self.model.load_state_dict(state)
@@ -138,7 +148,7 @@ class MambaForecastEngine:
                     except Exception as e:
                         print(f"[Warning] Failed to load weights: {e}")
                 else:
-                    print("[MambaEngine] Warning: No trained weights found. Using RANDOM initialization (Untrained).")
+                    print("[MambaEngine] Warning: No trained weights found. Using RANDOM initialization.")
 
                 self.model.eval() # Inference mode (no dropout etc)
                 
