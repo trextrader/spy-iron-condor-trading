@@ -185,34 +185,49 @@ class MambaForecastEngine:
 
         features_seq = []
         
-        # Pre-calc columns to avoid loop overhead
-        closes = window['close'].values
-        opens = window['open'].values if 'open' in window.columns else closes
-        # safe access
+        # Pre-calc columns
+        main_close = 'SPY_close' if 'SPY_close' in window.columns else 'close'
+        main_high = 'SPY_high' if 'SPY_high' in window.columns else 'high'
+        main_low = 'SPY_low' if 'SPY_low' in window.columns else 'low'
+        main_vol = 'SPY_volume' if 'SPY_volume' in window.columns else 'volume'
+
+        closes = window[main_close].values
+        
+        # 1. SPY Log Returns
+        prev_closes = np.roll(closes, 1)
+        prev_closes[0] = closes[0]
+        log_ret = np.log(closes / (prev_closes + 1e-9))
+        
+        # 2. QQQ Alignment
+        if 'QQQ_close' in window.columns:
+            qqq_closes = window['QQQ_close'].values
+            prev_qqq = np.roll(qqq_closes, 1)
+            prev_qqq[0] = qqq_closes[0]
+            qqq_ret = np.log(qqq_closes / (prev_qqq + 1e-9))
+        else:
+            qqq_ret = log_ret
+
         rsi = window['rsi_14'].fillna(50.0).infer_objects(copy=False).values if 'rsi_14' in window.columns else np.full(len(window), 50.0)
         atr_pct = window['atr_pct'].fillna(0.01).infer_objects(copy=False).values if 'atr_pct' in window.columns else np.full(len(window), 0.01)
         vol_ratio = window['volume_ratio'].fillna(1.0).infer_objects(copy=False).values if 'volume_ratio' in window.columns else np.full(len(window), 1.0)
         
-        prev_closes = np.roll(closes, 1)
-        prev_closes[0] = closes[0]
-        
-        log_ret = np.log(closes / (prev_closes + 1e-9))
-        
         for i in range(len(window)):
-            # 5. Session Timing
+            # Session Timing
             dt_obj = window.index[i]
-            # Handle localized/non-localized
-            hour = dt_obj.hour
-            minute = dt_obj.minute
-            min_from_open = (hour - 9) * 60 + (minute - 30)
+            min_from_open = (dt_obj.hour - 9) * 60 + (dt_obj.minute - 30)
             norm_time = np.clip(min_from_open / 390.0, 0, 1)
+            
+            # Range Proxy
+            range_val = (window[main_high].values[i] - window[main_low].values[i]) / (window[main_close].values[i] + 1e-9)
 
             feat = [
-                log_ret[i] * 100.0,    # Scale up
+                log_ret[i] * 100.0,
+                qqq_ret[i] * 100.0,
                 (rsi[i] - 50.0) / 10.0,
                 atr_pct[i] * 50.0,
                 (vol_ratio[i] - 1.0) * 2.0,
-                norm_time
+                norm_time,
+                range_val * 100.0
             ]
             
             # Simple manual embedding (padding)
@@ -238,46 +253,47 @@ class MambaForecastEngine:
 
         print(f"[MambaEngine] Pre-computing signals for {len(df)} bars (Batch Size: {batch_size})...")
         
-        # 1. Vectorized Feature Preparation
-        # Create rolling window features efficiently
-        
-        # We need sequences of length 'lookback' for each time step
-        # This is memory intensive if we naïvely duplicate. 
-        # But Mamba is efficient. Let's create a rolling strided view or just iterate efficiently.
-        # For GPU speed, we'll prep batches of sequences.
-        
-        closes = df['close'].values.astype(np.float32)
-        
-        # Pre-calc normalized features
-        if 'rsi_14' in df.columns:
-            rsi = (df['rsi_14'].fillna(50.0).values - 50.0) / 10.0
-        else:
-            rsi = np.zeros_like(closes)
-            
-        if 'atr_pct' in df.columns:
-            atr = df['atr_pct'].fillna(0.01).values * 50.0
-        else:
-            atr = np.zeros_like(closes)
-            
-        if 'volume_ratio' in df.columns:
-            vol = (df['volume_ratio'].fillna(1.0).values - 1.0) * 2.0
-        else:
-            vol = np.zeros_like(closes)
+        # Vectorized Feature Preparation
+        main_close = 'SPY_close' if 'SPY_close' in df.columns else 'close'
+        main_high = 'SPY_high' if 'SPY_high' in df.columns else 'high'
+        main_low = 'SPY_low' if 'SPY_low' in df.columns else 'low'
+        main_vol = 'SPY_volume' if 'SPY_volume' in df.columns else 'volume'
 
-        # 5. Session Timing (Vectorized)
-        times = df.index
-        hours = times.hour
-        minutes = times.minute
-        min_from_open = (hours - 9) * 60 + (minutes - 30)
-        norm_time = np.clip(min_from_open / 390.0, 0, 1).astype(np.float32)
-
-        # Log returns
+        closes = df[main_close].values.astype(np.float32)
+        
+        # 1. SPY Returns
         prev_closes = np.roll(closes, 1)
         prev_closes[0] = closes[0]
         log_rets = np.log(closes / (prev_closes + 1e-9)) * 100.0
         
-        # Stack features: (N, 5)
-        data_matrix = np.stack([log_rets, rsi, atr, vol, norm_time], axis=1).astype(np.float32)
+        # 2. QQQ Correlation
+        if 'QQQ_close' in df.columns:
+            qqq_closes = df['QQQ_close'].values.astype(np.float32)
+            prev_qqq = np.roll(qqq_closes, 1)
+            prev_qqq[0] = qqq_closes[0]
+            qqq_rets = np.log(qqq_closes / (prev_qqq + 1e-9)) * 100.0
+        else:
+            qqq_rets = log_rets
+
+        # 3. RSI
+        rsi = (df['rsi_14'].fillna(50.0).values - 50.0) / 10.0 if 'rsi_14' in df.columns else np.zeros_like(closes)
+            
+        # 4. ATR
+        atr = (df['atr_pct'].fillna(0.01).values * 50.0) if 'atr_pct' in df.columns else np.zeros_like(closes)
+            
+        # 5. Volume
+        vol = ((df['volume_ratio'].fillna(1.0).values - 1.0) * 2.0) if 'volume_ratio' in df.columns else np.zeros_like(closes)
+
+        # 6. Session Timing
+        times = df.index
+        min_from_open = (times.hour - 9) * 60 + (times.minute - 30)
+        norm_time = np.clip(min_from_open / 390.0, 0, 1).astype(np.float32)
+        
+        # 7. Range Proxy
+        range_proxy = ((df[main_high] - df[main_low]) / (df[main_close] + 1e-9)).values * 100.0
+
+        # Stack features: (N, 7)
+        data_matrix = np.stack([log_rets, qqq_rets, rsi, atr, vol, norm_time, range_proxy], axis=1).astype(np.float32)
         
         # Pad to d_model directly? 
         # No, we embed (pad) during batch creation to save RAM 
@@ -295,7 +311,7 @@ class MambaForecastEngine:
         # or simple loop. Sliding window of (Batch, Time, Feat)
         
         # Convert to Tensor
-        full_tensor = torch.from_numpy(data_matrix) # (N, 4)
+        full_tensor = torch.from_numpy(data_matrix) # (N, 7)
         if self.is_cuda:
             full_tensor = full_tensor.cuda()
             
@@ -326,7 +342,7 @@ class MambaForecastEngine:
                  pad_amt = (self.lookback - 1) - start_idx
                  if pad_amt > 0:
                      # (Pad, Feat)
-                     padding = torch.zeros((pad_amt, 4), device=sub_data.device)
+                     padding = torch.zeros((pad_amt, 7), device=sub_data.device)
                      sub_data = torch.cat([padding, sub_data], dim=0)
             
             # Now unfold: (Batch, Lookback, Feat)

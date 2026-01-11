@@ -63,6 +63,7 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--lookback", type=int, default=60, help="Number of bars for model context")
+    parser.add_argument("--use-qqq", action="store_true", default=True, help="Include QQQ correlation data")
     
     return parser.parse_args()
 
@@ -94,22 +95,30 @@ def download_alpaca_data(key, secret, symbol, years=2, tf_str="15Min"):
     else:
         tf = TimeFrame.Hour
 
-    req = StockBarsRequest(
-        symbol_or_symbols=symbol,
-        timeframe=tf,
-        start=start_dt,
-        end=end_dt
-    )
-    
     try:
+        # Request both symbols
+        symbols = [symbol]
+        if symbol == 'SPY': symbols.append('QQQ')
+        
+        req = StockBarsRequest(
+            symbol_or_symbols=symbols,
+            timeframe=tf,
+            start=start_dt,
+            end=end_dt
+        )
+        
         bars = client.get_stock_bars(req)
         df = bars.df
         
-        # MultiIndex cleanup (symbol, timestamp) -> just timestamp
+        # MultiIndex cleanup: pivot symbols to columns if multiple
         if isinstance(df.index, pd.MultiIndex):
-            df = df.reset_index(level=0, drop=True) # Drop symbol level
+            # We want columns like: SPY_close, QQQ_close...
+            df = df.reset_index()
+            df = df.pivot(index='timestamp', columns='symbol')
+            # Flatten columns: (close, SPY) -> SPY_close
+            df.columns = [f"{s}_{c.lower()}" for c, s in df.columns]
         
-        print(f"[Alpaca] Downloaded {len(df)} bars.")
+        print(f"[Alpaca] Downloaded data for {symbols}. Total bars: {len(df)}")
         return df
     except Exception as e:
         print(f"[Error] Alpaca download failed: {e}")
@@ -120,43 +129,47 @@ def prepare_features(df):
         raise ValueError("Cannot prepare features for empty DataFrame")
         
     print("Feature Engineering...")
-    # Ensure lowercase columns
-    df.columns = [c.lower() for c in df.columns]
     
-    # Matches logic in mamba_engine.py precompute_all
-    closes = df['close']
+    # Identify primary symbol columns
+    main_close = 'SPY_close' if 'SPY_close' in df.columns else 'close'
+    main_high = 'SPY_high' if 'SPY_high' in df.columns else 'high'
+    main_low = 'SPY_low' if 'SPY_low' in df.columns else 'low'
+    main_vol = 'SPY_volume' if 'SPY_volume' in df.columns else 'volume'
+
+    # 1. Log Returns (SPY)
+    df['log_ret'] = np.log(df[main_close] / df[main_close].shift(1)) * 100.0
     
-    # 1. Log Returns
-    df['log_ret'] = np.log(closes / closes.shift(1)) * 100.0
+    # 2. QQQ Correlation (if available)
+    if 'QQQ_close' in df.columns:
+        df['qqq_ret'] = np.log(df['QQQ_close'] / df['QQQ_close'].shift(1)) * 100.0
+    else:
+        df['qqq_ret'] = df['log_ret'] # Fallback
     
-    # 2. RSI
-    df['rsi_14'] = ta.rsi(closes, length=14)
-    # Normalize: (RSI - 50) / 10
+    # 3. RSI
+    df['rsi_14'] = ta.rsi(df[main_close], length=14)
     df['norm_rsi'] = (df['rsi_14'].fillna(50.0) - 50.0) / 10.0
     
-    # 3. ATR
-    df['atr'] = ta.atr(df['high'], df['low'], closes, length=14)
-    df['atr_pct'] = df['atr'] / closes
-    # Normalize: * 50
-    df['norm_atr'] = df['atr_pct'].fillna(0.01) * 50.0
+    # 4. ATR / Volatility
+    df['atr'] = ta.atr(df[main_high], df[main_low], df[main_close], length=14)
+    df['norm_atr'] = (df['atr'] / df[main_close]).fillna(0.01) * 50.0
     
-    # 4. Volume Ratio
-    vol_sma = ta.sma(df['volume'], length=20)
-    df['vol_ratio'] = df['volume'] / (vol_sma + 1.0)
-    # Normalize: (Ratio - 1) * 2
+    # 5. Volume Ratio
+    vol_sma = ta.sma(df[main_vol], length=20)
+    df['vol_ratio'] = df[main_vol] / (vol_sma + 1.0)
     df['norm_vol'] = (df['vol_ratio'].fillna(1.0) - 1.0) * 2.0
     
-    # 5. Session Timing (Minutes from market open 9:30 AM EST)
+    # 6. Session Timing
     if 'timestamp' in df.columns:
         df['dt'] = pd.to_datetime(df['timestamp'])
     else:
-        # Assume index is datetime if column missing
         df['dt'] = pd.to_datetime(df.index)
         
-    df['hour'] = df['dt'].dt.hour
-    df['min'] = df['dt'].dt.minute
-    df['min_from_open'] = (df['hour'] - 9) * 60 + (df['min'] - 30)
-    df['norm_time'] = np.clip(df['min_from_open'] / 390.0, 0, 1) # 390 mins in session
+    df['min_from_open'] = (df['dt'].dt.hour - 9) * 60 + (df['dt'].dt.minute - 30)
+    df['norm_time'] = np.clip(df['min_from_open'] / 390.0, 0, 1)
+    
+    # 7. Range Proxy (Spread/Liquidity)
+    df['range_pct'] = (df[main_high] - df[main_low]) / df[main_close]
+    df['norm_range'] = df['range_pct'] * 100.0
     
     # Target: Next bar log return
     df['target'] = df['log_ret'].shift(-1)
@@ -164,8 +177,8 @@ def prepare_features(df):
     # Drop NaN
     df.dropna(inplace=True)
     
-    # Select features: [log_ret, rsi, atr, vol, time]
-    feature_cols = ['log_ret', 'norm_rsi', 'norm_atr', 'norm_vol', 'norm_time']
+    # Select features: [log_ret, qqq_ret, rsi, atr, vol, time, range]
+    feature_cols = ['log_ret', 'qqq_ret', 'norm_rsi', 'norm_atr', 'norm_vol', 'norm_time', 'norm_range']
     
     X = df[feature_cols].values.astype(np.float32)
     y = df['target'].values.astype(np.float32)
