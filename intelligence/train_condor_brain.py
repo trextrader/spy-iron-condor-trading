@@ -229,6 +229,12 @@ def train_condor_brain(args):
         input_dim=len(FEATURE_COLS)
     ).to(device)
     
+    # JIT compile for maximum speed (PyTorch 2.0+)
+    if hasattr(torch, 'compile'):
+        print("[CondorBrain] Compiling model with torch.compile()...")
+        model = torch.compile(model, mode='reduce-overhead')
+        print("[CondorBrain] Model compiled!")
+    
     n_params = sum(p.numel() for p in model.parameters())
     print(f"[CondorBrain] Model parameters: {n_params:,}")
     
