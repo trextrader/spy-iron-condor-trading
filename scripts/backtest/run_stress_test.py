@@ -73,6 +73,23 @@ def run_stress_test():
     r_cfg.backtest_end = dt.date(2025, 3, 30)
     scenario_name = "Q1 2025 (Known Data)"
 
+    # --- PRE-LOAD DATA (Optimization) ---
+    print(f"\n[Pre-loading] Spot data for {s_cfg.underlying}...")
+    csv_path = os.path.join("data", "spot", f"{s_cfg.underlying}_1.csv")
+    df = pd.read_csv(csv_path, parse_dates=["timestamp"])
+    df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
+    df.set_index("timestamp", inplace=True)
+    df.sort_index(inplace=True)
+    
+    # Filter to the range we need
+    start_dt = pd.Timestamp(r_cfg.backtest_start)
+    end_dt = pd.Timestamp(r_cfg.backtest_end) + pd.Timedelta(days=1)
+    df_slice = df[(df.index >= start_dt) & (df.index < end_dt)].iloc[-500:] # Match the bar count from logs
+    
+    from core.backtest_engine import load_intraday_options
+    print(f"[Pre-loading] Options data from {r_cfg.options_data_path}...")
+    options_by_date = load_intraday_options(r_cfg.options_data_path, r_cfg.backtest_start, r_cfg.backtest_end)
+
     results = []
     
     print(f"\nRunning Sensitivity Analysis on {scenario_name}...")
@@ -86,21 +103,31 @@ def run_stress_test():
             setattr(test_s_cfg, k, v)
             
         try:
-            # Run
-            res = run_backtest_headless(test_s_cfg, r_cfg)
+            # Run with pre-loaded data
+            res = run_backtest_headless(
+                test_s_cfg, r_cfg, 
+                preloaded_df=df_slice, 
+                preloaded_options=options_by_date
+            )
             
             # Record
+            trades = getattr(res, 'trades', 0)
+            wins = getattr(res, 'wins', 0)
+            max_dd = max(res.drawdowns) if hasattr(res, 'drawdowns') and res.drawdowns else 0.0
+            
             summary = {
                 "Scenario": shock["name"],
-                "Net Profit": res.get("total_pnl", 0.0),
-                "Max DD": res.get("max_drawdown", 0.0),
-                "Trades": res.get("total_trades", 0),
-                "Win Rate": res.get("win_rate", 0.0)
+                "Net Profit": getattr(res, 'pnl', 0.0),
+                "Max DD": max_dd,
+                "Trades": trades,
+                "Win Rate": (wins / trades * 100.0) if trades > 0 else 0.0
             }
             results.append(summary)
             print(f"   Result: NP=${summary['Net Profit']:.2f} | DD=${summary['Max DD']:.2f} | Trades={summary['Trades']}")
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             print(f"   [ERROR] Failed: {e}")
             
     # Display Table

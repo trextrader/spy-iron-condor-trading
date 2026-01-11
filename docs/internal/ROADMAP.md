@@ -56,10 +56,10 @@ Intelligence modules (fuzzy sizing and regime filters) provide higher-order cont
 ### Stage 3 — Risk & Portfolio Controls
 | Task | File(s) | Status |
 |------|---------|--------|
-| Portfolio Greeks tracking | `options_strategy.py`, `broker.py` | ⬜ |
-| Risk caps (delta/gamma/vega limits) | `StrategyConfig` | ⬜ |
-| Risk budget sizing | `fuzzy_engine.py` | ⬜ |
-| Stress test runner (±2-4% shock) | `backtest_engine.py` | ⬜ |
+| Portfolio Greeks tracking | `core/risk_manager.py` | ✅ |
+| Risk caps (delta/gamma/vega limits) | `core/config.py`, `core/risk_manager.py` | ✅ |
+| Risk budget sizing | `strategies/options_strategy.py` | ✅ |
+| Stress test runner (Historical Shocks) | `scripts/backtest/run_stress_test.py` | ✅ |
 
 ### Stage 4 — Performance & Compute
 | Task | File(s) | Status |

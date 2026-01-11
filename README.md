@@ -61,6 +61,23 @@ The optimizer automatically loads `models/mamba_active.pth` and uses the GPU for
 - **Alpaca Integration**: Seamless live paper trading via Alpaca-Py SDK
 - **Professional Reporting**: Automated PDF reports with equity curves, strike overlays, P&L distributions
 
+## 🦅 Stage 2 & 3: Intelligence & Risk Safeguards
+
+The system has been upgraded with institutional-grade decision logic and safety guardrails:
+
+### Stage 2: Strategy Depth (Intelligence)
+- **Regime-Adaptive Wings**: Dynamically scales Iron Condor wing widths based on market states (e.g., wider wings in `CRASH_MODE`, tighter in `LOW_VOL_RANGE`).
+- **Skew-Aware Strike Selection**: Automatically detects and penalizes unfavorable IV skew. Avoids "Put Traps" where heavy downside skew would normally force too-close strikes.
+- **Probabilistic Entry Filter**: Rejects trades where the Delta-based probability of breach exceeds safety thresholds for any leg.
+- **Market Regime Classifier**: Real-time classification into Bull/Bear Trends, Volatile Ranges, or Ranging states using ADX, VIX, and SMA alignment.
+
+### Stage 3: Institutional Risk Management
+- **RiskManager Class**: A centralized gatekeeper (`core/risk_manager.py`) that validates every trade against portfolio and account limits.
+- **Portfolio Greeks Aggregator**: Real-time tracking of net Delta, Gamma, Vega, and Theta across the entire option portfolio.
+- **Dynamic Risk Caps**: Enforces maximum net Greeks per trade and portfolio-wide (e.g., hard stop if Portfolio Delta > 200).
+- **Daily Drawdown Stop**: Automatic "kill-switch" that halts trading for the day if realized/unrealized losses breach a configurable percentage (e.g., 2% of equity).
+- **Stress Test Runner**: A dedicated tool (`scripts/backtest/run_stress_test.py`) to evaluate strategy robustness under parameter shocks and historical volatility spikes.
+
 ### 💻 CLI Command Reference
 
 Execute `core/main.py` with the following flags to control strategy behavior:
@@ -73,6 +90,7 @@ Execute `core/main.py` with the following flags to control strategy behavior:
 | **Why MTF Only?** | `python core/main.py --mode backtest --use-mtf --no-fuzzy` | Tests impact of multi-timeframe consensus in isolation. |
 | **Why Fuzzy Only?** | `python core/main.py --mode backtest --use-fuzzy --dynamic-sizing --no-mtf-filter` | Tests impact of 10-factor position sizing in isolation. |
 | **Custom Dates** | `python core/main.py --mode backtest --bt-start 2024-01-01 --bt-end 2024-03-31` | Backtest specific historical period. |
+| **Risk Stress Test** | `python scripts/backtest/run_stress_test.py` | Runs sensitivity analysis & stress test suite. |
 | **Paper Trading** | `python core/main.py --mode live --alpaca` | Connects to Alpaca Paper API for live execution. |
 
 > **Note**: `--bt-samples 0` loads the ENTIRE dataset. Remove it to default to 500 samples for quick debugging.
