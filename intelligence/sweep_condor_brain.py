@@ -111,8 +111,29 @@ def load_and_prep_data(csv_path, max_rows=0):
     y = np.nan_to_num(y, nan=0.0, posinf=1e5, neginf=-1e5)
     if X.shape[1] > 4:
         X[:, 4] = np.log1p(X[:, 4]) # Volume log scale
-    X = np.clip(X, -1e6, 1e6)
-    y = np.clip(y, -1e6, 1e6)
+        
+    # SCALING (Critical for Neural Net Stability)
+    print("Stats before scaling:")
+    print(f"X range: [{X.min():.2f}, {X.max():.2f}]")
+    print(f"y range: [{y.min():.2f}, {y.max():.2f}]")
+
+    # Robust Feature Scaling (Mean=0, Std=1)
+    mean = X.mean(axis=0)
+    std = X.std(axis=0) + 1e-6
+    X = (X - mean) / std
+    
+    # Clip after scaling to ensure no outliers break FP16
+    X = np.clip(X, -10.0, 10.0) 
+    
+    # Scale huge targets? 
+    # ROI, MaxLoss, Prob are small (0-1). 
+    # Offsets (2.0) are small.
+    # Wing Width (5.0) is small.
+    # DTE (14.0) is medium.
+    # Only need to be careful if targets are huge.
+    
+    print("Stats after scaling:")
+    print(f"X range: [{X.min():.2f}, {X.max():.2f}]")
     
     print(f"[Success] Loaded {len(X):,} rows into RAM.")
     return X, y, regime
