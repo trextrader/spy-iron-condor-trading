@@ -90,15 +90,24 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     y = df[target_cols].values.astype(np.float32)
     regime = df['regime_label'].values.astype(np.int64)
     
-    # Debug: Check for NaNs
-    if np.isnan(X).any():
-        nan_count = np.isnan(X).sum()
-        print(f"[Warning] {nan_count} NaN values in features - replacing with 0")
-        X = np.nan_to_num(X, nan=0.0)
-    if np.isnan(y).any():
-        nan_count = np.isnan(y).sum()
-        print(f"[Warning] {nan_count} NaN values in targets - replacing with 0")
-        y = np.nan_to_num(y, nan=0.0)
+    # DEBUG: Force clean all inputs
+    print("[CondorBrain] Sanitizing data...")
+    X = np.nan_to_num(X, nan=0.0, posinf=1e6, neginf=-1e6)
+    y = np.nan_to_num(y, nan=0.0, posinf=1e6, neginf=-1e6)
+    
+    # Scale volume (index 4) to avoid huge gradients
+    if X.shape[1] > 4:
+        X[:, 4] = np.log1p(X[:, 4])
+        
+    # Clamp extreme values to prevent gradient explosion
+    X = np.clip(X, -1e6, 1e6)
+    y = np.clip(y, -1e6, 1e6)
+    
+    # Verify clean
+    if np.isnan(X).any() or np.isinf(X).any():
+        print("[CRITICAL ERROR] X still contains NaN/Inf after sanitization!")
+    if np.isnan(y).any() or np.isinf(y).any():
+        print("[CRITICAL ERROR] y still contains NaN/Inf after sanitization!")
     
     print(f"[CondorBrain] Features: {X.shape}, Targets: {y.shape}")
     return X, y, regime
