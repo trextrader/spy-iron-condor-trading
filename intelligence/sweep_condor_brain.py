@@ -207,9 +207,10 @@ def main():
     parser.add_argument("--csv", required=True)
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lookback", type=int, default=240)
+    parser.add_argument("--max-rows", type=int, default=0, help="Limit rows for faster sweep")
     args = parser.parse_args()
     
-    X, y, r = load_and_prep_data(args.csv)
+    X, y, r = load_and_prep_data(args.csv, max_rows=args.max_rows)
     
     # Split Indices (Time Series Split)
     split_idx = int(0.8 * (len(X) - args.lookback))
