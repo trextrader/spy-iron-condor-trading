@@ -6,7 +6,7 @@ import argparse
 import numpy as np
 import pandas as pd
 import pandas_ta as ta
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -63,8 +63,8 @@ def download_alpaca_data(key, secret, symbol, years=2, tf_str="15Min"):
     client = StockHistoricalDataClient(key, secret)
     
     # Non-Pro Alpaca accounts cannot query the last 15 minutes of SIP data.
-    # We subtract 15 minutes to avoid the "subscription does not permit" error.
-    end_dt = datetime.now() - timedelta(minutes=15)
+    # We use a 20-minute UTC buffer to be absolutely safe and avoid subscription errors.
+    end_dt = datetime.now(timezone.utc) - timedelta(minutes=20)
     start_dt = end_dt - timedelta(days=365 * years)
     
     # Map timeframe string to Alpaca Object
