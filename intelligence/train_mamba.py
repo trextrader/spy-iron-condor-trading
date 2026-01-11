@@ -124,7 +124,7 @@ def download_alpaca_data(key, secret, symbol, years=2, tf_str="15Min"):
         print(f"[Error] Alpaca download failed: {e}")
         return pd.DataFrame()
 
-def prepare_features(df):
+def prepare_features(df, use_qqq=True):
     if df.empty:
         raise ValueError("Cannot prepare features for empty DataFrame")
         
@@ -177,8 +177,16 @@ def prepare_features(df):
     # Drop NaN
     df.dropna(inplace=True)
     
-    # Select features: [log_ret, qqq_ret, rsi, atr, vol, time, range]
-    feature_cols = ['log_ret', 'qqq_ret', 'norm_rsi', 'norm_atr', 'norm_vol', 'norm_time', 'norm_range']
+    # Select features: [log_ret, qqq_ret (opt), rsi, atr, vol, time, range]
+    feature_cols = ['log_ret']
+    
+    # Only add QQQ if flag is True AND data exists
+    if use_qqq and 'qqq_ret' in df.columns:
+        feature_cols.append('qqq_ret')
+    elif use_qqq:
+        print("[Warning] --use-qqq requested but 'qqq_ret' column not found in data.")
+
+    feature_cols += ['norm_rsi', 'norm_atr', 'norm_vol', 'norm_time', 'norm_range']
     
     X = df[feature_cols].values.astype(np.float32)
     y = df['target'].values.astype(np.float32)
@@ -187,6 +195,7 @@ def prepare_features(df):
     X = np.clip(X, -5.0, 5.0)
     y = np.clip(y, -5.0, 5.0)
     
+    print(f"Features Prepared: {feature_cols} (Dim: {X.shape[1]})")
     return X, y
 
 def create_sequences(X, y, lookback):
@@ -277,7 +286,7 @@ def run_training(args):
         print("[Action] Please enable GPU in Colab (Runtime > Change runtime type > T4 / A100 GPU).")
         # Optional: sys.exit(1) if you want to be strict
     
-    X, y = prepare_features(df)
+    X, y = prepare_features(df, use_qqq=args.use_qqq)
     
     # Split
     split = int(len(X) * 0.8)

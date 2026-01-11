@@ -106,10 +106,11 @@ class DeepMamba(nn.Module):
 class MambaForecastEngine:
     """Next-Gen Neural Forecasting using Mamba 2 Architecture."""
     
-    def __init__(self, d_model: int = 1024, lookback: int = 60, layers: int = 32):
+    def __init__(self, d_model: int = 1024, lookback: int = 60, layers: int = 32, use_qqq: bool = True):
         self.d_model = d_model
         self.lookback = lookback
         self.layers = layers
+        self.use_qqq = use_qqq
         self.is_cuda = HAS_MAMBA and torch.cuda.is_available()
         self.kernel = None
         self.model = None
@@ -198,14 +199,14 @@ class MambaForecastEngine:
         prev_closes[0] = closes[0]
         log_ret = np.log(closes / (prev_closes + 1e-9))
         
-        # 2. QQQ Alignment
-        if 'QQQ_close' in window.columns:
+        # 2. QQQ Alignment (Optional)
+        if self.use_qqq and 'QQQ_close' in window.columns:
             qqq_closes = window['QQQ_close'].values
             prev_qqq = np.roll(qqq_closes, 1)
             prev_qqq[0] = qqq_closes[0]
             qqq_ret = np.log(qqq_closes / (prev_qqq + 1e-9))
         else:
-            qqq_ret = log_ret
+            qqq_ret = None
 
         rsi = window['rsi_14'].fillna(50.0).infer_objects(copy=False).values if 'rsi_14' in window.columns else np.full(len(window), 50.0)
         atr_pct = window['atr_pct'].fillna(0.01).infer_objects(copy=False).values if 'atr_pct' in window.columns else np.full(len(window), 0.01)
@@ -220,9 +221,11 @@ class MambaForecastEngine:
             # Range Proxy
             range_val = (window[main_high].values[i] - window[main_low].values[i]) / (window[main_close].values[i] + 1e-9)
 
-            feat = [
-                log_ret[i] * 100.0,
-                qqq_ret[i] * 100.0,
+            feat = [log_ret[i] * 100.0]
+            if qqq_ret is not None:
+                feat.append(qqq_ret[i] * 100.0)
+                
+            feat += [
                 (rsi[i] - 50.0) / 10.0,
                 atr_pct[i] * 50.0,
                 (vol_ratio[i] - 1.0) * 2.0,
@@ -266,14 +269,14 @@ class MambaForecastEngine:
         prev_closes[0] = closes[0]
         log_rets = np.log(closes / (prev_closes + 1e-9)) * 100.0
         
-        # 2. QQQ Correlation
-        if 'QQQ_close' in df.columns:
+        # 2. QQQ Correlation (Optional)
+        if self.use_qqq and 'QQQ_close' in df.columns:
             qqq_closes = df['QQQ_close'].values.astype(np.float32)
             prev_qqq = np.roll(qqq_closes, 1)
             prev_qqq[0] = qqq_closes[0]
             qqq_rets = np.log(qqq_closes / (prev_qqq + 1e-9)) * 100.0
         else:
-            qqq_rets = log_rets
+            qqq_rets = None
 
         # 3. RSI
         rsi = (df['rsi_14'].fillna(50.0).values - 50.0) / 10.0 if 'rsi_14' in df.columns else np.zeros_like(closes)
@@ -292,8 +295,13 @@ class MambaForecastEngine:
         # 7. Range Proxy
         range_proxy = ((df[main_high] - df[main_low]) / (df[main_close] + 1e-9)).values * 100.0
 
-        # Stack features: (N, 7)
-        data_matrix = np.stack([log_rets, qqq_rets, rsi, atr, vol, norm_time, range_proxy], axis=1).astype(np.float32)
+        # Stack features: (N, 6 or 7)
+        feat_list = [log_rets]
+        if qqq_rets is not None:
+            feat_list.append(qqq_rets)
+        feat_list += [rsi, atr, vol, norm_time, range_proxy]
+        
+        data_matrix = np.stack(feat_list, axis=1).astype(np.float32)
         
         # Pad to d_model directly? 
         # No, we embed (pad) during batch creation to save RAM 
@@ -311,7 +319,7 @@ class MambaForecastEngine:
         # or simple loop. Sliding window of (Batch, Time, Feat)
         
         # Convert to Tensor
-        full_tensor = torch.from_numpy(data_matrix) # (N, 7)
+        full_tensor = torch.from_numpy(data_matrix) # (N, F)
         if self.is_cuda:
             full_tensor = full_tensor.cuda()
             
@@ -342,7 +350,7 @@ class MambaForecastEngine:
                  pad_amt = (self.lookback - 1) - start_idx
                  if pad_amt > 0:
                      # (Pad, Feat)
-                     padding = torch.zeros((pad_amt, 7), device=sub_data.device)
+                     padding = torch.zeros((pad_amt, data_matrix.shape[1]), device=sub_data.device)
                      sub_data = torch.cat([padding, sub_data], dim=0)
             
             # Now unfold: (Batch, Lookback, Feat)
