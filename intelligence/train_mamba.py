@@ -11,7 +11,13 @@ from datetime import datetime, timedelta, timezone
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from core.config import RunConfig
+try:
+    from core.config import RunConfig
+except ImportError:
+    print("\n[ERROR] 'core/config.py' not found.")
+    print("Action: Copy 'core/config.template.py' to 'core/config.py' and fill in your API keys.")
+    print("Command: cp core/config.template.py core/config.py\n")
+    sys.exit(1)
 
 # Alpaca Imports
 try:

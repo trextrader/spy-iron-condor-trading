@@ -8,7 +8,13 @@ import os
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.config import StrategyConfig, RunConfig
+try:
+    from core.config import StrategyConfig, RunConfig
+except ImportError:
+    print("\n[ERROR] 'core/config.py' not found.")
+    print("Action: Copy 'core/config.template.py' to 'core/config.py' and fill in your API keys.")
+    print("Command: cp core/config.template.py core/config.py\n")
+    sys.exit(1)
 from core.backtest_engine import run_backtest_and_report
 from data_factory.polygon_client import PolygonClient
 from core.broker import PaperBroker
@@ -302,9 +308,6 @@ def main():
             run_config.polygon_key = args.polygon_key
         if args.alpaca_key:
             run_config.alpaca_key = args.alpaca_key
-        if args.alpaca_secret:
-            run_config.alpaca_secret = args.alpaca_secret
-
         if args.alpaca_secret:
             run_config.alpaca_secret = args.alpaca_secret
 
