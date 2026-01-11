@@ -66,19 +66,19 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     df['realized_max_loss'] = 0.2
     df['confidence_target'] = 0.5
     
-    # Regime labeling
+    # Regime labeling (with NaN safety)
     if 'regime_label' not in df.columns:
         if 'ivr' in df.columns:
             df['regime_label'] = pd.cut(
-                df['ivr'], 
+                df['ivr'].fillna(50),  # Default to normal regime
                 bins=[-0.1, 30, 70, 101], 
                 labels=[0, 1, 2]
-            ).astype(int)
+            ).fillna(1).astype(int)  # Default to normal (1)
         else:
             df['regime_label'] = 1
     
-    # Fill NaNs
-    df = df.ffill().fillna(0)
+    # Fill ALL NaNs
+    df = df.ffill().bfill().fillna(0)
     
     # Build arrays
     target_cols = [
@@ -89,6 +89,16 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     X = df[FEATURE_COLS].values.astype(np.float32)
     y = df[target_cols].values.astype(np.float32)
     regime = df['regime_label'].values.astype(np.int64)
+    
+    # Debug: Check for NaNs
+    if np.isnan(X).any():
+        nan_count = np.isnan(X).sum()
+        print(f"[Warning] {nan_count} NaN values in features - replacing with 0")
+        X = np.nan_to_num(X, nan=0.0)
+    if np.isnan(y).any():
+        nan_count = np.isnan(y).sum()
+        print(f"[Warning] {nan_count} NaN values in targets - replacing with 0")
+        y = np.nan_to_num(y, nan=0.0)
     
     print(f"[CondorBrain] Features: {X.shape}, Targets: {y.shape}")
     return X, y, regime
