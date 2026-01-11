@@ -1,6 +1,9 @@
-
-import os
 import sys
+import os
+
+# Memory Protection: Prevent fragmentation on smaller GPUs
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import time
 import argparse
 import numpy as np
@@ -297,6 +300,11 @@ def run_training(args):
     # Best loss tracking
     best_loss = float('inf')
     
+    # Initialize Gradient Scaler for Mixed Precision
+    scaler = torch.amp.GradScaler('cuda')
+    
+    print(f"[Memory] Initial VRAM Allocated: {torch.cuda.memory_allocated() / 1e6:.2f} MB")
+    
     for epoch in range(args.epochs):
         model.train()
         train_loss = 0.0
@@ -306,17 +314,21 @@ def run_training(args):
             
             optimizer.zero_grad()
             
-            # Pad with zeros to d_model
-            B, L, F = X_batch.shape
-            X_pad = torch.zeros((B, L, d_model), device=device)
-            X_pad[:, :, :F] = X_batch
+            # Pad/Cast with Mixed Precision
+            with torch.amp.autocast('cuda'):
+                B, L, F = X_batch.shape
+                X_pad = torch.zeros((B, L, d_model), device=device)
+                X_pad[:, :, :F] = X_batch
+                
+                # Forward
+                out = model(X_pad) 
+                loss = criterion(out.squeeze(), y_batch)
             
-            # Forward
-            out = model(X_pad) 
+            # Backward with Scaler
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             
-            loss = criterion(out.squeeze(), y_batch)
-            loss.backward()
-            optimizer.step()
             train_loss += loss.item()
             
         # Validation
@@ -325,12 +337,13 @@ def run_training(args):
         with torch.no_grad():
             for X_batch, y_batch in val_loader:
                 X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-                B, L, F = X_batch.shape
-                X_pad = torch.zeros((B, L, d_model), device=device)
-                X_pad[:, :, :F] = X_batch
-                
-                out = model(X_pad)
-                val_loss += criterion(out.squeeze(), y_batch)
+                with torch.amp.autocast('cuda'):
+                    B, L, F = X_batch.shape
+                    X_pad = torch.zeros((B, L, d_model), device=device)
+                    X_pad[:, :, :F] = X_batch
+                    
+                    out = model(X_pad)
+                    val_loss += criterion(out.squeeze(), y_batch)
         
         avg_train = train_loss / len(train_loader)
         avg_val = val_loss / len(val_loader)
