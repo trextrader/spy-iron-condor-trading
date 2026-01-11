@@ -367,7 +367,14 @@ $$
 - $G > 0.0019$: **Large gap** → Momentum continuation → Standard entry or skip
 
 **Gap Direction**:
-$$ \text{Direction} = \begin{cases} \text{Gap Up} & \text{if } P_{open} > P_{prev\_close} \cdot 1.0001 \\ \text{Gap Down} & \text{if } P_{open} < P_{prev\_close} \cdot 0.9999 \\ \text{No Gap} & \text{otherwise} \end{cases} $$
+
+$$
+\text{Direction} = \begin{cases} 
+\text{Gap Up} & \text{if } P_{open} > P_{prev\_close} \cdot 1.0001 \\ 
+\text{Gap Down} & \text{if } P_{open} < P_{prev\_close} \cdot 0.9999 \\ 
+\text{No Gap} & \text{otherwise} 
+\end{cases}
+$$
 
 **Implementation**:
 ```python
@@ -424,24 +431,26 @@ if basis < 0:
 
 ---
 
-### 6. Technical Indicators (10-Factor Fuzzy System) - `intelligence/fuzzy_engine.py`
+### 6. Technical Indicators (11-Factor Fuzzy System) - `intelligence/fuzzy_engine.py`
 
-The fuzzy position sizing system uses 10 indicators, each with a membership function that maps to [0, 1]:
+The fuzzy position sizing system uses 11 indicators (10 technical + 1 neural), blending them into a final confidence score $C \in [0, 1]$:
 
-$$F_t = \sum_{j=1}^{10} w_j \cdot \mu_j$$
+$$ F_t = \sum_{j=1}^{10} w_j \cdot \mu_j $$
+$$ C = 0.60 \cdot \mu_{Mamba} + 0.40 \cdot F_t $$
 
 | # | Factor | Weight | Description |
 |---|--------|--------|-------------|
-| 1 | MTF Consensus | 0.18 | Multi-timeframe alignment |
-| 2 | IV Rank | 0.14 | Implied volatility percentile |
-| 3 | VIX Regime | 0.11 | Market fear index |
-| 4 | RSI | 0.10 | Momentum oscillator |
-| 5 | ADX | 0.10 | Trend strength |
-| 6 | Bollinger Bands | 0.09 | Volatility regime |
-| 7 | Stochastic | 0.08 | Overbought/Oversold |
-| 8 | PSAR | 0.07 | Trend reversal |
-| 9 | Volume | 0.07 | Liquidity confirmation |
-| 10 | SMA Distance | 0.06 | Mean reversion |
+| 1 | **DeepMamba 2** | 0.60 (Rel) | Neural forecast confidence |
+| 2 | MTF Consensus | 0.18 | Multi-timeframe alignment |
+| 3 | IV Rank | 0.14 | Implied volatility percentile |
+| 4 | VIX Regime | 0.11 | Market fear index |
+| 5 | RSI | 0.10 | Momentum oscillator |
+| 6 | ADX | 0.10 | Trend strength |
+| 7 | Bollinger Bands | 0.09 | Volatility regime |
+| 8 | Stochastic | 0.08 | Overbought/Oversold |
+| 9 | PSAR | 0.07 | Trend reversal |
+| 10 | Volume | 0.07 | Liquidity confirmation |
+| 11 | SMA Distance | 0.06 | Mean reversion |
 
 ---
 
@@ -449,7 +458,9 @@ $$F_t = \sum_{j=1}^{10} w_j \cdot \mu_j$$
 
 **Theory**: Multi-timeframe alignment measures agreement across 1m, 5m, and 15m timeframes. Neutral consensus favors Iron Condors.
 
-$$ \mu_{MTF} = 1 - |C_{1/5/15} - 0.5| \times 2 $$
+$$
+\mu_{MTF} = 1 - |C_{\mathrm{1/5/15}} - 0.5| \times 2
+$$
 
 Where $C_{1/5/15} \in [0, 1]$ is the weighted consensus:
 - $C = 0.5$: Perfect neutral → $\mu = 1.0$ (ideal for IC)
@@ -461,10 +472,15 @@ Where $C_{1/5/15} \in [0, 1]$ is the weighted consensus:
 
 **Theory**: High IV Rank means elevated implied volatility relative to history—favorable for selling premium.
 
-$$ IVR = 100 \cdot \frac{IV_t - \min(IV_{window})}{\max(IV_{window}) - \min(IV_{window})} $$
+$$
+IVR = 100 \cdot \frac{IV_t - \min(IV_{\mathrm{window}})}{\max(IV_{\mathrm{window}}) - \min(IV_{\mathrm{window}})}
+$$
 
 **Membership**:
-$$ \mu_{IV} = \min\left(1.0, \frac{IVR}{60}\right) $$
+
+$$
+\mu_{IV} = \min\left(1.0, \frac{IVR}{60}\right)
+$$
 
 - $IVR \geq 60$: $\mu = 1.0$ (excellent for premium selling)
 - $IVR = 30$: $\mu = 0.5$ (moderate)
@@ -477,7 +493,14 @@ $$ \mu_{IV} = \min\left(1.0, \frac{IVR}{60}\right) $$
 **Theory**: Low VIX indicates stable markets; high VIX signals fear and potential oversized moves.
 
 **Membership**:
-$$ \mu_{VIX} = \begin{cases} 1.0 & \text{if } VIX \leq 12 \\ 1 - \frac{VIX - 12}{18} & \text{if } 12 < VIX < 30 \\ 0.0 & \text{if } VIX \geq 30 \end{cases} $$
+
+$$
+\mu_{VIX} = \begin{cases} 
+1.0 & \text{if } VIX \leq 12 \\ 
+1 - \frac{VIX - 12}{18} & \text{if } 12 < VIX < 30 \\ 
+0.0 & \text{if } VIX \geq 30 
+\end{cases}
+$$
 
 - $VIX \leq 12$: $\mu = 1.0$ (calm market, ideal)
 - $VIX = 20$: $\mu \approx 0.56$ (moderate caution)
@@ -494,7 +517,14 @@ $$ RSI = 100 - \frac{100}{1 + RS} $$
 Where $\alpha = \frac{1}{period}$ (default $period = 14$)
 
 **Membership** (neutral zone 40-60 is optimal):
-$$ \mu_{RSI} = \begin{cases} 1.0 & \text{if } 40 \leq RSI \leq 60 \\ \frac{RSI}{40} & \text{if } RSI < 40 \\ \frac{100 - RSI}{40} & \text{if } RSI > 60 \end{cases} $$
+
+$$
+\mu_{RSI} = \begin{cases} 
+1.0 & \text{if } 40 \leq RSI \leq 60 \\ 
+\frac{RSI}{40} & \text{if } RSI < 40 \\ 
+\frac{100 - RSI}{40} & \text{if } RSI > 60 
+\end{cases}
+$$
 
 - $RSI \in [40, 60]$: $\mu = 1.0$ (neutral momentum, ideal)
 - $RSI < 30$ or $RSI > 70$: $\mu \to 0$ (extreme, avoid)
@@ -512,7 +542,14 @@ $$ DX = 100 \cdot \frac{|+DI - (-DI)|}{+DI + (-DI)} $$
 $$ ADX = EMA_{\alpha}(DX) $$
 
 **Membership** (low ADX = weak trend = favorable):
-$$ \mu_{ADX} = \begin{cases} 1.0 & \text{if } ADX \leq 25 \\ 1 - \frac{ADX - 25}{15} & \text{if } 25 < ADX < 40 \\ 0.0 & \text{if } ADX \geq 40 \end{cases} $$
+
+$$
+\mu_{ADX} = \begin{cases} 
+1.0 & \text{if } ADX \leq 25 \\ 
+1 - \frac{ADX - 25}{15} & \text{if } 25 < ADX < 40 \\ 
+0.0 & \text{if } ADX \geq 40 
+\end{cases}
+$$
 
 - $ADX < 25$: $\mu = 1.0$ (ranging market, ideal)
 - $ADX > 40$: $\mu = 0.0$ (strong trend, avoid)
@@ -544,7 +581,14 @@ $$ \%K = 100 \cdot \frac{Close - Low_{14}}{High_{14} - Low_{14}} $$
 $$ \%D = SMA_3(\%K) $$
 
 **Membership** (neutral zone 30-70 is optimal):
-$$ \mu_{Stoch} = \begin{cases} 1.0 & \text{if } 30 \leq \%K \leq 70 \\ \frac{\%K}{30} & \text{if } \%K < 30 \\ \frac{100 - \%K}{30} & \text{if } \%K > 70 \end{cases} $$
+
+$$
+\mu_{\mathrm{Stoch}} = \begin{cases} 
+1.0 & \text{if } 30 \leq \%K \leq 70 \\ 
+\frac{\%K}{30} & \text{if } \%K < 30 \\ 
+\frac{100 - \%K}{30} & \text{if } \%K > 70 
+\end{cases}
+$$
 
 - $\%K \in [30, 70]$: $\mu = 1.0$ (neutral, ideal)
 - $\%K < 20$ or $> 80$: $\mu \to 0$ (extreme, avoid)
@@ -553,14 +597,19 @@ $$ \mu_{Stoch} = \begin{cases} 1.0 & \text{if } 30 \leq \%K \leq 70 \\ \frac{\%K
 
 #### 6.8 Parabolic SAR (w = 0.07)
 
-$$ SAR_{t+1} = SAR_t + AF \cdot (EP - SAR_t) $$
+$$
+SAR_{t+1} = SAR_t + AF \cdot (EP - SAR_t)
+$$
 
 Where:
 - $AF$ = Acceleration Factor (0.02 → 0.20)
 - $EP$ = Extreme Point (highest high / lowest low)
 
 **Membership** (crossover = ideal):
-$$ \mu_{PSAR} = 1 - |P_{position}| $$
+
+$$
+\mu_{\mathrm{PSAR}} = 1 - |P_{\mathrm{position}}|
+$$
 
 Where $P_{position} \in [-1, +1]$:
 - $P_{position} = 0$: PSAR crossover → $\mu = 1.0$ (ideal for IC)
@@ -570,10 +619,15 @@ Where $P_{position} \in [-1, +1]$:
 
 #### 6.9 Volume Ratio (w = 0.07)
 
-$$ V_{ratio} = \frac{Volume_t}{SMA_{20}(Volume)} $$
+$$
+V_{\mathrm{ratio}} = \frac{Volume_t}{SMA_{20}(Volume)}
+$$
 
 **Membership** (adequate liquidity required):
-$$ \mu_{Vol} = \min\left(1.0, \frac{V_{ratio}}{0.8}\right) $$
+
+$$
+\mu_{\mathrm{Vol}} = \min\left(1.0, \frac{V_{\mathrm{ratio}}}{0.8}\right)
+$$
 
 - $V_{ratio} \geq 0.8$: $\mu = 1.0$ (adequate liquidity)
 - $V_{ratio} < 0.4$: $\mu < 0.5$ (poor fills likely)
@@ -585,7 +639,13 @@ $$ \mu_{Vol} = \min\left(1.0, \frac{V_{ratio}}{0.8}\right) $$
 $$ D_{SMA} = \frac{Price - SMA_{20}}{SMA_{20}} $$
 
 **Membership** (near equilibrium = ideal):
-$$ \mu_{SMA} = \begin{cases} 1 - \frac{|D_{SMA}|}{0.02} & \text{if } |D_{SMA}| \leq 0.02 \\ 0.0 & \text{if } |D_{SMA}| > 0.02 \end{cases} $$
+
+$$
+\mu_{\mathrm{SMA}} = \begin{cases} 
+1 - \frac{|D_{\mathrm{SMA}}|}{0.02} & \text{if } |D_{\mathrm{SMA}}| \leq 0.02 \\ 
+0.0 & \text{if } |D_{\mathrm{SMA}}| > 0.02 
+\end{cases}
+$$
 
 - $|D_{SMA}| = 0$: $\mu = 1.0$ (at equilibrium)
 - $|D_{SMA}| > 2\%$: $\mu = 0.0$ (extended, mean reversion risk)
