@@ -23,6 +23,15 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from intelligence.condor_brain import CondorBrain, CondorLoss, HAS_MAMBA
 
 # ============================================================================
+# CUDA OPTIMIZATIONS (Release the H100 Kraken)
+# ============================================================================
+torch.backends.cuda.matmul.allow_tf32 = True  # Allow TF32 on Ampere+
+torch.backends.cudnn.allow_tf32 = True        # Allow TF32 on cuDNN
+torch.backends.cudnn.benchmark = True         # Auto-tuner for fastest kernels
+torch.backends.cudnn.deterministic = False    # Allow non-deterministic speedups
+print(f"[System] CUDA Optimizations Enabled: TF32=True, Benchmark=True")
+
+# ============================================================================
 # LAZY DATASET (Critical for Memory Efficiency)
 # ============================================================================
 
