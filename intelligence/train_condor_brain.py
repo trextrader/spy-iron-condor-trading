@@ -250,15 +250,23 @@ def create_gpu_dataloaders(args, device):
 def parse_args():
     parser = argparse.ArgumentParser(description="Train CondorBrain (GPU-Optimized)")
     parser.add_argument("--local-data", type=str, required=True, help="Path to institutional CSV")
-    parser.add_argument("--output", type=str, default="models/condor_brain.pth", help="Output model path")
+    parser.add_argument("--output", type=str, default="auto", help="Output model path ('auto' = generate from params)")
     parser.add_argument("--d-model", type=int, default=1024)
     parser.add_argument("--layers", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--batch-size", type=int, default=256)  # Larger batch for A100
+    parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--lookback", type=int, default=240)
     parser.add_argument("--max-rows", type=int, default=0, help="Limit rows for debugging")
-    return parser.parse_args()
+    
+    args = parser.parse_args()
+    
+    # Auto-generate output filename from params
+    if args.output == "auto":
+        lr_str = f"{args.lr:.0e}".replace("-", "")
+        args.output = f"models/condor_brain_e{args.epochs}_d{args.d_model}_L{args.layers}_lr{lr_str}.pth"
+    
+    return args
 
 
 # ============================================================================
