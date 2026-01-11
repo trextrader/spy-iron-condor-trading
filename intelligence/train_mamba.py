@@ -77,7 +77,7 @@ def parse_args():
     
     return parser.parse_args()
 
-def download_alpaca_data(key, secret, symbol, years=2, tf_str="15Min"):
+def download_alpaca_data(key, secret, symbol, years=2, tf_str="15Min", use_qqq=True):
     if not HAS_ALPACA:
         print("[Error] Alpaca SDK (alpaca-py) not found.")
         print("Install it with: pip install alpaca-py")
@@ -106,9 +106,9 @@ def download_alpaca_data(key, secret, symbol, years=2, tf_str="15Min"):
         tf = TimeFrame.Hour
 
     try:
-        # Request both symbols
+        # Request symbols
         symbols = [symbol]
-        if symbol == 'SPY': symbols.append('QQQ')
+        if use_qqq and symbol == 'SPY': symbols.append('QQQ')
         
         req = StockBarsRequest(
             symbol_or_symbols=symbols,
@@ -237,7 +237,7 @@ def run_download(args):
     api_key, api_secret = get_alpaca_keys(args)
             
     if api_key and api_secret:
-            df = download_alpaca_data(api_key, api_secret, args.symbol, args.years, args.timeframe)
+            df = download_alpaca_data(api_key, api_secret, args.symbol, args.years, args.timeframe, use_qqq=args.use_qqq)
             if not df.empty:
                 os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
                 df.to_csv(args.output_csv, index=False)
@@ -272,7 +272,7 @@ def run_training(args):
         print("[Core] No local data provided. Attempting automatic download...")
         api_key, api_secret = get_alpaca_keys(args)
         if api_key and api_secret:
-            df = download_alpaca_data(api_key, api_secret, args.symbol, args.years, args.timeframe)
+            df = download_alpaca_data(api_key, api_secret, args.symbol, args.years, args.timeframe, use_qqq=args.use_qqq)
             if not df.empty and args.output_csv:
                 os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
                 df.to_csv(args.output_csv, index=False)
