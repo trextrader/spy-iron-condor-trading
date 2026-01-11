@@ -48,6 +48,9 @@ def parse_args():
     parser.add_argument("--local-data", type=str, help="Path to local CSV to use for training instead of downloading")
     parser.add_argument("--output-csv", type=str, default="data/spy_training_data.csv")
     parser.add_argument("--model-name", type=str, help="Filename for the model (e.g., mamba_m5_v1.pth)")
+    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--batch-size", type=int, default=128)
+    parser.add_argument("--lr", type=float, default=5e-5)
     
     return parser.parse_args()
 
@@ -59,7 +62,9 @@ def download_alpaca_data(key, secret, symbol, years=2, tf_str="15Min"):
     print(f"[Alpaca] Connecting to fetch {years} years of {tf_str} data for {symbol}...")
     client = StockHistoricalDataClient(key, secret)
     
-    end_dt = datetime.now()
+    # Non-Pro Alpaca accounts cannot query the last 15 minutes of SIP data.
+    # We subtract 15 minutes to avoid the "subscription does not permit" error.
+    end_dt = datetime.now() - timedelta(minutes=15)
     start_dt = end_dt - timedelta(days=365 * years)
     
     # Map timeframe string to Alpaca Object
@@ -232,9 +237,9 @@ def run_training(args):
 
     # Loaders
     train_loader = DataLoader(TensorDataset(torch.from_numpy(X_train_seq), torch.from_numpy(y_train_seq)), 
-                              batch_size=DEFAULT_CONFIG['batch_size'], shuffle=True)
+                              batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(TensorDataset(torch.from_numpy(X_val_seq), torch.from_numpy(y_val_seq)), 
-                            batch_size=DEFAULT_CONFIG['batch_size'])
+                            batch_size=args.batch_size)
     
     # Model
     if not HAS_MAMBA:
@@ -255,7 +260,7 @@ def run_training(args):
     ).to(device)
     
     criterion = nn.MSELoss()
-    optimizer = optim.AdamW(model.parameters(), lr=DEFAULT_CONFIG['lr'], weight_decay=1e-5)
+    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-5)
     
     # Model Path Setup
     if args.model_name:
@@ -272,7 +277,7 @@ def run_training(args):
     # Best loss tracking
     best_loss = float('inf')
     
-    for epoch in range(DEFAULT_CONFIG['epochs']):
+    for epoch in range(args.epochs):
         model.train()
         train_loss = 0.0
         
