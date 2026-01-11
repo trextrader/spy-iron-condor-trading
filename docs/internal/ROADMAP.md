@@ -47,11 +47,11 @@ Intelligence modules (fuzzy sizing and regime filters) provide higher-order cont
 ### Stage 2 — Strategy Depth
 | Task | File(s) | Status |
 |------|---------|--------|
-| Skew/term-structure strike selection | `options_strategy.py` | ⬜ |
-| IV skew penalty in `nearest_by_delta` | `options_strategy.py` | ⬜ |
-| Probabilistic entry filter (breach probability) | `options_strategy.py` | ⬜ |
-| Regime classifier (trend vs mean-reversion) | `fuzzy_engine.py` | ⬜ |
-| Conditional wing width based on regime | `options_strategy.py` | ⬜ |
+| Skew/term-structure strike selection | `options_strategy.py` | ✅ |
+| IV skew penalty in `nearest_by_delta` | `options_strategy.py` | ✅ |
+| Probabilistic entry filter (breach probability) | `options_strategy.py` | ✅ |
+| Regime classifier (trend vs mean-reversion) | `fuzzy_engine.py` | ✅ |
+| Conditional wing width based on regime | `options_strategy.py` | ✅ |
 
 ### Stage 3 — Risk & Portfolio Controls
 | Task | File(s) | Status |
