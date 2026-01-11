@@ -23,7 +23,19 @@ from strategies.options_strategy import (
 )
 from intelligence.regime_filter import classify_regime, MarketRegime
 from core.risk_manager import RiskManager, PortfolioGreeks
-from intelligence.fuzzy_engine import calculate_atr_stop_multiplier
+from intelligence.fuzzy_engine import (
+    calculate_mtf_membership,
+    calculate_iv_membership,
+    calculate_regime_membership,
+    calculate_rsi_membership,
+    calculate_adx_membership,
+    calculate_bbands_membership,
+    calculate_stoch_membership,
+    calculate_volume_membership,
+    calculate_sma_distance_membership,
+    calculate_psar_membership,
+    calculate_atr_stop_multiplier
+)
 from qtmf.models import TradeIntent
 from qtmf.facade import benchmark_and_size
 
@@ -105,6 +117,17 @@ def load_intraday_options(file_path: str, start_date=None, end_date=None) -> dic
     # Read CSV
     df = pd.read_csv(file_path, parse_dates=['timestamp', 'expiration'])
     
+    # Clean column names
+    df.columns = df.columns.str.strip()
+    
+    # Standardize 'call_put' or 'option_type' to 'option_type'
+    if 'call_put' in df.columns:
+        df.rename(columns={'call_put': 'option_type'}, inplace=True)
+        
+    # Normalize option_type (C/P -> call/put)
+    if 'option_type' in df.columns:
+        df['option_type'] = df['option_type'].replace({'C': 'call', 'P': 'put'})
+    
     # Filter by date range
     if start_date:
         df = df[df['timestamp'] >= pd.Timestamp(start_date, tz='UTC')]
@@ -124,20 +147,24 @@ def load_intraday_options(file_path: str, start_date=None, end_date=None) -> dic
         
         # Convert group to dict of dicts: {symbol: {fields}}
         group_dict = {}
-        for row in group.itertuples():
-            sym = row.symbol
-            expiration = row.expiration.date() if hasattr(row.expiration, 'date') else row.expiration
+        # Use to_dict('records') for safer column access
+        for row in group.to_dict('records'):
+            sym = row['symbol']
+            # Expiration might be string or timestamp
+            expiration = row['expiration']
+            if hasattr(expiration, 'date'):
+                expiration = expiration.date()
             
             group_dict[sym] = {
-                'price': row.close,
-                'strike': row.strike,
+                'price': row['close'],
+                'strike': row['strike'],
                 'expiration': expiration,
-                'type': 'call' if row.option_type == 'call' else 'put',
-                'delta': row.delta_intraday,
-                'theta': row.theta_intraday,
-                'gamma': row.gamma_intraday,
-                'vega': row.vega_intraday,
-                'iv': row.iv_intraday
+                'type': row['option_type'],
+                'delta': row['delta_intraday'],
+                'theta': row['theta_intraday'],
+                'gamma': row['gamma_intraday'],
+                'vega': row['vega_intraday'],
+                'iv': row['iv_intraday']
             }
         options_by_time[ts_key] = group_dict
         

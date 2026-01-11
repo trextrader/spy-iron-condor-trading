@@ -705,6 +705,46 @@ print(f"Fuzzy Confidence: {Ft:.2f}")  # → 0.71
 
 ---
 
+## 🧠 7. DeepMamba 2 Neural Forecasting Engine
+
+The system leverages a **State-Space Model (SSM)** architecture (Mamba 2) for high-fidelity market forecasting. Unlike Transformers, Mamba scales linearly with sequence length and maintains a persistent "memory" of market state.
+
+### 7.1 Architecture Details
+*   **Model**: `DeepMamba` (Custom PyTorch implementation)
+*   **Layers**: 16–32 selective SSM layers
+*   **Dimension** ($d_{model}$): 64–1024
+*   **State Dim** ($d_{state}$): 32
+*   **Activation**: Selective Hidden State Evolution with $Tanh$ head
+
+### 7.2 Mathematical Foundation
+
+The core of the Mamba block is a continuous-time system discretized for digital computation:
+
+#### Continuous Form
+$$ h'(t) = \mathbf{A}h(t) + \mathbf{B}x(t) $$
+$$ y(t) = \mathbf{C}h(t) $$
+
+#### Discretization (Zero-Order Hold)
+To process discrete market bars, the parameters are transformed using step size $\Delta$:
+$$ \overline{\mathbf{A}} = \exp(\Delta \mathbf{A}) $$
+$$ \overline{\mathbf{B}} = (\Delta \mathbf{A})^{-1}(\exp(\Delta \mathbf{A}) - \mathbf{I}) \cdot \Delta \mathbf{B} $$
+
+#### Selective Mechanism
+Mamba 2 makes $\Delta, \mathbf{B}, \mathbf{C}$ functions of the input $x_t$, allowing the model to selectively propagate or reset its hidden state based on market volatility:
+$$ \Delta_t = \text{Softplus}(\text{Linear}(x_t)) $$
+$$ \mathbf{B}_t = \text{Linear}(x_t), \quad \mathbf{C}_t = \text{Linear}(x_t) $$
+
+### 7.3 Feature Engineering (Input Vector)
+The model consumes a 4-dimensional feature vector per bar, embedded into $d_{model}$:
+$$ \vec{V}_t = [ \Delta \log(P_t), \text{RSI}_{norm}, \text{ATR}_{pct}, \text{Vol}_{ratio} ] $$
+
+### 7.4 Model Persistence
+Weights are stored in the `models/` directory:
+*   `mamba_v1.pth`: Baseline stable model.
+*   `mamba_active.pth`: Latest optimized weights from the current Phase 6 run.
+
+---
+
 ## 📊 Iron Condor Strategy Mathematics
 
 ### Structure

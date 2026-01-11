@@ -119,9 +119,25 @@ def pick_expiration(expirations: List[dt.date], cfg, today: dt.date) -> Optional
     candidates = [e for e in expirations if cfg.dte_min <= (e - today).days <= cfg.dte_max]
     return sorted(candidates)[0] if candidates else None
 
+def calculate_skew(chain: List[OptionQuote]) -> float:
+    """
+    Calculate 25-Delta Skew: (Put IV - Call IV)
+    Positive => Puts are more expensive (Bearish Sentiment / Crash Protection)
+    """
+    puts_25 = [q for q in chain if not q.is_call]
+    calls_25 = [q for q in chain if q.is_call]
+    
+    if not puts_25 or not calls_25:
+        return 0.0
+        
+    p25 = min(puts_25, key=lambda q: abs(abs(q.delta) - 0.25))
+    c25 = min(calls_25, key=lambda q: abs(abs(q.delta) - 0.25))
+    
+    return p25.iv - c25.iv
+
 def nearest_by_delta(quotes: List[OptionQuote], is_call: bool, 
                      target_low: float, target_high: float,
-                     atm_iv: float = None) -> Optional[OptionQuote]:
+                     atm_iv: float = None, market_skew: float = 0.0) -> Optional[OptionQuote]:
     """
     Select best strike by delta, penalizing those with 'bad' skew 
     (buying high IV or selling low IV relative to ATM).
@@ -130,7 +146,23 @@ def nearest_by_delta(quotes: List[OptionQuote], is_call: bool,
                   and within_delta_band(q, target_low, target_high)]
     
     if not candidates:
-        return None
+        # Fallback: Find closest if within reasonable tolerance (e.g. +/- 0.05)
+        # useful for sparse data backtests
+        typed_quotes = [q for q in quotes if q.is_call == is_call]
+        if typed_quotes:
+            closest = min(typed_quotes, key=lambda q: min(abs(abs(q.delta) - target_low), abs(abs(q.delta) - target_high)))
+            d = abs(closest.delta)
+            # Accept if close enough (Backtest Data Patch)
+            if (target_low - 0.05) <= d <= (target_high + 0.05):
+                candidates = [closest]
+            else:
+                # Debugging: What deltas ARE available?
+                all_deltas = [abs(q.delta) for q in typed_quotes]
+                if len(all_deltas) > 0:
+                     print(f"      [Debug] No { 'Call' if is_call else 'Put' } in [{target_low}, {target_high}]. Available abs(delta): {min(all_deltas):.4f} to {max(all_deltas):.4f}")
+                return None
+        else:
+             return None
 
     center_delta = (target_low + target_high) / 2.0
     
@@ -141,13 +173,22 @@ def nearest_by_delta(quotes: List[OptionQuote], is_call: bool,
     for q in candidates:
         delta_dist = abs(abs(q.delta) - center_delta)
         
-        # Skew Penalty used as a tie-breaker or sweetener
-        skew_penalty = 0.0
+        # Skew Penalty: Penalize selling low IV
+        iv_penalty = 0.0
         if atm_iv and q.iv < atm_iv:
-            # Selling cheap volatility is bad. Penalize.
-            skew_penalty = (atm_iv - q.iv) * 100.0  # Weight factor
+            iv_penalty = (atm_iv - q.iv) * 100.0
             
-        score = delta_dist + (skew_penalty * 0.1) # 0.1 weight: Delta is still king
+        # Directional Skew Adjustment
+        # If Market Skew is Positive (Puts > Calls), Selling Puts is lucrative but risky.
+        # If we are selling Puts (is_call=False) and Skew is High (> 5%), 
+        # we might favor lower delta (safer) to account for crash risk.
+        skew_align_penalty = 0.0
+        if not is_call and market_skew > 0.05:
+            # High Put Skew: Penalize higher deltas (closer to money)
+            if abs(q.delta) > center_delta: 
+                skew_align_penalty = 2.0
+                
+        score = delta_dist + (iv_penalty * 0.1) + skew_align_penalty
         
         if score < best_score:
             best_score = score
@@ -173,9 +214,23 @@ def pick_long_by_width(chain: List[OptionQuote], short_leg: OptionQuote,
     return sorted(candidates, key=lambda q: abs(q.strike - target_strike))[0]
 
 # === Wing Width Determination ===
-def regime_wing_width(cfg, iv_rank: float, vix: float) -> float:
+def regime_wing_width(cfg, iv_rank: float, vix: float, regime: str = "NEUTRAL") -> float:
     """Dynamic wing width based on volatility regime"""
     base = cfg.wing_width_min
+    
+    # Regime-based overrides
+    if regime == "VOLATILE":
+        return cfg.wing_width_max
+        
+    if regime == "TRENDING" or regime == "TRENDING_WEAK":
+        # In trending market, wide wings prevent early stopping on tested side?
+        # Or actually, maybe we shouldn't trade. Assuming we trade, go wide.
+        return min(cfg.wing_width_max, base + cfg.width_widen_increment)
+        
+    if regime == "RANGING":
+        return base
+
+    # Fallback VIX/IVR Logic
     high_vol = (iv_rank >= cfg.regime_iv_rank_widen) or (vix >= cfg.regime_vix_widen)
     if high_vol:
         return min(cfg.wing_width_max, base + cfg.width_widen_increment)
@@ -195,24 +250,31 @@ def optimize_wing_width(cfg, historical_credit_curve: Dict[float, float]) -> flo
 def build_condor(chain: List[OptionQuote], cfg, today: dt.date, 
                  spot: float, base_wing_width: float) -> Optional[IronCondorLegs]:
     """Construct iron condor from option chain"""
-    # Estimate ATM IV
+    # Estimate ATM IV and Skew
     atm_iv = None
+    market_skew = calculate_skew(chain)
+    
     calls = [q for q in chain if q.is_call]
     if calls:
         # Find closest to spot
         atm_call = min(calls, key=lambda q: abs(q.strike - spot))
         atm_iv = atm_call.iv
-
-    short_call = nearest_by_delta(chain, True, cfg.target_short_delta_low, cfg.target_short_delta_high, atm_iv)
-    short_put = nearest_by_delta(chain, False, cfg.target_short_delta_low, cfg.target_short_delta_high, atm_iv)
+    
+    short_call = nearest_by_delta(chain, True, cfg.target_short_delta_low, cfg.target_short_delta_high, atm_iv, market_skew)
+    short_put = nearest_by_delta(chain, False, cfg.target_short_delta_low, cfg.target_short_delta_high, atm_iv, market_skew)
     
     if not short_call or not short_put:
+        # Debug why it failed
+        if not short_call: print(f"      [Build Fail] No Short Call in delta range [{cfg.target_short_delta_low}, {cfg.target_short_delta_high}]")
+        if not short_put: print(f"      [Build Fail] No Short Put in delta range [{cfg.target_short_delta_low}, {cfg.target_short_delta_high}]")
         return None
     
     long_call = pick_long_by_width(chain, short_call, True, base_wing_width)
     long_put = pick_long_by_width(chain, short_put, False, base_wing_width)
     
     if not long_call or not long_put:
+        if not long_call: print(f"      [Build Fail] No Long Call at width {base_wing_width} for Short Call {short_call.strike}")
+        if not long_put: print(f"      [Build Fail] No Long Put at width {base_wing_width} for Short Put {short_put.strike}")
         return None
     
     # Calculate net credit and max loss
@@ -273,6 +335,15 @@ def check_mtf_alignment(cfg, mtf_snapshot) -> Tuple[bool, str, float]:
     
     return True, f"MTF consensus {consensus:.2f} favorable for range", consensus
 
+def calculate_breach_probability(delta: float) -> float:
+    """
+    Estimate probability of strike breach (ITM) at expiration.
+    Approximation: Prob(ITM) ~= abs(Delta).
+    For more complex models (Touch Prob), we typically multiply by 2.
+    Here we focus on Expiration Prob.
+    """
+    return abs(delta)
+
 def validate_pricing_and_risk(legs: IronCondorLegs, width: float, 
                               cfg, acct_equity: float) -> Tuple[bool, str, float]:
     """Validate credit and risk constraints"""
@@ -286,6 +357,17 @@ def validate_pricing_and_risk(legs: IronCondorLegs, width: float,
     
     if mloss > cfg.max_account_risk_per_trade * acct_equity:
         return False, f"Reject: max loss ${mloss:.2f} exceeds per-trade risk", credit
+        
+    # Probabilistic Filter: Reject if leg delta is significantly drifted
+    # Strategy picks 0.12-0.30. If we somehow got > 0.35, reject.
+    prob_call = calculate_breach_probability(legs.short_call.delta)
+    prob_put = calculate_breach_probability(legs.short_put.delta)
+    
+    max_prob = 0.35
+    if prob_call > max_prob:
+        return False, f"Reject: Call Delta {prob_call:.2f} > {max_prob} (High Breach Prob)", credit
+    if prob_put > max_prob:
+        return False, f"Reject: Put Delta {prob_put:.2f} > {max_prob} (High Breach Prob)", credit
     
     return True, "OK", credit
 
