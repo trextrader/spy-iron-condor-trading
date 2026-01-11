@@ -159,8 +159,12 @@ def train_condor_brain(args):
     if device.type == 'cuda':
         print(f"[CondorBrain] GPU: {torch.cuda.get_device_name(0)}")
         print(f"[CondorBrain] GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+        # CUDA optimizations for max speed
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True  # Auto-tune kernels
+        torch.backends.cudnn.deterministic = False  # Speed over reproducibility
+        print("[CondorBrain] CUDA optimizations enabled: TF32, cuDNN benchmark")
     
     # Load data
     print(f"\n[CondorBrain] Loading data from {args.local_data}...")
