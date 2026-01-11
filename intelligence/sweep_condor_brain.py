@@ -236,7 +236,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--csv", required=True)
     parser.add_argument("--epochs", type=int, default=5)
-    parser.add_argument("--lookback", type=int, default=240)
+    parser.add_argument("--lookback", type=int, default=120)
     parser.add_argument("--max-rows", type=int, default=0, help="Limit rows for faster sweep")
     args = parser.parse_args()
     
