@@ -72,6 +72,19 @@ class MTFSyncEngine:
             
             # ATR: Average True Range (14-period)
             df['atr_14'] = ta.atr(df['high'], df['low'], df['close'], length=14)
+
+            # PSAR: Parabolic SAR (0.02, 0.2)
+            psar = ta.psar(df['high'], df['low'], df['close'], af=0.02, max_af=0.2)
+            if psar is not None and not psar.empty:
+                # pandas-ta PSAR returns multiple columns; we want the active one
+                # psarl (long) or psars (short)
+                psar_val = psar.iloc[:, 0] 
+                df['psar'] = psar_val
+                # Derived: -1 if price > psar (bullish), +1 if price < psar (bearish)
+                df['psar_position'] = np.where(df['close'] > df['psar'], -1, 1)
+            else:
+                df['psar'] = df['close']
+                df['psar_position'] = 0
             
             # === VOLUME INDICATORS ===
             df['volume_ma_20'] = ta.sma(df['volume'], length=20)

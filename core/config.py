@@ -40,11 +40,11 @@ class StrategyConfig:
     vrp_lag_weighting: bool = True
     vrp_lag_weight_mode: str = "multiply"  # {"multiply","subtract"}
     vrp_lag_penalty_scale: float = 1.045
-    target_short_delta_low:  float = 0.08  
-    target_short_delta_high: float = 0.25
+    target_short_delta_low:  float = 0.12  
+    target_short_delta_high: float = 0.30
     
     # === Wing Width & Pricing ===
-    wing_width_min:  float = 5.00  # ~7-8% of SPY at $650-700
+    wing_width_min:  float = 10.00  # ~7-8% of SPY at $650-700
 
     wing_width_max: float = 80.0  # ~12% of SPY at $650-700
     min_credit_to_width:  float = 0.10  # 15% credit minimum
@@ -56,14 +56,14 @@ class StrategyConfig:
     max_portfolio_alloc: float = 0.15
     
     # === Entry Filters ===
-    iv_rank_min:  float = 0.00  
+    iv_rank_min:  float = 40.0  
     vix_threshold:  float = 25.00  # Max VIX for new entries
 
     
     # === Exit Rules ===
-    profit_take_pct:    float = 0.40  
+    profit_take_pct:    float = 0.50  
     loss_close_multiple:   float = 1.00  
-    max_hold_days:  int = 10  
+    max_hold_days:  int = 21  
     
     # === Adjustment Rules ===
     delta_roll_threshold: float = 0.30
@@ -80,7 +80,7 @@ class StrategyConfig:
     
     # === Dynamic Wing Logic ===
     base_wing_width: float = 5.0
-    vix_threshold_low: float = 20.0
+    vix_threshold_low: float = 15.0
     vix_threshold_high: float = 30.0
     wing_increment_med: float = 2.5   # If VIX > 20
     wing_increment_high: float = 5.0  # If VIX > 30
@@ -92,7 +92,7 @@ class StrategyConfig:
     mtf_consensus_max: float = 0.80  # Max consensus (avoid strong trends)
     use_liquidity_gate: bool = True
     min_volume_threshold: int = 100
-    max_volatility_pct: float = 0.02  # Max 2% range in recent bars
+    max_volatility_pct: float = 0.03  # Max 2% range in recent bars
 
     # === ADVANCED TECHNICAL INDICATORS ===
 
@@ -102,15 +102,15 @@ class StrategyConfig:
     
     # === Fuzzy / Gaussian Logic ===
     min_gaussian_confidence: float = 0.20
-    rsi_neutral_min:  float = 30  # Lower bound of neutral zone
+    rsi_neutral_min:  float = 30.0  # Lower bound of neutral zone
 
-    rsi_neutral_max:  float = 60  # Upper bound of neutral zone
+    rsi_neutral_max:  float = 70.0  # Upper bound of neutral zone
 
 
     # ADX (Average Directional Index) Settings
     use_adx_filter: bool = True
     adx_period: int = 14
-    adx_threshold_low: float = 25.0  # Below this = weak trend (good)
+    adx_threshold_low: float = 20.0  # Below this = weak trend (good)
     adx_threshold_high: float = 55.0  # Above this = strong trend (avoid)
 
     # Stochastic Oscillator Settings
@@ -118,8 +118,8 @@ class StrategyConfig:
     stoch_k_period: int = 14
     stoch_d_period: int = 3
     stoch_smooth_k: int = 3
-    stoch_neutral_min: float = 30.0
-    stoch_neutral_max: float = 70.0
+    stoch_neutral_min: float = 20.0
+    stoch_neutral_max: float = 80.0
 
     # Bollinger Bands Settings
     use_bbands_filter: bool = True
@@ -163,23 +163,23 @@ class StrategyConfig:
 
     # === 10-FACTOR FUZZY WEIGHTS (Sum = 1.00) ===
     # Ft = Σ(w_j × μ_j) for j=1 to 10
-    fuzzy_weight_mtf: float = 0.18       # Multi-timeframe consensus
-    fuzzy_weight_iv: float = 0.14        # IV Rank
-    fuzzy_weight_regime: float = 0.11    # VIX regime
-    fuzzy_weight_rsi: float = 0.10       # RSI neutrality
-    fuzzy_weight_adx: float = 0.10       # Trend strength
-    fuzzy_weight_bbands: float = 0.09    # Bollinger position/squeeze
-    fuzzy_weight_stoch: float = 0.08     # Stochastic momentum
-    fuzzy_weight_volume: float = 0.07    # Volume confirmation
-    fuzzy_weight_sma: float = 0.06       # SMA distance
-    fuzzy_weight_psar: float = 0.07      # Parabolic SAR (10th)
+    fuzzy_weight_mtf: float = 0.10       # Multi-timeframe consensus
+    fuzzy_weight_iv: float = 0.10        # IV Rank
+    fuzzy_weight_regime: float = 0.08    # VIX regime
+    fuzzy_weight_rsi: float = 0.05       # RSI neutrality
+    fuzzy_weight_adx: float = 0.05       # Trend strength
+    fuzzy_weight_bbands: float = 0.15    # Bollinger position/squeeze
+    fuzzy_weight_stoch: float = 0.15     # Stochastic momentum
+    fuzzy_weight_volume: float = 0.12    # Volume confirmation
+    fuzzy_weight_sma: float = 0.10       # SMA distance
+    fuzzy_weight_psar: float = 0.10      # Parabolic SAR (10th)
     # Total: 0.18+0.14+0.11+0.10+0.10+0.09+0.08+0.07+0.06+0.07 = 1.00
 
     # === Mamba Neural Forecasting ===
     use_mamba_model: bool = True               # Enable Mamba 2 neural engine
     mamba_d_model: int = 64                    # Model dimension
     mamba_layers: int = 16                     # Model depth
-    fuzzy_weight_neural: float = 0.20          # Weight of neural signal in sizing
+    fuzzy_weight_neural: float = 0.10          # Weight of neural signal in sizing
 
     # === Position Sizing Guardrails ===
     min_total_qty_for_iron_condor: int = 2     # Minimum contracts for Iron Condor (must be >= 2 for two wings)

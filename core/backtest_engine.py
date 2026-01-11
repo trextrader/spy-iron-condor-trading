@@ -664,6 +664,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             bb_width = snapshot_5m.get('bb_width', None)
             volume_ratio = snapshot_5m.get('volume_ratio', None)
             sma_distance = snapshot_5m.get('sma_distance', None)
+            psar_pos = snapshot_5m.get('psar_position', None)
 
             # RSI Filter
             if self.s_cfg.use_rsi_filter:
@@ -746,6 +747,16 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     return
             else:
                 mu_sma = 0.5
+
+            # PSAR Filter (10th Indicator)
+            if self.s_cfg.use_psar_filter:
+                mu_psar = calculate_psar_membership(psar_pos)
+                if mu_psar < 0.3:
+                    if self.verbose:
+                        print(f"  [Filter] Strong PSAR trend ({psar_pos}), skip entry")
+                    return
+            else:
+                mu_psar = 0.5
 
             # Existing MTF consensus check
             if self.s_cfg.use_mtf_filter:
@@ -843,30 +854,21 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             # from qtmf.models import TradeIntent # Moved to top
             # from qtmf.facade import benchmark_and_size # Moved to top
 
-            # Calculate Gaussian Confidence from Fuzzy Memberships
-            gaussian_confidence = (
-                mu_mtf * getattr(self.s_cfg, 'fuzzy_weight_mtf', 0.25) +
-                mu_iv * getattr(self.s_cfg, 'fuzzy_weight_iv', 0.18) +
-                mu_regime * getattr(self.s_cfg, 'fuzzy_weight_regime', 0.15) +
-                mu_rsi * getattr(self.s_cfg, 'fuzzy_weight_rsi', 0.10) +
-                mu_adx * getattr(self.s_cfg, 'fuzzy_weight_adx', 0.10) +
-                mu_stoch * getattr(self.s_cfg, 'fuzzy_weight_stoch', 0.07) +
-                mu_bbands * getattr(self.s_cfg, 'fuzzy_weight_bbands', 0.08) +
-                mu_volume * getattr(self.s_cfg, 'fuzzy_weight_volume', 0.04) +
-                mu_sma * getattr(self.s_cfg, 'fuzzy_weight_sma', 0.03)
-            )
+            # Assign Neural Confidence to gaussian_confidence (for Facade Fusion)
+            # Default to 0.5 (neutral) if no forecast available
+            mamba_conf = neural_forecast_data['confidence'] if (neural_forecast_data and 'confidence' in neural_forecast_data) else 0.5
 
-            # Construct Trade Intent with all 9 indicators + Neural Signal
+            # Construct Trade Intent with all 10 Indicators + Neural Signal
             intent = TradeIntent(
                 symbol=self.s_cfg.underlying,
                 action="SELL_CONDOR",
-                gaussian_confidence=gaussian_confidence,
+                gaussian_confidence=mamba_conf, # Component for Stage 2 Fusion
                 current_price=self.data.close[0],
                 vix=vix,
                 ivr=ivr,
                 realized_vol=0.0,
                 mtf_snapshot=mtf_snapshot,
-                # New Advanced Indicators
+                # Indicator State
                 rsi=rsi_current,
                 adx=adx_current,
                 bb_position=bb_position,
@@ -874,26 +876,28 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                 stoch_k=stoch_k,
                 volume_ratio=volume_ratio,
                 sma_distance=sma_distance,
+                psar_position=psar_pos, # Pass the pos from earlier calc
                 # Neural Forecast
                 neural_forecast=neural_forecast_data,
                 extras={
                     'equity': self.broker.get_cash(),
-                    'max_loss_per_contract': width * 100.0, # Approximate max loss as spread width
+                    'max_loss_per_contract': width * 100.0,
                     'risk_fraction': self.s_cfg.max_account_risk_per_trade,
-                    'min_gaussian_confidence': getattr(self.s_cfg, 'min_gaussian_confidence', 0.20),  # Use config
-                    'fallback_total_qty': getattr(self.s_cfg, 'min_total_qty_for_iron_condor', 2),  # Configurable minimum
-                    'min_total_qty_for_two_wings': getattr(self.s_cfg, 'min_total_qty_for_iron_condor', 2),  # Facade guardrail
+                    'min_gaussian_confidence': getattr(self.s_cfg, 'min_gaussian_confidence', 0.20),
+                    'fallback_total_qty': getattr(self.s_cfg, 'min_total_qty_for_iron_condor', 2),
+                    'min_total_qty_for_two_wings': getattr(self.s_cfg, 'min_total_qty_for_iron_condor', 2),
                     # Pass config weights to facade
-                    'w_mtf': getattr(self.s_cfg, 'fuzzy_weight_mtf', 0.25),
-                    'w_iv': getattr(self.s_cfg, 'fuzzy_weight_iv', 0.20),
-                    'w_regime': getattr(self.s_cfg, 'fuzzy_weight_regime', 0.15),
-                    'w_rsi': getattr(self.s_cfg, 'fuzzy_weight_rsi', 0.10),
-                    'w_adx': getattr(self.s_cfg, 'fuzzy_weight_adx', 0.10),
-                    'w_bbands': getattr(self.s_cfg, 'fuzzy_weight_bbands', 0.10),
-                    'w_volume': getattr(self.s_cfg, 'fuzzy_weight_volume', 0.05),
-                    'w_sma': getattr(self.s_cfg, 'fuzzy_weight_sma', 0.05),
-                    'w_stoch': getattr(self.s_cfg, 'fuzzy_weight_stoch', 0.07),
-                    'fuzzy_weight_neural': getattr(self.s_cfg, 'fuzzy_weight_neural', 0.20)
+                    'w_mtf': getattr(self.s_cfg, 'fuzzy_weight_mtf', 0.10),
+                    'w_iv': getattr(self.s_cfg, 'fuzzy_weight_iv', 0.10),
+                    'w_regime': getattr(self.s_cfg, 'fuzzy_weight_regime', 0.08),
+                    'w_rsi': getattr(self.s_cfg, 'fuzzy_weight_rsi', 0.05),
+                    'w_adx': getattr(self.s_cfg, 'fuzzy_weight_adx', 0.05),
+                    'w_bbands': getattr(self.s_cfg, 'fuzzy_weight_bbands', 0.15),
+                    'w_volume': getattr(self.s_cfg, 'fuzzy_weight_volume', 0.12),
+                    'w_sma': getattr(self.s_cfg, 'fuzzy_weight_sma', 0.10),
+                    'w_stoch': getattr(self.s_cfg, 'fuzzy_weight_stoch', 0.15),
+                    'w_psar': getattr(self.s_cfg, 'fuzzy_weight_psar', 0.10),
+                    'fuzzy_weight_neural': getattr(self.s_cfg, 'fuzzy_weight_neural', 0.10)
                 }
             )
             

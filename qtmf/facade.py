@@ -238,8 +238,15 @@ def benchmark_and_size(
     high_vol = float(extras.get("high_vol", 35.0))
     sigma_star = normalize_volatility(realized_vol, low_vol, high_vol)
 
-    # Scale: combine Gaussian confidence and fuzzy Ft to avoid double-counting.
-    fused_conf = _clamp((ti.gaussian_confidence * 0.60) + (Ft * 0.40), 0.0, 1.0)
+    # Neural-Fuzzy Fusion (Stage 2)
+    # Scale: combine Neural confidence (gaussian_confidence) and fuzzy Technical Ft.
+    # relative weight w_nl for neural, (1-w_nl) for technical.
+    w_nl = float(extras.get("fuzzy_weight_neural", 0.60))
+    
+    # gaussian_confidence here represents the Neural (Mamba) probability/signal
+    neural_conf = ti.gaussian_confidence
+    
+    fused_conf = _clamp((neural_conf * w_nl) + (Ft * (1.0 - w_nl)), 0.0, 1.0)
     g = compute_scaling_factor(fused_conf, sigma_star, min_scale=float(extras.get("min_scale", 0.10)))
 
     # Check minimum requirements before applying scaling floor

@@ -317,7 +317,9 @@ elif z < -2.0:
 **Theory**: Put skew (higher IV for OTM puts) indicates crash risk. Steep skew suggests expensive downside protection.
 
 #### Skew Metric
-$$ \text{Skew} = \frac{IV_{put} - IV_{call}}{IV_{ATM}} $$
+$$
+\text{Skew} = \frac{IV_{\mathrm{put}} - IV_{\mathrm{call}}}{IV_{\mathrm{ATM}}}
+$$
 
 Where:
 - $IV_{put}$ = Implied volatility of OTM put (e.g., 15-delta)
@@ -330,7 +332,9 @@ Where:
 - $\text{Skew} < 0$: Call skew (rare) → Potential rally risk
 
 **Risk Adjustment**:
-$$ W_{put} = W_{base} + \Delta W \cdot \mathbb{1}_{\{\text{Skew} > \theta_{skew}\}} $$
+$$
+W_{\mathrm{put}} = W_{\mathrm{base}} + \Delta W \cdot \mathbb{1}_{\{\text{Skew} > \theta_{\mathrm{skew}}\}}
+$$
 
 Where:
 - $W_{put}$ = Put wing width
@@ -435,25 +439,25 @@ if basis < 0:
 The fuzzy position sizing system uses 11 indicators (10 technical + 1 neural), blending them into a final confidence score $C \in [0, 1]$:
 
 $$ F_t = \sum_{j=1}^{10} w_j \cdot \mu_j $$
-$$ C = 0.60 \cdot \mu_{Mamba} + 0.40 \cdot F_t $$
+$$ C = 0.10 \cdot \mu_{\mathrm{Mamba}} + 0.90 \cdot F_t $$
 
 | # | Factor | Weight | Description |
 |---|--------|--------|-------------|
-| 1 | **DeepMamba 2** | 0.60 (Rel) | Neural forecast confidence |
-| 2 | MTF Consensus | 0.18 | Multi-timeframe alignment |
-| 3 | IV Rank | 0.14 | Implied volatility percentile |
-| 4 | VIX Regime | 0.11 | Market fear index |
-| 5 | RSI | 0.10 | Momentum oscillator |
-| 6 | ADX | 0.10 | Trend strength |
-| 7 | Bollinger Bands | 0.09 | Volatility regime |
-| 8 | Stochastic | 0.08 | Overbought/Oversold |
-| 9 | PSAR | 0.07 | Trend reversal |
-| 10 | Volume | 0.07 | Liquidity confirmation |
-| 11 | SMA Distance | 0.06 | Mean reversion |
+| 1 | **DeepMamba 2** | 0.10 (Rel) | Neural forecast confidence |
+| 2 | MTF Consensus | 0.10 | Multi-timeframe alignment |
+| 3 | IV Rank | 0.10 | Implied volatility percentile |
+| 4 | VIX Regime | 0.08 | Market fear index |
+| 5 | RSI | 0.05 | Momentum oscillator |
+| 6 | ADX | 0.05 | Trend strength |
+| 7 | Bollinger Bands | 0.15 | Range positioning |
+| 8 | Stochastic | 0.15 | Momentum neutrality |
+| 9 | Volume | 0.12 | Liquidity confirmation |
+| 10 | SMA Distance | 0.10 | Mean reversion potential |
+| 11 | Parabolic SAR | 0.10 | Trend reversal detection |
 
 ---
 
-#### 6.1 MTF Consensus (w = 0.18)
+#### 6.1 MTF Consensus (w = 0.10)
 
 **Theory**: Multi-timeframe alignment measures agreement across 1m, 5m, and 15m timeframes. Neutral consensus favors Iron Condors.
 
@@ -467,7 +471,7 @@ Where $C_{1/5/15} \in [0, 1]$ is the weighted consensus:
 
 ---
 
-#### 6.2 IV Rank (w = 0.14)
+#### 6.2 IV Rank (w = 0.10)
 
 **Theory**: High IV Rank means elevated implied volatility relative to history—favorable for selling premium.
 
@@ -487,7 +491,7 @@ $$
 
 ---
 
-#### 6.3 VIX Regime (w = 0.11)
+#### 6.3 VIX Regime (w = 0.08)
 
 **Theory**: Low VIX indicates stable markets; high VIX signals fear and potential oversized moves.
 
@@ -507,7 +511,7 @@ $$
 
 ---
 
-#### 6.4 RSI (w = 0.10) - Wilder Smoothing
+#### 6.4 RSI (w = 0.05) - Wilder Smoothing
 
 $$ RS = \frac{EMA_{\alpha}(\text{Gain})}{EMA_{\alpha}(\text{Loss})} $$
 
@@ -530,7 +534,7 @@ $$
 
 ---
 
-#### 6.5 ADX (w = 0.10) - Wilder Smoothing
+#### 6.5 ADX (w = 0.05) - Wilder Smoothing
 
 $$ +DI = 100 \cdot \frac{EMA_{\alpha}(+DM)}{ATR} $$
 
@@ -555,22 +559,22 @@ $$
 
 ---
 
-#### 6.6 Bollinger Bands (w = 0.09)
+#### 6.6 Bollinger Bands (w = 0.15)
 
 $$
-\text{Upper} = SMA_{20} + 2 \cdot \sigma_{20}
-$$
-
-$$
-\text{Lower} = SMA_{20} - 2 \cdot \sigma_{20}
+\mathrm{Upper} = SMA_{20} + 2 \cdot \sigma_{20}
 $$
 
 $$
-BB_{\mathrm{position}} = \frac{Price - \text{Lower}}{\text{Upper} - \text{Lower}}
+\mathrm{Lower} = SMA_{20} - 2 \cdot \sigma_{20}
 $$
 
 $$
-BB_{\mathrm{width}} = \frac{\text{Upper} - \text{Lower}}{SMA_{20}}
+BB_{\mathrm{position}} = \frac{Price - \mathrm{Lower}}{\mathrm{Upper} - \mathrm{Lower}}
+$$
+
+$$
+BB_{\mathrm{width}} = \frac{\mathrm{Upper} - \mathrm{Lower}}{SMA_{20}}
 $$
 
 **Membership** (middle of bands = ideal):
@@ -579,15 +583,15 @@ $$
 \mu_{\mathrm{BB}} = 0.7 \times (1 - |BB_{\mathrm{position}} - 0.5| \times 2) + 0.3 \times \max\left(0, 1 - \frac{BB_{\mathrm{width}}}{0.04}\right)
 $$
 
-- $BB_{position} = 0.5$: $\mu \to 1.0$ (price at center)
-- $BB_{position} < 0.05$ or $> 0.95$: $\mu \to 0$ (touching bands, avoid)
+- $BB_{\mathrm{position}} = 0.5$: $\mu \to 1.0$ (price at center)
+- $BB_{\mathrm{position}} < 0.05$ or $> 0.95$: $\mu \to 0$ (touching bands, avoid)
 
 ---
 
-#### 6.7 Stochastic Oscillator (w = 0.08)
+#### 6.7 Stochastic Oscillator (w = 0.15)
 
 $$
-\%K = 100 \cdot \frac{Close - Low_{14}}{High_{14} - Low_{14}}
+\%K = 100 \cdot \frac{\mathrm{Close} - \mathrm{Low}_{14}}{\mathrm{High}_{14} - \mathrm{Low}_{14}}
 $$
 
 $$
@@ -609,7 +613,7 @@ $$
 
 ---
 
-#### 6.8 Parabolic SAR (w = 0.07)
+#### 6.8 Parabolic SAR (w = 0.10)
 
 $$
 SAR_{t+1} = SAR_t + AF \cdot (EP - SAR_t)
@@ -626,12 +630,12 @@ $$
 $$
 
 Where $P_{position} \in [-1, +1]$:
-- $P_{position} = 0$: PSAR crossover → $\mu = 1.0$ (ideal for IC)
-- $|P_{position}| = 1$: Strong trend → $\mu = 0.0$ (avoid)
+- $P_{\mathrm{position}} = 0$: PSAR crossover → $\mu = 1.0$ (ideal for IC)
+- $|P_{\mathrm{position}}| = 1$: Strong trend → $\mu = 0.0$ (avoid)
 
 ---
 
-#### 6.9 Volume Ratio (w = 0.07)
+#### 6.9 Volume (w = 0.12)
 
 $$
 V_{\mathrm{ratio}} = \frac{Volume_t}{SMA_{20}(Volume)}
@@ -643,12 +647,12 @@ $$
 \mu_{\mathrm{Vol}} = \min\left(1.0, \frac{V_{\mathrm{ratio}}}{0.8}\right)
 $$
 
-- $V_{ratio} \geq 0.8$: $\mu = 1.0$ (adequate liquidity)
-- $V_{ratio} < 0.4$: $\mu < 0.5$ (poor fills likely)
+- $V_{\mathrm{ratio}} \geq 0.8$: $\mu = 1.0$ (adequate liquidity)
+- $V_{\mathrm{ratio}} < 0.4$: $\mu < 0.5$ (poor fills likely)
 
 ---
 
-#### 6.10 SMA Distance (w = 0.06)
+#### 6.10 SMA Distance (w = 0.10)
 
 $$ D_{SMA} = \frac{Price - SMA_{20}}{SMA_{20}} $$
 
@@ -661,8 +665,8 @@ $$
 \end{cases}
 $$
 
-- $|D_{SMA}| = 0$: $\mu = 1.0$ (at equilibrium)
-- $|D_{SMA}| > 2\%$: $\mu = 0.0$ (extended, mean reversion risk)
+- $|D_{\mathrm{SMA}}| = 0$: $\mu = 1.0$ (at equilibrium)
+- $|D_{\mathrm{SMA}}| > 2\%$: $\mu = 0.0$ (extended, mean reversion risk)
 
 ---
 
@@ -724,7 +728,9 @@ $$
 Where $W$ = wing width (e.g., $W = K_{C_l} - K_{C_s} = K_{P_s} - K_{P_l}$)
 
 ### Mark-to-Market P&L
-$$ PnL_t = (Credit - Cost_t) \times Q \times 100 $$
+$$
+PnL_{\mathrm{t}} = (Credit - Cost_{\mathrm{t}}) \times Q \times 100
+$$
 
 Where:
 - $Cost_t = (C_{s,t} - C_{l,t}) + (P_{s,t} - P_{l,t})$ = current replacement cost
@@ -734,17 +740,23 @@ Where:
 ### Exit Conditions
 
 #### Profit Take
-$$ PnL_t \geq Credit \cdot \alpha_{PT} $$
+$$
+PnL_{\mathrm{t}} \geq Credit \cdot \alpha_{\mathrm{PT}}
+$$
 
 Example: $\alpha_{PT} = 0.50$ (50% of max profit)
 
 #### Stop Loss
-$$ PnL_t \leq -Credit \cdot \alpha_{SL} $$
+$$
+PnL_{\mathrm{t}} \leq -Credit \cdot \alpha_{\mathrm{SL}}
+$$
 
 Example: $\alpha_{SL} = 2.00$ (200% of credit = max loss)
 
 #### DTE Exit
-$$ DTE_t \leq DTE_{exit} $$
+$$
+DTE_{\mathrm{t}} \leq DTE_{\mathrm{exit}}
+$$
 
 Example: $DTE_{exit} = 21$ days
 
@@ -755,29 +767,41 @@ Example: $DTE_{exit} = 21$ days
 ### Portfolio Greeks Tracking
 
 #### Delta
-$$ \Delta_{\mathrm{portfolio}} = \sum_{i=1}^{N} \Delta_{\mathrm{trade}_i} \cdot Q_i $$
+$$
+\Delta_{\mathrm{portfolio}} = \sum_{i=1}^{N} \Delta_{\mathrm{trade}_i} \cdot Q_i
+$$
 
 **Limit**: $|\Delta_{\mathrm{portfolio}}| \leq \Delta_{\mathrm{max}}$ (e.g., $\Delta_{\mathrm{max}} = 200$)
 
 #### Gamma
-$$ \Gamma_{\mathrm{portfolio}} = \sum_{i=1}^{N} \Gamma_{\mathrm{trade}_i} \cdot Q_i $$
+$$
+\Gamma_{\mathrm{portfolio}} = \sum_{i=1}^{N} \Gamma_{\mathrm{trade}_i} \cdot Q_i
+$$
 
 **Limit**: $|\Gamma_{\mathrm{portfolio}}| \leq \Gamma_{\mathrm{max}}$ (e.g., $\Gamma_{\mathrm{max}} = 50$)
 
 #### Vega
-$$ \mathcal{V}_{\mathrm{portfolio}} = \sum_{i=1}^{N} \mathcal{V}_{\mathrm{trade}_i} \cdot Q_i $$
+$$
+\mathcal{V}_{\mathrm{portfolio}} = \sum_{i=1}^{N} \mathcal{V}_{\mathrm{trade}_i} \cdot Q_i
+$$
 
 **Limit**: $|\mathcal{V}_{\mathrm{portfolio}}| \leq \mathcal{V}_{\mathrm{max}}$ (e.g., $\mathcal{V}_{\mathrm{max}} = 500$)
 
 ### Drawdown Cap
-$$ DD_t = \frac{Equity_t - Equity_{peak}}{Equity_{peak}} $$
+$$
+DD_{\mathrm{t}} = \frac{Equity_{\mathrm{t}} - Equity_{\mathrm{peak}}}{Equity_{\mathrm{peak}}}
+$$
 
 **Limit**: $DD_t \geq DD_{max}$ (e.g., $DD_{max} = -0.02$ or -2%)
 
 ### Risk Budget Sizing
-$$ Q_{risk} = \left\lfloor \frac{RiskBudget}{MaxLoss_{contract}} \right\rfloor $$
+$$
+Q_{\mathrm{risk}} = \left\lfloor \frac{RiskBudget}{MaxLoss_{\mathrm{contract}}} \right\rfloor
+$$
 
-$$ Q_{final} = \min(Q_{fuzzy}, Q_{risk}) $$
+$$
+Q_{\mathrm{final}} = \min(Q_{\mathrm{fuzzy}}, Q_{\mathrm{risk}})
+$$
 
 ---
 
@@ -939,7 +963,9 @@ py scripts/run_full_backtest.py
 - **Expectancy Ratio**: Average win / Average loss
 
 ### Optimizer Objective
-$$ \text{Fitness} = \frac{NetProfit}{|MaxDrawdown|} $$
+$$
+\text{Fitness} = \frac{NetProfit}{|MaxDrawdown|}
+$$
 
 ---
 
