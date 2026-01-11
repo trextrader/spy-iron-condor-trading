@@ -170,6 +170,14 @@ class StrategyConfig:
     # === Spread limits expressed as % of mid price ===
     max_short_spread_pct: float = 0.25
     max_long_spread_pct: float  = 0.40
+    
+    # === Stage 3: Risk Controls ===
+    max_portfolio_delta: float = 200.0   # Max net delta (SPY share equivalent)
+    max_portfolio_gamma: float = 50.0    # Max net gamma
+    max_portfolio_vega: float = 1000.0   # Max net vega
+    max_delta_per_trade: float = 30.0    # Max net delta per new position
+    max_vega_per_trade: float = 300.0    # Max vega per new position
+    max_daily_drawdown_pct: float = 0.02 # Halt trading if daily loss > 2%
 
 
 @dataclass
