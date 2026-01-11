@@ -197,7 +197,7 @@ def train_condor_brain(args):
     
     print(f"[CondorBrain] Train: {len(X_train):,} | Val: {len(X_val):,}")
     
-    # DataLoaders
+    # DataLoaders with parallel loading
     train_loader = DataLoader(
         TensorDataset(
             torch.from_numpy(X_train),
@@ -206,7 +206,10 @@ def train_condor_brain(args):
         ),
         batch_size=args.batch_size,
         shuffle=True,
-        pin_memory=True
+        pin_memory=True,
+        num_workers=4,  # Parallel data loading
+        drop_last=True,  # Avoid uneven final batch
+        persistent_workers=True  # Keep workers alive
     )
     val_loader = DataLoader(
         TensorDataset(
@@ -215,7 +218,8 @@ def train_condor_brain(args):
             torch.from_numpy(r_val)
         ),
         batch_size=args.batch_size,
-        pin_memory=True
+        pin_memory=True,
+        num_workers=2
     )
     
     # Model
