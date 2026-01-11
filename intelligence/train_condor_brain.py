@@ -258,7 +258,16 @@ def train_condor_brain(args):
                 outputs, regime_probs, _ = model(batch_x, return_regime=True, forecast_days=0)
                 loss = criterion(outputs, batch_y, regime_probs, batch_r)
             
+            # Skip NaN losses (prevents explosion)
+            if torch.isnan(loss) or torch.isinf(loss):
+                continue
+            
             scaler.scale(loss).backward()
+            
+            # Gradient clipping (prevents explosion)
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             scaler.step(optimizer)
             scaler.update()
             
