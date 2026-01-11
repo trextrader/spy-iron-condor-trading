@@ -44,12 +44,22 @@ DEFAULT_CONFIG = {
     'model_path': 'models/mamba_active.pth'
 }
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Train Mamba on Alpaca Intraday Data")
     parser.add_argument("--key", type=str, help="Alpaca API Key (optional if in config.py)")
     parser.add_argument("--secret", type=str, help="Alpaca Secret Key (optional if in config.py)")
     parser.add_argument("--symbol", type=str, default="SPY")
-    parser.add_argument("--years", type=int, default=2, help="Years of history to fetch")
+    parser.add_argument("--years", type=float, default=2.0, help="Years of history to fetch")
     parser.add_argument("--timeframe", type=str, default="15Min", choices=["1Min", "5Min", "15Min", "1Hour"])
     parser.add_argument("--d-model", type=int, default=1024)
     parser.add_argument("--layers", type=int, default=32)
@@ -63,7 +73,7 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--lookback", type=int, default=60, help="Number of bars for model context")
-    parser.add_argument("--use-qqq", action="store_true", default=True, help="Include QQQ correlation data")
+    parser.add_argument("--use-qqq", type=str2bool, default=True, help="Include QQQ correlation data (true/false)")
     
     return parser.parse_args()
 
