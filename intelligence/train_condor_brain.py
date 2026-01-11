@@ -224,19 +224,19 @@ def create_gpu_dataloaders(args, device):
         is_train=False
     )
     
-    # Pinned memory for fast CPU→GPU transfer
+    # NOTE: IterableDataset with num_workers>0 can cause issues
+    # Using num_workers=0 for reliability, GPU still handles compute
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
-        num_workers=4,
-        pin_memory=True,
-        prefetch_factor=2
+        num_workers=0,  # Single-process for IterableDataset reliability
+        pin_memory=True
     )
     
     val_loader = DataLoader(
         val_dataset,
         batch_size=args.batch_size,
-        num_workers=2,
+        num_workers=0,
         pin_memory=True
     )
     
