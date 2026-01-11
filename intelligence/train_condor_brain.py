@@ -17,6 +17,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from torch.amp import autocast, GradScaler
+from tqdm import tqdm
 
 # Add project root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -246,7 +247,7 @@ def train_condor_brain(args):
         
         epoch_start = time.time()
         
-        for batch_x, batch_y, batch_r in train_loader:
+        for batch_x, batch_y, batch_r in tqdm(train_loader, desc=f"Epoch {epoch+1}", leave=False):
             batch_x = batch_x.to(device, non_blocking=True)
             batch_y = batch_y.to(device, non_blocking=True)
             batch_r = batch_r.to(device, non_blocking=True)
