@@ -103,8 +103,7 @@ class RegimeDetector(nn.Module):
             nn.Linear(d_model, 256),
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(256, 3),  # Low, Normal, High
-            nn.Softmax(dim=-1)
+            nn.Linear(256, 3)  # Low, Normal, High (Logits)
         )
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -309,8 +308,11 @@ class CondorBrain(nn.Module):
         # Take last timestep
         last_hidden = x[:, -1, :]  # (B, d_model)
         
-        # Detect regime
-        regime_probs = self.regime_detector(last_hidden)  # (B, 3)
+        # Detect regime (logits)
+        regime_logits = self.regime_detector(last_hidden)  # (B, 3)
+        
+        # Probabilities for weighting experts (apply softmax here)
+        regime_probs = torch.softmax(regime_logits, dim=-1)
         
         # Multi-horizon price forecast (if requested)
         horizon_forecast = None
@@ -330,7 +332,7 @@ class CondorBrain(nn.Module):
         )
         
         if return_regime:
-            return outputs, regime_probs, horizon_forecast
+            return outputs, regime_logits, horizon_forecast
         return outputs, None, horizon_forecast
     
     def predict_legacy(self, x: torch.Tensor) -> torch.Tensor:
