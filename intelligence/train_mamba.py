@@ -197,20 +197,25 @@ def create_sequences(X, y, lookback):
     
     return np.array(Xs), np.array(ys)
 
-def run_download(args):
-    # Resolve Keys
+def get_alpaca_keys(args):
+    """Resolve Alpaca keys from CLI or config.py"""
     api_key = args.key
     api_secret = args.secret
     
     if not api_key:
         try:
             cfg = RunConfig()
-            api_key = cfg.alpaca_key # Corrected attribute name
-            api_secret = cfg.alpaca_secret # Corrected attribute name
+            api_key = cfg.alpaca_key
+            api_secret = cfg.alpaca_secret
             if api_key and "YOUR_" not in api_key:
                 print("[Config] Using Alpaca Keys from config.py")
         except Exception as e:
             print(f"[Warning] Could not load config: {e}")
+            
+    return api_key, api_secret
+
+def run_download(args):
+    api_key, api_secret = get_alpaca_keys(args)
             
     if api_key and api_secret:
             df = download_alpaca_data(api_key, api_secret, args.symbol, args.years, args.timeframe)
@@ -244,10 +249,18 @@ def run_training(args):
             print(f"[Error] Failed to load local CSV: {e}")
             return
     else:
-        # Try download via run_download helpers? 
-        # Simpler: just tell user to use save-only first if locally.
-        print("[Error] In Training Mode, --local-data is recommended. Or use download flow first.")
-        return
+        # Fallback to automatic download if key/secret available
+        print("[Core] No local data provided. Attempting automatic download...")
+        api_key, api_secret = get_alpaca_keys(args)
+        if api_key and api_secret:
+            df = download_alpaca_data(api_key, api_secret, args.symbol, args.years, args.timeframe)
+            if not df.empty and args.output_csv:
+                os.makedirs(os.path.dirname(args.output_csv), exist_ok=True)
+                df.to_csv(args.output_csv, index=False)
+                print(f"[Success] Data saved to {args.output_csv}.")
+        else:
+            print("[Error] No local data and no Alpaca keys found. Cannot proceed.")
+            return
 
     # Check Empty
     if df.empty:
