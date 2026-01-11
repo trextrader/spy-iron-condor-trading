@@ -343,21 +343,26 @@ def calculate_psar_membership(psar_position: float) -> float:
     """
     Parabolic SAR membership for trend/reversal detection.
     
-    For Iron Condor, we want NEUTRAL conditions:
-    - PSAR below price (psar_position = -1) = bullish trend = less favorable
-    - PSAR above price (psar_position = +1) = bearish trend = less favorable
-    - PSAR near crossover (psar_position ~ 0) = potential reversal = more favorable
-    
-    The closer to 0 (crossover), the better for range-bound IC strategy.
+    Input: Normalized distance (price - sar) / price.
+    - Small distance (< 0.5%) = Reversal or Chop = Favorable (1.0)
+    - Large distance (> 2.0%) = Strong Trend = Unfavorable (0.0)
     """
     if psar_position is None or np.isnan(psar_position):
         return 0.5  # Neutral default
     
-    # Membership based on proximity to crossover (0)
-    # |psar_position| = 0 -> 1.0 (perfect for IC)
-    # |psar_position| = 1 -> 0.0 (strong trend, avoid)
-    abs_pos = abs(psar_position)
-    return max(0.0, 1.0 - abs_pos)
+    abs_dist = abs(psar_position)
+    
+    # Thresholds for Iron Condor favorability
+    min_dist = 0.005  # 0.5% gap (Tight)
+    max_dist = 0.020  # 2.0% gap (Wide/Trending)
+    
+    if abs_dist <= min_dist:
+        return 1.0
+    elif abs_dist >= max_dist:
+        return 0.0
+    else:
+        # Linear interpolation
+        return 1.0 - ((abs_dist - min_dist) / (max_dist - min_dist))
 
 
 # =============================================================================
@@ -405,6 +410,31 @@ def check_bbands_breakout(bb_position: float, touch_threshold: float = 0.95) -> 
         return True
     
     return False
+
+
+def classify_market_regime(adx: float, rsi: float, vix: float) -> str:
+    """
+    Classify market state into simplified regimes.
+    
+    Regimes:
+    - VOLATILE: High VIX (>25)
+    - TRENDING: Strong ADX (>25)
+    - RANGING: Low ADX (<25) and Neutral RSI (40-60)
+    - NEUTRAL: default
+    """
+    if vix is not None and vix > 25.0:
+        return "VOLATILE"
+    
+    if adx is not None and adx > 25.0:
+        if rsi is not None and (rsi > 60 or rsi < 40):
+             return "TRENDING"
+        return "TRENDING_WEAK"
+        
+    if adx is not None and adx < 25.0:
+        if rsi is not None and 40 <= rsi <= 60:
+            return "RANGING"
+            
+    return "NEUTRAL"
 
 
 # Backward Compatibility

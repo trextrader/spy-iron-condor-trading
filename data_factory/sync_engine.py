@@ -80,11 +80,12 @@ class MTFSyncEngine:
                 # psarl (long) or psars (short)
                 psar_val = psar.iloc[:, 0] 
                 df['psar'] = psar_val
-                # Derived: -1 if price > psar (bullish), +1 if price < psar (bearish)
-                df['psar_position'] = np.where(df['close'] > df['psar'], -1, 1)
+                # Derived: Percentage distance (positive = price above SAR = bullish)
+                # We normalize by close price to get a trend strength metric
+                df['psar_position'] = (df['close'] - df['psar']) / df['close']
             else:
                 df['psar'] = df['close']
-                df['psar_position'] = 0
+                df['psar_position'] = 0.0
             
             # === VOLUME INDICATORS ===
             df['volume_ma_20'] = ta.sma(df['volume'], length=20)
@@ -120,6 +121,7 @@ class MTFSyncEngine:
             df['di_plus'] = 20.0
             df['di_minus'] = 20.0
             df['volume_ma_20'] = df['volume'].rolling(window=20).mean()
+            df['psar_position'] = 0.0 # Default if no PSAR
         
         # === DERIVED INDICATORS ===
         
@@ -146,7 +148,7 @@ class MTFSyncEngine:
         defaults = {
             'rsi_14': 50.0, 'adx_14': 20.0, 'stoch_k': 50.0, 'stoch_d': 50.0,
             'bb_position': 0.5, 'bb_width': 0.02, 'volume_ratio': 1.0,
-            'sma_distance': 0.0, 'atr_pct': 0.01
+            'sma_distance': 0.0, 'atr_pct': 0.01, 'psar_position': 0.0
         }
         for col, default in defaults.items():
             if col in df.columns:

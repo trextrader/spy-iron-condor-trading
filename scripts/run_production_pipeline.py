@@ -40,26 +40,26 @@ def main():
     
     # 1. Download IVolatility Data
     # Note: Requires IVolatility API Key
-    ivol_script = os.path.join(base_dir, "data_factory", "download_ivolatility_options.py")
+    ivol_script = os.path.join(base_dir, "data_factory", "downloaders", "download_ivolatility_options.py")
     if not run_script(ivol_script):
         print("Pipeline halted at Step 1.")
         return
 
     # 2. Download Alpaca Data
     # Note: Requires Alpaca API Keys
-    alpaca_script = os.path.join(base_dir, "data_factory", "download_alpaca_matched.py")
+    alpaca_script = os.path.join(base_dir, "data_factory", "downloaders", "download_alpaca_matched.py")
     if not run_script(alpaca_script):
          print("Pipeline halted at Step 2.")
          return
 
     # 3. Merge and Resample
-    merge_script = os.path.join(base_dir, "data_factory", "merge_intraday_with_greeks.py")
+    merge_script = os.path.join(base_dir, "data_factory", "pipeline", "merge_intraday_with_greeks.py")
     if not run_script(merge_script):
         print("Pipeline halted at Step 3.")
         return
 
     # 4. Run Backtest
-    backtest_script = os.path.join(base_dir, "scripts", "run_full_backtest.py")
+    backtest_script = os.path.join(base_dir, "scripts", "backtest", "run_full_backtest.py")
     if not run_script(backtest_script):
          print("Pipeline halted at Step 4.")
          return
