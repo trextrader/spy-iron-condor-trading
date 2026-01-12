@@ -1,71 +1,99 @@
 digraph OptimizationPipeline {
-    rankdir=LR;
+    rankdir=TB;
     splines=ortho;
-    nodesep=0.6;
-    ranksep=0.8;
-    bgcolor="#f8f9fa";
+    nodesep=0.5;
+    ranksep=0.6;
+    fontname="Segoe UI";
+    bgcolor="#ffffff";
+    compound=true;
     
-    node [fontname="Segoe UI", fontsize=12, shape=rect, style=filled, fillcolor="white", penwidth=1.5, color="#2d3748"];
-    edge [fontname="Segoe UI", fontsize=10, color="#4a5568", penwidth=1.2];
+    node [fontname="Consolas", fontsize=10, shape=record, style=filled, fillcolor="white", penwidth=1.0, color="#4a5568"];
+    edge [fontname="Segoe UI", fontsize=9, color="#718096", penwidth=1.0];
 
-    subgraph cluster_data {
-        label="1. Data Factory (H100 Memory Optimized)";
-        style=filled;
-        color="#e2e8f0";
-        fillcolor="#edf2f7";
+    subgraph cluster_infra {
+        label="Infrastructure Layer (Hardware/OS)";
+        style=dashed;
+        color="#a0aec0";
+        fontcolor="#718096";
         
-        RawData [label="Raw Market Data\n(10M Rows)", shape=cylinder, fillcolor="#bee3f8"];
-        Sanitization [label="Sanitization\n(Z-Score + Clip)", shape=component];
-        Features [label="Feature Eng.\n(13-Dim Vector)", shape=component];
-        LazyLoader [label="LazySequenceDataset\n(O(1) Memory Views)", shape=folder, fillcolor="#90cdf4", penwidth=2];
-        
-        RawData -> Sanitization;
-        Sanitization -> Features;
-        Features -> LazyLoader;
+        H100 [label="{ NVIDIA H100 GPU | { Tensor Cores | <tf32> TF32 Math } | { 80GB HBM3 | <mem> Unified Memory } }", fillcolor="#e6fffa", color="#38b2ac"];
+        RAM [label="{ System RAM | { <shared> Shared Memory } }", fillcolor="#edf2f7"];
     }
 
-    subgraph cluster_mamba {
-        label="2. Mamba Intelligence Engine";
+    subgraph cluster_data_eng {
+        label="1. Data Engineering (O(1) Access)";
         style=filled;
-        color="#c6f6d5";
+        color="#4299e1";
+        fillcolor="#ebf8ff";
+        
+        CSV [label="Raw CSV\n(10M Rows)", shape=note, fillcolor="#bee3f8"];
+        
+        subgraph cluster_lazy {
+            label="class LazySequenceDataset";
+            style=filled;
+            fillcolor="#ffffff";
+            color="#3182ce";
+            
+            MMap [label="Zero-Copy View\n(numpy.lib.stride_tricks)", shape=component];
+            Sanitizer [label="Z-Score Normalizer\n(Pre-computed Î¼, Ïƒ)", shape=box];
+        }
+        
+        CSV -> MMap [label=" mmap"];
+        MMap -> Sanitizer [label=" On-the-fly"];
+    }
+
+    subgraph cluster_model {
+        label="2. Mamba Intelligence (Model)";
+        style=filled;
+        color="#48bb78";
         fillcolor="#f0fff4";
         
-        SSM [label="DeepMamba 2 Backbone\n(Selective Scan - O(N))", shape=box3d, fillcolor="#68d391"];
-        Experts [label="Multi-Expert Heads", shape=trapezium];
-        Policy [label="Parametric Policy π(s)\n{Strikes, Width, ROI}", shape=parallelogram, fillcolor="#9ae6b4"];
+        ModelDef [label="{ class CondorBrain | { <enc> Mamba Backbone (d=512) | <sel> Selective Scan (CUDA) } | { <heads> Multi-Head Experts } }", shape=record, fillcolor="#c6f6d5"];
         
-        LazyLoader -> SSM [label="Stream"];
-        SSM -> Experts;
-        Experts -> Policy;
+        Context [label="Dynamic Context\n(Lookback=120..240)", shape=parallelogram, fillcolor="#9ae6b4"];
+        
+        Context -> ModelDef:enc [style=dotted];
     }
 
-    subgraph cluster_sweep {
-        label="3. Evolutionary Sweep (20 Iterations)";
+    subgraph cluster_sweep_engine {
+        label="3. Evolutionary Sweep Engine (sweep_condor_brain.py)";
         style=filled;
-        color="#fbd38d";
+        color="#ed8936";
         fillcolor="#fffaf0";
         
-        Loss [label="Multi-Objective Loss\n(Acc + P&L + Risk)", shape=diamond];
-        Hyperparams [label="Hyperparams\n(LR, Depth, Lookback)", shape=note];
-        Explorer [label="Bayesian Exploration\n(Loss Landscape)", shape=ellipse, fillcolor="#f6ad55"];
-        Selector [label="Optimal Config\n(Low Spectral Norm)", shape=star, fillcolor="#ed8936"];
+        Controller [label="{ Sweep Controller | { <iter> Loop: 20 Iters | <catch> Try/Catch (OOM) } }", fillcolor="#fbd38d"];
         
-        Policy -> Loss;
-        Hyperparams -> Explorer [style=dashed];
-        Loss -> Explorer;
-        Explorer -> Selector [label="Selection"];
+        subgraph cluster_job {
+            label="Training Job (Subprocess)";
+            style=rounded;
+            bgcolor="white";
+            
+            Batcher [label="DataLoader\n(Batch=1024)", shape=folder];
+            Optim [label="Optimizer (AdamW)\n+ GradScaler (FP16)", shape=box];
+            LossFn [label="CondorLoss\n(MSE + CrossEntropy)", shape=diamond];
+        }
+        
+        Controller -> Batcher [label=" Spawn"];
+        Batcher -> ModelDef [label=" GPU Transfer"];
+        ModelDef -> LossFn [label=" Logits"];
+        LossFn -> Optim [label=" Backward()"];
+        Optim -> Controller:iter [label=" Loss Metric"];
     }
-
-    subgraph cluster_prod {
-        label="4. Production";
+    
+    subgraph cluster_persistence {
+        label="4. Persistence & Analysis";
         style=filled;
-        color="#cbd5e0";
+        color="#a0aec0";
         fillcolor="#e2e8f0";
         
-        Deploy [label="Production Inference\n(H100 Tensor Core)", shape=component, fillcolor="#a0aec0"];
-        Signal [label="Execution Signal\n(Iron Condor)", shape=doublecircle, fillcolor="#63b3ed", fontcolor="white"];
-        
-        Selector -> Deploy;
-        Deploy -> Signal;
+        Checkpoint [label="Model Checkpoint\n(.pth)", shape=cylinder, fillcolor="#cbd5e0"];
+        Logs [label="Metrics Log\n(CSV/JSON)", shape=note];
     }
+    
+    # Cross-Cluster Links
+    Sanitizer -> Batcher [label=" Yield Tensor"];
+    H100:tf32 -> ModelDef:sel [style=dashed, color="#38b2ac", label=" Acceleration"];
+    RAM:shared -> MMap [style=dashed, color="#4a5568"];
+    Controller -> Checkpoint [label=" Save Best"];
+    Optim -> Logs [label=" Track"];
 }
