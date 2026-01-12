@@ -99,3 +99,49 @@
 **Validation**
 - ✅ Trace harness updated with alignment metadata display
 - ✅ All code committed and pushed to GitHub
+
+## Phase 3 — Strategy Refactor (Planned)
+- [ ] Slim down strategies/iron_condor.py to signal gating only
+- [ ] Move OptionQuote, IronCondorLegs to core/types.py
+- [ ] Remove sizing logic (move to FIS in Phase 4)
+- [ ] Integrate analytics.* modules into strategy
+
+## Phase 4 — FIS Pipeline (Planned)
+- [ ] Create intelligence/fis_sizer.py (orchestrator)
+- [ ] Enhance intelligence/fuzzifier.py (full feature extraction)
+- [ ] Create intelligence/inference_engine.py (Mamdani rule base)
+- [ ] Create intelligence/defuzzifier.py (centroid)
+- [ ] Migrate existing fuzzy logic from fuzzy_engine.py
+- [ ] Write FIS integration tests
+
+## Phase 5 — Risk Layer Enhancement (Planned)
+- [ ] Create risk/expected_shortfall.py (CVaR)
+- [ ] Create risk/beta_weighting.py (portfolio delta)
+- [ ] Create risk/pot_monitor.py (probability of touch)
+- [ ] Create risk/structure_validator.py (invariants)
+- [ ] Refactor risk_manager.py to use new modules
+
+## Phase 6 — Full Orchestration (Planned)
+- [ ] Enhance core/engine.py (complete TradingEngine)
+- [ ] Create core/trade_router.py (order execution)
+- [ ] Create core/mode.py (RunMode enum)
+- [ ] Wire up full pipeline (data → strategy → FIS → risk → router)
+- [ ] Run multi-day backtest validation
+
+## Phase 7 — Testing & Validation (Planned)
+- [ ] Complete all unit tests per traceability matrix
+- [ ] End-to-end integration tests
+- [ ] Regression tests with golden datasets
+- [ ] Performance benchmarking
+
+## Stage 4 — Advanced Strategy Expansion (Future)
+- [ ] Create CalendarStrategy (Low Vol)
+- [ ] Create BrokenWingButterflyStrategy (Skew/Bias)
+- [ ] Implement StrategySelector logic
+- [ ] Divergence Monitor (SPY vs ES)
+
+## Stage 5 — Neuro-Fuzzy Integration (Future)
+- [ ] Connect Fuzzy Sizing to Trade Execution
+- [ ] Optimize Membership Functions
+- [ ] Mamba Model Training Pipeline
+- [ ] Full System Integration Tests
