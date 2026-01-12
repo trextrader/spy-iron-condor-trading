@@ -113,3 +113,55 @@ After exhaustive sweeps, the following configuration was selected as the optimal
 | **Lookback** | 120 | 120 steps (5-min intervals) cover exactly 1 trading day (6.5h). |
 | **Batch Size**| 1024 | Saturates H100 compute units. |
 
+---
+
+## 5. Evolutionary Optimization Pipeline
+
+The CondorBrain learning system extends beyond standard model training into a closed-loop evolutionary optimization process. This ensures the model adapts to the non-stationary nature of financial markets.
+
+### 5.1 System Block Diagram
+
+```mermaid
+graph TD
+    subgraph Data Factory
+        Raw[Raw Market Data<br/>(10M Rows)] --> Clean[Sanitization<br/>(Z-Score + Clip)]
+        Clean --> Features[Feature Engineering<br/>(13-Dim Vector)]
+        Features --> Lazy[LazySequenceDataset<br/>(O(1) Memory Views)]
+    end
+
+    subgraph Mamba Intelligence
+        Lazy --> SSM[DeepMamba 2 Backbone<br/>(Selective Scan)]
+        SSM --> Heads[Multi-Expert Heads]
+        Heads --> Policy[Parametric Policy<br/>(Strikes, Width, ROI)]
+    end
+
+    subgraph Optimization Sweep
+        Policy --> Loss[Multi-Objective Loss<br/>(Accuracy + P&L + Risk)]
+        Loss --> Sweep{Hyperparam Sweep<br/>(20 Iterations)}
+        Sweep -->|Explore| Configs[Varying: lr, d_model, lookback]
+        Configs -->|Evaluate| Landscape[Loss Landscape Analysis]
+        Landscape -->|Select| Optimal[Global Minima Config]
+    end
+
+    subgraph Production
+        Optimal --> Deploy[Production Inference]
+        Deploy --> Signal[Execution Signal]
+    end
+```
+
+### 5.2 Scientific Explanation of Model Output
+The CondorBrain does not merely output a price prediction; it functions as a **Parametric Policy Network**.
+$$ \pi_\theta(s_t) \rightarrow \{ K_{upper}, K_{lower}, \Delta_{width}, \mathbb{E}[ROI], p_{regime} \} $$
+*   **Purpose:** It acts as a function approximator for the optimal Iron Condor configuration given state $s_t$.
+*   **Enhancement:** Unlike standard regression models, the **8-Head Output** enables the model to disentangle *directionality* (Price Targets) from *uncertainty* (Width/Volatility), allowing for risk-aware sizing.
+
+### 5.3 Rationale for Iterative Sweeps (20 Iterations)
+Financial loss landscapes are highly non-convex with numerous local minima. A single training run is insufficient to find the optimal solution.
+*   **Loss Landscape Geometry:** The sweep process probes different basins of attraction. By varying hyperparameters (learning rate, model depth, lookback), we perform a **Bayesian Exploration** of the optimization surface.
+*   **Robustness:** We select models not just with the lowest loss, but with the "flattest" minima (Low Spectral Norm), which correlates with better out-of-distribution generalization.
+
+### 5.4 Mamba 2 Pipeline Enhancements
+This pipeline substantially enhances the standard Deep Learning approach by:
+1.  **Dynamic Context Optimization:** The sweep dynamically finds the optimal `lookback` window (e.g., 120 vs 240 steps), matching the model's receptive field to the market's current fractal memory.
+2.  **Selective State Management:** Mamba 2's `continuous_scan` allows the model to compress irrelevant noise (choppy sideways action) and prioritize high-information events (regime shifts) into its hidden state $h_t$, effectively increasing the Signal-to-Noise Ratio (SNR) of the input stream.
+
