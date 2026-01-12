@@ -2,7 +2,14 @@
 
 **Version:** 2.0 (H100 Optimized)
 **Date:** 2026-01-11
+# Scientific Specification: CondorBrain & Mamba Architecture
+
+**Version:** 2.0 (H100 Optimized)
+**Date:** 2026-01-11
 **Architecture:** DeepMamba (State Space Model)
+
+## 0. System Architecture
+![System Overview](architecture/system_overview.png)
 
 ## 1. Core Architecture: Mamba Protocol
 Unlike traditional Transformers with $O(N^2)$ quadratic complexity, CondorBrain utilizes the **Mamba State Space Model (SSM)**, achieving $O(N)$ linear complexity with respect to sequence length.
