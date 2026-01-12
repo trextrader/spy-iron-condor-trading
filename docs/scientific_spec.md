@@ -6,6 +6,61 @@
 
 ## Abstract
 This specification outlines the architecture of **CondorBrain**, a high-frequency Parametric Policy Network designed for volatility arbitrage on the SPY index. Leveraging the **Linear State-Space Model (SSM) Mamba-2** architecture, the system achieves $O(N)$ linear scaling on sequences exceeding 120 steps, overcoming the quadratic bottleneck of Transformer attention mechanisms. The model incorporates a **Selective Scan CUDA kernel** for hardware-aware state modulation, enhancing Signal-to-Noise Ratio (SNR) in non-stationary regimes. Optimization is driven by a 20-generation **Evolutionary Bayesian Strategy**, dynamically tuning hyperparameters (Lookback window, State dimension $D$) to traverse the non-convex loss landscape. The architecture concludes with a **Regime-Gated Mixture-of-Experts (MoE)** decoder, disentangling price directionality from volatility surface parameters to generate risk-adjusted Iron Condor execution signals.
+
+## 2. Input Data & Tensor Specification
+
+The underlying engine assumes a massive, high-fidelity dataset synthesized from institutional-grade sources. The data pipeline aligns **1-minute Spot OHLCV** (Price Action) with **Real-Time Options Chain Data** (IV, Greeks, Liquidity), resulting in a dense tensor of over **10 Million rows** (4GB+).
+
+### 2.1 Sample Data Structure (First 5 Rows)
+The following table represents the raw `float32` input vectors fed into the Neural Network after normalization. Note the precision of the Greeks and the alignment of Technical Indicators.
+
+| dt (Index) | Price (O/H/L/C) | Volume | Strike | Type | Delta ($\Delta$) | Gamma ($\Gamma$) | Vega ($\nu$) | Theta ($\Theta$) | IV | IVR | RSI | MaxDD (Target) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **14:30:00** | 472.16 / 472.67 / ... | 60,276 | 423.0 | Put | 0.0000 | $1.50 \times 10^{-23}$ | $2.75 \times 10^{-21}$ | $-3.78 \times 10^{-20}$ | 0.15 | 50.0 | 30.33 | 0.218 |
+| **14:30:00** | 472.16 / 472.67 / ... | 60,276 | 424.0 | Put | 0.0000 | $1.25 \times 10^{-22}$ | $2.30 \times 10^{-20}$ | $-3.16 \times 10^{-19}$ | 0.15 | 50.0 | 30.33 | 0.218 |
+| **14:30:00** | 472.16 / 472.67 / ... | 60,276 | 425.0 | Put | 0.0000 | $9.98 \times 10^{-22}$ | $1.83 \times 10^{-19}$ | $-2.51 \times 10^{-18}$ | 0.15 | 50.0 | 30.33 | 0.218 |
+| **14:30:00** | 472.16 / 472.67 / ... | 60,276 | 426.0 | Put | 0.0000 | $7.54 \times 10^{-21}$ | $1.38 \times 10^{-18}$ | $-1.90 \times 10^{-17}$ | 0.15 | 50.0 | 30.33 | 0.218 |
+| **14:30:00** | 472.16 / 472.67 / ... | 60,276 | 427.0 | Put | 0.0000 | $5.42 \times 10^{-20}$ | $9.95 \times 10^{-18}$ | $-1.36 \times 10^{-16}$ | 0.15 | 50.0 | 30.33 | 0.218 |
+
+### 2.2 Neural Input Feature Vector (24 Parameters)
+The Input Layer transforms these raw fields into a vector $x_t \in \mathbb{R}^{24}$. Weights indicate the initialized importance (scalar scaling) before entering the Mamba block.
+
+| Feature Group | Parameters (Fields) | Count | Purpose | Neural Weighting |
+| :--- | :--- | :--- | :--- | :--- |
+| **Spot Dynamics** | `open`, `high`, `low`, `close`, `volume` | 5 | Micro-structure Price Action | **High** (Trend Detection) |
+| **Option Physics** | `strike`, `delta`, `gamma`, `vega`, `theta` | 5 | Black-Scholes Risk Surface | **Critical** (Pricing) |
+| **Volatility** | `iv` (Implied Vol), `ivr` (Rank), `spread_ratio` | 3 | Regime Classification | **Gating** (MoE Switch) |
+| **Technicals** | `rsi`, `atr`, `adx`, `stoch_k` | 4 | Momentum & Exhaustion | **Medium** (Entry Timing) |
+| **Bands & Trend** | `bb_lower`, `bb_upper`, `sma`, `psar`, `psar_mark` | 5 | Mean Reversion Bounds | **High** (Exit Logic) |
+| **Metadata** | `dist_to_spot` (Derived), `call_put` (One-Hot) | 2 | Positional Encoding | **Static** (Filtering) |
+| **TOTAL** | **24 Active Neurons per Time-Step** | **24** | **Input Tensor Shape: (B, L, 24)** | |
+
+### 2.3 Data Synthesis: 10M+ Row Alignment Pipeline
+The 4GB+ dataset is not a simple dump; it is a **Time-Aligned Join** of two distinct distinct high-frequency manifolds:
+1.  **Spot Manifold (1-Min):** Continuous 1-minute OHLCV bars for SPY (2024-2026).
+2.  **Options Surface (Tradeable):** The subset of liquid options (closest ~50 strikes) filtered for volume.
+
+**The "As-Of" Join:**
+To prevent lookahead bias (Data Leakage), the pipeline uses an `as_of` merge strategy. For every 1-minute Spot bar $t$, we attach the Option Greeks calculated *exactly* at timestamp $t$ (or the most recent valid print $< t$).
+*   **Result:** A flattened event stream where each row is a potential trade decision point.
+*   **Scale:** $390 \text{ mins/day} \times 252 \text{ days/yr} \times 100 \text{ options/min} \approx 10,000,000+$ rows.
+
+### 2.4 Forward Pass Mathematics
+The Mamba Engine processes this stream using the following mathematical transformation:
+
+1.  **Input Embedding (Expansion):**
+    $E_t = \text{LayerNorm}(W_{in} \cdot x_t + b_{in})$
+    *Where $x_t \in \mathbb{R}^{24}$ maps to Latent State $E_t \in \mathbb{R}^{512}$.*
+
+2.  **SSM State Transition (The "Crunch"):**
+    For each Mamba Layer $l \in [1..32]$:
+    $h_t^{(l)} = \text{SelectiveScan}(A, B, C, \Delta, E_t^{(l-1)})$
+    $E_t^{(l)} = \text{SiLU}(W_{gate} \cdot E_t^{(l-1)}) \odot h_t^{(l)}$
+    *The model compresses the 24-feature history into a rolling hidden state $h_t$ that retains infinite context (decaying exponentially based on learned $\Delta$).*
+
+3.  **Policy Head (Output):**
+    $\hat{y} = W_{out} \cdot \text{RMSNorm}(E_t^{(Final)})$
+    *Outputs the Policy Distribution: Strike Selection, Width, and Allocation Size.*
 ## 0. System Architecture
 ![System Overview](architecture/system_overview.png)
 
