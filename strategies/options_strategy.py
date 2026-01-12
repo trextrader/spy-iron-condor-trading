@@ -479,33 +479,34 @@ def validate_pricing_and_risk(legs: IronCondorLegs, width: float,
     return True, "OK", credit
 
 # === Main Entry Function ===
-def select_and_enter_condor(broker, cfg, today: dt.date,
+from core.dto import TradeDecision
+
+def generate_trade_signal(broker, cfg, today: dt.date,
                             historical_credit_curve: Optional[Dict[float, float]] = None,
                             quantity: int = 1,
                             mtf_snapshot=None,
-                            liquidity_data=None):
+                            liquidity_data=None) -> Tuple[Optional[TradeDecision], Optional[IronCondorLegs], float, float]:
     """
-    Select and enter iron condor with MTF filtering.
-    
-    Returns: PositionState if entered, None otherwise
+    Pure signal generation logic.
+    Returns: (TradeDecision, Legs, Credit, MTF_Consensus) or (None, None, 0.0, 0.0)
     """
     # 1. Check Portfolio Limits
     ok, msg = can_enter_trade(broker, cfg)
     if not ok:
         print(f"[Entry Blocked] {msg}")
-        return None
+        return None, None, 0.0, 0.0
     
     # 2. MTF Alignment Check
     mtf_ok, mtf_msg, consensus = check_mtf_alignment(cfg, mtf_snapshot)
     if not mtf_ok:
         print(f"[Entry Blocked] {mtf_msg}")
-        return None
+        return None, None, 0.0, 0.0
     
     # 3. Liquidity Gate
     if cfg.use_liquidity_gate and liquidity_data is not None:
         if not check_liquidity_gate(liquidity_data, spread_estimate=1.0):
             print(f"[Entry Blocked] Failed liquidity gate")
-            return None
+            return None, None, 0.0, 0.0
     
     # 4. Get Market Context
     spot = broker.get_spot(cfg.underlying)
@@ -521,21 +522,19 @@ def select_and_enter_condor(broker, cfg, today: dt.date,
     
     target_width = min(target_width, cfg.wing_width_max)
     
-    print(f"[Entry] VIX: {vix:.2f}, IVR: {ivr:.2f}, MTF: {consensus:.2f} -> Wing Width: ${target_width}")
-    
     # 6. Expiration Selection
     expirations = broker.get_expirations(cfg.underlying)
     exp = pick_expiration(expirations, cfg, today)
     if not exp:
         print("[Entry Blocked] No valid expiration in DTE window")
-        return None
+        return None, None, 0.0, 0.0
     
     # 7. Build Legs
     chain = broker.get_option_chain(cfg.underlying, exp)
     legs = build_condor(chain, cfg, today, spot, target_width)
     if not legs:
         print("[Entry Blocked] Unable to build condor legs")
-        return None
+        return None, None, 0.0, 0.0
     
     # 8. Validate Pricing & Risk
     acct = broker.get_account_metrics()
@@ -544,20 +543,25 @@ def select_and_enter_condor(broker, cfg, today: dt.date,
     
     if not valid:
         print(f"[Entry Blocked] {vmsg}")
-        return None
+        return None, None, 0.0, 0.0
     
-    # 9. Execute
-    print(f"[Entering] {cfg.underlying} Iron Condor | Width: ${target_width} | Credit: ${credit:.2f} | MTF: {consensus:.2f}")
-    order_id = broker.place_iron_condor(legs, quantity=quantity, limit_price=credit)
+    # 9. Construct Decision (No Execution)
+    decision = TradeDecision(
+        symbol=cfg.underlying,
+        should_trade=True,
+        structure="iron_condor",
+        bias="neutral",
+        rationale={
+            "mtf_consensus": consensus,
+            "vix": vix,
+            "ivr": ivr,
+            "width": target_width,
+            "credit": credit,
+            "roi": (credit / target_width) if target_width > 0 else 0.0
+        }
+    )
     
-    if order_id:
-        positions = broker.get_open_positions(cfg.underlying)
-        if positions:
-            # Store MTF consensus with position
-            positions[-1].mtf_consensus = consensus
-            return positions[-1]
-    
-    return None
+    return decision, legs, credit, consensus
 
 # === Position Management ===
 def estimate_pnl(position: PositionState, current_quotes: IronCondorLegs) -> Tuple[float, float]:
@@ -681,7 +685,19 @@ def manage_positions(broker, cfg, today: dt.date) -> None:
 def run_strategy(broker, cfg, historical_credit_curve=None, quantity=1):
     """Main strategy runner for live mode"""
     today = dt.date.today()
-    pos = select_and_enter_condor(broker, cfg, today, historical_credit_curve, quantity)
-    if pos:
-        print(f"[Entered] Position {pos.id} with credit ${pos.credit_received:.2f}")
+    
+    # 1. Generate Signal
+    decision, legs, credit, consensus = generate_trade_signal(broker, cfg, today, historical_credit_curve, quantity)
+    
+    # 2. Execute if Valid
+    if decision and decision.should_trade and legs:
+        print(f"[Entering] {decision.symbol} {decision.structure} | Credit: ${credit:.2f} | MTF: {consensus:.2f}")
+        order_id = broker.place_iron_condor(legs, quantity=quantity, limit_price=credit)
+        
+        if order_id:
+            positions = broker.get_open_positions(cfg.underlying)
+            if positions:
+                positions[-1].mtf_consensus = consensus
+                print(f"[Entered] Position {positions[-1].id} with credit ${positions[-1].credit_received:.2f}")
+    
     manage_positions(broker, cfg, today)
