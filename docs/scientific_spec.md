@@ -124,7 +124,7 @@ The CondorBrain learning system extends beyond standard model training into a cl
 
 ### 5.2 Scientific Explanation of Model Output
 The CondorBrain does not merely output a price prediction; it functions as a **Parametric Policy Network**.
-$$ \pi_\theta(s_t) \rightarrow \{ K_{upper}, K_{lower}, \Delta_{width}, \mathbb{E}[ROI], p_{regime} \} $$
+$\pi_\theta(s_t) \rightarrow \{ K_{upper}, K_{lower}, \Delta_{width}, \mathbb{E}[ROI], p_{regime} \}$
 *   **Purpose:** It acts as a function approximator for the optimal Iron Condor configuration given state $s_t$.
 *   **Enhancement:** Unlike standard regression models, the **8-Head Output** enables the model to disentangle *directionality* (Price Targets) from *uncertainty* (Width/Volatility), allowing for risk-aware sizing.
 
@@ -137,4 +137,44 @@ Financial loss landscapes are highly non-convex with numerous local minima. A si
 This pipeline substantially enhances the standard Deep Learning approach by:
 1.  **Dynamic Context Optimization:** The sweep dynamically finds the optimal `lookback` window (e.g., 120 vs 240 steps), matching the model's receptive field to the market's current fractal memory.
 2.  **Selective State Management:** Mamba 2's `continuous_scan` allows the model to compress irrelevant noise (choppy sideways action) and prioritize high-information events (regime shifts) into its hidden state $h_t$, effectively increasing the Signal-to-Noise Ratio (SNR) of the input stream.
+
+---
+
+## 6. Mamba Intelligence & Enhancements Breakdown
+
+This section details the specific architectural innovations added to the standard Mamba backbone, transforming it into the **CondorBrain Intelligence**.
+
+### 6.1 Multi-Head Expert Decoder
+Standard LSTMs/Transformers output a single vector. We architected a **Branched Decoder** to disentangle conflicting objectives:
+- **Price Head:** Predicts directional movement ($\hat{y}_{price}$).
+- **Vol Head:** Predicts required Iron Condor Width ($\hat{y}_{width}$).
+- **Risk Head:** Predicts Probability of Profit (POP).
+
+**Enhancement:** This prevents the "mean reversion smoothing" typical of single-head models, where the model outputs flat signals to minimize average error.
+
+### 6.2 Regime-Gated MoE (Mixture of Experts)
+We implemented a `RegimeDetector` (Logits-based) that acts as a Gating Network:
+$$
+\text{Output} = \sum_{i \in \{Low, Normal, High\}} \sigma(G(x))_i \cdot E_i(x)
+$$
+*   **Enhancement:** The model learns separate sub-policies for **High Volatility** (Wider Wings) vs **Low Volatility** (Tighter Wings), preventing catastrophic failure during market shocks (e.g., VIX spikes).
+
+### 6.3 Selective Scan (Hardware-Aware State)
+Leveraging the H100's specific `selective_scan_cuda` kernel:
+*   **Mechanism:** The model dynamically modulates its $\Delta$ (step size) parameter based on input content.
+*   **Effect:** It can "skip" over noise (0-volatility periods) and "focus" deeply on high-information bars (breakouts), effectively having a **variable sampling rate** learned entirely from data.
+
+---
+
+## 7. Compute Logic Graph (Granular Engine)
+
+The following diagram details the exact parallel computation flow within a single Mamba 2 Block, highlighting the hardware-accelerated **Selective Scan Kernel** on the H100.
+
+![Mamba Engine Logic](architecture/mamba_engine_logic.png)
+
+### 7.1 Key Operations
+1.  **Linear Projection (Expansion):** The input dimension $D$ is expanded (typically $2x$) to separate the "State" (SSM) and "Gate" branches.
+2.  **Conv1d (Local Context):** A short convolution ($L=4$) ensures token locality before the sequence model, preventing "state collapse" on very short patterns.
+3.  **Selective Scan Kernel (Fused):** The critical operation. It discretizes the continuous parameters $\textbf{A}, \textbf{B}$ using the Zero-Order Hold (ZOH) method *per time-step* based on $\Delta$, then performs a parallel inclusive scan (associative) to compute the hidden states $h_t$. This is the $O(N)$ magic compared to Attention's $O(N^2)$.
+4.  **Multiplicative Gate:** The output of the SSM branch is modulated by the "Gate" branch (SiLU activated), allowing the model to silence irrelevant features completely.
 

@@ -223,124 +223,72 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
         if verbose: print(f"[Data] Loaded {total_bars:,} bars from {df.index.min().date()} to {df.index.max().date()}")
     
     # === Load Options Data (Intraday or Synthetic) ===
+    options_df_raw = None # Keep for Mamba pre-compute
     if preloaded_options is not None:
         options_by_date = preloaded_options
-        # Auto-detect intraday by checking keys
+        # ... detect intraday ...
         sample_keys = list(preloaded_options.keys())[:10]
         has_datetime_keys = any(isinstance(k, dt.datetime) for k in sample_keys)
         is_intraday = has_datetime_keys or getattr(r_cfg, 'use_intraday_data', False)
-        
-        # Ensure total_bars is defined for progress tracking
         total_bars = len(df) if df is not None else 0
     else:
         # Use explicit path if provided, otherwise fallback to defaults
-        if r_cfg.options_data_path and os.path.exists(r_cfg.options_data_path):
-            data_path = r_cfg.options_data_path
-        else:
-            data_path = os.path.join("data", "alpaca_options", "spy_options_intraday_with_greeks.csv")
+        data_path = r_cfg.options_data_path if r_cfg.options_data_path and os.path.exists(r_cfg.options_data_path) else os.path.join("data", "alpaca_options", "spy_options_intraday_with_greeks.csv")
         synthetic_path = os.path.join("data", "synthetic_options", f"{s_cfg.underlying.lower()}_options_marks.csv")
         
-        # Detect data format by reading header
+        # Detect format
         is_synthetic_format = False
         if os.path.exists(data_path):
             with open(data_path, 'r') as f:
                 header = f.readline().lower()
-                # Synthetic data has 'option_symbol' and 'expiration' columns
                 is_synthetic_format = 'option_symbol' in header and 'expiration' in header
         
-        # Check if we should use intraday data (file exists, has correct format, and not explicitly disabled)
         use_intraday = os.path.exists(data_path) and not is_synthetic_format and getattr(r_cfg, 'prefer_intraday', True)
         
         if use_intraday:
             if verbose: print(f"[Data] Using Intraday Options Data: {data_path}")
-            # Determine date range for loading
-            start_load = r_cfg.backtest_start if hasattr(r_cfg, 'backtest_start') else None
-            end_load = r_cfg.backtest_end if hasattr(r_cfg, 'backtest_end') else None
-            
-            # Load using new function
-            options_by_date = load_intraday_options(data_path, start_load, end_load)
+            options_df_raw = pd.read_csv(data_path, parse_dates=['timestamp', 'expiration'])
+            options_by_date = load_intraday_options(data_path, r_cfg.backtest_start, r_cfg.backtest_end)
             is_intraday = True
-        
         elif os.path.exists(data_path) and is_synthetic_format:
             if verbose: print(f"[Data] Using Synthetic Options Data: {data_path}")
-            
-            # Memory optimization: Load with chunking and filter by date range
-            options_df = pd.read_csv(data_path, parse_dates=["date", "expiration"])
-            
-            # Filter to backtest date range BEFORE grouping to save memory
+            options_df_raw = pd.read_csv(data_path, parse_dates=["date", "expiration"])
+            # Filter
             if hasattr(r_cfg, 'backtest_start') and r_cfg.backtest_start:
-                start_dt = pd.Timestamp(r_cfg.backtest_start).date()
-                options_df = options_df[options_df['date'].dt.date >= start_dt]
+                options_df_raw = options_df_raw[options_df_raw['date'].dt.date >= pd.Timestamp(r_cfg.backtest_start).date()]
             if hasattr(r_cfg, 'backtest_end') and r_cfg.backtest_end:
-                end_dt = pd.Timestamp(r_cfg.backtest_end).date()
-                options_df = options_df[options_df['date'].dt.date <= end_dt]
+                options_df_raw = options_df_raw[options_df_raw['date'].dt.date <= pd.Timestamp(r_cfg.backtest_end).date()]
             
-            if verbose: print(f"[Data] Filtered options to {len(options_df):,} rows for date range.")
-            
-            options_by_date = {}
-            for date, group in options_df.groupby('date'):
-                options_by_date[date.date()] = group.to_dict('records')
-            is_intraday = False
-        
-        elif os.path.exists(synthetic_path):
-            if verbose: print(f"[Data] Using Synthetic Options Data: {synthetic_path}")
-            
-            # Memory optimization: Load with chunking and filter by date range
-            options_df = pd.read_csv(synthetic_path, parse_dates=["date", "expiration"])
-            
-            # Filter to backtest date range BEFORE grouping to save memory
-            if hasattr(r_cfg, 'backtest_start') and r_cfg.backtest_start:
-                start_dt = pd.Timestamp(r_cfg.backtest_start).date()
-                options_df = options_df[options_df['date'].dt.date >= start_dt]
-            if hasattr(r_cfg, 'backtest_end') and r_cfg.backtest_end:
-                end_dt = pd.Timestamp(r_cfg.backtest_end).date()
-                options_df = options_df[options_df['date'].dt.date <= end_dt]
-            
-            if verbose: print(f"[Data] Filtered options to {len(options_df):,} rows for date range.")
-            
-            options_by_date = {}
-            for date, group in options_df.groupby('date'):
-                options_by_date[date.date()] = group.to_dict('records')
+            options_by_date = {date.date(): group.to_dict('records') for date, group in options_df_raw.groupby('date')}
             is_intraday = False
         else:
-            print(f"[ERROR] No options data found (checked {data_path} and {synthetic_path})")
-            return None
+            # Synthetic Fallback
+            options_df_raw = pd.read_csv(synthetic_path, parse_dates=["date", "expiration"]) if os.path.exists(synthetic_path) else None
+            if options_df_raw is not None:
+                options_by_date = {date.date(): group.to_dict('records') for date, group in options_df_raw.groupby('date')}
+                is_intraday = False
+            else:
+                print(f"[ERROR] No options data found.")
+                return None
     
     # === Pre-Calculate Indicators & Neural Forecasts (Batch Mode) ===
-    # OPTIMIZATION: Use preloaded forecasts if available (from optimizer)
     if preloaded_neural_forecasts is not None:
         neural_forecasts = preloaded_neural_forecasts
-        # Indicators should already be on df if preloaded
     elif getattr(s_cfg, 'use_mamba_model', False) and HAS_MAMBA and not df.empty:
         neural_forecasts = None
         try:
-            import pandas_ta as ta
-            # Ensure indicators exist for Mamba
-            # RSI 14
-            if 'rsi_14' not in df.columns:
-                df['rsi_14'] = ta.rsi(df['close'], length=14)
-            # ATR Pct (approx)
-            if 'atr_pct' not in df.columns:
-                atr = ta.atr(df['high'], df['low'], df['close'], length=14)
-                df['atr_pct'] = atr / df['close']
-            # Volume Ratio
-            if 'volume_ratio' not in df.columns:
-                vol_sma = ta.sma(df['volume'], length=20)
-                df['volume_ratio'] = df['volume'] / (vol_sma + 1.0)
-            
-            # Init Mamba
             from intelligence.mamba_engine import MambaForecastEngine
-            # Use LARGE model if configured, else default
             d_model = getattr(s_cfg, 'mamba_d_model', 1024)
             layers = getattr(s_cfg, 'mamba_layers', 32) 
             mamba_engine = MambaForecastEngine(d_model=d_model, layers=layers)
             
-            # GPU Batch Inference
-            neural_forecasts = mamba_engine.precompute_all(df, batch_size=4096)
-            print(f"[BacktestEngine] Neural Signals Pre-Computed: {len(neural_forecasts)}")
-            
+            # Pass options_df_raw for 13-feature sync
+            neural_forecasts = mamba_engine.precompute_all(df, options_df=options_df_raw, batch_size=4096)
+            print(f"[BacktestEngine] Neural Signals Pre-Computed: {len(neural_forecasts)} (Features: {mamba_engine.model.input_proj.in_features if hasattr(mamba_engine.model, 'input_proj') else '?'})")
         except Exception as e:
             print(f"[Warning] Failed to batch-compute Mamba signals: {e}")
+    else:
+        neural_forecasts = None
     else:
         neural_forecasts = None
 

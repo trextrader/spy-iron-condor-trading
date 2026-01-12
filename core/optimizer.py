@@ -465,7 +465,7 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             d_model = getattr(base_s_cfg, 'mamba_d_model', 256)
             layers = getattr(base_s_cfg, 'mamba_layers', 12)
             mamba_engine = MambaForecastEngine(d_model=d_model, layers=layers)
-            preloaded_neural = mamba_engine.precompute_all(full_df, batch_size=4096)
+            preloaded_neural = mamba_engine.precompute_all(full_df, options_df=options_df, batch_size=4096)
             print(f"[Optimizer] Neural Signals Pre-Computed ONCE: {len(preloaded_neural)} bars")
         except Exception as e:
             print(f"[Optimizer] Neural pre-compute failed: {e}")

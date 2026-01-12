@@ -256,6 +256,144 @@ def train_one_config(args, config, datasets, device):
     print(f"✓ FINISHED. Best: {best_loss:.4f} -> {output_path}")
     return best_loss
 
+# --- EVOLUTIONARY INTELLIGENCE ---
+class EvolutionaryOptimizer:
+    def __init__(self, iterations=20):
+        self.iterations = iterations
+        self.history = []  # List of {config, loss}
+        self.best_loss = float('inf')
+        self.best_config = None
+        
+        # 1. BASELINE: "The Beast" (Max Horsepower)
+        self.queue = [{
+            'd_model': 512,  # Sweet Spot for stability
+            'layers': 32,    # Deep Reasoning
+            'lr': 1e-4, 
+            'batch_size': 1024,
+            'lookback': 120,
+            'id': 'Gen0_Baseline'
+        }]
+        
+    def get_next_config(self, iteration):
+        if self.queue:
+            return self.queue.pop(0)
+
+        # 2. INTELLIGENCE: Adapt based on history
+        # Simple Mutational Strategy
+        parent = self.best_config if self.best_config else self.history[-1]['config']
+        new_config = parent.copy()
+        new_config['id'] = f'Gen{iteration}_Mutant'
+        
+        # Mutation Logic (Bayesian Exploration)
+        import random
+        mutation_type = random.choice(['lr', 'depth', 'width', 'lookback'])
+        
+        if mutation_type == 'lr':
+            # Explore Gradient Landscape
+            factor = random.choice([0.5, 2.0])
+            new_config['lr'] = np.clip(new_config['lr'] * factor, 1e-5, 1e-3)
+            
+        elif mutation_type == 'depth':
+             # Vary reasoning depth
+            delta = random.choice([-4, 4])
+            new_config['layers'] = int(np.clip(new_config['layers'] + delta, 12, 48))
+            
+        elif mutation_type == 'width':
+            # Vary capacity
+            modes = [256, 512, 1024]
+            current_idx = modes.index(new_config['d_model']) if new_config['d_model'] in modes else 1
+            move = random.choice([-1, 1])
+            new_idx = np.clip(current_idx + move, 0, 2)
+            new_config['d_model'] = modes[new_idx]
+            
+        elif mutation_type == 'lookback':
+            # Vary Context Window
+            delta = random.choice([-30, 30])
+            new_config['lookback'] = int(np.clip(new_config['lookback'] + delta, 60, 240))
+
+        print(f"\n[Evolution] Mutating {mutation_type.upper()} -> {new_config}")
+        return new_config
+
+    def update(self, config, loss):
+        entry = {'config': config, 'loss': loss}
+        self.history.append(entry)
+        
+        if loss < self.best_loss:
+            print(f"*** NEW BEST MODEL FOUND! Loss: {loss:.4f} ***")
+            self.best_loss = loss
+            self.best_config = config
+        else:
+            print(f"[Evolution] Degraded (Best: {self.best_loss:.4f})")
+
+# --- EVOLUTIONARY INTELLIGENCE ---
+class EvolutionaryOptimizer:
+    def __init__(self, iterations=20):
+        self.iterations = iterations
+        self.history = []  # List of {config, loss}
+        self.best_loss = float('inf')
+        self.best_config = None
+        
+        # 1. BASELINE: "The Beast" (Max Horsepower)
+        self.queue = [{
+            'd_model': 512,  # Sweet Spot for stability
+            'layers': 32,    # Deep Reasoning
+            'lr': 1e-4, 
+            'batch_size': 1024,
+            'lookback': 120,
+            'id': 'Gen0_Baseline'
+        }]
+        
+    def get_next_config(self, iteration):
+        if self.queue:
+            return self.queue.pop(0)
+
+        # 2. INTELLIGENCE: Adapt based on history
+        # Simple Mutational Strategy
+        parent = self.best_config if self.best_config else self.history[-1]['config']
+        new_config = parent.copy()
+        new_config['id'] = f'Gen{iteration}_Mutant'
+        
+        # Mutation Logic (Bayesian Exploration)
+        import random
+        mutation_type = random.choice(['lr', 'depth', 'width', 'lookback'])
+        
+        if mutation_type == 'lr':
+            # Explore Gradient Landscape
+            factor = random.choice([0.5, 2.0])
+            new_config['lr'] = np.clip(new_config['lr'] * factor, 1e-5, 1e-3)
+            
+        elif mutation_type == 'depth':
+             # Vary reasoning depth
+            delta = random.choice([-4, 4])
+            new_config['layers'] = int(np.clip(new_config['layers'] + delta, 12, 48))
+            
+        elif mutation_type == 'width':
+            # Vary capacity
+            modes = [256, 512, 1024]
+            current_idx = modes.index(new_config['d_model']) if new_config['d_model'] in modes else 1
+            move = random.choice([-1, 1])
+            new_idx = np.clip(current_idx + move, 0, 2)
+            new_config['d_model'] = modes[new_idx]
+            
+        elif mutation_type == 'lookback':
+            # Vary Context Window
+            delta = random.choice([-30, 30])
+            new_config['lookback'] = int(np.clip(new_config['lookback'] + delta, 60, 240))
+
+        print(f"\n[Evolution] Mutating {mutation_type.upper()} -> {new_config}")
+        return new_config
+
+    def update(self, config, loss):
+        entry = {'config': config, 'loss': loss}
+        self.history.append(entry)
+        
+        if loss < self.best_loss:
+            print(f"*** NEW BEST MODEL FOUND! Loss: {loss:.4f} ***")
+            self.best_loss = loss
+            self.best_config = config
+        else:
+            print(f"[Evolution] Degraded (Best: {self.best_loss:.4f})")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--csv", required=True)
@@ -265,58 +403,67 @@ def main():
     parser.add_argument("--resume-from", type=str, default=None, help="Path to checkpoint .pth to resume from")
     args = parser.parse_args()
     
-    X, y, r = load_and_prep_data(args.csv, max_rows=args.max_rows)
-    
-    # Split Indices (Time Series Split)
-    split_idx = int(0.8 * (len(X) - args.lookback))
-    
-    # Creating Datasets specific to split is tricky with lazy loading.
-    # Easiest: Pass full arrays to Dataset with idx offsets.
-    # OR: Just slice the numpy arrays now. Slicing numpy is a view (cheap).
-    
-    # X_train is X[:split+lookback] to allow sequences up to split
-    # Actually, simplest:
-    n_total_seq = len(X) - args.lookback
-    n_train = int(0.8 * n_total_seq)
-    
-    # Train set: Indices 0 to n_train
-    # Val set: Indices n_train to n_total_seq
-    
-    # We can pass sliced arrays to Dataset.
-    # Train needs X up to n_train + lookback
-    X_train = X[:n_train + args.lookback]
-    y_train = y[:n_train + args.lookback] # technically y targets are shifted
-    r_train = r[:n_train + args.lookback]
-    
-    X_val = X[n_train:]
-    y_val = y[n_train:]
-    r_val = r[n_train:]
-    
-    train_ds = LazySequenceDataset(X_train, y_train, r_train, args.lookback)
-    val_ds = LazySequenceDataset(X_val, y_val, r_val, args.lookback)
-    
-    print(f"Train Seq: {len(train_ds):,} | Val Seq: {len(val_ds):,}")
-    
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    configs = [
-        # SWEET SPOT (High Perf, Fits 3h Session)
-        # 512d x 24 Layers ~25M Params
-        # Batch 1024 (2048 was OOM on H100)
-        {'d_model': 512, 'layers': 24, 'lr': 1e-4, 'batch_size': 1024},
-        
-        # THE BEAST (Too slow for today: ~30h total)
-        # {'d_model': 1024, 'layers': 32, 'lr': 1e-5, 'batch_size': 512},
-    ]
+    # Initialize Evolution
+    optimizer = EvolutionaryOptimizer(iterations=20)
     
-    results = []
-    for cfg in configs:
-        loss = train_one_config(args, cfg, (train_ds, val_ds), device)
-        results.append({**cfg, 'loss': loss})
+    # Load Data ONCE (Raw Arrays)
+    # We load with a max lookback to be safe, or just load everything
+    print("Loading Data into Shared Memory...")
+    # Use helper load function to get arrays
+    X, y, r = load_and_prep_data(args.csv, max_rows=args.max_rows)
+    
+    print("\n--- STARTING 20-ITERATION EVOLUTIONARY SWEEP ---")
+    
+    for i in range(20): 
+        cfg = optimizer.get_next_config(i)
         
-    print("\nFINAL SWEEP RESULTS:")
-    for res in results:
-        print(f"{res['d_model']}d/{res['layers']}L: {res['loss']:.4f}")
+        # Override lookback if config says so, else use args
+        current_lookback = cfg.get('lookback', 120)
+        args.lookback = current_lookback
+        
+        # Dynamic Dataset Creation (O(1) View)
+        # Recalculate split based on new lookback
+        n_total_seq = len(X) - current_lookback
+        n_train = int(0.8 * n_total_seq)
+        
+        X_train = X[:n_train + current_lookback]
+        y_train = y[:n_train + current_lookback]
+        r_train = r[:n_train + current_lookback]
+        
+        X_val = X[n_train:]
+        y_val = y[n_train:]
+        r_val = r[n_train:]
+        
+        train_ds = LazySequenceDataset(X_train, y_train, r_train, current_lookback)
+        val_ds = LazySequenceDataset(X_val, y_val, r_val, current_lookback)
+        
+        print(f"\n{'='*60}")
+        print(f"ITERATION {i+1}/20: {cfg['id']}")
+        print(f"CONFIG: {cfg}")
+        print(f"Seq Len: {len(train_ds):,} Train | {len(val_ds):,} Val")
+        print(f"{'='*60}")
+        
+        # Force epochs=3 for sweep (or use args.epochs if user wants control)
+        # User said "run all 20 models...". 
+        # We'll use args.epochs passed by user (default 5).
+        
+        try:
+            loss = train_one_config(args, cfg, (train_ds, val_ds), device)
+        except Exception as e:
+            print(f"[ERROR] Config failed: {e}")
+            loss = float('inf')
+            
+        optimizer.update(cfg, loss)
+        
+        # Log Progress
+        pd.DataFrame([x['config'] | {'loss': x['loss']} for x in optimizer.history]).to_csv("models/sweep/evolution_log.csv")
+
+    print("\n--- EVOLUTION COMPLETE ---")
+    if optimizer.best_config:
+        print(f"Best Configuration: {optimizer.best_config}")
+        print(f"Best Loss: {optimizer.best_loss:.4f}")
 
 if __name__ == "__main__":
     main()

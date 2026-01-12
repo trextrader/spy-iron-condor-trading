@@ -1,0 +1,88 @@
+digraph MambaEngine {
+    rankdir=TB;
+    splines=spline;
+    nodesep=0.4;
+    ranksep=0.6;
+    fontname="Segoe UI";
+    bgcolor="#ffffff";
+    compound=true;
+    
+    node [fontname="Consolas", fontsize=10, shape=record, style=filled, fillcolor="white", penwidth=1.0, color="#2d3748"];
+    edge [fontname="Segoe UI", fontsize=9, color="#718096", penwidth=1.0];
+
+    subgraph cluster_input {
+        label="Input Logic";
+        style=dashed;
+        color="#cbd5e0";
+        
+        Input [label="Input Tensor\n(B, L, D=512)", shape=box3d, fillcolor="#e2e8f0"];
+        Norm [label="RMSNorm", shape=box];
+    }
+    
+    subgraph cluster_mamba_block {
+        label="Mamba 2 Block (Hardware Accelerated Loop)";
+        style=filled;
+        color="#48bb78";
+        fillcolor="#f0fff4";
+        
+        # Projections
+        ProjIn [label="Linear Projection\n(Expand 2x)", shape=trapezium, fillcolor="#c6f6d5"];
+        
+        # Parallel Paths
+        Conv [label="Conv1d (L=4)\n(Local Context)", shape=component];
+        Silu [label="SiLU Activation", shape=ellipse];
+        
+        # The Core SSM
+        subgraph cluster_ssm_kernel {
+            label="Selective Scan Kernel (Fused CUDA)";
+            style=filled;
+            color="#2f855a";
+            fillcolor="#9ae6b4";
+            fontcolor="#ffffff";
+            
+            Params [label="{ <dt> Discretize (ZOH) | <scan> Parallel Scan (Flash) }", fillcolor="#68d391"];
+            State [label="Hidden State h(t)\n(Compressed Market Memory)", shape=cylinder, fillcolor="#f0fff4"];
+            
+            Params:dt -> State [label=" Update"];
+            State -> Params:scan [label=" Recurse"];
+        }
+        
+        # Gating
+        Gate [label="Multiplicative Gate\n(x * z)", shape=circle, width=0.8];
+        ProjOut [label="Output Linear", shape=invtrapezium];
+        
+        ProjIn -> Conv [label=" Main Branch"];
+        ProjIn -> Gate [label=" Gating Branch", style=dashed];
+        
+        Conv -> Silu;
+        Silu -> Params [label=" B, C, dt"];
+        Params -> Gate [label=" y"];
+        Gate -> ProjOut;
+    }
+
+    subgraph cluster_heads {
+        label="Multi-Head Expert Decoder";
+        style=filled;
+        color="#805ad5";
+        fillcolor="#faf5ff";
+        
+        Regime [label="Regime Gating\n(Logits)", shape=diamond, fillcolor="#e9d8fd"];
+        
+        Heads [label="{ <price> Price Head | <vol> Volatility Head | <risk> Risk Head }", shape=record, fillcolor="#d6bcfa"];
+        
+        FinalPolicy [label="Parametric Policy Ï€\n(Strikes, Width, ROI)", shape=parallelogram, fillcolor="#b794f4"];
+    }
+
+    # Connections
+    Input -> Norm;
+    Norm -> ProjIn;
+    ProjOut -> Regime [label=" Context Vector"];
+    Regime -> Heads [label=" Expert Weighting"];
+    Heads:price -> FinalPolicy;
+    Heads:vol -> FinalPolicy;
+    Heads:risk -> FinalPolicy;
+    
+    # Annotations
+    Title [label="CondorBrain Intelligence Engine\n(Mamba 2 + Mixture of Experts)", shape=plaintext, fontsize=14, fontcolor="#2d3748"];
+    Title -> Input [style=invis];
+}
