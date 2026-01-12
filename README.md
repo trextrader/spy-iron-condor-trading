@@ -1,5 +1,16 @@
-# Quantor-MTFuzz: Advanced Options Trading System
-## Iron Condor Algorithmic Trading with Neuro-Fuzzy Intelligence
+# Quantor-MTFuzz:# 🦅 CondorBrain: Institutional Iron Condor Trading System
+> **"The H100-Optimized Mamba Intelligence"**
+
+## 🚀 New in v2.0 (Scientific Update)
+Full technical details available in [Scientific Specification](docs/scientific_spec.md).
+
+- **🧠 Mamba Architecture:** Replaced Transformer with `Mamba SSM`, achieving $O(N)$ linear scaling and 3x training throughput.
+- **⚡ H100 Optimization:** Custom `TF32`, `cuDNN Benchmark`, and `LazySequenceDataset` allow training on **10 Million Rows** (1.2B tokens) entirely in-memory.
+- **🛡️ Robust Stability:** Implemented Z-Score Scaling ($x \leftarrow \frac{x-\mu}{\sigma}$) + Tanh Clipping to solve FP16 NaN divergence.
+- **🔥 Production Sweep:** Automated hyperparameter tuning infrastructure capable of training 100M+ parameter models.
+
+## 📋 Overview
+CondorBrain is an advanced algorithmic trading system designed for SPY Iron Condor strategies, combining Multi-Timeframe (MTF) technical intelligence, Fuzzy Logic position sizing, and institutional-grade risk management.
 
 **Quantor-MTFuzz** is a production-grade algorithmic trading system for SPY Iron Condor strategies, combining Multi-Timeframe (MTF) technical intelligence, Fuzzy Logic position sizing, and institutional-grade risk management.# 🦅 SPY Option Trader (Quantor-MTFuzz)
 
