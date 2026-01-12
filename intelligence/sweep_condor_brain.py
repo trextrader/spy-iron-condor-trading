@@ -174,6 +174,17 @@ def train_one_config(args, config, datasets, device):
                             num_workers=2, persistent_workers=True, pin_memory=True)
     
     model = CondorBrain(d_model=d_model, n_layers=layers, input_dim=len(FEATURE_COLS)).to(device)
+    
+    # RESUME LOGIC
+    if hasattr(args, 'resume_from') and args.resume_from:
+        print(f"[Resume] Loading weights from {args.resume_from}...")
+        try:
+            state_dict = torch.load(args.resume_from, map_location=device)
+            model.load_state_dict(state_dict)
+            print("[Resume] Success! Weights loaded.")
+        except Exception as e:
+            print(f"[Resume] Failed to load checkpoint: {e}")
+            
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model Params: {n_params:,}")
     
@@ -242,6 +253,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--lookback", type=int, default=120)
     parser.add_argument("--max-rows", type=int, default=0, help="Limit rows for faster sweep")
+    parser.add_argument("--resume-from", type=str, default=None, help="Path to checkpoint .pth to resume from")
     args = parser.parse_args()
     
     X, y, r = load_and_prep_data(args.csv, max_rows=args.max_rows)
