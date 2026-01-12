@@ -69,6 +69,7 @@ $$
 \hat{y} = W_{out} \cdot \text{RMSNorm}(E_t^{(Final)})
 $$
 *Outputs the Policy Distribution: Strike Selection, Width, and Allocation Size.*
+
 ## 0. System Architecture
 ![System Overview](architecture/system_overview.png)
 
