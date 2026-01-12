@@ -154,9 +154,7 @@ Standard LSTMs/Transformers output a single vector. We architected a **Branched 
 
 ### 6.2 Regime-Gated MoE (Mixture of Experts)
 We implemented a `RegimeDetector` (Logits-based) that acts as a Gating Network:
-$$
-\text{Output} = \sum_{i \in \{Low, Normal, High\}} \sigma(G(x))_i \cdot E_i(x)
-$$
+$\text{Output} = \sum_{i \in \{Low, Normal, High\}} \sigma(G(x))_i \cdot E_i(x)$
 *   **Enhancement:** The model learns separate sub-policies for **High Volatility** (Wider Wings) vs **Low Volatility** (Tighter Wings), preventing catastrophic failure during market shocks (e.g., VIX spikes).
 
 ### 6.3 Selective Scan (Hardware-Aware State)
