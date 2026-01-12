@@ -58,7 +58,8 @@ Where $x_t \in R^{24}$ maps to Latent State $E_t \in R^{512}$.
 
 For each Mamba Layer $l \in [1..32]$:
 
-$h_t^{(l)} = SelectiveScan(A, B, C, \Delta, E_t^{(l-1)})$
+$h_t^{(l)} = \text{SelectiveScan}(A, B, C, \Delta, E_t^{(l-1)})$
+
 $E_t^{(l)} = \text{SiLU}(W_{gate} \cdot E_t^{(l-1)}) \odot h_t^{(l)}$
 
 *The model compresses the 24-feature history into a rolling hidden state $h_t$ that retains infinite context.*
