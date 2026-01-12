@@ -58,13 +58,7 @@ To handle 10 Million+ rows (1.2 billion timestamps) on a single node without RAM
 **Algorithm:**
 1. **Load:** Raw float32 array $(N, F)$ loaded into RAM once (~1.2GB).
 2. **View:** Training samples are **virtual views** (pointers), not copies.
-3. **Fetch:**
-   
-   $$
-   \text{Batch}(i) = \text{Array}[i : i + L]
-   $$
-   
-   This operation is instantaneous in NumPy/PyTorch.
+3. **Fetch:** $\text{Batch}(i) = \text{Array}[i : i + L]$ - This operation is instantaneous in NumPy/PyTorch.
 
 **Result:**
 - **Disk Usage:** 0GB (vs 200GB materialized).
