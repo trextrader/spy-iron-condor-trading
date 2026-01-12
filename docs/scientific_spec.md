@@ -120,34 +120,7 @@ After exhaustive sweeps, the following configuration was selected as the optimal
 The CondorBrain learning system extends beyond standard model training into a closed-loop evolutionary optimization process. This ensures the model adapts to the non-stationary nature of financial markets.
 
 ### 5.1 System Block Diagram
-
-```mermaid
-graph TD
-    subgraph Data Factory
-        Raw[Raw Market Data<br/>(10M Rows)] --> Clean[Sanitization<br/>(Z-Score + Clip)]
-        Clean --> Features[Feature Engineering<br/>(13-Dim Vector)]
-        Features --> Lazy[LazySequenceDataset<br/>(O(1) Memory Views)]
-    end
-
-    subgraph Mamba Intelligence
-        Lazy --> SSM[DeepMamba 2 Backbone<br/>(Selective Scan)]
-        SSM --> Heads[Multi-Expert Heads]
-        Heads --> Policy[Parametric Policy<br/>(Strikes, Width, ROI)]
-    end
-
-    subgraph Optimization Sweep
-        Policy --> Loss[Multi-Objective Loss<br/>(Accuracy + P&L + Risk)]
-        Loss --> Sweep{Hyperparam Sweep<br/>(20 Iterations)}
-        Sweep -->|Explore| Configs[Varying: lr, d_model, lookback]
-        Configs -->|Evaluate| Landscape[Loss Landscape Analysis]
-        Landscape -->|Select| Optimal[Global Minima Config]
-    end
-
-    subgraph Production
-        Optimal --> Deploy[Production Inference]
-        Deploy --> Signal[Execution Signal]
-    end
-```
+![Optimization Pipeline](architecture/optimization_pipeline.png)
 
 ### 5.2 Scientific Explanation of Model Output
 The CondorBrain does not merely output a price prediction; it functions as a **Parametric Policy Network**.

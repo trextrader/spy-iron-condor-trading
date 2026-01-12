@@ -1,0 +1,71 @@
+digraph OptimizationPipeline {
+    rankdir=LR;
+    splines=ortho;
+    nodesep=0.6;
+    ranksep=0.8;
+    bgcolor="#f8f9fa";
+    
+    node [fontname="Segoe UI", fontsize=12, shape=rect, style=filled, fillcolor="white", penwidth=1.5, color="#2d3748"];
+    edge [fontname="Segoe UI", fontsize=10, color="#4a5568", penwidth=1.2];
+
+    subgraph cluster_data {
+        label="1. Data Factory (H100 Memory Optimized)";
+        style=filled;
+        color="#e2e8f0";
+        fillcolor="#edf2f7";
+        
+        RawData [label="Raw Market Data\n(10M Rows)", shape=cylinder, fillcolor="#bee3f8"];
+        Sanitization [label="Sanitization\n(Z-Score + Clip)", shape=component];
+        Features [label="Feature Eng.\n(13-Dim Vector)", shape=component];
+        LazyLoader [label="LazySequenceDataset\n(O(1) Memory Views)", shape=folder, fillcolor="#90cdf4", penwidth=2];
+        
+        RawData -> Sanitization;
+        Sanitization -> Features;
+        Features -> LazyLoader;
+    }
+
+    subgraph cluster_mamba {
+        label="2. Mamba Intelligence Engine";
+        style=filled;
+        color="#c6f6d5";
+        fillcolor="#f0fff4";
+        
+        SSM [label="DeepMamba 2 Backbone\n(Selective Scan - O(N))", shape=box3d, fillcolor="#68d391"];
+        Experts [label="Multi-Expert Heads", shape=trapezium];
+        Policy [label="Parametric Policy π(s)\n{Strikes, Width, ROI}", shape=parallelogram, fillcolor="#9ae6b4"];
+        
+        LazyLoader -> SSM [label="Stream"];
+        SSM -> Experts;
+        Experts -> Policy;
+    }
+
+    subgraph cluster_sweep {
+        label="3. Evolutionary Sweep (20 Iterations)";
+        style=filled;
+        color="#fbd38d";
+        fillcolor="#fffaf0";
+        
+        Loss [label="Multi-Objective Loss\n(Acc + P&L + Risk)", shape=diamond];
+        Hyperparams [label="Hyperparams\n(LR, Depth, Lookback)", shape=note];
+        Explorer [label="Bayesian Exploration\n(Loss Landscape)", shape=ellipse, fillcolor="#f6ad55"];
+        Selector [label="Optimal Config\n(Low Spectral Norm)", shape=star, fillcolor="#ed8936"];
+        
+        Policy -> Loss;
+        Hyperparams -> Explorer [style=dashed];
+        Loss -> Explorer;
+        Explorer -> Selector [label="Selection"];
+    }
+
+    subgraph cluster_prod {
+        label="4. Production";
+        style=filled;
+        color="#cbd5e0";
+        fillcolor="#e2e8f0";
+        
+        Deploy [label="Production Inference\n(H100 Tensor Core)", shape=component, fillcolor="#a0aec0"];
+        Signal [label="Execution Signal\n(Iron Condor)", shape=doublecircle, fillcolor="#63b3ed", fontcolor="white"];
+        
+        Selector -> Deploy;
+        Deploy -> Signal;
+    }
+}
