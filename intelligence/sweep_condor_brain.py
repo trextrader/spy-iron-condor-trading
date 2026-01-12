@@ -197,53 +197,62 @@ def train_one_config(args, config, datasets, device):
     output_path = f"models/sweep/condor_d{d_model}_L{layers}_lr{lr:.0e}.pth"
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     
-    for epoch in range(args.epochs):
-        model.train()
-        train_loss = 0.0
-        batches = 0
-        
-        for bx, by, br in tqdm(train_loader, desc=f"Ep {epoch+1}", leave=False):
-            bx, by, br = bx.to(device, non_blocking=True), by.to(device, non_blocking=True), br.to(device, non_blocking=True)
+    try:
+        for epoch in range(args.epochs):
+            model.train()
+            train_loss = 0.0
+            batches = 0
             
-            optimizer.zero_grad(set_to_none=True)
-            with autocast('cuda'):
-                out, r_logits, _ = model(bx, return_regime=True)
-                loss = criterion(out, by, r_logits, br) # Pass logits to criterion
-                
-            if torch.isnan(loss) or torch.isinf(loss): continue
-            
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            scaler.step(optimizer)
-            scaler.update()
-            
-            train_loss += loss.item()
-            batches += 1
-            
-        # Val
-        model.eval()
-        val_loss = 0.0
-        v_batches = 0
-        with torch.no_grad():
-            for bx, by, br in val_loader:
+            for bx, by, br in tqdm(train_loader, desc=f"Ep {epoch+1}", leave=False):
                 bx, by, br = bx.to(device, non_blocking=True), by.to(device, non_blocking=True), br.to(device, non_blocking=True)
+                
+                optimizer.zero_grad(set_to_none=True)
                 with autocast('cuda'):
                     out, r_logits, _ = model(bx, return_regime=True)
-                    loss = criterion(out, by, r_logits, br)
-                val_loss += loss.item()
-                v_batches += 1
+                    loss = criterion(out, by, r_logits, br) # Pass logits to criterion
+                    
+                if torch.isnan(loss) or torch.isinf(loss): continue
                 
-        train_loss /= max(batches, 1)
-        val_loss /= max(v_batches, 1)
-        scheduler.step()
-        
-        print(f"Epoch {epoch+1:2d}/{args.epochs} | Train: {train_loss:.4f} | Val: {val_loss:.4f}")
-        
-        if val_loss < best_loss and not np.isnan(val_loss):
-            best_loss = val_loss
-            torch.save(model.state_dict(), output_path)
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                scaler.step(optimizer)
+                scaler.update()
+                
+                train_loss += loss.item()
+                batches += 1
+                
+            # Val
+            model.eval()
+            val_loss = 0.0
+            v_batches = 0
+            with torch.no_grad():
+                for bx, by, br in val_loader:
+                    bx, by, br = bx.to(device, non_blocking=True), by.to(device, non_blocking=True), br.to(device, non_blocking=True)
+                    with autocast('cuda'):
+                        out, r_logits, _ = model(bx, return_regime=True)
+                        loss = criterion(out, by, r_logits, br)
+                    val_loss += loss.item()
+                    v_batches += 1
+                    
+            train_loss /= max(batches, 1)
+            val_loss /= max(v_batches, 1)
+            scheduler.step()
             
+            print(f"Epoch {epoch+1:2d}/{args.epochs} | Train: {train_loss:.4f} | Val: {val_loss:.4f}")
+            
+            if val_loss < best_loss and not np.isnan(val_loss):
+                best_loss = val_loss
+                torch.save(model.state_dict(), output_path)
+                
+    except KeyboardInterrupt:
+        print("\n\n[STOP] Training interrupted by user!")
+        emerg_path = output_path.replace(".pth", "_EMERGENCY.pth")
+        print(f"[STOP] Saving emergency checkpoint to: {emerg_path}")
+        torch.save(model.state_dict(), emerg_path)
+        print("[STOP] Saved. safe to exit.")
+        return best_loss
+
     print(f"✓ FINISHED. Best: {best_loss:.4f} -> {output_path}")
     return best_loss
 
