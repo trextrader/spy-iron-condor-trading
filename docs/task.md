@@ -103,15 +103,15 @@
 ## Phase 3 — Strategy Refactor (Planned)
 - ✅ Slim down strategies/iron_condor.py to signal gating only (Done: Refactored to generate_trade_signal)
 - ✅ Move OptionQuote, IronCondorLegs to core/types.py (Done: core/dto.py)
-- [ ] Remove sizing logic (move to FIS in Phase 4)
+- ✅ Remove sizing logic (move to FIS in Phase 4) (Done: Logic migrated to intelligence/fis_sizer.py)
 - [ ] Integrate analytics.* modules into strategy
 
 ## Phase 4 — FIS Pipeline (Planned)
-- [ ] Create intelligence/fis_sizer.py (orchestrator)
-- [ ] Enhance intelligence/fuzzifier.py (full feature extraction)
-- [ ] Create intelligence/inference_engine.py (Mamdani rule base)
-- [ ] Create intelligence/defuzzifier.py (centroid)
-- [ ] Migrate existing fuzzy logic from fuzzy_engine.py
+- ✅ Create intelligence/fis_sizer.py (orchestrator)
+- ✅ Enhance intelligence/fuzzifier.py (Verified: Existing implementation robust)
+- ✅ Create intelligence/inference_engine.py (Mamdani/Additive rule base)
+- ✅ Create intelligence/defuzzifier.py (centroid/volatility scaling)
+- ✅ Migrate existing fuzzy logic from fuzzy_engine.py (Completed)
 - [ ] Write FIS integration tests
 
 ## Phase 5 — Risk Layer Enhancement (Planned)
