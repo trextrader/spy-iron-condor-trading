@@ -5,7 +5,8 @@ import pandas as pd
 import datetime as dt
 from strategies.risk_manager import RiskManager, PortfolioGreeks
 from core.config import StrategyConfig
-from strategies.options_strategy import PositionState, IronCondorLegs, OptionQuote
+from core.dto import IronCondorLegs, OptionQuote
+from strategies.options_strategy import PositionState
 
 def create_mock_quote(delta, gamma, vega, theta):
     return OptionQuote(

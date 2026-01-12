@@ -8,8 +8,9 @@ from dataclasses import dataclass
 # Fix path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
+from core.dto import OptionQuote
 from strategies.options_strategy import (
-    OptionQuote, calculate_skew, nearest_by_delta, 
+    calculate_skew, nearest_by_delta, 
     regime_wing_width, build_condor, calculate_breach_probability
 )
 from intelligence.fuzzy_engine import classify_market_regime

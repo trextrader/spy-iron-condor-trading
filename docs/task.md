@@ -102,7 +102,7 @@
 
 ## Phase 3 — Strategy Refactor (Planned)
 - [ ] Slim down strategies/iron_condor.py to signal gating only
-- [ ] Move OptionQuote, IronCondorLegs to core/types.py
+- ✅ Move OptionQuote, IronCondorLegs to core/types.py (Done: core/dto.py)
 - [ ] Remove sizing logic (move to FIS in Phase 4)
 - [ ] Integrate analytics.* modules into strategy
 

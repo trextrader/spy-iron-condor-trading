@@ -6,7 +6,8 @@ import datetime as dt
 
 # Import necessary types based on existing code structure
 # Assuming PositionState and IronCondorLegs are in strategies.options_strategy
-from strategies.options_strategy import PositionState, IronCondorLegs, net_position_delta
+from core.dto import IronCondorLegs
+from strategies.options_strategy import PositionState, net_position_delta
 
 @dataclass
 class PortfolioGreeks:

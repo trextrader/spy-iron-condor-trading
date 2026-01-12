@@ -17,8 +17,9 @@ import time # Added for profiling
 import csv
 from matplotlib.backends.backend_pdf import PdfPages
 from data_factory.sync_engine import MTFSyncEngine
+from core.dto import OptionQuote
 from strategies.options_strategy import (
-    OptionQuote, build_condor, calc_condor_credit, 
+    build_condor, calc_condor_credit, 
     PositionState, regime_wing_width
 )
 from intelligence.regime_filter import classify_regime, MarketRegime

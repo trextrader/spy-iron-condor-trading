@@ -6,7 +6,8 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from strategies.options_strategy import OptionQuote, IronCondorLegs, PositionState
+from core.dto import OptionQuote, IronCondorLegs
+from strategies.options_strategy import PositionState
 from data_factory.polygon_client import PolygonClient
 
 class BrokerAPI:

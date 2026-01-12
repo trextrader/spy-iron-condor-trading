@@ -86,4 +86,37 @@ class OrderPlan:
     Contains broker order objects or dicts for TradeRouter.
     """
     orders: list[Any]               # Broker order objects or dicts
-    metadata: dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class OptionQuote:
+    """
+    Standardized Option Quote DTO.
+    Used across DataFactory, Strategy, and Broker.
+    """
+    strike: float
+    bid: float
+    ask: float
+    mid: float
+    iv: float
+    delta: float
+    gamma: float = 0.0
+    vega: float = 0.0
+    theta: float = 0.0
+    symbol: str = ""
+    expiration: Any = None  # datetime.date
+    is_call: bool = True
+
+
+@dataclass
+class IronCondorLegs:
+    """
+    Component legs of an Iron Condor structure.
+    Used for pricing, risk validation, and execution.
+    """
+    long_put: OptionQuote
+    short_put: OptionQuote
+    short_call: OptionQuote
+    long_call: OptionQuote
+    net_credit: float
+    max_loss: float
+

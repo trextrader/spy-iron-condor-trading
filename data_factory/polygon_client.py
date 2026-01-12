@@ -64,7 +64,7 @@ class PolygonClient:
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from strategies.options_strategy import OptionQuote
+from core.dto import OptionQuote
 
 def poly_to_quote(p: PolyOption) -> OptionQuote:
     return OptionQuote(

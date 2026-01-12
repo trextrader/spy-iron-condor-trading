@@ -14,10 +14,13 @@ from intelligence.regime_filter import check_liquidity_gate
 try:
     from intelligence.condor_brain import CondorBrainEngine, CondorSignal, HAS_MAMBA
     HAS_CONDOR_BRAIN = HAS_MAMBA and os.path.exists("models/condor_brain.pth")
-except ImportError:
+except (ImportError, OSError):
     HAS_CONDOR_BRAIN = False
     CondorBrainEngine = None
     CondorSignal = None
+
+
+from core.dto import OptionQuote, IronCondorLegs
 
 # === Core Types ===
 def lag_weighted_edge(edge: float, iv_conf: float, align_mode: str, cfg: Any) -> float:
@@ -46,32 +49,6 @@ def lag_weighted_edge(edge: float, iv_conf: float, align_mode: str, cfg: Any) ->
         return edge - (1.0 - iv_conf) * scale
     return edge * (iv_conf * scale)
 
-
-@dataclass
-class OptionQuote:
-    strike: float
-    bid: float
-    ask: float
-    mid: float
-    iv: float
-    delta: float
-    gamma: float = 0.0
-    vega: float = 0.0
-    theta: float = 0.0
-    # Added for backtest_engine compatibility
-    symbol: str = ""
-    expiration: Any = None  # datetime.date
-    is_call: bool = True
-
-
-@dataclass
-class IronCondorLegs:
-    long_put: OptionQuote
-    short_put: OptionQuote
-    short_call: OptionQuote
-    long_call: OptionQuote
-    net_credit: float
-    max_loss: float
 
 
 class OptionsStrategy:
