@@ -2,12 +2,10 @@
 
 **Version:** 2.0 (H100 Optimized)
 **Date:** 2026-01-11
-# Scientific Specification: CondorBrain & Mamba Architecture
-
-**Version:** 2.0 (H100 Optimized)
-**Date:** 2026-01-11
 **Architecture:** DeepMamba (State Space Model)
 
+## Abstract
+This specification outlines the architecture of **CondorBrain**, a high-frequency Parametric Policy Network designed for volatility arbitrage on the SPY index. Leveraging the **Linear State-Space Model (SSM) Mamba-2** architecture, the system achieves $O(N)$ linear scaling on sequences exceeding 120 steps, overcoming the quadratic bottleneck of Transformer attention mechanisms. The model incorporates a **Selective Scan CUDA kernel** for hardware-aware state modulation, enhancing Signal-to-Noise Ratio (SNR) in non-stationary regimes. Optimization is driven by a 20-generation **Evolutionary Bayesian Strategy**, dynamically tuning hyperparameters (Lookback window, State dimension $D$) to traverse the non-convex loss landscape. The architecture concludes with a **Regime-Gated Mixture-of-Experts (MoE)** decoder, disentangling price directionality from volatility surface parameters to generate risk-adjusted Iron Condor execution signals.
 ## 0. System Architecture
 ![System Overview](architecture/system_overview.png)
 
