@@ -52,13 +52,13 @@ The Mamba Engine processes this stream using the following mathematical transfor
 
 $E_t = \text{LayerNorm}(W_{in} \cdot x_t + b_{in})$
 
-*Where $x_t \in \mathbb{R}^{24}$ maps to Latent State $E_t \in \mathbb{R}^{512}$.*
+*Where $ x_t \in \mathbb{R}^{24} $ maps to Latent State $ E_t \in \mathbb{R}^{512} $.*
 
 **2. SSM State Transition (The "Crunch"):**
 
 For each Mamba Layer $l \in [1..32]$:
 
-$h_t^{(l)} = \text{SelectiveScan}(A, B, C, \Delta, E_t^{(l-1)})$
+$$h_t^{(l)} = \text{SelectiveScan}(A, B, C, \Delta, E_t^{(l-1)})$$
 $E_t^{(l)} = \text{SiLU}(W_{gate} \cdot E_t^{(l-1)}) \odot h_t^{(l)}$
 
 *The model compresses the 24-feature history into a rolling hidden state $h_t$ that retains infinite context.*
