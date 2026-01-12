@@ -7,7 +7,11 @@ Runs multiple training configurations sequentially using a LazySequenceDataset.
 - Fast training with parallel DataLoaders
 """
 import sys
+import sys
 import os
+# Fix fragmentation (Chunk Memory)
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'expandable_segments:True'
+
 import argparse
 import numpy as np
 import pandas as pd
