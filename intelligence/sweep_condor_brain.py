@@ -277,8 +277,8 @@ def main():
     configs = [
         # SWEET SPOT (High Perf, Fits 3h Session)
         # 512d x 24 Layers ~25M Params
-        # Batch 2048 to saturate H100 Memory (was 256, utilizing only 20%)
-        {'d_model': 512, 'layers': 24, 'lr': 1e-4, 'batch_size': 2048},
+        # Batch 1024 (2048 was OOM on H100)
+        {'d_model': 512, 'layers': 24, 'lr': 1e-4, 'batch_size': 1024},
         
         # THE BEAST (Too slow for today: ~30h total)
         # {'d_model': 1024, 'layers': 32, 'lr': 1e-5, 'batch_size': 512},
