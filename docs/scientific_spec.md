@@ -11,6 +11,12 @@
 ## 0. System Architecture
 ![System Overview](architecture/system_overview.png)
 
+### 0.1 Data Pipeline Detail
+![Data Pipeline](architecture/data_pipeline_detailed.png)
+
+### 0.2 Lag Alignment Flow
+![Lag Alignment](architecture/lag_alignment_flow.png)
+
 ## 1. Core Architecture: Mamba Protocol
 Unlike traditional Transformers with $O(N^2)$ quadratic complexity, CondorBrain utilizes the **Mamba State Space Model (SSM)**, achieving $O(N)$ linear complexity with respect to sequence length.
 
