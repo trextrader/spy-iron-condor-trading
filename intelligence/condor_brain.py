@@ -28,7 +28,31 @@ try:
     HAS_MAMBA = True
 except ImportError:
     HAS_MAMBA = False
-    logger.warning("mamba-ssm not found. CondorBrain will use mock layers.")
+
+
+# ============================================================================
+# BF16-FRIENDLY RMSNORM (Critical for throughput)
+# ============================================================================
+
+class RMSNorm(nn.Module):
+    """
+    BF16-friendly RMSNorm (no mean subtraction; stable without FP32 casts).
+    y = x * rsqrt(mean(x^2) + eps) * weight
+    
+    Unlike nn.RMSNorm, this returns the same dtype as input (BF16 stays BF16).
+    """
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Keep stats in FP32 for stability, but return in original dtype
+        dtype = x.dtype
+        x_fp32 = x.float()
+        rms = torch.rsqrt(x_fp32.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+        y = (x_fp32 * rms).to(dtype)
+        return y * self.weight.to(dtype)
 
 # ============================================================================
 # OUTPUT DATA STRUCTURES
@@ -266,8 +290,8 @@ class CondorBrain(nn.Module):
                 nn.Linear(d_model, d_model) for _ in range(n_layers)
             ])
         
-        # RMSNorm is faster and keeps BF16-friendly kernels hot
-        self.norm = nn.RMSNorm(d_model)
+        # Use our custom BF16-friendly RMSNorm (returns same dtype as input)
+        self.norm = RMSNorm(d_model)
         
         # Regime detector
         self.regime_detector = RegimeDetector(d_model)
@@ -332,8 +356,9 @@ class CondorBrain(nn.Module):
         # Detect regime (logits)
         regime_logits = self.regime_detector(last_hidden)  # (B, 3)
         
-        # Probabilities for weighting experts (apply softmax here)
-        regime_probs = torch.softmax(regime_logits, dim=-1)
+        # Probabilities for weighting experts
+        # Softmax often promotes to FP32 internally; cast back to BF16 so expert mix stays BF16
+        regime_probs = torch.softmax(regime_logits.float(), dim=-1).to(last_hidden.dtype)
         
         # Multi-horizon price forecast (if requested)
         horizon_forecast = None
@@ -345,7 +370,13 @@ class CondorBrain(nn.Module):
         out_normal = self.expert_normal(last_hidden)  # (B, 8)
         out_high = self.expert_high(last_hidden)      # (B, 8)
         
-        # Mixture-of-experts: weighted sum by regime probabilities
+        # Ensure experts stay in same dtype as hidden (BF16)
+        if out_low.dtype != last_hidden.dtype:
+            out_low = out_low.to(last_hidden.dtype)
+            out_normal = out_normal.to(last_hidden.dtype)
+            out_high = out_high.to(last_hidden.dtype)
+        
+        # Mixture-of-experts: weighted sum by regime probabilities (BF16 end-to-end)
         outputs = (
             regime_probs[:, 0:1] * out_low +
             regime_probs[:, 1:2] * out_normal +
