@@ -173,28 +173,35 @@ def prepare_features(df: pd.DataFrame) -> tuple:
 
 
 class SequenceDataset(torch.utils.data.Dataset):
-    """Optimized dataset that creates contiguous sequences on-the-fly.
+    """Zero-copy sequence dataset.
     
-    Much faster than pre-computing 3D strided arrays because:
-    1. Each slice X[i:i+L] is contiguous in memory
-    2. No expensive as_strided + copy overhead
-    3. Better cache locality for H2D transfers
+    Stores X/y/r as torch tensors once, returns views via narrow/select.
+    This eliminates the per-sample .copy() and from_numpy() overhead.
     """
-    def __init__(self, X2d: np.ndarray, y2d: np.ndarray, r2d: np.ndarray, lookback: int):
-        self.X = X2d
-        self.y = y2d
-        self.r = r2d
+    def __init__(self, X2d: np.ndarray, y2d: np.ndarray, r2d: np.ndarray, lookback: int, x_dtype=torch.bfloat16):
         self.L = lookback
-        self.n = X2d.shape[0] - lookback
+        
+        # Convert ONCE (no per-sample conversions)
+        # Keep y in float32 for stability (loss uses float32 anyway)
+        self.X = torch.from_numpy(X2d).to(dtype=x_dtype)          # (N, F) - BF16 for speed
+        self.y = torch.from_numpy(y2d).to(dtype=torch.float32)    # (N, 8)
+        self.r = torch.from_numpy(r2d).to(dtype=torch.long)       # (N,)
+        
+        self.n = self.X.shape[0] - lookback
+        
+        # Share memory so worker processes don't duplicate storage
+        self.X.share_memory_()
+        self.y.share_memory_()
+        self.r.share_memory_()
     
     def __len__(self):
         return self.n
     
     def __getitem__(self, i):
-        # Contiguous slice in numpy, then convert to torch
-        x = torch.from_numpy(self.X[i:i+self.L].copy())
-        y = torch.from_numpy(self.y[i+self.L-1:i+self.L].copy()).squeeze(0)
-        r = torch.tensor(self.r[i+self.L-1], dtype=torch.long)
+        # Views (no copies!) - this is the key optimization
+        x = self.X.narrow(0, i, self.L)        # (L, F) view
+        y = self.y[i + self.L - 1]             # (8,)
+        r = self.r[i + self.L - 1]             # scalar long
         return x, y, r
 
 
@@ -354,7 +361,7 @@ def train_condor_brain(args):
     train_loader = DataLoader(
         train_ds,
         batch_size=args.batch_size,
-        shuffle=True,
+        shuffle=False,  # Sequential access for zero-copy views + cache performance
         num_workers=n_workers,
         pin_memory=True,
         persistent_workers=True,
