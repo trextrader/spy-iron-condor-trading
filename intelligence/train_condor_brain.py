@@ -8,6 +8,11 @@ Uses proven pattern from train_mamba.py:
 """
 import sys
 import os
+
+# CRITICAL: Set CUDA memory allocator BEFORE importing torch
+# This reduces fragmentation and helps with "reserved but unallocated" OOM errors
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import time
 import argparse
 import numpy as np
