@@ -10,8 +10,8 @@ import sys
 import os
 
 # CRITICAL: Set CUDA memory allocator BEFORE importing torch
-# This reduces fragmentation and helps with "reserved but unallocated" OOM errors
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size_mb:256,garbage_collection_threshold:0.8"
+# Note: Only use expandable_segments - other options may conflict with PyTorch versions
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 import time
 import argparse
