@@ -172,26 +172,85 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     return X, y, regime
 
 
-def create_sequences_fast(X, y, regime, lookback):
-    """Create sequences using numpy stride tricks for speed."""
-    n_samples = len(X) - lookback
-    n_features = X.shape[1]
+class SequenceDataset(torch.utils.data.Dataset):
+    """Optimized dataset that creates contiguous sequences on-the-fly.
     
-    print(f"[CondorBrain] Creating {n_samples:,} sequences (lookback={lookback})...")
+    Much faster than pre-computing 3D strided arrays because:
+    1. Each slice X[i:i+L] is contiguous in memory
+    2. No expensive as_strided + copy overhead
+    3. Better cache locality for H2D transfers
+    """
+    def __init__(self, X2d: np.ndarray, y2d: np.ndarray, r2d: np.ndarray, lookback: int):
+        self.X = X2d
+        self.y = y2d
+        self.r = r2d
+        self.L = lookback
+        self.n = X2d.shape[0] - lookback
     
-    # Use stride tricks for efficient view (no memory copy!)
-    from numpy.lib.stride_tricks import as_strided
+    def __len__(self):
+        return self.n
     
-    X_seq = as_strided(
-        X,
-        shape=(n_samples, lookback, n_features),
-        strides=(X.strides[0], X.strides[0], X.strides[1])
-    ).copy()  # Copy to ensure contiguous memory
+    def __getitem__(self, i):
+        # Contiguous slice in numpy, then convert to torch
+        x = torch.from_numpy(self.X[i:i+self.L].copy())
+        y = torch.from_numpy(self.y[i+self.L-1:i+self.L].copy()).squeeze(0)
+        r = torch.tensor(self.r[i+self.L-1], dtype=torch.long)
+        return x, y, r
+
+
+class CUDAPrefetcher:
+    """Prefetches next batch to GPU while current batch computes.
     
-    y_seq = y[lookback:].copy()
-    r_seq = regime[lookback:].copy()
+    Removes H2D copy from critical path by pipelining transfers.
+    """
+    def __init__(self, loader, device):
+        self.loader = iter(loader)
+        self.device = device
+        self.stream = torch.cuda.Stream()
+        self.next_batch = None
+        self.preload()
     
-    return X_seq, y_seq, r_seq
+    def preload(self):
+        try:
+            batch = next(self.loader)
+        except StopIteration:
+            self.next_batch = None
+            return
+        with torch.cuda.stream(self.stream):
+            x, y, r = batch
+            self.next_batch = (
+                x.to(self.device, non_blocking=True),
+                y.to(self.device, non_blocking=True),
+                r.to(self.device, non_blocking=True),
+            )
+    
+    def __iter__(self):
+        return self
+    
+    def __next__(self):
+        if self.next_batch is None:
+            raise StopIteration
+        torch.cuda.current_stream().wait_stream(self.stream)
+        batch = self.next_batch
+        self.preload()
+        return batch
+
+
+def create_datasets(X, y, regime, lookback, train_split=0.8):
+    """Create train/val SequenceDatasets with proper split."""
+    n_sequences = len(X) - lookback
+    split_idx = int(n_sequences * train_split)
+    
+    # Split indices (chronological, no shuffle)
+    train_end = split_idx + lookback
+    
+    print(f"[CondorBrain] Creating {n_sequences:,} sequences (lookback={lookback})...")
+    
+    train_ds = SequenceDataset(X[:train_end], y[:train_end], regime[:train_end], lookback)
+    val_ds = SequenceDataset(X[split_idx:], y[split_idx:], regime[split_idx:], lookback)
+    
+    print(f"[CondorBrain] Train: {len(train_ds):,} | Val: {len(val_ds):,}")
+    return train_ds, val_ds
 
 
 # ============================================================================
@@ -268,7 +327,6 @@ def train_condor_brain(args):
         
         opt_str = f"TF32, cuDNN benchmark, {'BF16' if use_bf16 else 'FP16'}"
         print(f"[CondorBrain] CUDA optimizations enabled: {opt_str}")
-    
     # Load data
     print(f"\n[CondorBrain] Loading data from {args.local_data}...")
     if args.max_rows > 0:
@@ -285,49 +343,33 @@ def train_condor_brain(args):
     import gc
     gc.collect()
     
-    # Create sequences (FAST with stride tricks)
-    X_seq, y_seq, r_seq = create_sequences_fast(X, y, regime, args.lookback)
-    
-    # Free original arrays
-    del X, y, regime
-    gc.collect()
-    
-    # Train/Val split (80/20)
-    split = int(0.8 * len(X_seq))
-    X_train, X_val = X_seq[:split], X_seq[split:]
-    y_train, y_val = y_seq[:split], y_seq[split:]
-    r_train, r_val = r_seq[:split], r_seq[split:]
-    
-    print(f"[CondorBrain] Train: {len(X_train):,} | Val: {len(X_val):,}")
+    # Create optimized SequenceDatasets (contiguous slices, no strided arrays)
+    train_ds, val_ds = create_datasets(X, y, regime, args.lookback)
     
     # DataLoaders with maximum parallel loading
     # H100 can handle more workers due to faster PCIe 5.0
     n_workers = 8 if is_h100 else 4
+    torch.set_num_threads(1)  # Reduce CPU contention in dataloader-heavy training
     
     train_loader = DataLoader(
-        TensorDataset(
-            torch.from_numpy(X_train),
-            torch.from_numpy(y_train),
-            torch.from_numpy(r_train)
-        ),
+        train_ds,
         batch_size=args.batch_size,
         shuffle=True,
-        pin_memory=True,
         num_workers=n_workers,
-        drop_last=True,
-        persistent_workers=True,
-        prefetch_factor=4  # Prefetch 4 batches per worker
-    )
-    val_loader = DataLoader(
-        TensorDataset(
-            torch.from_numpy(X_val),
-            torch.from_numpy(y_val),
-            torch.from_numpy(r_val)
-        ),
-        batch_size=args.batch_size,
         pin_memory=True,
-        num_workers=n_workers // 2,
-        prefetch_factor=2
+        persistent_workers=True,
+        prefetch_factor=8,
+        drop_last=True
+    )
+    
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=max(2, n_workers // 2),
+        pin_memory=True,
+        persistent_workers=True,
+        prefetch_factor=4
     )
     
     # Model
@@ -389,10 +431,19 @@ def train_condor_brain(args):
         epoch_start = time.time()
         optimizer.zero_grad(set_to_none=True)  # Zero at start of epoch
         
-        for batch_idx, (batch_x, batch_y, batch_r) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}", leave=False)):
-            batch_x = batch_x.to(device, non_blocking=True)
-            batch_y = batch_y.to(device, non_blocking=True)
-            batch_r = batch_r.to(device, non_blocking=True)
+        # Use CUDAPrefetcher for pipelined H2D transfers (if on GPU)
+        if device.type == 'cuda':
+            train_iter = CUDAPrefetcher(train_loader, device)
+            pbar = tqdm(enumerate(train_iter), total=len(train_loader), desc=f"Epoch {epoch+1}", leave=False)
+        else:
+            pbar = tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Epoch {epoch+1}", leave=False)
+        
+        for batch_idx, (batch_x, batch_y, batch_r) in pbar:
+            # If not using prefetcher, move to device
+            if device.type != 'cuda':
+                batch_x = batch_x.to(device)
+                batch_y = batch_y.to(device)
+                batch_r = batch_r.to(device)
             
             with autocast('cuda', dtype=amp_dtype):
                 outputs, regime_probs, _ = model(batch_x, return_regime=True, forecast_days=0)
