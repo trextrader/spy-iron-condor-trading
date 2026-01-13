@@ -12,6 +12,7 @@ import os
 # CRITICAL: Set CUDA memory allocator BEFORE importing torch
 # Note: Only use expandable_segments - other options may conflict with PyTorch versions
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 
 import time
 import argparse
@@ -28,6 +29,33 @@ from tqdm import tqdm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from intelligence.condor_brain import CondorBrain, CondorLoss, HAS_MAMBA
+
+
+# ============================================================================
+# KERNEL PROBES (Your throughput depends on this)
+# ============================================================================
+
+def probe_fast_kernels() -> dict:
+    """
+    Returns a dict describing whether fused CUDA kernels are available.
+    If these are missing, you will be stuck in the ~1-3 it/s range for big models.
+    """
+    info = {
+        "mamba_selective_scan_cuda": False,
+        "causal_conv1d": False,
+    }
+    try:
+        # selective_scan_cuda is the core fast path for mamba_ssm
+        from mamba_ssm.ops.selective_scan_interface import selective_scan_fn  # noqa: F401
+        info["mamba_selective_scan_cuda"] = True
+    except Exception:
+        info["mamba_selective_scan_cuda"] = False
+    try:
+        import causal_conv1d  # noqa: F401
+        info["causal_conv1d"] = True
+    except Exception:
+        info["causal_conv1d"] = False
+    return info
 
 # ============================================================================
 # ROBUST NORMALIZATION HELPERS (Fixes NaN training issue)
@@ -242,6 +270,9 @@ def parse_args():
     parser.add_argument("--max-rows", type=int, default=0, help="Limit rows for debugging")
     parser.add_argument("--accum-steps", type=int, default=1, help="Gradient accumulation steps (effective_batch = batch_size * accum_steps)")
     parser.add_argument("--grad-checkpoint", action="store_true", help="Enable gradient checkpointing to save memory")
+    parser.add_argument("--require-fused-kernels", action="store_true", help="Hard fail if selective_scan_cuda/causal_conv1d are missing")
+    parser.add_argument("--compile", action="store_true", help="Try torch.compile (guarded). May improve throughput if supported by your mamba build.")
+    parser.add_argument("--compile-mode", type=str, default="reduce-overhead", choices=["reduce-overhead", "max-autotune", "default"], help="torch.compile mode")
     
     args = parser.parse_args()
     
@@ -266,6 +297,25 @@ def train_condor_brain(args):
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"[CondorBrain] Device: {device}")
+    
+    # Probe kernel availability early (your throughput depends on this)
+    kinfo = probe_fast_kernels()
+    print(f"[CondorBrain] Kernel probe: "
+          f"selective_scan_cuda={'YES' if kinfo['mamba_selective_scan_cuda'] else 'NO'}, "
+          f"causal_conv1d={'YES' if kinfo['causal_conv1d'] else 'NO'}")
+    
+    if args.require_fused_kernels:
+        missing = []
+        if not kinfo["mamba_selective_scan_cuda"]:
+            missing.append("mamba_ssm selective_scan_cuda")
+        if not kinfo["causal_conv1d"]:
+            missing.append("causal_conv1d")
+        if missing:
+            raise RuntimeError(
+                "[CRITICAL] Missing fused CUDA kernels: "
+                + ", ".join(missing)
+                + ". Install/compile these or throughput will be severely limited."
+            )
     
     # Detect GPU capabilities
     use_bf16 = False
@@ -355,8 +405,17 @@ def train_condor_brain(args):
         model.gradient_checkpointing = True
         print("[CondorBrain] Gradient checkpointing ENABLED (memory saver)")
     
-    # NOTE: torch.compile() disabled - incompatible with Mamba's custom selective_scan_cuda kernels
-    # Mamba already uses optimized Triton kernels internally
+    # torch.compile() (guarded). This CAN help, but depends on your exact mamba build.
+    if args.compile and hasattr(torch, "compile") and device.type == "cuda":
+        try:
+            # Suppress compile failures and fall back cleanly
+            torch._dynamo.config.suppress_errors = True
+            cmode = args.compile_mode if args.compile_mode != "default" else None
+            print(f"[CondorBrain] Trying torch.compile(mode={args.compile_mode}) ...")
+            model = torch.compile(model, mode=cmode) if cmode else torch.compile(model)
+            print("[CondorBrain] torch.compile enabled ✅")
+        except Exception as e:
+            print(f"[CondorBrain] torch.compile failed (continuing uncompiled): {e}")
     
     n_params = sum(p.numel() for p in model.parameters())
     print(f"[CondorBrain] Model parameters: {n_params:,}")
