@@ -346,20 +346,9 @@ def train_condor_brain(args):
     # Force model weights to BF16 so Mamba kernels take the BF16 fast path
     if use_bf16:
         model = model.to(torch.bfloat16)
-        print("[CondorBrain] Model weights converted to BF16 for fast Mamba kernels")
-        
-        # Keep norm layers in FP32 for numerical stability (common practice)
-        for m in model.modules():
-            name = m.__class__.__name__.lower()
-            if 'norm' in name:  # LayerNorm, RMSNorm, etc
-                try:
-                    m.to(dtype=torch.float32)
-                except Exception:
-                    pass
-        print("[CondorBrain] Norm layers kept in FP32 for stability")
-        # Keep the final output head in BF16 as well; loss is computed in FP32
-        if hasattr(model, 'legacy_head'):
-            model.legacy_head.to(torch.bfloat16)
+        print("[CondorBrain] Model weights converted to BF16 (including RMSNorm)")
+        # NOTE: RMSNorm is BF16-friendly, no need for FP32 conversion
+        # Loss is still computed in FP32 externally via .float() calls
     
     # Enable gradient checkpointing if requested (saves ~40% GPU memory)
     if args.grad_checkpoint:
