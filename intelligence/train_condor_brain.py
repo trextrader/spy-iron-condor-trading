@@ -150,6 +150,8 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--lookback", type=int, default=240)
     parser.add_argument("--max-rows", type=int, default=0, help="Limit rows for debugging")
+    parser.add_argument("--accum-steps", type=int, default=1, help="Gradient accumulation steps (effective_batch = batch_size * accum_steps)")
+    parser.add_argument("--grad-checkpoint", action="store_true", help="Enable gradient checkpointing to save memory")
     
     args = parser.parse_args()
     
@@ -175,15 +177,38 @@ def train_condor_brain(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"[CondorBrain] Device: {device}")
     
+    # Detect GPU capabilities
+    use_bf16 = False
+    is_h100 = False
+    
     if device.type == 'cuda':
-        print(f"[CondorBrain] GPU: {torch.cuda.get_device_name(0)}")
-        print(f"[CondorBrain] GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
-        # CUDA optimizations for max speed
+        gpu_name = torch.cuda.get_device_name(0)
+        gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+        compute_cap = torch.cuda.get_device_capability(0)
+        
+        print(f"[CondorBrain] GPU: {gpu_name}")
+        print(f"[CondorBrain] GPU Memory: {gpu_mem:.1f} GB")
+        print(f"[CondorBrain] Compute Capability: {compute_cap[0]}.{compute_cap[1]}")
+        
+        # H100 detection (compute capability 9.0+)
+        is_h100 = compute_cap[0] >= 9 or 'H100' in gpu_name
+        # BF16 supported on Ampere+ (8.0+)
+        use_bf16 = compute_cap[0] >= 8
+        
+        # === MAXIMUM CUDA OPTIMIZATIONS ===
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True  # Auto-tune kernels
         torch.backends.cudnn.deterministic = False  # Speed over reproducibility
-        print("[CondorBrain] CUDA optimizations enabled: TF32, cuDNN benchmark")
+        torch.set_float32_matmul_precision('high')  # Use Tensor Cores for FP32
+        
+        if is_h100:
+            print("[CondorBrain] 🚀 H100 DETECTED - Maximum optimizations enabled!")
+            # H100 has 80GB HBM3, can handle larger batches
+            torch.cuda.set_per_process_memory_fraction(0.95)  # Use 95% of GPU memory
+        
+        opt_str = f"TF32, cuDNN benchmark, {'BF16' if use_bf16 else 'FP16'}"
+        print(f"[CondorBrain] CUDA optimizations enabled: {opt_str}")
     
     # Load data
     print(f"\n[CondorBrain] Loading data from {args.local_data}...")
@@ -216,7 +241,10 @@ def train_condor_brain(args):
     
     print(f"[CondorBrain] Train: {len(X_train):,} | Val: {len(X_val):,}")
     
-    # DataLoaders with parallel loading
+    # DataLoaders with maximum parallel loading
+    # H100 can handle more workers due to faster PCIe 5.0
+    n_workers = 8 if is_h100 else 4
+    
     train_loader = DataLoader(
         TensorDataset(
             torch.from_numpy(X_train),
@@ -226,9 +254,10 @@ def train_condor_brain(args):
         batch_size=args.batch_size,
         shuffle=True,
         pin_memory=True,
-        num_workers=4,  # Parallel data loading
-        drop_last=True,  # Avoid uneven final batch
-        persistent_workers=True  # Keep workers alive
+        num_workers=n_workers,
+        drop_last=True,
+        persistent_workers=True,
+        prefetch_factor=4  # Prefetch 4 batches per worker
     )
     val_loader = DataLoader(
         TensorDataset(
@@ -238,7 +267,8 @@ def train_condor_brain(args):
         ),
         batch_size=args.batch_size,
         pin_memory=True,
-        num_workers=2
+        num_workers=n_workers // 2,
+        prefetch_factor=2
     )
     
     # Model
@@ -256,16 +286,32 @@ def train_condor_brain(args):
 
     
     criterion = CondorLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    
+    # Fused AdamW is faster on modern GPUs (avoids kernel launch overhead)
+    use_fused = device.type == 'cuda' and 'fused' in torch.optim.AdamW.__init__.__code__.co_varnames
+    optimizer = optim.AdamW(
+        model.parameters(), 
+        lr=args.lr, 
+        weight_decay=1e-4,
+        fused=use_fused if use_fused else False
+    )
+    if use_fused:
+        print("[CondorBrain] Using fused AdamW optimizer")
+    
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    scaler = GradScaler()
+    
+    # Use BF16 on H100/Ampere, FP16 on older GPUs
+    scaler = GradScaler() if not use_bf16 else None
+    amp_dtype = torch.bfloat16 if use_bf16 else torch.float16
     
     # Training
+    effective_batch = args.batch_size * args.accum_steps
     print(f"\n{'='*60}")
     print(f"CONDORBRAIN TRAINING")
     print(f"{'='*60}")
     print(f"Model: {args.d_model}d x {args.layers} layers ({n_params/1e6:.1f}M params)")
-    print(f"Epochs: {args.epochs}, Batch: {args.batch_size}, LR: {args.lr}")
+    print(f"Epochs: {args.epochs}, Batch: {args.batch_size} x {args.accum_steps} accum = {effective_batch} effective")
+    print(f"LR: {args.lr}, Grad Checkpoint: {args.grad_checkpoint}")
     print(f"Output: {args.output}")
     print(f"{'='*60}\n")
     
@@ -277,32 +323,42 @@ def train_condor_brain(args):
         n_batches = 0
         
         epoch_start = time.time()
+        optimizer.zero_grad(set_to_none=True)  # Zero at start of epoch
         
-        for batch_x, batch_y, batch_r in tqdm(train_loader, desc=f"Epoch {epoch+1}", leave=False):
+        for batch_idx, (batch_x, batch_y, batch_r) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}", leave=False)):
             batch_x = batch_x.to(device, non_blocking=True)
             batch_y = batch_y.to(device, non_blocking=True)
             batch_r = batch_r.to(device, non_blocking=True)
             
-            optimizer.zero_grad(set_to_none=True)
-            
-            with autocast('cuda'):
+            with autocast('cuda', dtype=amp_dtype):
                 outputs, regime_probs, _ = model(batch_x, return_regime=True, forecast_days=0)
                 loss = criterion(outputs, batch_y, regime_probs, batch_r)
+                # Scale loss for gradient accumulation
+                loss = loss / args.accum_steps
             
             # Skip NaN losses (prevents explosion)
             if torch.isnan(loss) or torch.isinf(loss):
                 continue
             
-            scaler.scale(loss).backward()
+            # Backward pass (accumulate gradients)
+            if scaler is not None:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
             
-            # Gradient clipping (prevents explosion)
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            # Optimizer step every accum_steps batches
+            if (batch_idx + 1) % args.accum_steps == 0:
+                if scaler is not None:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
             
-            scaler.step(optimizer)
-            scaler.update()
-            
-            train_loss += loss.item()
+            train_loss += loss.item() * args.accum_steps  # Un-scale for logging
             n_batches += 1
         
         # Validation
@@ -316,7 +372,7 @@ def train_condor_brain(args):
                 batch_y = batch_y.to(device, non_blocking=True)
                 batch_r = batch_r.to(device, non_blocking=True)
                 
-                with autocast('cuda'):
+                with autocast('cuda', dtype=amp_dtype):
                     outputs, regime_probs, _ = model(batch_x, return_regime=True, forecast_days=0)
                     loss = criterion(outputs, batch_y, regime_probs, batch_r)
                 val_loss += loss.item()
