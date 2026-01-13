@@ -300,6 +300,8 @@ def parse_args():
                         help="Enable advanced multi-head training monitor with per-predictor tracking.")
     parser.add_argument("--monitor-every", type=int, default=1,
                         help="Update monitor plots every N epochs (default: 1, use higher for faster training).")
+    parser.add_argument("--viz-every", type=int, default=0,
+                        help="Intra-epoch visualization: update plots every N batches (0=disabled, try 500-1000).")
     
     args = parser.parse_args()
     
@@ -661,6 +663,32 @@ def train_condor_brain(args):
                 )
                 _tp_last_t = _now
                 _tp_last_i = (batch_idx + 1)
+            
+            # === INTRA-EPOCH VISUALIZATION (--viz-every) ===
+            if args.viz_every > 0 and monitor is not None and (batch_idx + 1) % args.viz_every == 0:
+                # Quick mini-validation sample (just one batch, no full val pass)
+                model.eval()
+                with torch.no_grad():
+                    samples = sample_predictions(
+                        model=model,
+                        get_batch_fn=get_val_batch if use_gpu_dataset else lambda bi: next(iter(val_loader)),
+                        device=device,
+                        amp_dtype=amp_dtype,
+                        n_samples=32
+                    )
+                    # Compute quick per-head metrics from this sample
+                    preds_t = torch.from_numpy(samples['preds']).to(device)
+                    targs_t = torch.from_numpy(samples['targets']).to(device)
+                    quick_losses = {}
+                    for i, name in enumerate(MAIN_HEADS):
+                        quick_losses[name] = torch.mean((preds_t[:, i] - targs_t[:, i]) ** 2).item()
+                    quick_losses['regime_accuracy'] = 0.0  # Placeholder
+                
+                # Display inline
+                pbar.set_description(f"Epoch {epoch+1} [plotting]")
+                display_predictions_inline(samples, epoch + 1, args.epochs, quick_losses)
+                pbar.set_description(f"Epoch {epoch+1}")
+                model.train()
         
         # Flush leftover gradients if epoch ended mid-accumulation
         if (batch_idx + 1) % args.accum_steps != 0:
