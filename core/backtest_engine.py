@@ -290,8 +290,6 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             print(f"[Warning] Failed to batch-compute Mamba signals: {e}")
     else:
         neural_forecasts = None
-    else:
-        neural_forecasts = None
 
     # === Initialize MTF Sync Engine ===
     if preloaded_sync is not None:
