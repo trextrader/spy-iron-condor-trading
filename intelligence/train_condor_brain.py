@@ -188,10 +188,10 @@ class BatchedSequenceDataset(IterableDataset):
         self.B = int(batch_size)
         self.drop_last = drop_last
         
-        # Store as CPU tensors ONCE (no per-sample work)
-        self.X = torch.from_numpy(X2d)               # (N, F) float32
-        self.y = torch.from_numpy(y2d)               # (N, T) float32
-        self.r = torch.from_numpy(r1d).long()        # (N,)  int64
+        # Store as CPU tensors ONCE - X as BF16 to avoid per-batch conversion
+        self.X = torch.from_numpy(X2d).to(torch.bfloat16)   # (N, F) bf16 - no per-batch conversion!
+        self.y = torch.from_numpy(y2d).to(torch.float32)    # (N, T) fp32
+        self.r = torch.from_numpy(r1d).long()               # (N,)  int64
         
         if pin_memory:
             self.X = self.X.pin_memory()
@@ -291,6 +291,7 @@ def train_condor_brain(args):
         torch.backends.cudnn.benchmark = True  # Auto-tune kernels
         torch.backends.cudnn.deterministic = False  # Speed over reproducibility
         torch.set_float32_matmul_precision('high')  # Use Tensor Cores for FP32
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = True  # Fast BF16 reductions
         
         if is_h100:
             print("[CondorBrain] 🚀 H100 DETECTED - Maximum optimizations enabled!")
@@ -341,6 +342,11 @@ def train_condor_brain(args):
         n_layers=args.layers,
         input_dim=len(FEATURE_COLS)
     ).to(device)
+    
+    # Force model weights to BF16 so Mamba kernels take the BF16 fast path
+    if use_bf16:
+        model = model.to(torch.bfloat16)
+        print("[CondorBrain] Model weights converted to BF16 for fast Mamba kernels")
     
     # Enable gradient checkpointing if requested (saves ~40% GPU memory)
     if args.grad_checkpoint:
@@ -398,9 +404,9 @@ def train_condor_brain(args):
         pbar = tqdm(enumerate(train_loader), total=len(train_ds), desc=f"Epoch {epoch+1}", leave=False)
         
         for batch_idx, (batch_x, batch_y, batch_r) in pbar:
-            # Force BF16 for batch_x to enable fast Mamba kernels
-            batch_x = batch_x.to(device, dtype=torch.bfloat16, non_blocking=True)
-            batch_y = batch_y.to(device, dtype=torch.float32, non_blocking=True)
+            # X is already BF16 from BatchedSequenceDataset - just move to GPU
+            batch_x = batch_x.to(device, non_blocking=True)
+            batch_y = batch_y.to(device, non_blocking=True)
             batch_r = batch_r.to(device, non_blocking=True)
             
             with autocast('cuda', dtype=amp_dtype):
