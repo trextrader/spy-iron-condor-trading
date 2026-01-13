@@ -1,10 +1,10 @@
 """
-CondorBrain Training Script (Fast In-Memory)
+CondorBrain Training Script (Ultra-Fast GPU Dataset)
 
-Uses proven pattern from train_mamba.py:
-- Load all data into memory (works for datasets that fit in RAM)
-- Create sequences with numpy
-- Use TensorDataset + DataLoader for training
+Optimizations:
+- GPU-resident data with unfold() views (zero-copy sequence slicing)
+- No H2D transfers in training loop
+- BF16 end-to-end for Mamba fast path
 """
 import sys
 import os
@@ -16,12 +16,13 @@ os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 
 import time
 import argparse
+import math
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, IterableDataset
 from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 
@@ -200,8 +201,6 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     return X, y, regime
 
 
-import math
-from torch.utils.data import IterableDataset
 
 class BatchedSequenceDataset(IterableDataset):
     """High-performance batched sequence dataset.
@@ -273,6 +272,10 @@ def parse_args():
     parser.add_argument("--require-fused-kernels", action="store_true", help="Hard fail if selective_scan_cuda/causal_conv1d are missing")
     parser.add_argument("--compile", action="store_true", help="Try torch.compile (guarded). May improve throughput if supported by your mamba build.")
     parser.add_argument("--compile-mode", type=str, default="reduce-overhead", choices=["reduce-overhead", "max-autotune", "default"], help="torch.compile mode")
+    parser.add_argument("--gpu-dataset", action="store_true", default=True,
+                        help="Store X/y/regime on GPU and use unfold() views (FASTEST). Default: enabled.")
+    parser.add_argument("--no-gpu-dataset", dest="gpu_dataset", action="store_false",
+                        help="Disable gpu-dataset and use CPU loaders (debug only).")
     
     args = parser.parse_args()
     
@@ -372,19 +375,65 @@ def train_condor_brain(args):
     y_train, y_val = y[:split_row], y[split_row:]
     r_train, r_val = regime[:split_row], regime[split_row:]
     
-    # Number of sequences
-    n_train_seq = len(X_train) - args.lookback
-    n_val_seq = len(X_val) - args.lookback
-    print(f"[CondorBrain] Creating sequences (lookback={args.lookback})...")
+    # Number of sequences (start index positions)
+    L = int(args.lookback)
+    B = int(args.batch_size)
+    n_train_seq = len(X_train) - L
+    n_val_seq = len(X_val) - L
+    print(f"[CondorBrain] Creating sequences (lookback={L})...")
     print(f"[CondorBrain] Train: {n_train_seq:,} | Val: {n_val_seq:,}")
     
-    # Create BatchedSequenceDatasets (no per-sample work!)
-    train_ds = BatchedSequenceDataset(X_train, y_train, r_train, args.lookback, args.batch_size, drop_last=True)
-    val_ds = BatchedSequenceDataset(X_val, y_val, r_val, args.lookback, args.batch_size, drop_last=False)
+    # ==========================================================================
+    # FAST PATH: GPU DATASET + UNFOLD (ZERO-COPY VIEWS)
+    # ==========================================================================
+    use_gpu_dataset = args.gpu_dataset and device.type == "cuda"
     
-    # DataLoaders - batch_size=None because BatchedSequenceDataset yields full batches
-    train_loader = DataLoader(train_ds, batch_size=None, num_workers=0)
-    val_loader = DataLoader(val_ds, batch_size=None, num_workers=0)
+    if use_gpu_dataset:
+        print("[CondorBrain] ✅ gpu-dataset ENABLED: data on GPU, using unfold() views (FASTEST)")
+        
+        # Move data to GPU ONCE (no H2D in training loop!)
+        X_train_t = torch.from_numpy(X_train).to(device=device, dtype=torch.bfloat16)
+        y_train_t = torch.from_numpy(y_train).to(device=device, dtype=torch.float32)
+        r_train_t = torch.from_numpy(r_train).to(device=device, dtype=torch.long)
+        
+        X_val_t = torch.from_numpy(X_val).to(device=device, dtype=torch.bfloat16)
+        y_val_t = torch.from_numpy(y_val).to(device=device, dtype=torch.float32)
+        r_val_t = torch.from_numpy(r_val).to(device=device, dtype=torch.long)
+        
+        # Free numpy arrays
+        del X_train, X_val, y_train, y_val, r_train, r_val, X, y, regime
+        import gc; gc.collect()
+        
+        # Build sequence views via unfold (ZERO COPY - just stride metadata)
+        # unfold(dim, size, step) -> (N-L+1, F, L), then permute to (N-L+1, L, F)
+        X_train_seq = X_train_t.unfold(0, L, 1).permute(0, 2, 1)  # (n_train_seq, L, F)
+        X_val_seq = X_val_t.unfold(0, L, 1).permute(0, 2, 1)      # (n_val_seq, L, F)
+        
+        # Batch counts
+        n_train_batches = n_train_seq // B
+        n_val_batches = math.ceil(n_val_seq / B)
+        
+        # Batch getter closures (just slices, no data movement!)
+        def get_train_batch(bi: int):
+            s = bi * B
+            e = s + B
+            return X_train_seq[s:e], y_train_t[s + L:e + L], r_train_t[s + L:e + L]
+        
+        def get_val_batch(bi: int):
+            s = bi * B
+            e = min(s + B, n_val_seq)
+            return X_val_seq[s:e], y_val_t[s + L:e + L], r_val_t[s + L:e + L]
+        
+        print(f"[CondorBrain] GPU tensors ready: {n_train_batches} train batches, {n_val_batches} val batches")
+    else:
+        # Fallback: CPU DataLoader path (much slower)
+        print("[CondorBrain] ⚠️ gpu-dataset DISABLED: using CPU loaders (slower)")
+        train_ds = BatchedSequenceDataset(X_train, y_train, r_train, L, B, drop_last=True)
+        val_ds = BatchedSequenceDataset(X_val, y_val, r_val, L, B, drop_last=False)
+        train_loader = DataLoader(train_ds, batch_size=None, num_workers=0)
+        val_loader = DataLoader(val_ds, batch_size=None, num_workers=0)
+        n_train_batches = len(train_ds)
+        n_val_batches = len(val_ds)
     
     # Model
     model = CondorBrain(
@@ -461,10 +510,10 @@ def train_condor_brain(args):
         epoch_start = time.time()
         optimizer.zero_grad(set_to_none=True)  # Zero at start of epoch
         
-        # Direct iteration - BatchedSequenceDataset yields full batches, no collation needed
+        # Direct iteration over GPU batches (FAST) or DataLoader (fallback)
         pbar = tqdm(
-            enumerate(train_loader),
-            total=len(train_ds),
+            range(n_train_batches),
+            total=n_train_batches,
             desc=f"Epoch {epoch+1}",
             leave=False,
             mininterval=2.0,
@@ -475,11 +524,16 @@ def train_condor_brain(args):
         _tp_last_t = time.time()
         _tp_last_i = 0
         
-        for batch_idx, (batch_x, batch_y, batch_r) in pbar:
-            # X is already BF16 from BatchedSequenceDataset - just move to GPU
-            batch_x = batch_x.to(device, non_blocking=True)
-            batch_y = batch_y.to(device, non_blocking=True)
-            batch_r = batch_r.to(device, non_blocking=True)
+        for batch_idx in pbar:
+            # Get batch (GPU slice if gpu_dataset, else CPU->GPU transfer)
+            if use_gpu_dataset:
+                batch_x, batch_y, batch_r = get_train_batch(batch_idx)
+            else:
+                # Fallback path: iterate through DataLoader
+                _data = next(iter(train_loader))  # This is inefficient, but works as fallback
+                batch_x = _data[0].to(device, non_blocking=True)
+                batch_y = _data[1].to(device, non_blocking=True)
+                batch_r = _data[2].to(device, non_blocking=True)
             
             with autocast('cuda', dtype=amp_dtype):
                 outputs, regime_probs, _ = model(batch_x, return_regime=True, forecast_days=0)
@@ -558,29 +612,33 @@ def train_condor_brain(args):
         print(f"[Epoch {epoch+1}] Running validation...")
         model.eval()
         val_loss = 0.0
-        n_val_batches = 0
+        _n_val_done = 0
         
         with torch.no_grad():
-            for batch_x, batch_y, batch_r in tqdm(
-                val_loader,
+            for bi in tqdm(
+                range(n_val_batches),
                 desc=f"Val {epoch+1}",
                 leave=False,
                 mininterval=2.0,
                 smoothing=0.0,
                 dynamic_ncols=True,
             ):
-                batch_x = batch_x.to(device, non_blocking=True)
-                batch_y = batch_y.to(device, non_blocking=True)
-                batch_r = batch_r.to(device, non_blocking=True)
+                if use_gpu_dataset:
+                    batch_x, batch_y, batch_r = get_val_batch(bi)
+                else:
+                    _data = next(iter(val_loader))
+                    batch_x = _data[0].to(device, non_blocking=True)
+                    batch_y = _data[1].to(device, non_blocking=True)
+                    batch_r = _data[2].to(device, non_blocking=True)
                 
                 with autocast('cuda', dtype=amp_dtype):
                     outputs, regime_probs, _ = model(batch_x, return_regime=True, forecast_days=0)
                     loss = criterion(outputs.float(), batch_y.float(), regime_probs.float(), batch_r)
                 val_loss += loss.item()
-                n_val_batches += 1
+                _n_val_done += 1
         
         train_loss /= max(n_batches, 1)
-        val_loss /= max(n_val_batches, 1)
+        val_loss /= max(_n_val_done, 1)
         
         scheduler.step()
         
