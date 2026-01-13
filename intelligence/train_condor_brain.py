@@ -371,13 +371,14 @@ def train_condor_brain(args):
             train_loss += loss.item() * args.accum_steps  # Un-scale for logging
             n_batches += 1
         
-        # Validation
+        # Validation (with progress bar)
+        print(f"[Epoch {epoch+1}] Running validation...")
         model.eval()
         val_loss = 0.0
         n_val_batches = 0
         
         with torch.no_grad():
-            for batch_x, batch_y, batch_r in val_loader:
+            for batch_x, batch_y, batch_r in tqdm(val_loader, desc=f"Val {epoch+1}", leave=False):
                 batch_x = batch_x.to(device, non_blocking=True)
                 batch_y = batch_y.to(device, non_blocking=True)
                 batch_r = batch_r.to(device, non_blocking=True)
@@ -407,8 +408,11 @@ def train_condor_brain(args):
         if val_loss < best_loss:
             best_loss = val_loss
             os.makedirs(os.path.dirname(args.output) or 'models', exist_ok=True)
+            print(f"  [Saving] Writing model to {args.output}...")
+            save_start = time.time()
             torch.save(model.state_dict(), args.output)
-            print(f"  ✓ Saved best model (val_loss={val_loss:.4f})")
+            save_time = time.time() - save_start
+            print(f"  ✓ Saved best model (val_loss={val_loss:.4f}) in {save_time:.1f}s")
         
         # Clear cache periodically
         if device.type == 'cuda' and epoch % 10 == 0:
