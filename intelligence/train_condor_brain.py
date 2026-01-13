@@ -30,7 +30,10 @@ from tqdm import tqdm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from intelligence.condor_brain import CondorBrain, CondorLoss, HAS_MAMBA
-from intelligence.training_monitor import TrainingMonitor, compute_val_head_losses, MAIN_HEADS
+from intelligence.training_monitor import (
+    TrainingMonitor, compute_val_head_losses, MAIN_HEADS,
+    sample_predictions, display_predictions_inline
+)
 
 
 # ============================================================================
@@ -784,7 +787,18 @@ def train_condor_brain(args):
             # Throttled visualization (every --monitor-every epochs, or last epoch)
             should_plot = ((epoch + 1) % args.monitor_every == 0) or (epoch == args.epochs - 1)
             if should_plot:
+                # Show loss curves
                 monitor.display_inline(epoch + 1, args.epochs)
+                
+                # Show predicted vs actual scatter plots
+                samples = sample_predictions(
+                    model=model,
+                    get_batch_fn=get_val_batch if use_gpu_dataset else lambda bi: next(iter(val_loader)),
+                    device=device,
+                    amp_dtype=amp_dtype,
+                    n_samples=32
+                )
+                display_predictions_inline(samples, epoch + 1, args.epochs, head_losses)
         
         # === EARLY STOPPING CHECK ===
         if save_loss < best_loss:

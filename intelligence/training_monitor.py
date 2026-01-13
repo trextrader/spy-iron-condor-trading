@@ -372,3 +372,157 @@ def compute_val_head_losses(
     head_losses['regime_accuracy'] = (1.0 - regime_acc).item()
     
     return head_losses
+
+
+def sample_predictions(
+    model: torch.nn.Module,
+    get_batch_fn,
+    device: torch.device,
+    amp_dtype: torch.dtype,
+    n_samples: int = 16
+) -> Dict[str, np.ndarray]:
+    """
+    Sample predictions vs actuals for visualization.
+    
+    Returns dict with 'preds' and 'targets', each (n_samples, 8) numpy arrays.
+    """
+    from torch.amp import autocast
+    
+    model.eval()
+    
+    with torch.no_grad():
+        batch_x, batch_y, batch_r = get_batch_fn(0)  # Get first batch
+        
+        with autocast('cuda', dtype=amp_dtype):
+            outputs, regime_logits, _ = model(batch_x, return_regime=True, forecast_days=0)
+        
+        # Take first n_samples
+        preds = outputs[:n_samples].float().cpu().numpy()
+        targets = batch_y[:n_samples].float().cpu().numpy()
+        
+        # Regime predictions
+        if regime_logits is not None:
+            pred_regime = torch.argmax(regime_logits[:n_samples], dim=-1).cpu().numpy()
+            true_regime = batch_r[:n_samples].cpu().numpy()
+        else:
+            pred_regime = np.zeros(n_samples)
+            true_regime = np.zeros(n_samples)
+    
+    return {
+        'preds': preds,
+        'targets': targets,
+        'pred_regime': pred_regime,
+        'true_regime': true_regime
+    }
+
+
+def visualize_predictions(
+    samples: Dict[str, np.ndarray],
+    epoch: int,
+    total_epochs: int,
+    head_losses: Dict[str, float],
+    output_path: str = None,
+    plot_dir: str = "monitor_plots"
+) -> str:
+    """
+    Create visualization of predicted vs actual for all 8 output heads.
+    
+    Shows:
+    - Scatter plot (pred vs actual) for each head
+    - Mean absolute error
+    - Correlation
+    """
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        
+        preds = samples['preds']
+        targets = samples['targets']
+        n_samples = preds.shape[0]
+        
+        # Create 2x4 grid for 8 heads
+        fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+        axes = axes.flatten()
+        
+        # Head display info
+        head_info = {
+            'call_offset': ('Call Offset %', 'blue'),
+            'put_offset': ('Put Offset %', 'red'),
+            'wing_width': ('Wing Width $', 'green'),
+            'dte': ('DTE (days)', 'orange'),
+            'pop': ('Prob of Profit', 'purple'),
+            'roi': ('Expected ROI', 'brown'),
+            'max_loss': ('Max Loss %', 'pink'),
+            'confidence': ('Confidence', 'cyan')
+        }
+        
+        for i, name in enumerate(MAIN_HEADS):
+            ax = axes[i]
+            p = preds[:, i]
+            t = targets[:, i]
+            
+            # Scatter: pred vs actual
+            ax.scatter(t, p, alpha=0.6, s=40, c=head_info[name][1], edgecolors='black', linewidth=0.5)
+            
+            # Perfect prediction line
+            all_vals = np.concatenate([p, t])
+            vmin, vmax = all_vals.min(), all_vals.max()
+            margin = (vmax - vmin) * 0.1 + 0.01
+            ax.plot([vmin - margin, vmax + margin], [vmin - margin, vmax + margin], 
+                   'k--', alpha=0.5, linewidth=1, label='Perfect')
+            
+            # Stats
+            mae = np.mean(np.abs(p - t))
+            corr = np.corrcoef(p, t)[0, 1] if np.std(p) > 1e-6 and np.std(t) > 1e-6 else 0
+            loss = head_losses.get(name, 0)
+            
+            ax.set_xlabel('Actual', fontsize=9)
+            ax.set_ylabel('Predicted', fontsize=9)
+            ax.set_title(f'{head_info[name][0]}\nMAE={mae:.3f} | r={corr:.2f} | MSE={loss:.4f}', 
+                        fontsize=10, fontweight='bold')
+            ax.grid(True, alpha=0.3)
+            ax.set_xlim(vmin - margin, vmax + margin)
+            ax.set_ylim(vmin - margin, vmax + margin)
+            ax.tick_params(labelsize=8)
+        
+        fig.suptitle(
+            f'CondorBrain Predictions vs Actuals - Epoch {epoch}/{total_epochs}\n'
+            f'Sample size: {n_samples} | Regime acc: {100*(1-head_losses.get("regime_accuracy", 0)):.1f}%',
+            fontsize=12, fontweight='bold'
+        )
+        fig.tight_layout()
+        
+        # Save
+        if output_path is None:
+            import os
+            os.makedirs(plot_dir, exist_ok=True)
+            output_path = f"{plot_dir}/predictions_epoch_{epoch:03d}.png"
+        
+        fig.savefig(output_path, dpi=100, bbox_inches='tight')
+        plt.close(fig)
+        
+        return output_path
+        
+    except Exception as e:
+        print(f"[Viz error] {e}")
+        return None
+
+
+def display_predictions_inline(
+    samples: Dict[str, np.ndarray],
+    epoch: int,
+    total_epochs: int,
+    head_losses: Dict[str, float],
+    plot_dir: str = "monitor_plots"
+):
+    """Display predictions inline in Colab."""
+    try:
+        from IPython.display import display, Image
+        
+        path = visualize_predictions(samples, epoch, total_epochs, head_losses, plot_dir=plot_dir)
+        if path:
+            display(Image(filename=path))
+    except Exception as e:
+        print(f"[Display error] {e}")
+
