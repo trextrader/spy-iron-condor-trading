@@ -913,6 +913,10 @@ def train_condor_brain(args):
                         
                     except Exception as e:
                         print(f"[TensorBoard] Image logging error: {e}")
+            
+            # === SAVE EPOCH SNAPSHOT TO DISK (prevents race conditions) ===
+            if monitor is not None and run_val:
+                monitor.save_epoch_snapshot(epoch + 1, args.epochs)
         
         # === EARLY STOPPING CHECK ===
         if save_loss < best_loss:
@@ -953,6 +957,10 @@ def train_condor_brain(args):
         monitor.save_checkpoint_to_disk(ckpt_path)
         print(f"\n\ud83d\udcbe Full checkpoint (with optimizer state) saved to: {ckpt_path}")
         print("\ud83d\udca1 TIP: Use monitor.restore_best(model) to restore optimal weights after interruption")
+        
+        # Save analytics JSON for post-analysis
+        monitor.save_analytics_to_file("training_analytics")
+        print("\ud83d\udcca Per-head best epochs saved to training_analytics/analytics.json")
     
     # Close TensorBoard writer
     if tb_writer is not None:

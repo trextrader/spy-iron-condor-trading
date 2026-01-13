@@ -204,6 +204,53 @@ class TrainingMonitor:
         print("\n⚠️  Note: Per-head best epochs are for ANALYSIS only.")
         print("    Model is saved/restored from GLOBAL best epoch.")
     
+    def save_analytics_to_file(self, output_dir: str = "training_analytics"):
+        """
+        Save all training analytics to files for post-analysis.
+        
+        Creates:
+        - analytics.json: Per-head best epochs, losses, and all history
+        - epoch_snapshots/: PNG plots for each epoch
+        """
+        import json
+        import os
+        
+        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(f"{output_dir}/epoch_snapshots", exist_ok=True)
+        
+        # Build analytics dict
+        analytics = {
+            'global': {
+                'best_epoch': self.best_epoch,
+                'best_val_loss': self.best_val_loss,
+                'train_losses': self.train_losses,
+                'val_losses': self.val_losses,
+            },
+            'per_head': {}
+        }
+        
+        for name, head in self.heads.items():
+            analytics['per_head'][name] = {
+                'best_epoch': head.best_epoch,
+                'best_val_loss': head.best_val_loss,
+                'val_losses': head.val_losses,
+            }
+        
+        # Save JSON
+        json_path = f"{output_dir}/analytics.json"
+        with open(json_path, 'w') as f:
+            json.dump(analytics, f, indent=2)
+        
+        print(f"[Monitor] ✓ Analytics saved to {json_path}")
+        return json_path
+    
+    def save_epoch_snapshot(self, epoch: int, total_epochs: int, output_dir: str = "training_analytics"):
+        """Save epoch snapshot plot to file."""
+        import os
+        os.makedirs(f"{output_dir}/epoch_snapshots", exist_ok=True)
+        output_path = f"{output_dir}/epoch_snapshots/epoch_{epoch:03d}.png"
+        return self.save_plot_to_file(epoch, total_epochs, output_path)
+    
     def save_plot_to_file(self, epoch: int, total_epochs: int, output_path: str = None):
         """
         Save plot to PNG file (NON-BLOCKING).
