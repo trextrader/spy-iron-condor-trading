@@ -24,10 +24,10 @@
 - ✅ Add Greeks to OptionQuote (gamma, vega, theta)
 - ✅ Create RiskManager class
 - ✅ Integrated RiskManager into backtest loop
-- [ ] Portfolio Greeks tracking (aggregation)
-- [ ] Risk caps (delta/gamma/vega limits)
-- [ ] Risk budget sizing
-- [ ] Stress test runner
+- ✅ Portfolio Greeks tracking (aggregation)
+- ✅ Risk caps (delta/gamma/vega limits)
+- ✅ Risk budget sizing (Handled by FIS Sizer)
+- ✅ Stress test runner (scripts/backtest/run_stress_test.py)
 
 # Quantor-MTFuzz Architectural Refactoring
 

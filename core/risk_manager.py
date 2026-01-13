@@ -85,12 +85,47 @@ class RiskManager:
         
         return g
 
-    def check_new_trade(self, legs, quantity: int, current_equity: float) -> Tuple[bool, str]:
+    def check_drawdown_stop(self, current_equity: float, today: date) -> Tuple[bool, str]:
+        """
+        Check daily drawdown limit.
+        Returns: (is_halted, message)
+        """
+        # Initialize on first run
+        if self.daily_start_equity == 0.0:
+            self.daily_start_equity = current_equity
+            
+        # Reset tracker on new day if we have date tracking
+        # (This implies we need to track separate dates, simpler to just rely on caller to set_start on new day
+        # or we track 'last_check_date' state)
+        # Let's add last_check_date to state
+        if not hasattr(self, 'last_check_date'):
+            self.last_check_date = None
+            
+        if self.last_check_date != today:
+            self.daily_start_equity = current_equity
+            self.last_check_date = today
+            self.current_drawdown_pct = 0.0
+            return False, "New Day"
+            
+        if self.daily_start_equity <= 0:
+            return False, "No Equity"
+            
+        dd_amt = self.daily_start_equity - current_equity
+        self.current_drawdown_pct = dd_amt / self.daily_start_equity
+        
+        limit = getattr(self.cfg, 'max_daily_drawdown_pct', 0.02)
+        if self.current_drawdown_pct > limit:
+            return True, f"DAILY STOP: Drawdown {self.current_drawdown_pct*100:.2f}% > Limit {limit*100:.1f}%"
+            
+        return False, "OK"
+
+    def check_new_trade(self, legs, quantity: int, current_equity: float, existing_greeks: Optional[PortfolioGreeks] = None) -> Tuple[bool, str]:
         """
         Validate a new trade against risk limits.
         """
-        # 1. Drawdown Check
-        if self.current_drawdown_pct > getattr(self.cfg, 'max_daily_drawdown_pct', 0.02):
+        # 1. Drawdown Check (using current state)
+        limit = getattr(self.cfg, 'max_daily_drawdown_pct', 0.02)
+        if self.current_drawdown_pct > limit:
             return False, f"Daily Drawdown {self.current_drawdown_pct:.1%} > Limit"
 
         trade_greeks = self.calculate_trade_greeks(legs, quantity)
@@ -103,7 +138,8 @@ class RiskManager:
             return False, f"Trade Vega {trade_greeks.vega:.1f} > Limit"
 
         # 3. Portfolio Limits (Post-Trade)
-        projected = self.current_greeks + trade_greeks
+        base_greeks = existing_greeks if existing_greeks is not None else self.current_greeks
+        projected = base_greeks + trade_greeks
         
         if abs(projected.delta) > getattr(self.cfg, 'max_portfolio_delta', 200.0):
             return False, f"Projected Portfolio Delta {projected.delta:.1f} > Limit"

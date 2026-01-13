@@ -3,7 +3,7 @@ import os
 import sys
 import pandas as pd
 import datetime as dt
-from strategies.risk_manager import RiskManager, PortfolioGreeks
+from core.risk_manager import RiskManager, PortfolioGreeks
 from core.config import StrategyConfig
 from core.dto import IronCondorLegs, OptionQuote
 from strategies.options_strategy import PositionState
@@ -44,7 +44,7 @@ def test_risk_manager_caps():
     # Check Fail Trade Delta
     # Qty 1 -> Delta 15.0 (exceeds 10.0 limit)
     current_port = PortfolioGreeks()
-    ok, msg = rm.check_new_trade_risk(legs_fail_trade, 1, current_port)
+    ok, msg = rm.check_new_trade(legs_fail_trade, 1, 100000.0, existing_greeks=current_port)
     if not ok and "Trade Delta" in msg:
         print(" [PASS] Trade Delta Limit Enforced")
     else:
@@ -64,7 +64,7 @@ def test_risk_manager_caps():
         max_loss=0.0
     )
     
-    ok, msg = rm.check_new_trade_risk(legs_add, 1, current_port)
+    ok, msg = rm.check_new_trade(legs_add, 1, 100000.0, existing_greeks=current_port)
     if not ok and "Portfolio Delta" in msg:
         print(" [PASS] Portfolio Delta Limit Enforced")
     else:
