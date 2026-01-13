@@ -30,6 +30,7 @@ from tqdm import tqdm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from intelligence.condor_brain import CondorBrain, CondorLoss, HAS_MAMBA
+from intelligence.training_monitor import TrainingMonitor, compute_val_head_losses, HEAD_NAMES
 
 
 # ============================================================================
@@ -292,6 +293,8 @@ def parse_args():
                         help="Display live training curve (train vs val loss) in Colab/notebook.")
     parser.add_argument("--log-every", type=int, default=100,
                         help="Log batch-level metrics every N batches (default: 100).")
+    parser.add_argument("--monitor", action="store_true",
+                        help="Enable advanced multi-head training monitor with per-predictor tracking.")
     
     args = parser.parse_args()
     
@@ -542,7 +545,7 @@ def train_condor_brain(args):
     best_epoch = 0
     
     # Live plotting setup (Colab/Jupyter compatible)
-    if args.live_plot:
+    if args.live_plot and not args.monitor:
         try:
             import matplotlib.pyplot as plt
             from IPython.display import display, clear_output
@@ -552,6 +555,13 @@ def train_condor_brain(args):
         except ImportError:
             print("[CondorBrain] ⚠️ matplotlib/IPython not available, disabling live-plot")
             args.live_plot = False
+    
+    # Advanced multi-head training monitor (replaces simple live_plot)
+    monitor = None
+    if args.monitor:
+        monitor = TrainingMonitor(checkpoint_capacity=5)
+        print("[CondorBrain] 🎯 Advanced multi-head monitor enabled (per-predictor tracking)")
+        args.live_plot = False  # Monitor handles visualization
     
     for epoch in range(args.epochs):
         model.train()
@@ -741,6 +751,35 @@ def train_condor_brain(args):
             except Exception as e:
                 print(f"[Plot error] {e}")
         
+        # === ADVANCED MULTI-HEAD MONITOR ===
+        if monitor is not None and run_val:
+            # Compute per-head validation losses
+            head_losses = compute_val_head_losses(
+                model=model,
+                get_batch_fn=get_val_batch if use_gpu_dataset else lambda bi: next(iter(val_loader)),
+                n_batches=n_val_batches,
+                device=device,
+                amp_dtype=amp_dtype
+            )
+            
+            # Update monitor with epoch results
+            status = monitor.update(
+                epoch=epoch + 1,
+                train_loss=train_loss,
+                val_loss=val_loss,
+                head_val_losses=head_losses,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler
+            )
+            
+            # Print per-head summary
+            if status['improved_heads']:
+                print(f"  [Monitor] Improved: {', '.join(status['improved_heads'])}")
+            
+            # Live multi-panel visualization
+            monitor.plot_live(epoch + 1, args.epochs)
+        
         # === EARLY STOPPING CHECK ===
         if save_loss < best_loss:
             best_loss = save_loss
@@ -770,6 +809,16 @@ def train_condor_brain(args):
     print(f"Best Val Loss: {best_loss:.4f}")
     print(f"Model saved to: {args.output}")
     print(f"{'='*60}")
+    
+    # Print advanced monitor summary if enabled
+    if monitor is not None:
+        monitor.print_summary()
+        
+        # Offer to save best checkpoint (model already saved, but with full state)
+        ckpt_path = args.output.replace('.pth', '_full_ckpt.pth')
+        monitor.save_checkpoint_to_disk(ckpt_path)
+        print(f"\n\ud83d\udcbe Full checkpoint (with optimizer state) saved to: {ckpt_path}")
+        print("\ud83d\udca1 TIP: Use monitor.restore_best(model) to restore optimal weights after interruption")
 
 
 # ============================================================================
