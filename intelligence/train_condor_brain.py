@@ -302,6 +302,12 @@ def parse_args():
                         help="Update monitor plots every N epochs (default: 1, use higher for faster training).")
     parser.add_argument("--viz-every", type=int, default=0,
                         help="Intra-epoch visualization: update plots every N batches (0=disabled, try 500-1000).")
+    parser.add_argument("--tensorboard", action="store_true",
+                        help="Enable TensorBoard logging for all metrics and predictions.")
+    parser.add_argument("--tb-logdir", type=str, default="runs/condor_brain",
+                        help="TensorBoard log directory (default: runs/condor_brain).")
+    parser.add_argument("--tb-port", type=int, default=3500,
+                        help="TensorBoard port (default: 3500).")
     
     args = parser.parse_args()
     
@@ -570,6 +576,22 @@ def train_condor_brain(args):
         print("[CondorBrain] 🎯 Advanced multi-head monitor enabled (per-predictor tracking)")
         args.live_plot = False  # Monitor handles visualization
     
+    # TensorBoard setup
+    tb_writer = None
+    if args.tensorboard:
+        try:
+            from torch.utils.tensorboard import SummaryWriter
+            import datetime
+            run_name = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            log_dir = f"{args.tb_logdir}/{run_name}"
+            tb_writer = SummaryWriter(log_dir=log_dir)
+            print(f"[CondorBrain] 📊 TensorBoard enabled: {log_dir}")
+            print(f"[CondorBrain] 🚀 Start TensorBoard with: tensorboard --logdir={args.tb_logdir} --port={args.tb_port}")
+            print(f"[CondorBrain] 🌐 Then open: http://localhost:{args.tb_port}")
+        except ImportError:
+            print("[CondorBrain] ⚠️ tensorboard not installed, skipping")
+            args.tensorboard = False
+    
     for epoch in range(args.epochs):
         model.train()
         train_loss = 0.0
@@ -688,6 +710,15 @@ def train_condor_brain(args):
                 pbar.set_description(f"Epoch {epoch+1} [plotting]")
                 display_predictions_inline(samples, epoch + 1, args.epochs, quick_losses)
                 pbar.set_description(f"Epoch {epoch+1}")
+                
+                # Real-time TensorBoard logging (batch-level for smooth updates)
+                if tb_writer is not None:
+                    global_batch = epoch * n_train_batches + batch_idx
+                    tb_writer.add_scalar('Batch/train_loss', loss.item(), global_batch)
+                    for head_name, head_loss in quick_losses.items():
+                        if head_name != 'regime_accuracy':
+                            tb_writer.add_scalar(f'Batch/{head_name}', head_loss, global_batch)
+                
                 model.train()
         
         # Flush leftover gradients if epoch ended mid-accumulation
@@ -827,6 +858,61 @@ def train_condor_brain(args):
                     n_samples=32
                 )
                 display_predictions_inline(samples, epoch + 1, args.epochs, head_losses)
+            
+            # === TENSORBOARD LOGGING ===
+            if tb_writer is not None:
+                global_step = epoch + 1
+                
+                # Log global losses
+                tb_writer.add_scalar('Loss/train', train_loss, global_step)
+                tb_writer.add_scalar('Loss/val', val_loss, global_step)
+                tb_writer.add_scalar('Loss/best_val', monitor.best_val_loss if monitor else best_loss, global_step)
+                
+                # Log per-head val losses (separate tabs in TensorBoard)
+                for head_name, head_loss in head_losses.items():
+                    tb_writer.add_scalar(f'HeadLoss/{head_name}', head_loss, global_step)
+                
+                # Log prediction vs actual scatter plots as images
+                if should_plot:
+                    try:
+                        import matplotlib
+                        matplotlib.use('Agg')
+                        import matplotlib.pyplot as plt
+                        import io
+                        from PIL import Image
+                        import numpy as np
+                        
+                        for i, head_name in enumerate(MAIN_HEADS):
+                            fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+                            p = samples['preds'][:, i]
+                            t = samples['targets'][:, i]
+                            
+                            ax.scatter(t, p, alpha=0.6, s=50, c='blue', edgecolors='black')
+                            vmin, vmax = min(p.min(), t.min()), max(p.max(), t.max())
+                            margin = (vmax - vmin) * 0.1 + 0.01
+                            ax.plot([vmin-margin, vmax+margin], [vmin-margin, vmax+margin], 'k--', alpha=0.5)
+                            
+                            mae = np.mean(np.abs(p - t))
+                            corr = np.corrcoef(p, t)[0, 1] if np.std(p) > 1e-6 else 0
+                            ax.set_title(f'{head_name}\nMAE={mae:.4f} | r={corr:.3f}')
+                            ax.set_xlabel('Actual')
+                            ax.set_ylabel('Predicted')
+                            ax.grid(True, alpha=0.3)
+                            fig.tight_layout()
+                            
+                            # Convert to image for TensorBoard
+                            buf = io.BytesIO()
+                            fig.savefig(buf, format='png', dpi=80)
+                            buf.seek(0)
+                            img = Image.open(buf)
+                            img_array = np.array(img)
+                            plt.close(fig)
+                            
+                            # Add to TensorBoard (HWC format, needs CHW)
+                            tb_writer.add_image(f'Predictions/{head_name}', img_array, global_step, dataformats='HWC')
+                        
+                    except Exception as e:
+                        print(f"[TensorBoard] Image logging error: {e}")
         
         # === EARLY STOPPING CHECK ===
         if save_loss < best_loss:
@@ -867,6 +953,12 @@ def train_condor_brain(args):
         monitor.save_checkpoint_to_disk(ckpt_path)
         print(f"\n\ud83d\udcbe Full checkpoint (with optimizer state) saved to: {ckpt_path}")
         print("\ud83d\udca1 TIP: Use monitor.restore_best(model) to restore optimal weights after interruption")
+    
+    # Close TensorBoard writer
+    if tb_writer is not None:
+        tb_writer.close()
+        print(f"\n\ud83d\udcca TensorBoard logs saved to: {args.tb_logdir}")
+        print(f"\ud83c\udf10 View with: tensorboard --logdir={args.tb_logdir} --port={args.tb_port}")
 
 
 # ============================================================================
