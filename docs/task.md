@@ -114,12 +114,12 @@
 - ✅ Migrate existing fuzzy logic from fuzzy_engine.py (Completed)
 - [ ] Write FIS integration tests
 
-## Phase 5 — Risk Layer Enhancement (Planned)
-- [ ] Create risk/expected_shortfall.py (CVaR)
-- [ ] Create risk/beta_weighting.py (portfolio delta)
-- [ ] Create risk/pot_monitor.py (probability of touch)
-- [ ] Create risk/structure_validator.py (invariants)
-- [ ] Refactor risk_manager.py to use new modules
+## Phase 5 — Risk Layer Enhancement (Completed)
+- ✅ Create risk/expected_shortfall.py (CVaR)
+- ✅ Create risk/beta_weighting.py (portfolio delta)
+- ✅ Create risk/pot_monitor.py (probability of touch)
+- ✅ Create risk/structure_validator.py (invariants)
+- ✅ Refactor risk_manager.py to use new modules
 
 ## Phase 6 — Full Orchestration (Planned)
 - [ ] Enhance core/engine.py (complete TradingEngine)

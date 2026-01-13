@@ -4,6 +4,12 @@ from typing import Dict, List, Optional, Tuple
 import math
 from datetime import date
 
+# Phase 5: Advanced Risk Modules
+from risk.expected_shortfall import ExpectedShortfall
+from risk.beta_weighting import BetaCalculator
+from risk.pot_monitor import POTMonitor
+from risk.structure_validator import StructureValidator
+
 @dataclass
 class PortfolioGreeks:
     delta: float = 0.0
@@ -25,6 +31,12 @@ class RiskManager:
         self.current_greeks = PortfolioGreeks()
         self.daily_start_equity = 0.0
         self.current_drawdown_pct = 0.0
+        
+        # Phase 5: Advanced Risk Components
+        self.cvar_calculator = ExpectedShortfall(confidence_level=0.95)
+        self.beta_calculator = BetaCalculator()
+        self.pot_monitor = POTMonitor()
+        self.structure_validator = StructureValidator()
         
     def set_daily_start_equity(self, equity: float):
         self.daily_start_equity = equity
@@ -151,3 +163,45 @@ class RiskManager:
             return False, f"Projected Portfolio Vega {projected.vega:.1f} > Limit"
             
         return True, "OK"
+
+    # === Phase 5: Advanced Risk Methods ===
+    
+    def validate_structure(self, legs) -> Tuple[bool, str]:
+        """Validate Iron Condor structure invariants."""
+        return self.structure_validator.validate_iron_condor(legs)
+    
+    def check_pot_risk(self, spot: float, legs, iv: float, dte: float, threshold: float = 0.60) -> Tuple[bool, str]:
+        """
+        Check if Probability of Touch exceeds threshold.
+        Returns: (is_risky, message)
+        """
+        pot_result = self.pot_monitor.check_condor_touch(
+            spot=spot,
+            short_call=legs.short_call.strike,
+            short_put=legs.short_put.strike,
+            iv=iv,
+            dte=dte
+        )
+        
+        if pot_result["max_pot"] > threshold:
+            side = "Call" if pot_result["call_pot"] > pot_result["put_pot"] else "Put"
+            return True, f"POT Warning: {side} side at {pot_result['max_pot']*100:.1f}% > {threshold*100:.0f}%"
+            
+        return False, "OK"
+    
+    def get_portfolio_cvar(self, portfolio_value: float, benchmark_returns, beta: float = 1.0) -> float:
+        """
+        Calculate Portfolio CVaR (Expected Shortfall).
+        """
+        return self.cvar_calculator.estimate_portfolio_cvar(portfolio_value, benchmark_returns, beta)
+    
+    def get_beta_weighted_delta(self, delta: float, asset_returns=None) -> float:
+        """
+        Convert delta to Beta-Weighted Delta (SPY-equivalent for multi-asset).
+        For pure SPY trading, returns delta unchanged.
+        """
+        if asset_returns is not None:
+            beta = self.beta_calculator.calculate_beta(asset_returns)
+        else:
+            beta = 1.0
+        return self.beta_calculator.beta_weight_delta(delta, beta)
