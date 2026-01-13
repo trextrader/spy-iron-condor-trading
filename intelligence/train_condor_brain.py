@@ -276,6 +276,13 @@ def parse_args():
                         help="Store X/y/regime on GPU and use unfold() views (FASTEST). Default: enabled.")
     parser.add_argument("--no-gpu-dataset", dest="gpu_dataset", action="store_false",
                         help="Disable gpu-dataset and use CPU loaders (debug only).")
+    # NEW: High-impact A100 performance flags
+    parser.add_argument("--materialize-seqs", action="store_true",
+                        help="Materialize unfold() views to contiguous GPU tensors (uses ~50GB VRAM, much faster).")
+    parser.add_argument("--no-val", action="store_true",
+                        help="Skip validation entirely (for throughput benchmarks).")
+    parser.add_argument("--val-every", type=int, default=1,
+                        help="Validate every N epochs instead of every epoch (default: 1).")
     
     args = parser.parse_args()
     
@@ -408,6 +415,19 @@ def train_condor_brain(args):
         # unfold(dim, size, step) -> (N-L+1, F, L), then permute to (N-L+1, L, F)
         X_train_seq = X_train_t.unfold(0, L, 1).permute(0, 2, 1)  # (n_train_seq, L, F)
         X_val_seq = X_val_t.unfold(0, L, 1).permute(0, 2, 1)      # (n_val_seq, L, F)
+        
+        # MASSIVE PERF WIN: Materialize strided views to contiguous tensors
+        # Strided access from unfold() causes poor memory coalescing / hidden copies
+        # On A100 (80GB), we can afford ~50GB for contiguous sequences
+        if args.materialize_seqs:
+            print("[CondorBrain] 🚀 Materializing sequences to CONTIGUOUS GPU tensors...")
+            mat_start = time.time()
+            X_train_seq = X_train_seq.contiguous()
+            # Keep val strided to save ~10GB (val is less perf critical)
+            torch.cuda.synchronize()
+            mat_time = time.time() - mat_start
+            alloc_gb = torch.cuda.memory_allocated() / 1e9
+            print(f"[CondorBrain] ✅ Materialized in {mat_time:.1f}s | GPU alloc: {alloc_gb:.1f}GB")
         
         # Batch counts
         n_train_batches = n_train_seq // B
@@ -608,37 +628,41 @@ def train_condor_brain(args):
                 optimizer.step()
             optimizer.zero_grad(set_to_none=True)
         
-        # Validation (with progress bar)
-        print(f"[Epoch {epoch+1}] Running validation...")
-        model.eval()
-        val_loss = 0.0
-        _n_val_done = 0
-        
-        with torch.no_grad():
-            for bi in tqdm(
-                range(n_val_batches),
-                desc=f"Val {epoch+1}",
-                leave=False,
-                mininterval=2.0,
-                smoothing=0.0,
-                dynamic_ncols=True,
-            ):
-                if use_gpu_dataset:
-                    batch_x, batch_y, batch_r = get_val_batch(bi)
-                else:
-                    _data = next(iter(val_loader))
-                    batch_x = _data[0].to(device, non_blocking=True)
-                    batch_y = _data[1].to(device, non_blocking=True)
-                    batch_r = _data[2].to(device, non_blocking=True)
-                
-                with autocast('cuda', dtype=amp_dtype):
-                    outputs, regime_probs, _ = model(batch_x, return_regime=True, forecast_days=0)
-                    loss = criterion(outputs.float(), batch_y.float(), regime_probs.float(), batch_r)
-                val_loss += loss.item()
-                _n_val_done += 1
-        
         train_loss /= max(n_batches, 1)
-        val_loss /= max(_n_val_done, 1)
+        
+        # Validation (skip if --no-val, or run every N epochs with --val-every)
+        run_val = not args.no_val and ((epoch + 1) % args.val_every == 0 or epoch == args.epochs - 1)
+        val_loss = 0.0
+        
+        if run_val:
+            print(f"[Epoch {epoch+1}] Running validation...")
+            model.eval()
+            _n_val_done = 0
+            
+            with torch.no_grad():
+                for bi in tqdm(
+                    range(n_val_batches),
+                    desc=f"Val {epoch+1}",
+                    leave=False,
+                    mininterval=2.0,
+                    smoothing=0.0,
+                    dynamic_ncols=True,
+                ):
+                    if use_gpu_dataset:
+                        batch_x, batch_y, batch_r = get_val_batch(bi)
+                    else:
+                        _data = next(iter(val_loader))
+                        batch_x = _data[0].to(device, non_blocking=True)
+                        batch_y = _data[1].to(device, non_blocking=True)
+                        batch_r = _data[2].to(device, non_blocking=True)
+                    
+                    with autocast('cuda', dtype=amp_dtype):
+                        outputs, regime_probs, _ = model(batch_x, return_regime=True, forecast_days=0)
+                        loss = criterion(outputs.float(), batch_y.float(), regime_probs.float(), batch_r)
+                    val_loss += loss.item()
+                    _n_val_done += 1
+            
+            val_loss /= max(_n_val_done, 1)
         
         scheduler.step()
         
@@ -648,20 +672,23 @@ def train_condor_brain(args):
         if device.type == 'cuda':
             alloc = torch.cuda.memory_allocated() / 1e9
             reserved = torch.cuda.memory_reserved() / 1e9
-            print(f"Epoch {epoch+1:3d}/{args.epochs} | Train: {train_loss:.4f} | Val: {val_loss:.4f} | "
+            val_str = f"Val: {val_loss:.4f}" if run_val else "Val: SKIP"
+            print(f"Epoch {epoch+1:3d}/{args.epochs} | Train: {train_loss:.4f} | {val_str} | "
                   f"LR: {lr:.2e} | Time: {epoch_time:.1f}s | GPU alloc: {alloc:.1f}GB | reserved: {reserved:.1f}GB")
         else:
             print(f"Epoch {epoch+1:3d}/{args.epochs} | Train: {train_loss:.4f} | Val: {val_loss:.4f} | LR: {lr:.2e}")
         
-        # Save best
-        if val_loss < best_loss:
-            best_loss = val_loss
+        # Save best (use train_loss when val is skipped)
+        save_loss = val_loss if run_val else train_loss
+        if save_loss < best_loss or (args.no_val and epoch == args.epochs - 1):
+            best_loss = save_loss
             os.makedirs(os.path.dirname(args.output) or 'models', exist_ok=True)
             print(f"  [Saving] Writing model to {args.output}...")
             save_start = time.time()
             torch.save(model.state_dict(), args.output)
             save_time = time.time() - save_start
-            print(f"  ✓ Saved best model (val_loss={val_loss:.4f}) in {save_time:.1f}s")
+            loss_type = "val_loss" if run_val else "train_loss"
+            print(f"  ✓ Saved best model ({loss_type}={save_loss:.4f}) in {save_time:.1f}s")
         
         # Clear cache periodically
         if device.type == 'cuda' and epoch % 10 == 0:
