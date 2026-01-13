@@ -283,6 +283,15 @@ def parse_args():
                         help="Skip validation entirely (for throughput benchmarks).")
     parser.add_argument("--val-every", type=int, default=1,
                         help="Validate every N epochs instead of every epoch (default: 1).")
+    # NEW: Early stopping and live visualization
+    parser.add_argument("--early-stop", action="store_true",
+                        help="Enable early stopping when val loss stops improving.")
+    parser.add_argument("--patience", type=int, default=5,
+                        help="Early stopping patience: epochs to wait after last improvement (default: 5).")
+    parser.add_argument("--live-plot", action="store_true",
+                        help="Display live training curve (train vs val loss) in Colab/notebook.")
+    parser.add_argument("--log-every", type=int, default=100,
+                        help="Log batch-level metrics every N batches (default: 100).")
     
     args = parser.parse_args()
     
@@ -518,9 +527,31 @@ def train_condor_brain(args):
     print(f"Epochs: {args.epochs}, Batch: {args.batch_size} x {args.accum_steps} accum = {effective_batch} effective")
     print(f"LR: {args.lr}, Grad Checkpoint: {args.grad_checkpoint}")
     print(f"Output: {args.output}")
+    if args.early_stop:
+        print(f"Early stopping: patience={args.patience} epochs")
+    if args.live_plot:
+        print(f"Live plotting: enabled (updates every epoch)")
     print(f"{'='*60}\n")
     
     best_loss = float('inf')
+    
+    # === EARLY STOPPING & VISUALIZATION STATE ===
+    patience_counter = 0
+    train_losses = []
+    val_losses = []
+    best_epoch = 0
+    
+    # Live plotting setup (Colab/Jupyter compatible)
+    if args.live_plot:
+        try:
+            import matplotlib.pyplot as plt
+            from IPython.display import display, clear_output
+            fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+            plt.ion()  # Interactive mode
+            print("[CondorBrain] 📊 Live plotting enabled")
+        except ImportError:
+            print("[CondorBrain] ⚠️ matplotlib/IPython not available, disabling live-plot")
+            args.live_plot = False
     
     for epoch in range(args.epochs):
         model.train()
@@ -680,8 +711,41 @@ def train_condor_brain(args):
         
         # Save best (use train_loss when val is skipped)
         save_loss = val_loss if run_val else train_loss
-        if save_loss < best_loss or (args.no_val and epoch == args.epochs - 1):
+        
+        # Track losses for plotting
+        train_losses.append(train_loss)
+        val_losses.append(val_loss if run_val else None)
+        
+        # === LIVE PLOTTING ===
+        if args.live_plot and len(train_losses) > 0:
+            try:
+                clear_output(wait=True)
+                ax.clear()
+                epochs_x = list(range(1, len(train_losses) + 1))
+                ax.plot(epochs_x, train_losses, 'b-', label='Train Loss', linewidth=2)
+                if any(v is not None for v in val_losses):
+                    val_plot = [v for v in val_losses if v is not None]
+                    val_x = [i+1 for i, v in enumerate(val_losses) if v is not None]
+                    ax.plot(val_x, val_plot, 'r-', label='Val Loss', linewidth=2)
+                    # Mark best epoch
+                    if best_epoch > 0 and best_epoch <= len(val_losses) and val_losses[best_epoch-1] is not None:
+                        ax.axvline(x=best_epoch, color='g', linestyle='--', alpha=0.7, label=f'Best @ E{best_epoch}')
+                ax.set_xlabel('Epoch')
+                ax.set_ylabel('Loss')
+                ax.set_title(f'CondorBrain Training - Epoch {epoch+1}/{args.epochs}\n'
+                            f'Train: {train_loss:.4f} | Val: {val_loss:.4f if run_val else "N/A"} | Best: {best_loss:.4f}')
+                ax.legend(loc='upper right')
+                ax.grid(True, alpha=0.3)
+                fig.tight_layout()
+                display(fig)
+            except Exception as e:
+                print(f"[Plot error] {e}")
+        
+        # === EARLY STOPPING CHECK ===
+        if save_loss < best_loss:
             best_loss = save_loss
+            best_epoch = epoch + 1
+            patience_counter = 0  # Reset patience
             os.makedirs(os.path.dirname(args.output) or 'models', exist_ok=True)
             print(f"  [Saving] Writing model to {args.output}...")
             save_start = time.time()
@@ -689,6 +753,13 @@ def train_condor_brain(args):
             save_time = time.time() - save_start
             loss_type = "val_loss" if run_val else "train_loss"
             print(f"  ✓ Saved best model ({loss_type}={save_loss:.4f}) in {save_time:.1f}s")
+        elif args.early_stop and run_val:
+            patience_counter += 1
+            print(f"  [Early Stop] No improvement. Patience: {patience_counter}/{args.patience}")
+            if patience_counter >= args.patience:
+                print(f"\n🛑 EARLY STOPPING triggered at epoch {epoch+1}!")
+                print(f"   Best model was at epoch {best_epoch} with val_loss={best_loss:.4f}")
+                break
         
         # Clear cache periodically
         if device.type == 'cuda' and epoch % 10 == 0:
