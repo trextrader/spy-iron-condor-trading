@@ -30,6 +30,51 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from intelligence.condor_brain import CondorBrain, CondorLoss, HAS_MAMBA
 
 # ============================================================================
+# ROBUST NORMALIZATION HELPERS (Fixes NaN training issue)
+# ============================================================================
+
+EPS = 1e-6
+
+def safe_nan_to_num(X: np.ndarray) -> np.ndarray:
+    """Never replace inf with huge constants. Replace NaN/Inf with 0."""
+    return np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+
+def robust_zscore_fit(X: np.ndarray):
+    """Robust scaler using median + MAD (much safer than mean/std on heavy tails)."""
+    med = np.median(X, axis=0)
+    mad = np.median(np.abs(X - med), axis=0)
+    scale = 1.4826 * mad  # Convert MAD to std-like scale
+    scale = np.where(scale < EPS, 1.0, scale)
+    return med.astype(np.float32), scale.astype(np.float32)
+
+def robust_zscore_transform(X: np.ndarray, med: np.ndarray, scale: np.ndarray, clip_val: float = 10.0) -> np.ndarray:
+    """Apply robust z-score and clip to prevent extreme values."""
+    X = (X - med) / (scale + EPS)
+    X = np.clip(X, -clip_val, clip_val)
+    return X.astype(np.float32)
+
+def clamp_targets(y: np.ndarray) -> np.ndarray:
+    """Clamp targets to reasonable ranges to prevent BF16 overflow."""
+    y = safe_nan_to_num(y)
+    # Target ordering: call_offset, put_offset, wing_width, dte, pop, roi, max_loss, confidence
+    y[:, 0] = np.clip(y[:, 0], -100.0, 100.0)  # call offset
+    y[:, 1] = np.clip(y[:, 1], -100.0, 100.0)  # put offset
+    y[:, 2] = np.clip(y[:, 2], 0.5, 50.0)       # wing width
+    y[:, 3] = np.clip(y[:, 3], 0.0, 120.0)      # dte
+    y[:, 4] = np.clip(y[:, 4], 0.0, 1.0)        # pop (probability)
+    y[:, 5] = np.clip(y[:, 5], -5.0, 5.0)       # expected roi
+    y[:, 6] = np.clip(y[:, 6], 0.0, 5.0)        # max loss
+    y[:, 7] = np.clip(y[:, 7], 0.0, 1.0)        # confidence
+    return y.astype(np.float32)
+
+def debug_tensor_stats(name: str, X: np.ndarray):
+    """Print tensor statistics for debugging NaN issues."""
+    finite = np.isfinite(X)
+    bad = np.size(X) - finite.sum()
+    mx = np.max(np.abs(X[finite])) if finite.any() else np.nan
+    print(f"[DEBUG] {name}: shape={X.shape} bad={bad} max|x|={mx:.4f}")
+
+# ============================================================================
 # CONFIGURATION
 # ============================================================================
 
@@ -95,24 +140,29 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     y = df[target_cols].values.astype(np.float32)
     regime = df['regime_label'].values.astype(np.int64)
     
-    # DEBUG: Force clean all inputs
-    print("[CondorBrain] Sanitizing data...")
-    X = np.nan_to_num(X, nan=0.0, posinf=1e6, neginf=-1e6)
-    y = np.nan_to_num(y, nan=0.0, posinf=1e6, neginf=-1e6)
+    # ROBUST SANITIZATION (never use 1e6 - it explodes in BF16!)
+    print("[CondorBrain] Sanitizing data (safe)...")
+    X = safe_nan_to_num(X)
+    y = clamp_targets(y)
     
     # Scale volume (index 4) to avoid huge gradients
     if X.shape[1] > 4:
-        X[:, 4] = np.log1p(X[:, 4])
-        
-    # Clamp extreme values to prevent gradient explosion
-    X = np.clip(X, -1e6, 1e6)
-    y = np.clip(y, -1e6, 1e6)
+        X[:, 4] = np.log1p(np.clip(X[:, 4], 0.0, 1e9)).astype(np.float32)
+    
+    # ROBUST NORMALIZATION (median/MAD + clip to ±10)
+    print("[CondorBrain] Robust-normalizing features (median/MAD)...")
+    med, scale = robust_zscore_fit(X)
+    X = robust_zscore_transform(X, med, scale, clip_val=10.0)
+    
+    # Debug output
+    debug_tensor_stats("X_scaled", X)
+    debug_tensor_stats("y_clamped", y)
     
     # Verify clean
     if np.isnan(X).any() or np.isinf(X).any():
-        print("[CRITICAL ERROR] X still contains NaN/Inf after sanitization!")
+        raise RuntimeError("[CRITICAL ERROR] X still contains NaN/Inf after sanitization!")
     if np.isnan(y).any() or np.isinf(y).any():
-        print("[CRITICAL ERROR] y still contains NaN/Inf after sanitization!")
+        raise RuntimeError("[CRITICAL ERROR] y still contains NaN/Inf after sanitization!")
     
     print(f"[CondorBrain] Features: {X.shape}, Targets: {y.shape}")
     return X, y, regime
@@ -342,13 +392,24 @@ def train_condor_brain(args):
             
             with autocast('cuda', dtype=amp_dtype):
                 outputs, regime_probs, _ = model(batch_x, return_regime=True, forecast_days=0)
+                
+                # HARD CHECK: Fail immediately on NaN outputs (don't silently skip!)
+                if torch.isnan(outputs).any() or torch.isinf(outputs).any():
+                    print(f"[NaN ERROR] outputs contained NaN/Inf at batch {batch_idx}")
+                    print(f"  batch_x max: {torch.max(torch.abs(batch_x)).item():.4f}")
+                    print(f"  outputs max: {torch.max(torch.abs(outputs[~torch.isnan(outputs)])).item() if (~torch.isnan(outputs)).any() else 'ALL NaN'}")
+                    raise RuntimeError("Model produced NaN/Inf outputs - check data normalization!")
+                
                 loss = criterion(outputs, batch_y, regime_probs, batch_r)
                 # Scale loss for gradient accumulation
                 loss = loss / args.accum_steps
             
-            # Skip NaN losses (prevents explosion)
+            # Hard check on loss
             if torch.isnan(loss) or torch.isinf(loss):
-                continue
+                print(f"[NaN ERROR] Loss is NaN/Inf at batch {batch_idx}")
+                print(f"  outputs range: [{outputs.min().item():.4f}, {outputs.max().item():.4f}]")
+                print(f"  batch_y range: [{batch_y.min().item():.4f}, {batch_y.max().item():.4f}]")
+                raise RuntimeError("Loss is NaN/Inf - check loss function!")
             
             # Backward pass (accumulate gradients)
             if scaler is not None:
