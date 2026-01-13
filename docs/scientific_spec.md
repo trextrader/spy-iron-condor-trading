@@ -375,6 +375,66 @@ python intelligence/train_condor_brain.py \
 
 **Total Training Time (10 epochs, A100-80GB):** ~30 hours
 
+### 9.5 Interpreting Training Metrics
+
+#### What the Loss Values Mean
+
+The loss represents the **average error** between model predictions and ground truth. Since CondorLoss is primarily MSE-based, the **Root Mean Squared Error (RMSE)** provides intuitive interpretation:
+
+$$\text{RMSE} = \sqrt{\text{Loss}}$$
+
+| Loss Value | RMSE | Interpretation |
+|:-----------|:-----|:---------------|
+| 4.0 | ~2.0 | Poor - predictions off by 2 units |
+| 2.0 | ~1.4 | Moderate - learning in progress |
+| 0.5 | ~0.7 | Good - predictions within 1 unit |
+| 0.1 | ~0.3 | Excellent - highly accurate |
+
+#### Practical Example
+
+**Sample Training Output:**
+```
+Epoch   1/10 | Train: 2.2107 | Val: 0.1340
+```
+
+**What this means for predictions:**
+
+| Output | Unit | Train Error (RMSE=1.5) | Val Error (RMSE=0.36) |
+|:-------|:-----|:-----------------------|:----------------------|
+| **Call Offset** | Strike points | ±1.5 points | ±0.4 points |
+| **Put Offset** | Strike points | ±1.5 points | ±0.4 points |
+| **Wing Width** | Points | ±1.5 points | ±0.4 points |
+| **Target DTE** | Days | ±1.5 days | ±0.4 days |
+| **Profitability** | 0-1 probability | ±0.15 (15%) | ±0.04 (4%) |
+| **Expected ROI** | Fraction | ±0.15 | ±0.04 |
+
+**Val Error of 0.36 means:** If actual optimal call offset is 6 points, model predicts 5.6-6.4 points.
+
+#### Train vs Validation Loss Relationship
+
+| Relationship | Diagnosis | Action |
+|:-------------|:----------|:-------|
+| Train ≈ Val | ✅ Healthy learning | Continue training |
+| Train < Val | ⚠️ Overfitting | Add regularization, reduce epochs |
+| Train > Val | 🔍 Unusual but possible | Often normalizes with more epochs |
+| Val = nan | 🔴 Data issue | Check normalization (see Section 9.2) |
+
+#### Training Progress Indicators
+
+**Good training shows:**
+- Loss decreasing each epoch
+- Train and Val loss converging
+- Both losses stabilizing around 0.3-0.8
+- No NaN or Inf values
+
+**Quick Test Command (5 minutes):**
+```bash
+python intelligence/train_condor_brain.py \
+    --local-data data/processed/mamba_institutional_1m.csv \
+    --d-model 512 --layers 16 --epochs 1 \
+    --batch-size 256 --lookback 64 --max-rows 100000
+```
+
 ---
 
 ## 10. Loss Function: CondorLoss
