@@ -300,8 +300,8 @@ def parse_args():
                         help="Enable advanced multi-head training monitor with per-predictor tracking.")
     parser.add_argument("--monitor-every", type=int, default=1,
                         help="Update monitor plots every N epochs (default: 1, use higher for faster training).")
-    parser.add_argument("--viz-every", type=int, default=0,
-                        help="Intra-epoch visualization: update plots every N batches (0=disabled, try 500-1000).")
+    parser.add_argument("--viz-every", type=int, default=20,
+                        help="Intra-epoch visualization: update plots every N batches (default: 20 ~1min, 0=disabled).")
     parser.add_argument("--tensorboard", action="store_true",
                         help="Enable TensorBoard logging for all metrics and predictions.")
     parser.add_argument("--tb-logdir", type=str, default="runs/condor_brain",
