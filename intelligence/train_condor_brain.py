@@ -357,6 +357,9 @@ def train_condor_brain(args):
                 except Exception:
                     pass
         print("[CondorBrain] Norm layers kept in FP32 for stability")
+        # Keep the final output head in BF16 as well; loss is computed in FP32
+        if hasattr(model, 'legacy_head'):
+            model.legacy_head.to(torch.bfloat16)
     
     # Enable gradient checkpointing if requested (saves ~40% GPU memory)
     if args.grad_checkpoint:
@@ -411,7 +414,18 @@ def train_condor_brain(args):
         optimizer.zero_grad(set_to_none=True)  # Zero at start of epoch
         
         # Direct iteration - BatchedSequenceDataset yields full batches, no collation needed
-        pbar = tqdm(enumerate(train_loader), total=len(train_ds), desc=f"Epoch {epoch+1}", leave=False)
+        pbar = tqdm(
+            enumerate(train_loader),
+            total=len(train_ds),
+            desc=f"Epoch {epoch+1}",
+            leave=False,
+            mininterval=2.0,
+            smoothing=0.0,
+            dynamic_ncols=True,
+        )
+        # Throughput meter (batches/sec is misleading; report samples/sec and tokens/sec)
+        _tp_last_t = time.time()
+        _tp_last_i = 0
         
         for batch_idx, (batch_x, batch_y, batch_r) in pbar:
             # X is already BF16 from BatchedSequenceDataset - just move to GPU
@@ -465,6 +479,20 @@ def train_condor_brain(args):
             
             train_loss += loss.item() * args.accum_steps  # Un-scale for logging
             n_batches += 1
+            
+            # Update throughput display every 20 batches to keep tqdm overhead low
+            if (batch_idx + 1) % 20 == 0:
+                _now = time.time()
+                _dt = max(_now - _tp_last_t, 1e-6)
+                _batches = (batch_idx + 1) - _tp_last_i
+                _samples = _batches * int(args.batch_size)
+                _sps = _samples / _dt
+                _tps = _sps * int(args.lookback)
+                pbar.set_postfix_str(
+                    f"{_sps:,.0f} samp/s | {_tps/1e6:.2f}M tok/s | loss {loss.item():.4f}"
+                )
+                _tp_last_t = _now
+                _tp_last_i = (batch_idx + 1)
         
         # Flush leftover gradients if epoch ended mid-accumulation
         if (batch_idx + 1) % args.accum_steps != 0:
@@ -485,7 +513,14 @@ def train_condor_brain(args):
         n_val_batches = 0
         
         with torch.no_grad():
-            for batch_x, batch_y, batch_r in tqdm(val_loader, desc=f"Val {epoch+1}", leave=False):
+            for batch_x, batch_y, batch_r in tqdm(
+                val_loader,
+                desc=f"Val {epoch+1}",
+                leave=False,
+                mininterval=2.0,
+                smoothing=0.0,
+                dynamic_ncols=True,
+            ):
                 batch_x = batch_x.to(device, non_blocking=True)
                 batch_y = batch_y.to(device, non_blocking=True)
                 batch_r = batch_r.to(device, non_blocking=True)

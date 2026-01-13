@@ -266,7 +266,8 @@ class CondorBrain(nn.Module):
                 nn.Linear(d_model, d_model) for _ in range(n_layers)
             ])
         
-        self.norm = nn.LayerNorm(d_model)
+        # RMSNorm is faster and keeps BF16-friendly kernels hot
+        self.norm = nn.RMSNorm(d_model)
         
         # Regime detector
         self.regime_detector = RegimeDetector(d_model)
@@ -318,19 +319,11 @@ class CondorBrain(nn.Module):
             if i == 0 and (not self._dtype_sanity_printed) and x.is_cuda:
                 print(f"[DTYPE PROBE] after layer[0] (Mamba): {x.dtype}")
         
-        # ------------------------------------------------------------------
-        # BF16 PERFORMANCE CRITICAL:
-        # LayerNorm is kept in FP32 for numerical stability, but we must cast
-        # activations back to the original dtype (BF16) immediately afterward,
-        # otherwise the rest of the network runs in FP32 (slow on A100/H100).
-        # ------------------------------------------------------------------
-        _dtype = x.dtype
-        x = self.norm(x.float())
-        if _dtype in (torch.bfloat16, torch.float16):
-            x = x.to(_dtype)
+        # RMSNorm is BF16-friendly, no cast needed
+        x = self.norm(x)
         
         if (not self._dtype_sanity_printed) and x.is_cuda:
-            print(f"[DTYPE PROBE] after norm (cast back): {x.dtype}")
+            print(f"[DTYPE PROBE] after RMSNorm: {x.dtype}")
             self._dtype_sanity_printed = True
         
         # Take last timestep
@@ -368,11 +361,8 @@ class CondorBrain(nn.Module):
         x = self.input_proj(x)
         for layer in self.layers:
             x = layer(x)
-        # Same FP32-norm / BF16-activation rule for legacy forward
-        _dtype = x.dtype
-        x = self.norm(x.float())
-        if _dtype in (torch.bfloat16, torch.float16):
-            x = x.to(_dtype)
+        # Final normalization stays in model dtype (BF16) for throughput; loss is cast to FP32 externally
+        x = self.norm(x)
         return self.legacy_head(x[:, -1, :])
 
 # ============================================================================
