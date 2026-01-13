@@ -440,6 +440,18 @@ def train_condor_brain(args):
             train_loss += loss.item() * args.accum_steps  # Un-scale for logging
             n_batches += 1
         
+        # Flush leftover gradients if epoch ended mid-accumulation
+        if (batch_idx + 1) % args.accum_steps != 0:
+            if scaler is not None:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+        
         # Validation (with progress bar)
         print(f"[Epoch {epoch+1}] Running validation...")
         model.eval()
