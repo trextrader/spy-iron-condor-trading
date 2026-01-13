@@ -299,9 +299,13 @@ class CondorBrain(nn.Module):
         # Input projection
         x = self.input_proj(x)
         
-        # Pass through Mamba layers
+        # Pass through Mamba layers (with optional gradient checkpointing)
         for layer in self.layers:
-            x = layer(x)
+            if self.training and getattr(self, 'gradient_checkpointing', False):
+                from torch.utils.checkpoint import checkpoint
+                x = checkpoint(layer, x, use_reentrant=False)
+            else:
+                x = layer(x)
         
         x = self.norm(x)
         

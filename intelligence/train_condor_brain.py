@@ -278,6 +278,11 @@ def train_condor_brain(args):
         input_dim=len(FEATURE_COLS)
     ).to(device)
     
+    # Enable gradient checkpointing if requested (saves ~40% GPU memory)
+    if args.grad_checkpoint:
+        model.gradient_checkpointing = True
+        print("[CondorBrain] Gradient checkpointing ENABLED (memory saver)")
+    
     # NOTE: torch.compile() disabled - incompatible with Mamba's custom selective_scan_cuda kernels
     # Mamba already uses optimized Triton kernels internally
     
