@@ -318,10 +318,19 @@ class CondorBrain(nn.Module):
             if i == 0 and (not self._dtype_sanity_printed) and x.is_cuda:
                 print(f"[DTYPE PROBE] after layer[0] (Mamba): {x.dtype}")
         
-        x = self.norm(x)
+        # ------------------------------------------------------------------
+        # BF16 PERFORMANCE CRITICAL:
+        # LayerNorm is kept in FP32 for numerical stability, but we must cast
+        # activations back to the original dtype (BF16) immediately afterward,
+        # otherwise the rest of the network runs in FP32 (slow on A100/H100).
+        # ------------------------------------------------------------------
+        _dtype = x.dtype
+        x = self.norm(x.float())
+        if _dtype in (torch.bfloat16, torch.float16):
+            x = x.to(_dtype)
         
         if (not self._dtype_sanity_printed) and x.is_cuda:
-            print(f"[DTYPE PROBE] after norm: {x.dtype}")
+            print(f"[DTYPE PROBE] after norm (cast back): {x.dtype}")
             self._dtype_sanity_printed = True
         
         # Take last timestep
@@ -359,7 +368,11 @@ class CondorBrain(nn.Module):
         x = self.input_proj(x)
         for layer in self.layers:
             x = layer(x)
-        x = self.norm(x)
+        # Same FP32-norm / BF16-activation rule for legacy forward
+        _dtype = x.dtype
+        x = self.norm(x.float())
+        if _dtype in (torch.bfloat16, torch.float16):
+            x = x.to(_dtype)
         return self.legacy_head(x[:, -1, :])
 
 # ============================================================================
