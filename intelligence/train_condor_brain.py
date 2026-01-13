@@ -158,6 +158,10 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     debug_tensor_stats("X_scaled", X)
     debug_tensor_stats("y_clamped", y)
     
+    # Sanity check: confirm dtypes and ranges
+    print(f"[SANITY] X dtype: {X.dtype}, min/max: {X.min():.4f}/{X.max():.4f}")
+    print(f"[SANITY] y dtype: {y.dtype}, min/max: {y.min():.4f}/{y.max():.4f}")
+    
     # Verify clean
     if np.isnan(X).any() or np.isinf(X).any():
         raise RuntimeError("[CRITICAL ERROR] X still contains NaN/Inf after sanitization!")
@@ -392,6 +396,10 @@ def train_condor_brain(args):
             
             with autocast('cuda', dtype=amp_dtype):
                 outputs, regime_probs, _ = model(batch_x, return_regime=True, forecast_days=0)
+                
+                # Log dtype on first batch (sanity check)
+                if batch_idx == 0 and epoch == 0:
+                    print(f"[SANITY] outputs dtype: {outputs.dtype}, loss will compute in: float32")
                 
                 # HARD CHECK: Fail immediately on NaN outputs (don't silently skip!)
                 if torch.isnan(outputs).any() or torch.isinf(outputs).any():
