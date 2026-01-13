@@ -30,7 +30,7 @@ from tqdm import tqdm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from intelligence.condor_brain import CondorBrain, CondorLoss, HAS_MAMBA
-from intelligence.training_monitor import TrainingMonitor, compute_val_head_losses, HEAD_NAMES
+from intelligence.training_monitor import TrainingMonitor, compute_val_head_losses, MAIN_HEADS
 
 
 # ============================================================================
@@ -295,6 +295,8 @@ def parse_args():
                         help="Log batch-level metrics every N batches (default: 100).")
     parser.add_argument("--monitor", action="store_true",
                         help="Enable advanced multi-head training monitor with per-predictor tracking.")
+    parser.add_argument("--monitor-every", type=int, default=1,
+                        help="Update monitor plots every N epochs (default: 1, use higher for faster training).")
     
     args = parser.parse_args()
     
@@ -753,7 +755,7 @@ def train_condor_brain(args):
         
         # === ADVANCED MULTI-HEAD MONITOR ===
         if monitor is not None and run_val:
-            # Compute per-head validation losses
+            # Compute per-head validation losses (GPU-accumulated, fast)
             head_losses = compute_val_head_losses(
                 model=model,
                 get_batch_fn=get_val_batch if use_gpu_dataset else lambda bi: next(iter(val_loader)),
@@ -762,7 +764,7 @@ def train_condor_brain(args):
                 amp_dtype=amp_dtype
             )
             
-            # Update monitor with epoch results
+            # Update monitor with epoch results (only checkpoints on global improvement)
             status = monitor.update(
                 epoch=epoch + 1,
                 train_loss=train_loss,
@@ -773,12 +775,16 @@ def train_condor_brain(args):
                 scheduler=scheduler
             )
             
-            # Print per-head summary
+            # Print per-head improvement summary
             if status['improved_heads']:
-                print(f"  [Monitor] Improved: {', '.join(status['improved_heads'])}")
+                print(f"  [Monitor] Improved heads: {', '.join(status['improved_heads'])}")
+            if status['improved_global']:
+                print(f"  [Monitor] ★ New best global: E{status['best_epoch']} val_loss={status['best_val_loss']:.4f}")
             
-            # Live multi-panel visualization
-            monitor.plot_live(epoch + 1, args.epochs)
+            # Throttled visualization (every --monitor-every epochs, or last epoch)
+            should_plot = ((epoch + 1) % args.monitor_every == 0) or (epoch == args.epochs - 1)
+            if should_plot:
+                monitor.display_inline(epoch + 1, args.epochs)
         
         # === EARLY STOPPING CHECK ===
         if save_loss < best_loss:

@@ -1,24 +1,32 @@
 """
 CondorBrain Training Monitor: Per-Head Metrics & In-Memory Checkpointing
+(Production-Hardened Version)
 
-Features:
-- Per-output-head loss tracking (8 predictors)
-- In-memory best state checkpointing (no disk I/O during training)
-- Real-time multi-panel visualization
-- Manual interrupt → reconstruct from best point per head
+Performance Features:
+- NO GPU sync points in training loop
+- Throttled plotting (every N epochs, not every epoch)
+- File-based PNG output (non-blocking, Colab-stable)
+- Per-head tracking for analysis (8 outputs + regime)
+- Best-global checkpoint for model restore
+- Best-per-head for reporting only
 """
 import copy
+import time
 import torch
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
-# Output head names (matching CondorLoss order + regime)
-HEAD_NAMES = [
+# Output head names - MUST match CondorBrain output[:, i] order exactly
+# Model outputs (B, 8): [call_offset, put_offset, wing_width, dte, pop, roi, max_loss, confidence]
+# Training targets match same order in prepare_features()
+MAIN_HEADS = [
     'call_offset', 'put_offset', 'wing_width', 'dte',
-    'pop', 'roi', 'max_loss', 'confidence',
-    'regime_accuracy'  # Regime classification accuracy
+    'pop', 'roi', 'max_loss', 'confidence'
 ]
+# Extra tracked metrics (not direct model outputs)
+EXTRA_HEADS = ['regime_accuracy']
+HEAD_NAMES = MAIN_HEADS + EXTRA_HEADS
 
 
 @dataclass
@@ -45,18 +53,26 @@ class TrainingState:
 
 class TrainingMonitor:
     """
-    Advanced training monitor with per-head tracking and in-memory checkpointing.
+    Production-hardened training monitor with per-head tracking.
     
-    Allows interruption at any point and reconstruction from optimal checkpoint
-    for each output head independently.
+    ARCHITECTURE DECISION:
+    - Best-global checkpoint: Used for early stopping + final model save
+    - Best-per-head tracking: For analysis/reporting ONLY (can't restore 8 different heads)
+    
+    PERFORMANCE:
+    - No .item() calls in training loop
+    - Plotting throttled to every N epochs
+    - Uses file-based PNG output (non-blocking)
     """
     
-    def __init__(self, checkpoint_capacity: int = 3):
+    def __init__(self, checkpoint_capacity: int = 3, plot_dir: str = "monitor_plots"):
         """
         Args:
             checkpoint_capacity: How many recent checkpoints to keep in memory
+            plot_dir: Directory for plot PNG files (non-blocking output)
         """
         self.capacity = checkpoint_capacity
+        self.plot_dir = plot_dir
         
         # Per-head metrics
         self.heads: Dict[str, HeadMetrics] = {
@@ -72,34 +88,15 @@ class TrainingMonitor:
         # In-memory checkpoints (circular buffer of recent states)
         self._checkpoints: List[TrainingState] = []
         self._best_checkpoint: Optional[TrainingState] = None
-        self._best_per_head: Dict[str, TrainingState] = {}
+        
+        # Best per-head tracking (FOR REPORTING ONLY - cannot restore these separately)
+        self._best_per_head: Dict[str, int] = {}  # head_name -> best_epoch
         
         # Visualization state
         self._fig = None
         self._axes = None
+        self._last_plot_time = 0
         
-    def compute_per_head_losses(
-        self,
-        pred: torch.Tensor,
-        target: torch.Tensor
-    ) -> Dict[str, float]:
-        """
-        Compute MSE loss for each output head.
-        
-        Args:
-            pred: (B, 8) predictions
-            target: (B, 8) targets
-            
-        Returns:
-            Dict mapping head name to loss value
-        """
-        with torch.no_grad():
-            losses = {}
-            for i, name in enumerate(HEAD_NAMES):
-                head_loss = torch.mean((pred[:, i].float() - target[:, i].float()) ** 2)
-                losses[name] = head_loss.item()
-        return losses
-    
     def update(
         self,
         epoch: int,
@@ -111,7 +108,10 @@ class TrainingMonitor:
         scheduler: Optional[Any] = None
     ) -> Dict[str, Any]:
         """
-        Update monitor with epoch results and optionally checkpoint.
+        Update monitor with epoch results and checkpoint if improved.
+        
+        CRITICAL: This is called ONCE per epoch, AFTER validation.
+        All values passed here should already be Python floats (no GPU tensors).
         
         Returns:
             Dict with status info including which heads improved
@@ -120,61 +120,64 @@ class TrainingMonitor:
         self.train_losses.append(train_loss)
         self.val_losses.append(val_loss)
         
-        # Update per-head metrics
+        # Update per-head metrics (FOR REPORTING)
         improved_heads = []
         for name, loss in head_val_losses.items():
+            if name not in self.heads:
+                continue
             head = self.heads[name]
             head.val_losses.append(loss)
             
             if loss < head.best_val_loss:
                 head.best_val_loss = loss
                 head.best_epoch = epoch
+                self._best_per_head[name] = epoch
                 improved_heads.append(name)
         
-        # Create checkpoint
-        state = TrainingState(
-            epoch=epoch,
-            model_state_dict=copy.deepcopy(model.state_dict()),
-            optimizer_state_dict=copy.deepcopy(optimizer.state_dict()),
-            scheduler_state_dict=copy.deepcopy(scheduler.state_dict()) if scheduler else None,
-            train_loss=train_loss,
-            val_loss=val_loss,
-            head_val_losses=head_val_losses.copy()
-        )
+        # Only checkpoint when GLOBAL loss improves (this is what we restore)
+        improved_global = val_loss < self.best_val_loss
         
-        # Update checkpoints
-        self._checkpoints.append(state)
-        if len(self._checkpoints) > self.capacity:
-            self._checkpoints.pop(0)
-        
-        # Update best global checkpoint
-        if val_loss < self.best_val_loss:
+        if improved_global:
             self.best_val_loss = val_loss
             self.best_epoch = epoch
+            
+            # Create checkpoint (deep copy of state dicts)
+            state = TrainingState(
+                epoch=epoch,
+                model_state_dict=copy.deepcopy(model.state_dict()),
+                optimizer_state_dict=copy.deepcopy(optimizer.state_dict()),
+                scheduler_state_dict=copy.deepcopy(scheduler.state_dict()) if scheduler else None,
+                train_loss=train_loss,
+                val_loss=val_loss,
+                head_val_losses=head_val_losses.copy()
+            )
+            
+            # Update best checkpoint
             self._best_checkpoint = state
-        
-        # Update best per-head checkpoints
-        for name in improved_heads:
-            self._best_per_head[name] = state
+            
+            # Also keep in circular buffer
+            self._checkpoints.append(state)
+            if len(self._checkpoints) > self.capacity:
+                self._checkpoints.pop(0)
         
         return {
-            'improved_global': val_loss < self.best_val_loss or epoch == self.best_epoch,
+            'improved_global': improved_global,
             'improved_heads': improved_heads,
             'best_epoch': self.best_epoch,
             'best_val_loss': self.best_val_loss,
-            'head_summary': {name: (h.best_epoch, h.best_val_loss) for name, h in self.heads.items()}
         }
     
     def get_best_checkpoint(self) -> Optional[TrainingState]:
-        """Get the globally best checkpoint."""
+        """Get the globally best checkpoint (for restoring model)."""
         return self._best_checkpoint
     
-    def get_best_checkpoint_for_head(self, head_name: str) -> Optional[TrainingState]:
-        """Get the best checkpoint for a specific output head."""
-        return self._best_per_head.get(head_name)
-    
-    def restore_best(self, model: torch.nn.Module, optimizer: torch.optim.Optimizer = None):
-        """Restore model to globally best checkpoint."""
+    def restore_best(self, model: torch.nn.Module, optimizer: torch.optim.Optimizer = None) -> bool:
+        """
+        Restore model to globally best checkpoint.
+        
+        NOTE: This restores the GLOBAL best, not per-head best.
+        Per-head best epochs are for analysis only.
+        """
         if self._best_checkpoint is None:
             print("[Monitor] No checkpoint available!")
             return False
@@ -186,69 +189,108 @@ class TrainingMonitor:
         return True
     
     def print_summary(self):
-        """Print summary of best epochs per head."""
+        """Print summary of best epochs per head (for analysis)."""
         print("\n" + "="*70)
-        print("TRAINING MONITOR SUMMARY - Best Epochs Per Output Head")
+        print("TRAINING MONITOR SUMMARY")
         print("="*70)
-        print(f"{'Head':<15} {'Best Epoch':>12} {'Best Val Loss':>15}")
+        print(f"{'Head':<17} {'Best Epoch':>10} {'Best Val Loss':>14} {'Note':>15}")
         print("-"*70)
         for name, head in self.heads.items():
-            print(f"{name:<15} {head.best_epoch:>12} {head.best_val_loss:>15.6f}")
+            note = "← RESTORED" if name == "GLOBAL" and head.best_epoch == self.best_epoch else ""
+            print(f"{name:<17} {head.best_epoch:>10} {head.best_val_loss:>14.6f} {note:>15}")
         print("-"*70)
-        print(f"{'GLOBAL':<15} {self.best_epoch:>12} {self.best_val_loss:>15.6f}")
+        print(f"{'GLOBAL (restore)':<17} {self.best_epoch:>10} {self.best_val_loss:>14.6f} {'← MODEL SAVED':>15}")
         print("="*70)
+        print("\n⚠️  Note: Per-head best epochs are for ANALYSIS only.")
+        print("    Model is saved/restored from GLOBAL best epoch.")
     
-    def plot_live(self, epoch: int, total_epochs: int):
-        """Create/update live multi-panel visualization."""
+    def save_plot_to_file(self, epoch: int, total_epochs: int, output_path: str = None):
+        """
+        Save plot to PNG file (NON-BLOCKING).
+        
+        This is preferred over inline display for:
+        - No matplotlib blocking
+        - Works in all Colab cells
+        - Faster than display()
+        """
         try:
+            import matplotlib
+            matplotlib.use('Agg')  # Non-interactive backend
             import matplotlib.pyplot as plt
-            from IPython.display import display, clear_output
             
-            if self._fig is None:
-                # Create 3x3 grid: 8 heads + 1 global
-                self._fig, self._axes = plt.subplots(3, 3, figsize=(14, 10))
-                self._axes = self._axes.flatten()
-                plt.ion()
-            
-            clear_output(wait=True)
+            fig, axes = plt.subplots(3, 4, figsize=(16, 10))
+            axes = axes.flatten()
             
             epochs_x = list(range(1, len(self.train_losses) + 1))
             
-            # Plot global loss
-            ax = self._axes[0]
-            ax.clear()
+            # Plot 0: Global loss
+            ax = axes[0]
             ax.plot(epochs_x, self.train_losses, 'b-', label='Train', linewidth=2)
-            if any(v > 0 for v in self.val_losses):
-                ax.plot(epochs_x, self.val_losses, 'r-', label='Val', linewidth=2)
-            ax.axvline(x=self.best_epoch, color='g', linestyle='--', alpha=0.7)
+            ax.plot(epochs_x, self.val_losses, 'r-', label='Val', linewidth=2)
+            if self.best_epoch > 0:
+                ax.axvline(x=self.best_epoch, color='g', linestyle='--', alpha=0.7, label=f'Best E{self.best_epoch}')
             ax.set_title(f'GLOBAL Loss\nBest: E{self.best_epoch} ({self.best_val_loss:.4f})', fontweight='bold')
-            ax.legend(loc='upper right', fontsize=8)
+            ax.legend(loc='upper right', fontsize=7)
             ax.grid(True, alpha=0.3)
             
-            # Plot per-head losses
+            # Plots 1-9: Per-head losses
             for i, (name, head) in enumerate(self.heads.items()):
-                ax = self._axes[i + 1]
-                ax.clear()
+                ax = axes[i + 1]
                 
                 if len(head.val_losses) > 0:
                     ax.plot(epochs_x[:len(head.val_losses)], head.val_losses, 'r-', linewidth=1.5)
-                    ax.axvline(x=head.best_epoch, color='g', linestyle='--', alpha=0.7)
-                    ax.scatter([head.best_epoch], [head.best_val_loss], color='g', s=50, zorder=5)
+                    if head.best_epoch > 0:
+                        ax.axvline(x=head.best_epoch, color='g', linestyle='--', alpha=0.7)
+                        ax.scatter([head.best_epoch], [head.best_val_loss], color='g', s=40, zorder=5)
                 
                 ax.set_title(f'{name}\nBest: E{head.best_epoch} ({head.best_val_loss:.4f})', fontsize=9)
                 ax.grid(True, alpha=0.3)
                 ax.tick_params(labelsize=7)
             
-            self._fig.suptitle(
+            # Clear unused axes
+            for i in range(len(self.heads) + 1, len(axes)):
+                axes[i].axis('off')
+            
+            fig.suptitle(
                 f'CondorBrain Training Monitor - Epoch {epoch}/{total_epochs}\n'
                 f'Global Best: Epoch {self.best_epoch} | Val Loss: {self.best_val_loss:.4f}',
                 fontsize=12, fontweight='bold'
             )
-            self._fig.tight_layout()
-            display(self._fig)
+            fig.tight_layout()
+            
+            # Save to file (non-blocking)
+            if output_path is None:
+                import os
+                os.makedirs(self.plot_dir, exist_ok=True)
+                output_path = f"{self.plot_dir}/monitor_epoch_{epoch:03d}.png"
+            
+            fig.savefig(output_path, dpi=100, bbox_inches='tight')
+            plt.close(fig)
+            
+            return output_path
             
         except Exception as e:
             print(f"[Plot error] {e}")
+            return None
+    
+    def display_inline(self, epoch: int, total_epochs: int):
+        """
+        Display plot inline in Colab/Jupyter (may block briefly).
+        
+        Use save_plot_to_file() for guaranteed non-blocking.
+        """
+        try:
+            import matplotlib.pyplot as plt
+            from IPython.display import display, clear_output, Image
+            
+            # Save to temp file first
+            path = self.save_plot_to_file(epoch, total_epochs)
+            if path:
+                clear_output(wait=True)
+                display(Image(filename=path))
+                
+        except Exception as e:
+            print(f"[Display error] {e}")
     
     def save_checkpoint_to_disk(self, path: str, checkpoint: TrainingState = None):
         """Save a checkpoint to disk."""
@@ -279,6 +321,10 @@ def compute_val_head_losses(
     """
     Compute per-head validation losses including regime accuracy.
     
+    PERFORMANCE: 
+    - Accumulates on GPU, only calls .item() once at end
+    - No CPU sync in loop
+    
     Args:
         model: The model
         get_batch_fn: Function(batch_idx) -> (x, y, r)
@@ -287,17 +333,16 @@ def compute_val_head_losses(
         amp_dtype: AMP dtype
         
     Returns:
-        Dict mapping head name to average loss (or 1-accuracy for regime)
+        Dict mapping head name to average loss (Python floats)
     """
     from torch.amp import autocast
     
     model.eval()
     
-    # 8 main outputs + regime
-    main_head_names = HEAD_NAMES[:8]  # Exclude regime_accuracy
-    head_losses = {name: 0.0 for name in main_head_names}
-    regime_correct = 0
-    regime_total = 0
+    # Accumulate on GPU
+    head_loss_accum = {name: torch.tensor(0.0, device=device) for name in MAIN_HEADS}
+    regime_correct = torch.tensor(0, device=device, dtype=torch.long)
+    regime_total = torch.tensor(0, device=device, dtype=torch.long)
     
     with torch.no_grad():
         for bi in range(n_batches):
@@ -306,24 +351,24 @@ def compute_val_head_losses(
             with autocast('cuda', dtype=amp_dtype):
                 outputs, regime_logits, _ = model(batch_x, return_regime=True, forecast_days=0)
             
-            # Compute per-head losses for 8 main outputs
-            for i, name in enumerate(main_head_names):
+            # Compute per-head losses (accumulate on GPU, no .item())
+            for i, name in enumerate(MAIN_HEADS):
                 loss = torch.mean((outputs[:, i].float() - batch_y[:, i].float()) ** 2)
-                head_losses[name] += loss.item()
+                head_loss_accum[name] += loss
             
-            # Compute regime classification accuracy
+            # Compute regime classification accuracy (on GPU)
             if regime_logits is not None:
                 pred_regime = torch.argmax(regime_logits, dim=-1)
-                regime_correct += (pred_regime == batch_r).sum().item()
+                regime_correct += (pred_regime == batch_r).sum()
                 regime_total += batch_r.numel()
     
-    # Average main head losses
-    for name in main_head_names:
-        head_losses[name] /= max(n_batches, 1)
+    # NOW move to CPU and call .item() (once per head)
+    head_losses = {}
+    for name in MAIN_HEADS:
+        head_losses[name] = (head_loss_accum[name] / max(n_batches, 1)).item()
     
-    # Compute regime accuracy (stored as 1 - accuracy so lower is better)
-    regime_acc = regime_correct / max(regime_total, 1)
-    head_losses['regime_accuracy'] = 1.0 - regime_acc  # Lower = better
+    # Regime accuracy (stored as 1 - accuracy so lower is better)
+    regime_acc = regime_correct.float() / regime_total.float().clamp(min=1)
+    head_losses['regime_accuracy'] = (1.0 - regime_acc).item()
     
     return head_losses
-
