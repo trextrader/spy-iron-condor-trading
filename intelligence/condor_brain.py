@@ -299,15 +299,30 @@ class CondorBrain(nn.Module):
         # Input projection
         x = self.input_proj(x)
         
+        # DTYPE PROBE: Track where FP32 upcast happens (one-time)
+        if not hasattr(self, '_dtype_sanity_printed'):
+            self._dtype_sanity_printed = False
+        
+        if (not self._dtype_sanity_printed) and x.is_cuda:
+            print(f"[DTYPE PROBE] after input_proj: {x.dtype}")
+        
         # Pass through Mamba layers (with optional gradient checkpointing)
-        for layer in self.layers:
+        for i, layer in enumerate(self.layers):
             if self.training and getattr(self, 'gradient_checkpointing', False):
                 from torch.utils.checkpoint import checkpoint
                 x = checkpoint(layer, x, use_reentrant=False)
             else:
                 x = layer(x)
+            
+            # Print dtype after first layer only
+            if i == 0 and (not self._dtype_sanity_printed) and x.is_cuda:
+                print(f"[DTYPE PROBE] after layer[0] (Mamba): {x.dtype}")
         
         x = self.norm(x)
+        
+        if (not self._dtype_sanity_printed) and x.is_cuda:
+            print(f"[DTYPE PROBE] after norm: {x.dtype}")
+            self._dtype_sanity_printed = True
         
         # Take last timestep
         last_hidden = x[:, -1, :]  # (B, d_model)
