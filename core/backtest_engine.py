@@ -435,7 +435,14 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             if self.bar_count == 101 and self.verbose:
                 print(f"[DEBUG] Mode: {'Intraday' if self.is_intraday else 'Synthetic'}")
                 print(f"[DEBUG] Looking for: {dt_now if self.is_intraday else date_now}")
+                print(f"[DEBUG] Lookup Key Type: {type(dt_key)}")
                 print(f"[DEBUG] Records found: {len(chain_records)}")
+                # Show sample keys from loaded data
+                if self.options_data:
+                    sample_keys = list(self.options_data.keys())[:5]
+                    print(f"[DEBUG] Sample Data Keys: {sample_keys}")
+                    if sample_keys:
+                        print(f"[DEBUG] Sample Key Type: {type(sample_keys[0])}")
             
             if chain_records is None or (isinstance(chain_records, list) and not chain_records) or (isinstance(chain_records, pd.DataFrame) and chain_records.empty):
                 return
