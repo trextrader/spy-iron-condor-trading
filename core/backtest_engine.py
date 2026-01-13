@@ -401,8 +401,8 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             t_load_start = time.time() # Start Profile
             if self.is_intraday:
                 # Intraday Lookup: Exact timestamp match
-                # Convert backtrader datetime to python datetime
-                dt_key = dt_now.replace(tzinfo=None)
+                # Convert backtrader datetime to pandas Timestamp (matching loaded data keys)
+                dt_key = pd.Timestamp(dt_now).tz_localize(None)
                 chain_dict = self.options_data.get(dt_key, {})
                 if chain_dict:
                     # Convert dict of dicts to list of OptionQuote objects directly
