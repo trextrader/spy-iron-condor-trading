@@ -238,3 +238,200 @@ The following diagram details the exact parallel computation flow within a singl
 3.  **Selective Scan Kernel (Fused):** The critical operation. It discretizes the continuous parameters $\textbf{A}, \textbf{B}$ using the Zero-Order Hold (ZOH) method *per time-step* based on $\Delta$, then performs a parallel inclusive scan (associative) to compute the hidden states $h_t$. This is the $O(N)$ magic compared to Attention's $O(N^2)$.
 4.  **Multiplicative Gate:** The output of the SSM branch is modulated by the "Gate" branch (SiLU activated), allowing the model to silence irrelevant features completely.
 
+---
+
+## 8. CondorBrain Multi-Head Output Specification
+
+The CondorBrain produces a total of **23 prediction outputs** per inference, organized into three functional groups.
+
+### 8.1 Iron Condor Policy Parameters (8 Outputs)
+
+The primary output head generates optimal Iron Condor configuration:
+
+| Output | Symbol | Range | Mathematical Definition |
+|:-------|:-------|:------|:------------------------|
+| **Call Offset** | $\delta_C$ | [0, 10] | ATM offset for short call: $K_C = S_t + \delta_C \cdot \sigma_{ATM}$ |
+| **Put Offset** | $\delta_P$ | [0, 10] | ATM offset for short put: $K_P = S_t - \delta_P \cdot \sigma_{ATM}$ |
+| **Wing Width** | $W$ | [2, 15] | Long strike offset: $K_{long} = K_{short} \pm W$ |
+| **Target DTE** | $\tau^*$ | [7, 45] | Optimal days to expiration |
+| **Profitability** | $\mathbb{P}(win)$ | [0, 1] | Estimated win probability: $\mathbb{E}[\mathbb{1}_{PnL > 0}]$ |
+| **Expected ROI** | $\mathbb{E}[R]$ | [-1, 1] | Expected return on risk capital |
+| **Max Loss %** | $\text{MDD}$ | [0, 1] | Expected maximum drawdown fraction |
+| **Confidence** | $\kappa$ | [0, 1] | Model certainty: $\kappa = 1 - H(\hat{y})$ where $H$ is entropy |
+
+**Policy Head Mathematics:**
+
+$$\hat{\pi}_{IC} = \text{Softmax}\left( W_{policy} \cdot \text{RMSNorm}(h_T^{(L)}) + b_{policy} \right) \in \mathbb{R}^8$$
+
+### 8.2 Regime Classification (3 Probability Outputs)
+
+The `RegimeDetector` module classifies market volatility state:
+
+| Regime | Symbol | IVR Range | Interpretation |
+|:-------|:-------|:----------|:---------------|
+| **Low Volatility** | $p_{low}$ | IVR ∈ [0, 30] | Quiet market, tighter wings recommended |
+| **Normal** | $p_{normal}$ | IVR ∈ (30, 70) | Standard IC setup |
+| **High Volatility** | $p_{high}$ | IVR ∈ [70, 100] | Elevated IV, wider wings for premium |
+
+**Regime Detection Mathematics:**
+
+$$p_{regime} = \text{Softmax}\left( W_G \cdot h_T^{(L)} \right) \in \mathbb{R}^3$$
+
+**Mixture-of-Experts Aggregation:**
+
+$$\hat{y}_{final} = \sum_{i \in \{low, normal, high\}} p_i \cdot E_i(h_T^{(L)})$$
+
+Where each $E_i$ is a specialized expert head trained for that volatility regime.
+
+### 8.3 Multi-Horizon Price Forecasts (12 Outputs)
+
+The `HorizonForecaster` module generates probabilistic price predictions:
+
+| Horizon | Outputs | Mathematical Specification |
+|:--------|:--------|:---------------------------|
+| **1-Day** | $(\mu_1, \sigma_1, p_1^{up})$ | $\mathbb{E}[S_{t+1}], \sqrt{\text{Var}[S_{t+1}]}, \mathbb{P}(S_{t+1} > S_t)$ |
+| **3-Day** | $(\mu_3, \sigma_3, p_3^{up})$ | $\mathbb{E}[S_{t+3}], \sqrt{\text{Var}[S_{t+3}]}, \mathbb{P}(S_{t+3} > S_t)$ |
+| **5-Day** | $(\mu_5, \sigma_5, p_5^{up})$ | $\mathbb{E}[S_{t+5}], \sqrt{\text{Var}[S_{t+5}]}, \mathbb{P}(S_{t+5} > S_t)$ |
+| **10-Day** | $(\mu_{10}, \sigma_{10}, p_{10}^{up})$ | $\mathbb{E}[S_{t+10}], \sqrt{\text{Var}[S_{t+10}]}, \mathbb{P}(S_{t+10} > S_t)$ |
+
+**Forecast Head Mathematics:**
+
+For each horizon $h \in \{1, 3, 5, 10\}$:
+
+$$\mu_h = W_{\mu}^{(h)} \cdot h_T^{(L)} + b_{\mu}^{(h)}$$
+
+$$\sigma_h = \text{Softplus}\left( W_{\sigma}^{(h)} \cdot h_T^{(L)} + b_{\sigma}^{(h)} \right)$$
+
+$$p_h^{up} = \sigma\left( W_p^{(h)} \cdot h_T^{(L)} + b_p^{(h)} \right)$$
+
+---
+
+## 9. Training Configuration & Memory Optimization
+
+### 9.1 A100/H100 Optimized Settings
+
+| Parameter | Value | Rationale |
+|:----------|:------|:----------|
+| **d_model** | 1024 | Optimal width for SSM state capacity |
+| **n_layers** | 32 | Sufficient depth for 128-step context |
+| **batch_size** | 64 × 4 accum = 256 | Gradient accumulation for memory efficiency |
+| **learning_rate** | $1 \times 10^{-4}$ | Standard for Adam with gradient clipping |
+| **lookback** | 128 | ~2 hours of 1-min bars |
+| **train/val split** | 80/20 | Chronological (no shuffle) |
+
+### 9.2 Memory Optimization Techniques
+
+**1. Gradient Accumulation:**
+
+Simulates large batch without memory explosion:
+
+$$\nabla \theta_{eff} = \frac{1}{K} \sum_{k=1}^{K} \nabla \theta_{micro}^{(k)}$$
+
+Where $K$ = `accum_steps` and effective batch = $B_{micro} \times K$.
+
+**2. Gradient Checkpointing:**
+
+Trades compute for memory by recomputing activations:
+
+$$\text{Memory} \propto O(\sqrt{L})$$ instead of $$O(L)$$
+
+Enabled via `--grad-checkpoint` flag (reduces memory ~40%, increases compute ~30%).
+
+**3. BF16 Mixed Precision (Ampere+):**
+
+$$x_{BF16} = \text{round}(x_{FP32}) \in \{-3.4 \times 10^{38}, ..., 3.4 \times 10^{38}\}$$
+
+16-bit mantissa with FP32 dynamic range, no GradScaler needed.
+
+**4. CUDA Memory Allocator:**
+
+```python
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+```
+
+Prevents fragmentation-induced OOM on 80GB VRAM.
+
+### 9.3 Training Command Reference
+
+```bash
+python intelligence/train_condor_brain.py \
+    --local-data data/processed/mamba_institutional_1m.csv \
+    --d-model 1024 \
+    --layers 32 \
+    --epochs 10 \
+    --batch-size 64 \
+    --accum-steps 4 \
+    --lr 1e-4 \
+    --lookback 128
+```
+
+### 9.4 Expected Training Metrics
+
+| Epoch | Train Loss | Val Loss | Time |
+|:------|:-----------|:---------|:-----|
+| 1 | ~1.2-1.5 | ~1.3-1.6 | ~3h |
+| 5 | ~0.7-0.9 | ~0.8-1.0 | ~3h |
+| 10 | ~0.5-0.7 | ~0.6-0.8 | ~3h |
+
+**Total Training Time (10 epochs, A100-80GB):** ~30 hours
+
+---
+
+## 10. Loss Function: CondorLoss
+
+The training objective is a weighted multi-task loss:
+
+$$\mathcal{L}_{total} = \lambda_1 \mathcal{L}_{position} + \lambda_2 \mathcal{L}_{regime} + \lambda_3 \mathcal{L}_{confidence} + \lambda_4 \mathcal{L}_{returns}$$
+
+### 10.1 Component Losses
+
+**Position Loss (MSE on IC parameters):**
+
+$$\mathcal{L}_{position} = \frac{1}{8} \sum_{i=1}^{8} (\hat{y}_i - y_i)^2$$
+
+**Regime Loss (Cross-Entropy):**
+
+$$\mathcal{L}_{regime} = -\sum_{i=1}^{3} y_i^{regime} \log(\hat{p}_i^{regime})$$
+
+**Confidence Loss (Binary Cross-Entropy):**
+
+$$\mathcal{L}_{confidence} = -[y \log(\hat{\kappa}) + (1-y) \log(1-\hat{\kappa})]$$
+
+**Returns Loss (Huber/Smooth L1):**
+
+$$\mathcal{L}_{returns} = \text{SmoothL1}(\mathbb{E}[\hat{R}], R_{realized})$$
+
+### 10.2 Loss Weights
+
+| Component | Weight ($\lambda$) | Rationale |
+|:----------|:-------------------|:----------|
+| Position | 1.0 | Primary objective |
+| Regime | 0.5 | Classification regularizer |
+| Confidence | 0.3 | Calibration |
+| Returns | 0.2 | Downstream validation |
+
+---
+
+## 11. Hyperparameter Sweep Strategy
+
+### 11.1 Recommended Sweep Grid
+
+| Run | d_model | layers | lookback | lr | Objective |
+|:----|:--------|:-------|:---------|:---|:----------|
+| 1 | 1024 | 32 | 128 | 1e-4 | Baseline |
+| 2 | 1024 | 32 | 256 | 1e-4 | Longer context |
+| 3 | 1024 | 32 | 128 | 5e-5 | Lower LR |
+| 4 | 512 | 24 | 128 | 1e-4 | Smaller model |
+| 5 | 2048 | 48 | 128 | 1e-4 | Larger model |
+
+### 11.2 Selection Criteria
+
+Models are ranked by:
+
+1. **Validation Loss** (primary)
+2. **Flatness of Loss Curve** (generalization proxy)
+3. **Regime Classification Accuracy** (secondary)
+
+---
+
+*Document Version: 2.1 | Last Updated: 2026-01-12*
