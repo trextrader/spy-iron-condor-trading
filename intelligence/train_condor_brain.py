@@ -11,7 +11,7 @@ import os
 
 # CRITICAL: Set CUDA memory allocator BEFORE importing torch
 # This reduces fragmentation and helps with "reserved but unallocated" OOM errors
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True,max_split_size_mb:256,garbage_collection_threshold:0.8"
 
 import time
 import argparse
@@ -408,7 +408,7 @@ def train_condor_brain(args):
                     print(f"  outputs max: {torch.max(torch.abs(outputs[~torch.isnan(outputs)])).item() if (~torch.isnan(outputs)).any() else 'ALL NaN'}")
                     raise RuntimeError("Model produced NaN/Inf outputs - check data normalization!")
                 
-                loss = criterion(outputs, batch_y, regime_probs, batch_r)
+                loss = criterion(outputs.float(), batch_y.float(), regime_probs.float(), batch_r)
                 # Scale loss for gradient accumulation
                 loss = loss / args.accum_steps
             
@@ -454,7 +454,7 @@ def train_condor_brain(args):
                 
                 with autocast('cuda', dtype=amp_dtype):
                     outputs, regime_probs, _ = model(batch_x, return_regime=True, forecast_days=0)
-                    loss = criterion(outputs, batch_y, regime_probs, batch_r)
+                    loss = criterion(outputs.float(), batch_y.float(), regime_probs.float(), batch_r)
                 val_loss += loss.item()
                 n_val_batches += 1
         
@@ -467,9 +467,10 @@ def train_condor_brain(args):
         lr = optimizer.param_groups[0]['lr']
         
         if device.type == 'cuda':
-            gpu_mem = torch.cuda.memory_allocated() / 1e9
+            alloc = torch.cuda.memory_allocated() / 1e9
+            reserved = torch.cuda.memory_reserved() / 1e9
             print(f"Epoch {epoch+1:3d}/{args.epochs} | Train: {train_loss:.4f} | Val: {val_loss:.4f} | "
-                  f"LR: {lr:.2e} | Time: {epoch_time:.1f}s | GPU: {gpu_mem:.1f}GB")
+                  f"LR: {lr:.2e} | Time: {epoch_time:.1f}s | GPU alloc: {alloc:.1f}GB | reserved: {reserved:.1f}GB")
         else:
             print(f"Epoch {epoch+1:3d}/{args.epochs} | Train: {train_loss:.4f} | Val: {val_loss:.4f} | LR: {lr:.2e}")
         
