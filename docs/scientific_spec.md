@@ -71,7 +71,10 @@ $\hat{y} = W_{out} \cdot \text{RMSNorm}(E_t^{(Final)})$
 *Outputs the Policy Distribution: Strike Selection, Width, and Allocation Size.*
 
 ## 0. System Architecture
-![System Overview](architecture/system_overview.png)
+
+The following diagram provides a granular mapping of the CondorIntelligence hardware-aware Mamba-2 backbone, its synergistic 23-head output distribution, and the downstream Neural-Fuzzy fusion logic.
+
+![CondorIntelligence Detailed Flow](architecture/condor_intelligence_flow.png)
 
 ### 0.1 Data Pipeline Detail
 ![Data Pipeline](architecture/data_pipeline_detailed.png)
@@ -82,28 +85,36 @@ $\hat{y} = W_{out} \cdot \text{RMSNorm}(E_t^{(Final)})$
 ## 1. Core Architecture: Mamba Protocol
 Unlike traditional Transformers with $O(N^2)$ quadratic complexity, CondorBrain utilizes the **Mamba State Space Model (SSM)**, achieving $O(N)$ linear complexity with respect to sequence length.
 
-### 1.1 Mathematical Formulation
-The core mechanism uses a continuous-time system mapped to discrete time:
+### 1.1 Mathematical Formulation (Mamba-2)
+The core of CondorBrain is a Structured State Space Model (SSM) that maps a sequence $x \in \mathbb{R}^{L \times F}$ to $y \in \mathbb{R}^{L \times D}$ through a latent manifold.
 
+**Continuous-Time System (ODEs):**
+The latent state $h(t) \in \mathbb{R}^{N}$ evolves according to:
 $$
-h'(t) = \mathbf{A}h(t) + \mathbf{B}x(t)
-$$
-
-$$
-y(t) = \mathbf{C}h(t)
-$$
-
-Discretized using Zero-Order Hold (ZOH):
-
-$$
-h_t = \bar{\mathbf{A}}h_{t-1} + \bar{\mathbf{B}}x_t
+\begin{aligned}
+\dot{h}(t) &= \mathbf{A}h(t) + \mathbf{B}x(t) \\
+y(t) &= \mathbf{C}h(t) + \mathbf{D}x(t)
+\end{aligned}
 $$
 
+**Hardware-Aware Discretization (Zero-Order Hold):**
+On the H100, we apply dynamic step-size $\Delta_t$ to discretize the system:
 $$
-y_t = \mathbf{C}h_t
+\begin{aligned}
+\bar{\mathbf{A}}_t &= \exp(\Delta_t \mathbf{A}) \\
+\bar{\mathbf{B}}_t &= (\Delta_t \mathbf{A})^{-1} (\bar{\mathbf{A}}_t - \mathbf{I}) \cdot \Delta_t \mathbf{B} \approx \Delta_t \mathbf{B}
+\end{aligned}
 $$
 
-Where $\bar{\mathbf{A}}$ is input-dependent (Selective Scan), allowing the model to "select" which information to remember or forget dynamically based on the input context $x_t$.
+**Selective Scan Mechanism (Associative Property):**
+Unlike LSTMs, Mamba-2 leverages the associative property of the scan operator to parallelize the recursion:
+$$
+\begin{aligned}
+h_t &= \bar{\mathbf{A}}_t h_{t-1} + \bar{\mathbf{B}}_t x_t \\
+(h_0, \dots, h_L) &= \text{ParallelScan}(\{ \bar{\mathbf{A}}_t, \bar{\mathbf{B}}_t x_t \}_{t=1}^L)
+\end{aligned}
+$$
+The state transition $\bar{\mathbf{A}}_t$ is computed as a function of the input: $\Delta_t = \text{Softplus}(W_\Delta x_t + b_\Delta)$. This allows the model to compress sequences by "stretching" time during low-entropy market periods.
 
 ### 1.2 Performance vs Transformers
 - **Inference Latency:** Constant time per step ($O(1)$) due to recurrent state formulation.
@@ -215,14 +226,30 @@ Standard LSTMs/Transformers output a single vector. We architected a **Branched 
 **Enhancement:** This prevents the "mean reversion smoothing" typical of single-head models, where the model outputs flat signals to minimize average error.
 
 ### 6.2 Regime-Gated MoE (Mixture of Experts)
-We implemented a `RegimeDetector` (Logits-based) that acts as a Gating Network:
-$\text{Output} = \sum_{i \in \{Low, Normal, High\}} \sigma(G(x))_i \cdot E_i(x)$
-*   **Enhancement:** The model learns separate sub-policies for **High Volatility** (Wider Wings) vs **Low Volatility** (Tighter Wings), preventing catastrophic failure during market shocks (e.g., VIX spikes).
+We implement a probabilistic gating network $G(h_T) \in \mathbb{R}^3$ that blends specialized sub-networks based on volatility regimes:
 
-### 6.3 Selective Scan (Hardware-Aware State)
-Leveraging the H100's specific `selective_scan_cuda` kernel:
-*   **Mechanism:** The model dynamically modulates its $\Delta$ (step size) parameter based on input content.
-*   **Effect:** It can "skip" over noise (0-volatility periods) and "focus" deeply on high-information bars (breakouts), effectively having a **variable sampling rate** learned entirely from data.
+**Gating Logic:**
+$$
+\pi(h_T) = \text{Softmax}(W_g h_T) = \begin{bmatrix} P(Low) \\ P(Normal) \\ P(High) \end{bmatrix}
+$$
+
+**Output Synthesis:**
+$$
+\hat{y} = \sum_{i \in \text{Regimes}} \pi_i(h_T) \cdot \text{Expert}_i(h_T)
+$$
+This allows the model to maintain discrete strike selection policies for high-fright (VIX > 25) vs. low-volatility (VIX < 15) environments while sharing a common Mamba backbone for feature extraction.
+
+### 6.3 HorizonForecaster Trajectory Mathematics
+The Forecaster generates a 45-day price surface $F \in \mathbb{R}^{45 \times 4}$ where each step $j$ contains:
+$$
+f_j = [P_{close}, P_{high}, P_{low}, \sigma_{vol}]
+$$
+
+The trajectory is constrained by a price envelope calculated via the GRU hidden state $z_j$:
+$$
+\text{Range}_{max} = \sigma(W_{range} z_{45}) \in [0, 1]
+$$
+This provides the model with a "predictive horizon" to calibrate the Iron Condor wings against expected 45-day outliers.
 
 ---
 
@@ -282,6 +309,26 @@ $$p_{regime} = \text{Softmax}\left( W_G \cdot h_T^{(L)} \right) \in \mathbb{R}^3
 $$\hat{y}_{final} = \sum_{i \in \{low, normal, high\}} p_i \cdot E_i(h_T^{(L)})$$
 
 Where each $E_i$ is a specialized expert head trained for that volatility regime.
+
+### 8.4 Synergy of the 23-Channel Intelligence
+The CondorBrain's primary advantage is its **Simultaneous Multi-Head Inference**. Rather than training separate models for price, volatility, and timing, the system utilizes a shared Mamba-2 backbone to optimize 23 discrete learning objectives:
+
+1. **Policy Heads (8):** Direct configuration for Iron Condor strikes and wings.
+2. **Regime Detector (3):** Probabilistic gating for the Mixture-of-Experts.
+3. **Horizon Forecaster (12):** 4-horizon price trajectory surfaces.
+
+This "Synergistic Learning" ensures that the features learned for price trajectory ($O(N)$ efficiency) inherently inform the strike selection policy. If the Horizon Forecaster predicts an impending 5-day spike, the Policy heads automatically respond by widening the wings or shifting offsets to maintain the optimal **Expected ROI**.
+
+### 8.5 Real-Time Money Management Logic
+The final trade size is not static; it is a **dynamic function of predictive alignment**:
+
+$$ S_{trade} = S_{max} \cdot \left( w_1 \cdot \mu_{fuzzy} + w_2 \cdot \phi_{mamba} \right) \cdot \text{RiskFactor} $$
+
+- **$\mu_{fuzzy}$:** Consensus from the 11-factor fuzzy engine.
+- **$\phi_{mamba}$:** The confidence head of the policy branch.
+- **RiskFactor:** A multiplier derived from the predicted **Max Loss %** and **POP**.
+
+If all 23 heads align with high confidence (e.g., Bearish Trajectory + Low Vol Regime + DeepMamba Confidence > 0.9), the system scales to $100\%$ of the per-trade risk limit. Conversely, any divergence among heads triggers a **Defensive Scaling** reduction, preventing over-exposure in uncertain market states.
 
 ### 8.3 Multi-Horizon Price Forecasts (12 Outputs)
 
@@ -419,56 +466,37 @@ Epoch   1/10 | Train: 2.2107 | Val: 0.1340
 | Train > Val | 🔍 Unusual but possible | Often normalizes with more epochs |
 | Val = nan | 🔴 Data issue | Check normalization (see Section 9.2) |
 
-#### Training Progress Indicators
+#### 9.6 Convergence Analysis (Evidence)
+Experimental batch logs from the A100 training run demonstrate the stability of the multi-head objective.
 
-**Good training shows:**
-- Loss decreasing each epoch
-- Train and Val loss converging
-- Both losses stabilizing around 0.3-0.8
-- No NaN or Inf values
+![Batch Optimization: Global & Head Dynamics](tensorboard%20second%20three.PNG)
 
-**Quick Test Command (5 minutes):**
-```bash
-python intelligence/train_condor_brain.py \
-    --local-data data/processed/mamba_institutional_1m.csv \
-    --d-model 512 --layers 16 --epochs 1 \
-    --batch-size 256 --lookback 64 --max-rows 100000
-```
+**Key Observations:**
+- **Global Loss ($Batch/train\_loss$):** Shows a classic exponential decay, transitioning from a high-entropy search (Loss > 9) to a stable basin (Loss < 0.4) within the first 1,000 batches. This indicates effective learning rate scheduling and robust normalization.
+- **Parametric Convergence:** Primary Iron Condor parameters such as `call_offset` and `put_offset` exhibit "staged" convergence. They initially oscillate as the Mamba backbone identifies the regime, then lock into precise strike selections once the `RegimeDetector` stabilizes.
+- **Stability of the Mixture:** The `Batch/roi` and `Batch/pop` curves (Probability heads) show higher sensitivity to batch-level variance but maintain a downward trajectory without divergence, validating the use of Huber loss for risk-weighted components.
 
 ---
 
-## 10. Loss Function: CondorLoss
+### 10.1 Multi-Objective Composite Loss
+The objective function $\mathcal{J}(\theta)$ is a weighted convex combination of regression, classification, and calibration losses:
 
-The training objective is a weighted multi-task loss:
+$$
+\min_\theta \mathcal{L}_{total} = \underbrace{\frac{\lambda_{stk}}{2} \sum_{i=0}^3 \text{Huber}(\hat{y}_i, y_i, \delta=1)}_{\text{Position Precision}} + \underbrace{\lambda_{reg} \, \text{XEnt}(\hat{\pi}, \text{Regime})}_{\text{Context Extraction}} + \underbrace{\lambda_{pnl} \sum_{i=4}^7 \text{MSE}(\hat{y}_i, y_i)}_{\text{Risk Calibration}}
+$$
 
-$$\mathcal{L}_{total} = \lambda_1 \mathcal{L}_{position} + \lambda_2 \mathcal{L}_{regime} + \lambda_3 \mathcal{L}_{confidence} + \lambda_4 \mathcal{L}_{returns}$$
+**Loss Components:**
+1. **Huber Loss ($\delta=1$):** Used for strike offsets to remain robust against price spikes while penalizing large miss-calibrations linearly.
+2. **Standard MSE:** Used for probability heads (ROI, POP, Confidence) to ensure strict calibration of expected values.
+3. **Cross-Entropy:** Drives the Regime Expert Mixture.
 
-### 10.1 Component Losses
-
-**Position Loss (MSE on IC parameters):**
-
-$$\mathcal{L}_{position} = \frac{1}{8} \sum_{i=1}^{8} (\hat{y}_i - y_i)^2$$
-
-**Regime Loss (Cross-Entropy):**
-
-$$\mathcal{L}_{regime} = -\sum_{i=1}^{3} y_i^{regime} \log(\hat{p}_i^{regime})$$
-
-**Confidence Loss (Binary Cross-Entropy):**
-
-$$\mathcal{L}_{confidence} = -[y \log(\hat{\kappa}) + (1-y) \log(1-\hat{\kappa})]$$
-
-**Returns Loss (Huber/Smooth L1):**
-
-$$\mathcal{L}_{returns} = \text{SmoothL1}(\mathbb{E}[\hat{R}], R_{realized})$$
-
-### 10.2 Loss Weights
-
-| Component | Weight ($\lambda$) | Rationale |
-|:----------|:-------------------|:----------|
-| Position | 1.0 | Primary objective |
-| Regime | 0.5 | Classification regularizer |
-| Confidence | 0.3 | Calibration |
-| Returns | 0.2 | Downstream validation |
+**Weighting Matrix:**
+| Scalar | Value | Objective |
+| :--- | :--- | :--- |
+| $\lambda_{stk}$ | 1.0 | Strike Offset & Width Accuracy |
+| $\lambda_{reg}$ | 0.5 | Regime Discovery |
+| $\lambda_{pnl}$ | 2.0 | ROI & Win Prob Convergence |
+| $\lambda_{risk}$ | 1.5 | Max Loss Tail Calibration |
 
 ---
 

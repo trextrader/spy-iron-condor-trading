@@ -7,6 +7,7 @@ Full technical details available in [Scientific Specification](docs/scientific_s
 - **🧠 Mamba Architecture:** Replaced Transformer with `Mamba SSM`, achieving $O(N)$ linear scaling and 3x training throughput.
 - **⚡ H100 Optimization:** Custom `TF32`, `cuDNN Benchmark`, and `LazySequenceDataset` allow training on **10 Million Rows** (1.2B tokens) entirely in-memory.
 - **🛡️ Robust Stability:** Implemented Z-Score Scaling ($x \leftarrow \frac{x-\mu}{\sigma}$) + Tanh Clipping to solve FP16 NaN divergence.
+- **📊 Advanced Monitoring:** Real-time TensorBoard logging for per-head loss, regime expert activations, and 45-day price trajectories.
 - **🔥 Production Sweep:** Automated hyperparameter tuning infrastructure capable of training 100M+ parameter models.
 
 ## 📋 Overview
@@ -68,9 +69,22 @@ The optimizer automatically loads `models/mamba_active.pth` and uses the GPU for
 ```python
 !python core/main.py --use-optimizer --mamba-d-model 256 --mamba-layers 12
 ```
-- **Enhanced Risk Controls**: Portfolio Greeks tracking, drawdown caps, and beta-weighted delta limits
-- **Alpaca Integration**: Seamless live paper trading via Alpaca-Py SDK
-- **Professional Reporting**: Automated PDF reports with equity curves, strike overlays, P&L distributions
+### 📊 Real-Time Monitoring Dashboard
+
+The system provides a high-fidelity visual experience for tracking model convergence across all 23 output heads.
+
+````carousel
+![Dashboard: Call Offset, Confidence, DTE](docs/tensorboard%20first%20three.PNG)
+<!-- slide -->
+![Dashboard: ROI, Train Loss, Wing Width](docs/tensorboard%20second%20three.PNG)
+<!-- slide -->
+![Dashboard: Max Loss, POP, Put Offset](docs/tensorboard%20last%20three.PNG)
+````
+
+**Key Features:**
+- **Real-time TensorBoard Integration:** Scalar metrics, per-head distributions, and images.
+- **Intra-Epoch Live Plots:** Inline scatter plots every $N$ batches (throlled for performance).
+- **Visual Export & Snapshots:** Automatic PNG snapshots to `training_analytics/epoch_snapshots/`.
 
 ## 🦅 Stage 2 & 3: Intelligence & Risk Safeguards
 
@@ -218,6 +232,11 @@ Optimizes the 11-factor fuzzy weight blend including Neural Network influence.
 ---
 
 ## 🏗️ Architecture: Quantor-MTFuzz Specification
+
+The system architecture is tiered into four layers of intelligence, combining high-fidelity Mamba SSM forecasting with a robust Neural-Fuzzy decision suite.
+
+### Intelligence Flow Overview
+![CondorIntelligence Architecture](docs/architecture/condor_intelligence_flow_premium.png)
 
 ### Module Hierarchy
 ```

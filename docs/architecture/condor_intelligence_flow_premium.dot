@@ -1,0 +1,124 @@
+digraph CondorIntelligence {
+    // General Settings for High-Fidelity Technical Visualization
+    rankdir=TB;
+    nodesep=0.5;
+    ranksep=0.7;
+    compound=true;
+    fontname="Arial, Helvetica, sans-serif";
+    splines=spline;
+
+    // Global Node Styles
+    node [
+        fontname="Arial, Helvetica, sans-serif",
+        fontsize=11,
+        shape=rect,
+        style="filled,rounded",
+        penwidth=1.5,
+        color="#FFFFFF",
+        margin="0.15,0.1"
+    ];
+
+    // Global Edge Styles
+    edge [
+        color="#90A4AE",
+        penwidth=1.2,
+        arrowsize=0.7
+    ];
+
+    // --- LAYER 1: INPUT FEATURES (24 TOTAL) ---
+    subgraph cluster_l1 {
+        label = <<b>LAYER 1: MULTI-SOURCE INPUT MANIFOLD (24 PARAMETERS)</b>>;
+        labelloc = "t";
+        fontsize = 13;
+        fontcolor = "#37474F";
+        style = "invis";
+
+        i1 [label=<<table border="0" cellspacing="0"><tr><td><b>LOG RETURNS</b></td></tr><tr><td><font point-size="9">Spot Dynamics (5 heads): OHLCV</font></td></tr></table>>, fillcolor="#E1F5FE", color="#0288D1"];
+        i2 [label=<<table border="0" cellspacing="0"><tr><td><b>OPTION PHYSICS</b></td></tr><tr><td><font point-size="9">BSM Greeks (5): Delta, Gamma, Vega, etc.</font></td></tr></table>>, fillcolor="#E8F5E9", color="#388E3C"];
+        i3 [label=<<table border="0" cellspacing="0"><tr><td><b>VOLATILITY</b></td></tr><tr><td><font point-size="9">IVR, VIX, Term Structure (3)</font></td></tr></table>>, fillcolor="#FFF9C4", color="#FBC02D"];
+        i4 [label=<<table border="0" cellspacing="0"><tr><td><b>TECHNICIALS</b></td></tr><tr><td><font point-size="9">RSI, ADX, BBands, PSAR (11)</font></td></tr></table>>, fillcolor="#F3E5F5", color="#7B1FA2"];
+        
+        {rank=same; i1 i2 i3 i4}
+    }
+
+    // --- LAYER 2: NEURAL CORE (MAMBA-2 BACKBONE) ---
+    subgraph cluster_l2 {
+        label = <<b>LAYER 2: DEEP MAMBA-2 NEURAL ENGINE</b>>;
+        labelloc = "t";
+        fontsize = 13;
+        fontcolor = "#1A237E";
+        style = "filled,rounded";
+        fillcolor = "#E8EAF6";
+        pencolor = "#3949AB";
+        penwidth = 2;
+        margin = 35;
+
+        mamba_core [label=<<table border="0" cellspacing="8">
+            <tr><td><font point-size="30" color="#1A237E">🧠</font></td></tr>
+            <tr><td><font point-size="20" color="#1A237E"><b>24X MAMBA-2 LAYERS</b></font></td></tr>
+            <tr><td><font point-size="12" color="#303F9F">SELECTIVE-SCAN SSM (STATE SPACE MODEL)</font></td></tr>
+            <tr><td><font point-size="10" color="#3F51B5">Hardware-Aware Discretization | BF16 Accelerated</font></td></tr>
+            <tr><td><font point-size="9" color="#5C6BC0">GPU-Resident Unfold (Zero-Copy) | O(N) Complexity</font></td></tr>
+        </table>>, shape=hexagon, style="filled", fillcolor="#C5CAE9", color="#1A237E", penwidth=3];
+    }
+
+    // --- LAYER 3: COGNITIVE FUSION ---
+    subgraph cluster_l3 {
+        label = <<b>LAYER 3: NEURAL-FUZZY FUSION LAYER</b>>;
+        labelloc = "t";
+        fontsize = 13;
+        fontcolor = "#2E7D32";
+        style = "filled,rounded";
+        fillcolor = "#F1F8E9";
+        pencolor = "#C8E6C9";
+        margin = 15;
+
+        fuzzy_logic [label=<<table border="0" cellspacing="4">
+            <tr><td><b>FUZZY INFERENCE SYSTEM</b></td></tr>
+            <tr><td><font point-size="9">11 Membership Tiers | Uncertainty Handling</font></td></tr>
+        </table>>, fillcolor="#43A047", fontcolor=white, shape=septagon, style="filled"];
+
+        lag_alignment [label=<<table border="0" cellspacing="0"><tr><td><font point-size="9">Temporal Normalization</font></td></tr><tr><td><b>LAG ALIGNMENT UNIT</b></td></tr></table>>, fillcolor="white", color="#4CAF50"];
+        
+        fuzzy_logic -> lag_alignment [dir=both, style=dashed, color="#4CAF50"];
+    }
+
+    // --- LAYER 4: MULTI-CHANNEL OUTPUT (23 HEADS) ---
+    subgraph cluster_l4 {
+        label = <<b>LAYER 4: SYNERGISTIC PREDICTION (23 DISCRETE HEADS)</b>>;
+        labelloc = "t";
+        fontsize = 13;
+        fontcolor = "#37474F";
+        style = "invis";
+
+        o1 [label=<<table border="0" cellspacing="0"><tr><td><b>POLICY BRANCH (8)</b></td></tr><tr><td><font point-size="9">Offsets, Width, POP, ROI, DTE</font></td></tr></table>>, fillcolor="#E0F2F1", color="#00897B"];
+        o2 [label=<<table border="0" cellspacing="0"><tr><td><b>REGIME EXPERTS (3)</b></td></tr><tr><td><font point-size="9">MoE Mixture: Low/Norm/High Vol</font></td></tr></table>>, fillcolor="#FFF3E0", color="#FB8C00"];
+        o3 [label=<<table border="0" cellspacing="0"><tr><td><b>HORIZON FORECAST (12)</b></td></tr><tr><td><font point-size="9">1/3/5/10D Trajectory Envelopes</font></td></tr></table>>, fillcolor="#FCE4EC", color="#D81B60"];
+        
+        {rank=same; o1 o2 o3}
+    }
+
+    // --- FINAL LAYER: EXECUTION & SIZE ---
+    trade_intent [label=<<table border="0" cellspacing="4">
+        <tr><td><font point-size="30">🎯</font></td></tr>
+        <tr><td><font point-size="18"><b>TRADE INTENT</b></font></td></tr>
+        <tr><td><font point-size="11">DYNAMIC RISK-WEIGHTED SIZING</font></td></tr>
+        <tr><td><font point-size="9">Predictive Alignment Filtering</font></td></tr>
+    </table>>, shape=circle, style=filled, fillcolor="#FF6F00", fontcolor=white, color="#E65100", penwidth=3];
+
+    // Connections
+    i1 -> mamba_core [color="#0288D1", penwidth=2.0];
+    i2 -> mamba_core [color="#388E3C", penwidth=2.0];
+    i3 -> mamba_core [color="#FBC02D", penwidth=2.0];
+    i4 -> mamba_core [color="#7B1FA2", penwidth=2.0];
+
+    mamba_core -> fuzzy_logic [label="Mamba Latents", fontcolor="#1A237E", color="#3949AB", penwidth=3, arrowhead=box];
+
+    fuzzy_logic -> o1 [color="#43A047"];
+    fuzzy_logic -> o2 [color="#43A047"];
+    fuzzy_logic -> o3 [color="#43A047"];
+
+    o1 -> trade_intent [color="#FB8C00", penwidth=2, style=bold];
+    o2 -> trade_intent [color="#FB8C00", penwidth=2, style=bold];
+    o3 -> trade_intent [color="#FB8C00", penwidth=2, style=bold];
+}

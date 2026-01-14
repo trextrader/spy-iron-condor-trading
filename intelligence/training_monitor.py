@@ -441,25 +441,53 @@ def sample_predictions(
         batch_x, batch_y, batch_r = get_batch_fn(0)  # Get first batch
         
         with autocast('cuda', dtype=amp_dtype):
-            outputs, regime_logits, _ = model(batch_x, return_regime=True, forecast_days=0)
+            # Request all outputs: regime, experts, and 45-day forecast
+            outputs, regime_logits, horizon_forecast, experts = model(
+                batch_x, 
+                return_regime=True, 
+                return_experts=True, 
+                forecast_days=45
+            )
         
         # Take first n_samples
         preds = outputs[:n_samples].float().cpu().numpy()
         targets = batch_y[:n_samples].float().cpu().numpy()
         
-        # Regime predictions
+        # Expert specific predictions (Low, Normal, High)
+        expert_preds = {
+            k: v[:n_samples].float().cpu().numpy() for k, v in experts.items()
+        }
+        
+        # Price trajectory forecast
+        forecast_data = None
+        if horizon_forecast is not None:
+            # daily_forecast: (B, num_days, 4) -> [close, high, low, vol]
+            forecast_data = horizon_forecast['daily_forecast'][:n_samples].float().cpu().numpy()
+            max_range = horizon_forecast['max_range'][:n_samples].float().cpu().numpy()
+        
+        # Regime predictions and probabilities
         if regime_logits is not None:
-            pred_regime = torch.argmax(regime_logits[:n_samples], dim=-1).cpu().numpy()
+            regime_probs = torch.softmax(regime_logits[:n_samples].float(), dim=-1).cpu().numpy()
+            pred_regime = np.argmax(regime_probs, axis=-1)
             true_regime = batch_r[:n_samples].cpu().numpy()
+            
+            # Compute mean regime distribution across batch
+            regime_dist = regime_probs.mean(axis=0)  # (3,) - Low, Normal, High
         else:
             pred_regime = np.zeros(n_samples)
             true_regime = np.zeros(n_samples)
+            regime_dist = np.array([0.33, 0.34, 0.33])
     
     return {
         'preds': preds,
         'targets': targets,
+        'expert_preds': expert_preds,
+        'forecast_data': forecast_data,
         'pred_regime': pred_regime,
-        'true_regime': true_regime
+        'true_regime': true_regime,
+        'regime_probs_low': float(regime_dist[0]),
+        'regime_probs_normal': float(regime_dist[1]),
+        'regime_probs_high': float(regime_dist[2]),
     }
 
 

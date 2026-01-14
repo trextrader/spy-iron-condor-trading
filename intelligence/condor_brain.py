@@ -307,19 +307,21 @@ class CondorBrain(nn.Module):
         # Legacy single-output head (for backward compatibility)
         self.legacy_head = nn.Linear(d_model, 1)
         
-    def forward(self, x: torch.Tensor, return_regime: bool = True, forecast_days: int = 0) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[dict]]:
+    def forward(self, x: torch.Tensor, return_regime: bool = True, return_experts: bool = False, forecast_days: int = 0) -> Any:
         """
         Forward pass.
         
         Args:
             x: Input tensor (B, SeqLen, InputDim)
             return_regime: If True, also return regime probabilities
+            return_experts: If True, also return discrete expert outputs
             forecast_days: If > 0, generate price trajectory for this many days
             
         Returns:
             outputs: (B, 8) IC parameters
             regime_probs: (B, 3) regime probabilities [Low, Normal, High]
             horizon_forecast: dict with daily predictions (if forecast_days > 0)
+            experts: dict with discrete expert outputs (if return_experts > 0)
         """
         # Input projection
         x = self.input_proj(x)
@@ -383,9 +385,23 @@ class CondorBrain(nn.Module):
             regime_probs[:, 2:3] * out_high
         )
         
+        # Return package
+        res = [outputs]
         if return_regime:
-            return outputs, regime_logits, horizon_forecast
-        return outputs, None, horizon_forecast
+            res.append(regime_logits)
+        else:
+            res.append(None)
+            
+        res.append(horizon_forecast)
+        
+        if return_experts:
+            res.append({
+                'low': out_low,
+                'normal': out_normal,
+                'high': out_high
+            })
+            
+        return tuple(res) if len(res) > 1 else outputs
     
     def predict_legacy(self, x: torch.Tensor) -> torch.Tensor:
         """Legacy single-output prediction for backward compatibility."""

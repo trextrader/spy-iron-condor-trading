@@ -718,6 +718,11 @@ def train_condor_brain(args):
                     for head_name, head_loss in quick_losses.items():
                         if head_name != 'regime_accuracy':
                             tb_writer.add_scalar(f'Batch/{head_name}', head_loss, global_batch)
+                    
+                    # Log regime expert activations (3 heads)
+                    tb_writer.add_scalar('Regime/low_vol_expert', samples.get('regime_probs_low', 0), global_batch)
+                    tb_writer.add_scalar('Regime/normal_vol_expert', samples.get('regime_probs_normal', 0), global_batch)
+                    tb_writer.add_scalar('Regime/high_vol_expert', samples.get('regime_probs_high', 0), global_batch)
                 
                 model.train()
         
@@ -910,6 +915,56 @@ def train_condor_brain(args):
                             
                             # Add to TensorBoard (HWC format, needs CHW)
                             tb_writer.add_image(f'Predictions/{head_name}', img_array, global_step, dataformats='HWC')
+                        
+                        # --- LOG HORIZON FORECASTER (45-DAY TRAJECTORY) ---
+                        if samples.get('forecast_data') is not None:
+                            forecast = samples['forecast_data'][0]  # Sample 0
+                            num_days = forecast.shape[0]
+                            days = np.arange(num_days)
+                            
+                            fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+                            # forecast components: [close, high, low, vol]
+                            ax.plot(days, forecast[:, 0], 'b-', label='Expected Close', linewidth=2)
+                            ax.fill_between(days, forecast[:, 2], forecast[:, 1], color='blue', alpha=0.2, label='High/Low Envelope')
+                            
+                            ax.set_title(f'HorizonForecaster: 45-Day Price Trajectory (Epoch {global_step})')
+                            ax.set_xlabel('Days from Now')
+                            ax.set_ylabel('Normalized Price Change')
+                            ax.legend()
+                            ax.grid(True, alpha=0.3)
+                            fig.tight_layout()
+                            
+                            buf = io.BytesIO()
+                            fig.savefig(buf, format='png', dpi=100)
+                            buf.seek(0)
+                            img = Image.open(buf)
+                            img_array = np.array(img)
+                            plt.close(fig)
+                            tb_writer.add_image('Horizon/Trajectory', img_array, global_step, dataformats='HWC')
+                            
+                        # --- LOG EXPERT SPECIFIC PREDICTIONS ---
+                        if samples.get('expert_preds') is not None:
+                            for expert_name, preds in samples['expert_preds'].items():
+                                # Just log one representative head (e.g., call_offset) to see divergence
+                                for head_idx, head_name in enumerate(['call_offset', 'put_offset']):
+                                    fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+                                    p = preds[:, head_idx]
+                                    t = samples['targets'][:, head_idx]
+                                    
+                                    ax.scatter(t, p, alpha=0.6, s=50, c='green', edgecolors='black')
+                                    vmin, vmax = min(p.min(), t.min()), max(p.max(), t.max())
+                                    margin = (vmax - vmin) * 0.1 + 0.01
+                                    ax.plot([vmin-margin, vmax+margin], [vmin-margin, vmax+margin], 'k--', alpha=0.5)
+                                    
+                                    ax.set_title(f'Expert: {expert_name} | {head_name}')
+                                    ax.grid(True, alpha=0.3)
+                                    fig.tight_layout()
+                                    
+                                    buf = io.BytesIO()
+                                    fig.savefig(buf, format='png', dpi=80)
+                                    buf.seek(0)
+                                    tb_writer.add_image(f'Experts_{expert_name}/{head_name}', np.array(Image.open(buf)), global_step, dataformats='HWC')
+                                    plt.close(fig)
                         
                     except Exception as e:
                         print(f"[TensorBoard] Image logging error: {e}")
