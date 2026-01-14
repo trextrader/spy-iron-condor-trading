@@ -72,9 +72,14 @@ $\hat{y} = W_{out} \cdot \text{RMSNorm}(E_t^{(Final)})$
 
 ## 0. System Architecture
 
-The following diagram provides a granular mapping of the CondorIntelligence hardware-aware Mamba-2 backbone, its synergistic 23-head output distribution, and the downstream Neural-Fuzzy fusion logic.
+The following diagram provides a granular mapping of the CondorIntelligence hardware-aware Mamba-2 backbone, its synergistic 23-head output distribution, and the downstream Neural-Fuzzy fusion logic. A one-page [Technical Architecture Summary](architecture/technical_architecture_summary.md) is also available.
 
 ![CondorIntelligence Detailed Flow](architecture/condor_intelligence_flow.png)
+
+### 0.1 End-to-End Institutional Execution Flow
+This diagram details the entire lifecycle from real-time data ingestion to post-trade alpha analysis.
+
+![Institutional Execution Flow](architecture/institutional_execution_flow.png)
 
 ### 0.1 Data Pipeline Detail
 ![Data Pipeline](architecture/data_pipeline_detailed.png)

@@ -235,6 +235,10 @@ Optimizes the 11-factor fuzzy weight blend including Neural Network influence.
 
 The system architecture is tiered into four layers of intelligence, combining high-fidelity Mamba SSM forecasting with a robust Neural-Fuzzy decision suite.
 
+- **[Weekly Technical Progress Report (Jan 13)](docs/internal/WEEKLY_SUMMARY_2026-01-13.md):** Summary of recent high-impact work.
+- **[Technical Architecture Summary](docs/architecture/technical_architecture_summary.md):** A one-page engineering overview.
+- **[Institutional Execution Flow](docs/architecture/institutional_execution_flow.png):** The complete lifecycle from data to trade analysis.
+
 ### Intelligence Flow Overview
 ![CondorIntelligence Architecture](docs/architecture/condor_intelligence_flow_premium.png)
 

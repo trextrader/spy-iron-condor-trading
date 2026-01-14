@@ -1,0 +1,85 @@
+digraph InstitutionalWorkflow {
+    // Strategic Design Settings
+    rankdir=TB;
+    nodesep=0.5;
+    ranksep=0.6;
+    fontname="Arial, Helvetica, sans-serif";
+    compound=true;
+
+    // Global Styles
+    node [shape=rect, style="filled,rounded", fontname="Arial", fontsize=10, penwidth=1.5, color="#FFFFFF"];
+    edge [color="#607D8B", penwidth=1.2, fontname="Arial", fontsize=9];
+
+    // --- PHASE 1: DATA HARVESTING ---
+    subgraph cluster_data {
+        label = <<b>1. REAL-TIME DATA HARVESTING</b>>;
+        fillcolor = "#ECEFF1"; style = "filled,dashed"; color = "#455A64";
+        
+        feed_spot [label="Real-Time SPY Feed\n(Polygon.io / IBKR)", fillcolor="#E1F5FE", color="#0288D1"];
+        feed_options [label="Option Surface (1M)\n(iVolatility Snapshot)", fillcolor="#E8F5E9", color="#388E3C"];
+        sync_engine [label="Sync Engine\n(Lag-Aware Alignment)", fillcolor="#FFF9C4", color="#FBC02D"];
+        
+        feed_spot -> sync_engine;
+        feed_options -> sync_engine;
+    }
+
+    // --- PHASE 2: INTELLIGENCE ENGINE ---
+    subgraph cluster_intelligence {
+        label = <<b>2. AGENTIC INTELLIGENCE HUB</b>>;
+        fillcolor = "#E8EAF6"; style = "filled,rounded"; color = "#3F51B5";
+        
+        mamba_core [label="DeepMamba-2 Layers\n(Selective-Scan SSM)", fillcolor="#C5CAE9", color="#1A237E", shape=hexagon];
+        heads [label="23-Head Joint Output\n(Policy, Regime, Horizon)", fillcolor="#E0F2F1", color="#00897B"];
+        moe_gate [label="MoE Expert Mixture\n(Gating Logic)", fillcolor="#FFF3E0", color="#FB8C00"];
+        
+        mamba_core -> heads;
+        mamba_core -> moe_gate [style=dotted];
+    }
+
+    // --- PHASE 3: FUZZY RISK & SIZING ---
+    subgraph cluster_risk {
+        label = <<b>3. INSTITUTIONAL RISK &amp; SIZING</b>>;
+        fillcolor = "#F1F8E9"; style = "filled,rounded"; color = "#2E7D32";
+        
+        fuzzy_sizer [label="Fuzzy Logistics Engine\n(11 Membership Factors)", fillcolor="#81C784", color="#2E7D32"];
+        expected_shortfall [label="Expected Shortfall (ES)\n&amp; CVaR Calculation", fillcolor="#A5D6A7", color="#2E7D32"];
+        sizing_logic [label="Dynamic Scaling Unit\n(Predictive Alignment)", fillcolor="#4CAF50", fontcolor=white];
+        
+        heads -> fuzzy_sizer;
+        moe_gate -> fuzzy_sizer;
+        fuzzy_sizer -> sizing_logic;
+        expected_shortfall -> sizing_logic;
+    }
+
+    // --- PHASE 4: EXECUTION & LIQUIDITY ---
+    subgraph cluster_execution {
+        label = <<b>4. PRECISION EXECUTION</b>>;
+        fillcolor = "#FFF3E0"; style = "filled,rounded"; color = "#E65100";
+        
+        strike_select [label="Leg Selection Engine\n(4-Leg Iron Condor)", fillcolor="#FFCC80", color="#EF6C00"];
+        order_mgr [label="Smart Order Manager\n(Twap/Market/Limit)", fillcolor="#FFB74D", color="#E65100"];
+        broker_facade [label="Broker Facade\n(IBKR / TDA / Sim)", fillcolor="#FF9800", fontcolor=white];
+        
+        sizing_logic -> strike_select;
+        strike_select -> order_mgr;
+        order_mgr -> broker_facade [label="FIX/REST API"];
+    }
+
+    // --- PHASE 5: POST-TRADE ALPHA ---
+    subgraph cluster_analysis {
+        label = <<b>5. POST-TRADE &amp; PERFORMANCE</b>>;
+        fillcolor = "#FCE4EC"; style = "filled,rounded"; color = "#880E4F";
+        
+        log_db [label="Trade Log DB\n(SQLite/JSON)", fillcolor="#F8BBD0", color="#AD1457"];
+        alpha_report [label="Alpha Factors Analysis\n(Performance Attribution)", fillcolor="#F48FB1", color="#880E4F"];
+        tensorboard [label="Training Monitor\n(Visual Validation)", fillcolor="#F06292", fontcolor=white];
+        
+        broker_facade -> log_db [label="Execution Ack"];
+        log_db -> alpha_report;
+        alpha_report -> tensorboard [label="Metrics Flip"];
+    }
+
+    // Cross-Phase Feedback Loop
+    sync_engine -> mamba_core [label="Feature Matrix"];
+    tensorboard -> mamba_core [label="Parameter Gradient", style=dashed, constraint=false];
+}
