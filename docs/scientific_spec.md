@@ -228,9 +228,8 @@ Standard LSTMs/Transformers output a single vector. We architected a **Branched 
 We implement a probabilistic gating network $G(h_T) \in \mathbb{R}^3$ that blends specialized sub-networks based on volatility regimes:
 
 **Gating Logic:**
-$$
-\pi(h_T) = \text{Softmax}(W_g h_T) = \begin{bmatrix} P(Low) \\ P(Normal) \\ P(High) \end{bmatrix}
-$$
+
+$$\pi(h_T) = \text{Softmax}(W_g h_T) = [P(Low), P(Normal), P(High)]^T$$
 
 **Output Synthesis:**
 $$
