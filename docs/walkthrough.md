@@ -76,17 +76,17 @@ option_align_mode: str      # "exact" | "prior" | "stale" | "none"
 Created three comprehensive Graphviz diagrams in `docs/architecture/`:
 
 #### `system_overview.png`
-![System Architecture](file:///c:/SPYOptionTrader_test/docs/architecture/system_overview.png)
+![System Architecture](architecture/system_overview.png)
 
 Complete data flow from CSV ingestion through intelligence layer to execution.
 
 #### `lag_alignment_flow.png`
-![Lag Alignment Flowchart](file:///c:/SPYOptionTrader_test/docs/architecture/lag_alignment_flow.png)
+![Lag Alignment Flowchart](architecture/lag_alignment_flow.png)
 
 Detailed flowchart showing exact/prior/stale/none modes with policy branches.
 
 #### `data_pipeline_detailed.png`
-![Data Pipeline Details](file:///c:/SPYOptionTrader_test/docs/architecture/data_pipeline_detailed.png)
+![Data Pipeline Details](architecture/data_pipeline_detailed.png)
 
 CSV → MarketSnapshot → Trading Decision with sample data.
 
