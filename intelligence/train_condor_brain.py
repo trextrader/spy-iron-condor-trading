@@ -723,6 +723,19 @@ def train_condor_brain(args):
                     tb_writer.add_scalar('Regime/low_vol_expert', samples.get('regime_probs_low', 0), global_batch)
                     tb_writer.add_scalar('Regime/normal_vol_expert', samples.get('regime_probs_normal', 0), global_batch)
                     tb_writer.add_scalar('Regime/high_vol_expert', samples.get('regime_probs_high', 0), global_batch)
+                    
+                    # Real-time Table Summary (Markdown format for TensorBoard Text tab)
+                    table_rows = [
+                        "| Head | Loss | Status |",
+                        "|------|------|--------|",
+                    ]
+                    for head_name, head_loss in quick_losses.items():
+                        if head_name != 'regime_accuracy':
+                            status = "✅" if head_loss < 0.5 else ("⚠️" if head_loss < 1.0 else "🔴")
+                            table_rows.append(f"| {head_name} | {head_loss:.4f} | {status} |")
+                    table_rows.append(f"| **Global Loss** | **{loss.item():.4f}** | - |")
+                    table_md = "\n".join(table_rows)
+                    tb_writer.add_text('Summary/HeadMetrics', table_md, global_batch)
                 
                 model.train()
         
