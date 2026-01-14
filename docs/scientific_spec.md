@@ -95,30 +95,24 @@ The core of CondorBrain is a Structured State Space Model (SSM) that maps a sequ
 
 **Continuous-Time System (ODEs):**
 The latent state $h(t) \in \mathbb{R}^{N}$ evolves according to:
-$$
-\begin{aligned}
-\dot{h}(t) &= \mathbf{A}h(t) + \mathbf{B}x(t) \\
-y(t) &= \mathbf{C}h(t) + \mathbf{D}x(t)
-\end{aligned}
-$$
+
+$$\dot{h}(t) = \mathbf{A}h(t) + \mathbf{B}x(t)$$
+
+$$y(t) = \mathbf{C}h(t) + \mathbf{D}x(t)$$
 
 **Hardware-Aware Discretization (Zero-Order Hold):**
 On the H100, we apply dynamic step-size $\Delta_t$ to discretize the system:
-$$
-\begin{aligned}
-\bar{\mathbf{A}}_t &= \exp(\Delta_t \mathbf{A}) \\
-\bar{\mathbf{B}}_t &= (\Delta_t \mathbf{A})^{-1} (\bar{\mathbf{A}}_t - \mathbf{I}) \cdot \Delta_t \mathbf{B} \approx \Delta_t \mathbf{B}
-\end{aligned}
-$$
+
+$$\bar{\mathbf{A}}_t = \exp(\Delta_t \mathbf{A})$$
+
+$$\bar{\mathbf{B}}_t = (\Delta_t \mathbf{A})^{-1} (\bar{\mathbf{A}}_t - \mathbf{I}) \cdot \Delta_t \mathbf{B} \approx \Delta_t \mathbf{B}$$
 
 **Selective Scan Mechanism (Associative Property):**
 Unlike LSTMs, Mamba-2 leverages the associative property of the scan operator to parallelize the recursion:
-$$
-\begin{aligned}
-h_t &= \bar{\mathbf{A}}_t h_{t-1} + \bar{\mathbf{B}}_t x_t \\
-(h_0, \dots, h_L) &= \text{ParallelScan}(\{ \bar{\mathbf{A}}_t, \bar{\mathbf{B}}_t x_t \}_{t=1}^L)
-\end{aligned}
-$$
+
+$$h_t = \bar{\mathbf{A}}_t h_{t-1} + \bar{\mathbf{B}}_t x_t$$
+
+$$(h_0, \dots, h_L) = \text{ParallelScan}(\{ \bar{\mathbf{A}}_t, \bar{\mathbf{B}}_t x_t \}_{t=1}^L)$$
 The state transition $\bar{\mathbf{A}}_t$ is computed as a function of the input: $\Delta_t = \text{Softplus}(W_\Delta x_t + b_\Delta)$. This allows the model to compress sequences by "stretching" time during low-entropy market periods.
 
 ### 1.2 Performance vs Transformers
