@@ -1,0 +1,418 @@
+/*
+ * SPY Iron Condor Trading System - Complete Architecture
+ * Full System Graphviz Diagram with Curved Lines & Multi-Color Theme
+ * 
+ * Compile: dot -Tpng full_system_architecture.dot -o full_system_architecture.png -Gdpi=150
+ */
+
+digraph SPYIronCondorSystem {
+    // === GLOBAL SETTINGS ===
+    rankdir=TB;
+    fontname="Helvetica Neue";
+    fontsize=11;
+    node [fontname="Helvetica Neue", fontsize=10, style=filled];
+    edge [fontname="Helvetica Neue", fontsize=8];
+    compound=true;
+    bgcolor="#0d1117";
+    splines=curved;
+    nodesep=0.8;
+    ranksep=1.2;
+    
+    // === COLOR PALETTE ===
+    // Data: Blues (#1e3a5f, #3d5a80)
+    // Neural: Greens (#1a4a1a, #2e7d32) 
+    // Logic: Purples (#4a2d4a, #8e44ad)
+    // Risk: Reds (#5c1a1a, #c0392b)
+    // Execution: Orange (#5c3a1a, #e67e22)
+    // Output: Teal (#1a4a4a, #16a085)
+
+    // =========================================================================
+    // LAYER 1: EXTERNAL DATA SOURCES
+    // =========================================================================
+    subgraph cluster_data_sources {
+        label="📡 EXTERNAL DATA SOURCES";
+        style=filled;
+        fillcolor="#0a1628";
+        fontcolor="#4a9eff";
+        color="#1e3a5f";
+        penwidth=2;
+        
+        polygon_api [label="Polygon.io API\n(Spot + Options)", shape=cylinder, fillcolor="#1e3a5f", fontcolor=white];
+        schwab_api [label="Schwab API\n(Account + Orders)", shape=cylinder, fillcolor="#1e3a5f", fontcolor=white];
+        vix_feed [label="VIX Data Feed", shape=cylinder, fillcolor="#1e3a5f", fontcolor=white];
+        historical_csv [label="Historical CSV\n(10M+ rows)", shape=folder, fillcolor="#2d4a6a", fontcolor=white];
+    }
+
+    // =========================================================================
+    // LAYER 2: DATA FACTORY (ETL Pipeline)
+    // =========================================================================
+    subgraph cluster_data_factory {
+        label="🏭 DATA FACTORY (ETL)";
+        style=filled;
+        fillcolor="#0a1420";
+        fontcolor="#4a9eff";
+        color="#1e3a5f";
+        penwidth=2;
+        
+        subgraph cluster_ingest {
+            label="Ingestion";
+            style=dashed;
+            color="#3d5a80";
+            fontcolor="#3d5a80";
+            
+            polygon_client [label="PolygonClient\ndata_factory/polygon_client.py", shape=box, fillcolor="#1e3a5f", fontcolor=white];
+            options_loader [label="OptionsLoader\ndata_factory/options_loader.py", shape=box, fillcolor="#1e3a5f", fontcolor=white];
+        }
+        
+        subgraph cluster_sync {
+            label="Synchronization";
+            style=dashed;
+            color="#3d5a80";
+            fontcolor="#3d5a80";
+            
+            sync_engine [label="SyncEngine\ndata_factory/sync_engine.py\n(Lag-Aware Alignment)", shape=box, fillcolor="#2d5a8a", fontcolor=white];
+            time_align [label="TimeAligner\n(Spot ↔ Options)", shape=box, fillcolor="#2d5a8a", fontcolor=white];
+        }
+        
+        subgraph cluster_transform {
+            label="Feature Engineering";
+            style=dashed;
+            color="#3d5a80";
+            fontcolor="#3d5a80";
+            
+            feature_eng [label="Feature Pipeline\n24 Institutional Features", shape=box, fillcolor="#3d6a9a", fontcolor=white];
+            greeks_calc [label="Greeks Calculator\nΔ, Γ, Θ, ν, IV", shape=box, fillcolor="#3d6a9a", fontcolor=white];
+            technicals [label="Technicals\nRSI, ATR, ADX, BB, PSAR", shape=box, fillcolor="#3d6a9a", fontcolor=white];
+        }
+        
+        // New: Manifold & TDA
+        manifold_vol [label="🆕 ManifoldVolatility\nκ_curvature, E_vol, RSI_dyn", shape=box, fillcolor="#2e7d32", fontcolor=white];
+        tda_sig [label="🆕 TDA Signature\nπ_TDA (H1 Cycles)", shape=box, fillcolor="#2e7d32", fontcolor=white];
+    }
+
+    // =========================================================================
+    // LAYER 3: INTELLIGENCE ENGINE (Neural + Fuzzy)
+    // =========================================================================
+    subgraph cluster_intelligence {
+        label="🧠 INTELLIGENCE ENGINE";
+        style=filled;
+        fillcolor="#0a200a";
+        fontcolor="#2ecc71";
+        color="#2e7d32";
+        penwidth=2;
+        
+        // === CondorBrain Neural Network ===
+        subgraph cluster_condor_brain {
+            label="CondorBrain (Mamba-2 SSM)";
+            style=filled;
+            fillcolor="#1a3a1a";
+            fontcolor="#2ecc71";
+            color="#27ae60";
+            
+            input_proj [label="Input Projection\n24 → 1024 dims", shape=box, fillcolor="#1e4a1e", fontcolor=white];
+            
+            // Mamba Layers with VolGatedAttn
+            mamba_1_7 [label="Mamba Layers 1-7\nO(N) SSM", shape=box, fillcolor="#2d5a2d", fontcolor=white];
+            vol_attn_1 [label="🆕 VolGatedAttn\n8 heads", shape=diamond, fillcolor="#ff6b6b", fontcolor=white];
+            
+            mamba_8_15 [label="Mamba Layers 8-15", shape=box, fillcolor="#2d5a2d", fontcolor=white];
+            vol_attn_2 [label="🆕 VolGatedAttn", shape=diamond, fillcolor="#ff6b6b", fontcolor=white];
+            
+            mamba_16_23 [label="Mamba Layers 16-23", shape=box, fillcolor="#2d5a2d", fontcolor=white];
+            vol_attn_3 [label="🆕 VolGatedAttn", shape=diamond, fillcolor="#ff6b6b", fontcolor=white];
+            
+            mamba_24 [label="Mamba Layer 24\n+ RMSNorm", shape=box, fillcolor="#2d5a2d", fontcolor=white];
+            
+            hidden_state [label="h_T ∈ ℝ¹⁰²⁴\nLast Hidden State", shape=ellipse, fillcolor="#3a6a3a", fontcolor=white];
+        }
+        
+        // === Output Heads ===
+        subgraph cluster_output_heads {
+            label="Multi-Head Outputs";
+            style=dashed;
+            color="#27ae60";
+            fontcolor="#27ae60";
+            
+            regime_detector [label="RegimeDetector\n[Low, Normal, High]", shape=box, fillcolor="#4a2d4a", fontcolor=white];
+            topk_moe [label="🆕 TopKMoE\nn=3, k=1", shape=hexagon, fillcolor="#ff9f43", fontcolor=black];
+            
+            expert_low [label="Expert_Low\nTight Wings", shape=box, fillcolor="#3498db", fontcolor=white];
+            expert_normal [label="Expert_Normal\nBalanced", shape=box, fillcolor="#2ecc71", fontcolor=white];
+            expert_high [label="Expert_High\nWide Wings", shape=box, fillcolor="#e74c3c", fontcolor=white];
+            
+            horizon_forecast [label="HorizonForecaster\nGRU → 45-day trajectory", shape=box, fillcolor="#4a4a6a", fontcolor=white];
+            
+            ic_params [label="ŷ ∈ ℝ⁸\nIC Policy Parameters", shape=parallelogram, fillcolor="#8e44ad", fontcolor=white];
+        }
+        
+        // === Fuzzy Inference System ===
+        subgraph cluster_fuzzy {
+            label="Fuzzy Inference System (FIS)";
+            style=dashed;
+            color="#9b59b6";
+            fontcolor="#9b59b6";
+            
+            fuzzifier [label="Fuzzifier\n11 Linguistic Variables", shape=box, fillcolor="#4a2d4a", fontcolor=white];
+            fuzzy_engine [label="FuzzyEngine\nRule Matrix", shape=box, fillcolor="#5a3d5a", fontcolor=white];
+            defuzzifier [label="Defuzzifier\nCentroid Method", shape=box, fillcolor="#6a4d6a", fontcolor=white];
+            fis_sizer [label="FISSizer\nPosition Sizing", shape=box, fillcolor="#7a5d7a", fontcolor=white];
+        }
+        
+        // Neural-Fuzzy Fusion
+        fusion_gate [label="Neural-Fuzzy Fusion\nα·Neural + (1-α)·FIS", shape=doubleoctagon, fillcolor="#9b59b6", fontcolor=white];
+    }
+
+    // =========================================================================
+    // LAYER 4: TRAINING PIPELINE
+    // =========================================================================
+    subgraph cluster_training {
+        label="🎓 TRAINING PIPELINE";
+        style=filled;
+        fillcolor="#1a1a0a";
+        fontcolor="#f1c40f";
+        color="#f39c12";
+        penwidth=2;
+        
+        gpu_dataset [label="GPU Dataset\nUnfold Views / Materialized", shape=cylinder, fillcolor="#5c4a1a", fontcolor=white];
+        
+        composite_loss [label="🆕 CompositeCondorLoss\nλ₁L_pred - λ₂L_sharpe\n+ λ₃L_dd + λ₄L_turn", shape=doubleoctagon, fillcolor="#f39c12", fontcolor=black];
+        
+        optimizer [label="FusedAdamW\n+ GradScaler (BF16)", shape=box, fillcolor="#5c4a1a", fontcolor=white];
+        
+        training_monitor [label="TrainingMonitor\nPer-Head Tracking\nTensorBoard", shape=box, fillcolor="#5c4a1a", fontcolor=white];
+        
+        model_checkpoint [label="Model Checkpoint\ncondor_brain_*.pth", shape=folder, fillcolor="#7c6a3a", fontcolor=white];
+    }
+
+    // =========================================================================
+    // LAYER 5: STRATEGY ENGINE
+    // =========================================================================
+    subgraph cluster_strategy {
+        label="📊 STRATEGY ENGINE";
+        style=filled;
+        fillcolor="#200a20";
+        fontcolor="#e74c3c";
+        color="#c0392b";
+        penwidth=2;
+        
+        options_strategy [label="OptionsStrategy\nstrategies/options_strategy.py", shape=box, fillcolor="#5c1a1a", fontcolor=white];
+        
+        build_condor [label="build_condor()\nRule-Based Legs", shape=box, fillcolor="#6c2a2a", fontcolor=white];
+        build_neural [label="build_condor_neural()\nNeural-Driven Legs", shape=box, fillcolor="#2e7d32", fontcolor=white];
+        
+        strike_selector [label="StrikeSelector\nDelta Band + Skew", shape=box, fillcolor="#6c2a2a", fontcolor=white];
+        wing_optimizer [label="WingOptimizer\nRegime-Dynamic Width", shape=box, fillcolor="#6c2a2a", fontcolor=white];
+        
+        ic_legs [label="IronCondorLegs\n(SC, LC, SP, LP)", shape=parallelogram, fillcolor="#8c4a4a", fontcolor=white];
+    }
+
+    // =========================================================================
+    // LAYER 6: RISK MANAGEMENT
+    // =========================================================================
+    subgraph cluster_risk {
+        label="🛡️ RISK MANAGEMENT";
+        style=filled;
+        fillcolor="#200a0a";
+        fontcolor="#e74c3c";
+        color="#c0392b";
+        penwidth=2;
+        
+        risk_manager [label="RiskManager\ncore/risk_manager.py", shape=box, fillcolor="#5c1a1a", fontcolor=white];
+        
+        position_sizer [label="PositionSizer\nKelly + Max Risk %", shape=box, fillcolor="#6c2a2a", fontcolor=white];
+        expected_shortfall [label="ExpectedShortfall\nCVaR @ 95%", shape=box, fillcolor="#6c2a2a", fontcolor=white];
+        drawdown_monitor [label="DrawdownMonitor\nHWM Tracking", shape=box, fillcolor="#6c2a2a", fontcolor=white];
+        
+        delta_hedge [label="DeltaHedge\nDynamic Neutralization", shape=box, fillcolor="#7c3a3a", fontcolor=white];
+        
+        regime_filter [label="RegimeFilter\nIVR/VIX Gates", shape=box, fillcolor="#6c2a2a", fontcolor=white];
+    }
+
+    // =========================================================================
+    // LAYER 7: EXECUTION & BACKTESTING
+    // =========================================================================
+    subgraph cluster_execution {
+        label="⚡ EXECUTION & BACKTESTING";
+        style=filled;
+        fillcolor="#201a0a";
+        fontcolor="#e67e22";
+        color="#d35400";
+        penwidth=2;
+        
+        subgraph cluster_backtest {
+            label="Backtesting";
+            style=dashed;
+            color="#e67e22";
+            fontcolor="#e67e22";
+            
+            backtest_engine [label="BacktestEngine\ncore/backtest_engine.py\n(Backtrader)", shape=box, fillcolor="#5c3a1a", fontcolor=white];
+            optimizer_grid [label="Optimizer\nPhased Grid Search", shape=box, fillcolor="#5c3a1a", fontcolor=white];
+            reporter [label="Reporter\nEquity Curve, Metrics", shape=box, fillcolor="#5c3a1a", fontcolor=white];
+        }
+        
+        subgraph cluster_live {
+            label="Live Execution";
+            style=dashed;
+            color="#e67e22";
+            fontcolor="#e67e22";
+            
+            broker [label="Broker Interface\ncore/broker.py", shape=box, fillcolor="#6c4a2a", fontcolor=white];
+            order_manager [label="OrderManager\n4-Leg Execution", shape=box, fillcolor="#6c4a2a", fontcolor=white];
+            position_tracker [label="PositionTracker\nOpen Positions", shape=box, fillcolor="#6c4a2a", fontcolor=white];
+        }
+        
+        trade_intent [label="TradeIntent\n(QTMF Protocol)", shape=parallelogram, fillcolor="#7c5a3a", fontcolor=white];
+    }
+
+    // =========================================================================
+    // LAYER 8: ANALYTICS & REPORTING
+    // =========================================================================
+    subgraph cluster_analytics {
+        label="📈 ANALYTICS & REPORTING";
+        style=filled;
+        fillcolor="#0a1a1a";
+        fontcolor="#16a085";
+        color="#1abc9c";
+        penwidth=2;
+        
+        policy_output [label="🆕 PolicyOutput\nQ-Table Discretization", shape=box, fillcolor="#16a085", fontcolor=white];
+        
+        trade_log [label="TradeLog\nAll Transactions", shape=cylinder, fillcolor="#1a4a4a", fontcolor=white];
+        equity_curve [label="EquityCurve\nDaily NAV", shape=box, fillcolor="#1a4a4a", fontcolor=white];
+        
+        metrics [label="Performance Metrics\nSharpe, Sortino, MDD\nProfit Factor, E-Ratio", shape=box, fillcolor="#2a5a5a", fontcolor=white];
+        
+        reports_csv [label="Reports (CSV)\nreports/*.csv", shape=folder, fillcolor="#3a6a6a", fontcolor=white];
+        tensorboard [label="TensorBoard\nruns/condor_brain/", shape=box, fillcolor="#2a5a5a", fontcolor=white];
+    }
+
+    // =========================================================================
+    // DATA FLOW CONNECTIONS
+    // =========================================================================
+    
+    // External → Data Factory
+    polygon_api -> polygon_client [color="#4a9eff", penwidth=2];
+    polygon_api -> options_loader [color="#4a9eff", penwidth=2];
+    schwab_api -> broker [color="#4a9eff", penwidth=2, style=dashed];
+    vix_feed -> sync_engine [color="#4a9eff"];
+    historical_csv -> feature_eng [color="#4a9eff", style=dashed];
+    
+    // Data Factory Internal
+    polygon_client -> sync_engine [color="#3d5a80"];
+    options_loader -> sync_engine [color="#3d5a80"];
+    sync_engine -> time_align [color="#3d5a80"];
+    time_align -> feature_eng [color="#3d5a80"];
+    time_align -> greeks_calc [color="#3d5a80"];
+    feature_eng -> technicals [color="#3d5a80"];
+    
+    // New Features
+    technicals -> manifold_vol [color="#2e7d32", penwidth=2];
+    technicals -> tda_sig [color="#2e7d32", penwidth=2];
+    
+    // Data Factory → Intelligence
+    feature_eng -> input_proj [color="#27ae60", penwidth=2, label="X ∈ ℝ^(240×24)"];
+    manifold_vol -> input_proj [color="#2e7d32", penwidth=2];
+    tda_sig -> input_proj [color="#2e7d32", penwidth=2];
+    greeks_calc -> fuzzifier [color="#9b59b6"];
+    technicals -> fuzzifier [color="#9b59b6"];
+    
+    // CondorBrain Internal Flow
+    input_proj -> mamba_1_7 [color="#27ae60"];
+    mamba_1_7 -> vol_attn_1 [color="#27ae60"];
+    vol_attn_1 -> mamba_8_15 [color="#ff6b6b", penwidth=2];
+    mamba_8_15 -> vol_attn_2 [color="#27ae60"];
+    vol_attn_2 -> mamba_16_23 [color="#ff6b6b", penwidth=2];
+    mamba_16_23 -> vol_attn_3 [color="#27ae60"];
+    vol_attn_3 -> mamba_24 [color="#ff6b6b", penwidth=2];
+    mamba_24 -> hidden_state [color="#27ae60", penwidth=2];
+    
+    // Output Heads
+    hidden_state -> regime_detector [color="#8e44ad"];
+    hidden_state -> topk_moe [color="#ff9f43", penwidth=2];
+    hidden_state -> horizon_forecast [color="#4a4a6a"];
+    
+    topk_moe -> expert_low [color="#3498db", style=dashed];
+    topk_moe -> expert_normal [color="#2ecc71", style=dashed];
+    topk_moe -> expert_high [color="#e74c3c", style=dashed];
+    
+    expert_low -> ic_params [color="#8e44ad"];
+    expert_normal -> ic_params [color="#8e44ad"];
+    expert_high -> ic_params [color="#8e44ad"];
+    horizon_forecast -> ic_params [color="#4a4a6a"];
+    
+    // Fuzzy System
+    fuzzifier -> fuzzy_engine [color="#9b59b6"];
+    fuzzy_engine -> defuzzifier [color="#9b59b6"];
+    defuzzifier -> fis_sizer [color="#9b59b6"];
+    
+    // Neural-Fuzzy Fusion
+    ic_params -> fusion_gate [color="#8e44ad", penwidth=2];
+    fis_sizer -> fusion_gate [color="#9b59b6", penwidth=2];
+    
+    // Training Pipeline
+    feature_eng -> gpu_dataset [color="#f39c12", style=dashed, label="Training Data"];
+    hidden_state -> composite_loss [color="#f39c12", constraint=false];
+    composite_loss -> optimizer [color="#f39c12"];
+    optimizer -> input_proj [color="#f39c12", style=dashed, label="∇L", constraint=false];
+    optimizer -> training_monitor [color="#f39c12"];
+    training_monitor -> tensorboard [color="#16a085"];
+    optimizer -> model_checkpoint [color="#f39c12"];
+    
+    // Strategy
+    fusion_gate -> options_strategy [color="#e74c3c", penwidth=2];
+    options_strategy -> build_condor [color="#c0392b"];
+    options_strategy -> build_neural [color="#2e7d32"];
+    build_condor -> strike_selector [color="#c0392b"];
+    build_neural -> strike_selector [color="#2e7d32"];
+    strike_selector -> wing_optimizer [color="#c0392b"];
+    wing_optimizer -> ic_legs [color="#c0392b", penwidth=2];
+    
+    // Risk Management
+    ic_legs -> risk_manager [color="#e74c3c", penwidth=2];
+    risk_manager -> position_sizer [color="#c0392b"];
+    risk_manager -> expected_shortfall [color="#c0392b"];
+    risk_manager -> drawdown_monitor [color="#c0392b"];
+    position_sizer -> delta_hedge [color="#c0392b"];
+    regime_detector -> regime_filter [color="#8e44ad"];
+    regime_filter -> risk_manager [color="#c0392b"];
+    
+    // Execution
+    risk_manager -> trade_intent [color="#e67e22", penwidth=2];
+    trade_intent -> backtest_engine [color="#e67e22"];
+    trade_intent -> broker [color="#e67e22", style=dashed];
+    backtest_engine -> optimizer_grid [color="#e67e22"];
+    optimizer_grid -> reporter [color="#e67e22"];
+    broker -> order_manager [color="#d35400"];
+    order_manager -> position_tracker [color="#d35400"];
+    
+    // Analytics
+    position_tracker -> trade_log [color="#16a085"];
+    backtest_engine -> equity_curve [color="#16a085"];
+    reporter -> metrics [color="#16a085"];
+    equity_curve -> metrics [color="#16a085"];
+    metrics -> reports_csv [color="#16a085"];
+    
+    // Policy Output
+    ic_params -> policy_output [color="#1abc9c", penwidth=2];
+    policy_output -> trade_log [color="#16a085"];
+
+    // =========================================================================
+    // LEGEND
+    // =========================================================================
+    subgraph cluster_legend {
+        label="LEGEND";
+        style=filled;
+        fillcolor="#0d0d0d";
+        fontcolor=white;
+        color="#333333";
+        
+        leg_data [label="Data Layer", shape=box, fillcolor="#1e3a5f", fontcolor=white];
+        leg_neural [label="Neural (CondorBrain)", shape=box, fillcolor="#2e7d32", fontcolor=white];
+        leg_fuzzy [label="Fuzzy Logic", shape=box, fillcolor="#4a2d4a", fontcolor=white];
+        leg_risk [label="Risk Management", shape=box, fillcolor="#5c1a1a", fontcolor=white];
+        leg_exec [label="Execution", shape=box, fillcolor="#5c3a1a", fontcolor=white];
+        leg_new [label="🆕 v2.2 Enhancement", shape=box, fillcolor="#2e7d32", fontcolor=white];
+        leg_volattn [label="VolGatedAttn", shape=diamond, fillcolor="#ff6b6b", fontcolor=white];
+        leg_moe [label="TopKMoE", shape=hexagon, fillcolor="#ff9f43", fontcolor=black];
+    }
+}
