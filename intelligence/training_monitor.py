@@ -453,10 +453,13 @@ def sample_predictions(
         preds = outputs[:n_samples].float().cpu().numpy()
         targets = batch_y[:n_samples].float().cpu().numpy()
         
-        # Expert specific predictions (Low, Normal, High)
-        expert_preds = {
-            k: v[:n_samples].float().cpu().numpy() for k, v in experts.items()
-        }
+        # Expert specific predictions (Low, Normal, High) - may be None if TopKMoE is used
+        if experts is not None:
+            expert_preds = {
+                k: v[:n_samples].float().cpu().numpy() for k, v in experts.items()
+            }
+        else:
+            expert_preds = None
         
         # Price trajectory forecast
         forecast_data = None
