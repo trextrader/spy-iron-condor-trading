@@ -253,7 +253,7 @@ $$
 The trajectory is constrained by a price envelope calculated via the GRU hidden state $z_j$:
 
 $$
-\text{Range}_{max} = \sigma(W_{range} z_{45}) \in [0, 1]
+\mathrm{Range_{max}} = \sigma(W_{\mathrm{range}} z_{45}) \in [0, 1]
 $$
 This provides the model with a "predictive horizon" to calibrate the Iron Condor wings against expected 45-day outliers.
 
