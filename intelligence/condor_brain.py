@@ -200,6 +200,8 @@ class HorizonForecaster(nn.Module):
         
         # Concat and forecast
         rnn_input = torch.cat([hidden_expanded, day_embed], dim=-1)  # (B, num_days, d_model+64)
+        # cuDNN GRU requires FP32 contiguous input (BF16 not supported)
+        rnn_input = rnn_input.float().contiguous()
         rnn_out, _ = self.forecast_rnn(rnn_input)  # (B, num_days, 512)
         
         # Daily predictions
