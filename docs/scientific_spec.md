@@ -87,6 +87,11 @@ This diagram details the entire lifecycle from real-time data ingestion to post-
 ### 0.2 Lag Alignment Flow
 ![Lag Alignment](architecture/lag_alignment_flow.png)
 
+### 0.3 Enhanced Architecture (v2.2)
+This diagram shows the advanced enhancements including VolGatedAttn, TopKMoE, and CompositeCondorLoss integration points.
+
+![Enhanced Architecture v2.2](architecture/enhanced_architecture.png)
+
 ## 1. Core Architecture: Mamba Protocol
 Unlike traditional Transformers with $O(N^2)$ quadratic complexity, CondorBrain utilizes the **Mamba State Space Model (SSM)**, achieving $O(N)$ linear complexity with respect to sequence length.
 
