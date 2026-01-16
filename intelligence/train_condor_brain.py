@@ -515,6 +515,10 @@ def train_condor_brain(args):
     if use_bf16:
         model = model.to(torch.bfloat16)
         print("[CondorBrain] Model weights converted to BF16 (including RMSNorm)")
+        # CRITICAL: cuDNN GRU does NOT support BF16 - keep HorizonForecaster GRU in FP32
+        if hasattr(model, 'horizon_forecaster') and hasattr(model.horizon_forecaster, 'forecast_rnn'):
+            model.horizon_forecaster.forecast_rnn = model.horizon_forecaster.forecast_rnn.float()
+            print("[CondorBrain] HorizonForecaster GRU kept in FP32 (cuDNN compatibility)")
         # NOTE: RMSNorm is BF16-friendly, no need for FP32 conversion
         # Loss is still computed in FP32 externally via .float() calls
     
