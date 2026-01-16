@@ -237,6 +237,7 @@ We implement a probabilistic gating network $G(h_T) \in \mathbb{R}^3$ that blend
 $$\pi(h_T) = \text{Softmax}(W_g h_T) = [P(Low), P(Normal), P(High)]^T$$
 
 **Output Synthesis:**
+
 $$
 \hat{y} = \sum_{i \in \text{Regimes}} \pi_i(h_T) \cdot \text{Expert}_i(h_T)
 $$
@@ -244,11 +245,13 @@ This allows the model to maintain discrete strike selection policies for high-fr
 
 ### 6.3 HorizonForecaster Trajectory Mathematics
 The Forecaster generates a 45-day price surface $F \in \mathbb{R}^{45 \times 4}$ where each step $j$ contains:
+
 $$
 f_j = [P_{close}, P_{high}, P_{low}, \sigma_{vol}]
 $$
 
 The trajectory is constrained by a price envelope calculated via the GRU hidden state $z_j$:
+
 $$
 \text{Range}_{max} = \sigma(W_{range} z_{45}) \in [0, 1]
 $$
