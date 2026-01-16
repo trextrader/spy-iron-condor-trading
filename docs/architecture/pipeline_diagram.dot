@@ -1,0 +1,45 @@
+digraph DataPipeline {
+    rankdir=LR;
+    node [shape=box, style=filled, fillcolor=lightgray];
+
+    // External APIs
+    subgraph cluster_apis {
+        label = "External Data Sources";
+        style=dashed;
+        IVolatility [shape=ellipse, fillcolor=lightblue, label="IVolatility API\n(EOD Greeks)"];
+        Alpaca [shape=ellipse, fillcolor=lightgreen, label="Alpaca API\n(M1 OHLVC)"];
+    }
+
+    // Scripts
+    subgraph cluster_scripts {
+        label = "Data Factory Scripts";
+        dl_ivol [label="download_ivolatility_options.py\n(Filter: Liquid ATM)"];
+        dl_alpaca [label="download_alpaca_matched.py\n(Match: Symbol & Date)"];
+        merger [label="merge_intraday_with_greeks.py\n(Interpolate Greeks)"];
+    }
+
+    // Files
+    subgraph cluster_files {
+        label = "Data Artifacts";
+        csv_ivol [shape=note, label="spy_options_ivol_1year.csv\n(Anchors)"];
+        csv_alpaca [shape=note, label="spy_options_intraday_m1_matched.csv\n(Raw Bars)"];
+        csv_final [shape=note, fillcolor=gold, label="spy_options_intraday_with_greeks.csv\n(Final Dataset)"];
+    }
+
+    // Consumer
+    BacktestEngine [label="Backtest Engine\n(Intraday Mode)", shape=component, fillcolor=orange];
+
+    // Edges
+    IVolatility -> dl_ivol [label="Fetch Daily"];
+    dl_ivol -> csv_ivol [label="Write/Append"];
+
+    csv_ivol -> dl_alpaca [label="Read Targets"];
+    Alpaca -> dl_alpaca [label="Fetch Bars"];
+    dl_alpaca -> csv_alpaca [label="Write"];
+
+    csv_ivol -> merger [label="Input 1"];
+    csv_alpaca -> merger [label="Input 2"];
+    merger -> csv_final [label="Vectorized Merge"];
+
+    csv_final -> BacktestEngine [label="Load M1 Data"];
+}

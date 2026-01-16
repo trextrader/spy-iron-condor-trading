@@ -1,99 +1,83 @@
+
 digraph OptimizationPipeline {
-    rankdir=TB;
+    rankdir=LR;
+    nodesep=0.6; 
+    ranksep=0.7;
     splines=ortho;
-    nodesep=0.5;
-    ranksep=0.6;
-    fontname="Segoe UI";
-    bgcolor="#ffffff";
     compound=true;
-    
-    node [fontname="Consolas", fontsize=10, shape=record, style=filled, fillcolor="white", penwidth=1.0, color="#4a5568"];
-    edge [fontname="Segoe UI", fontsize=9, color="#718096", penwidth=1.0];
+    node [shape=rect, style="filled,rounded", fontname="Helvetica", fontsize=11, margin="0.2,0.1"];
+    edge [fontname="Helvetica", fontsize=9, color="#444444", arrowsize=0.8];
 
-    subgraph cluster_infra {
-        label="Infrastructure Layer (Hardware/OS)";
-        style=dashed;
-        color="#a0aec0";
-        fontcolor="#718096";
+    # Title
+    labelloc="t";
+    label="Mamba 2 Neural Iron Condor System\nEnd-to-End Optimization Architecture";
+    fontsize=18;
+
+    # --- Data Sources ---
+    subgraph cluster_data {
+        label = "1. Data Acquisition";
+        style="dashed,rounded";
+        color="#888888";
+        bgcolor="#F9F9F9";
         
-        H100 [label="{ NVIDIA H100 GPU | { Tensor Cores | <tf32> TF32 Math } | { 80GB HBM3 | <mem> Unified Memory } }", fillcolor="#e6fffa", color="#38b2ac"];
-        RAM [label="{ System RAM | { <shared> Shared Memory } }", fillcolor="#edf2f7"];
+        {rank=same; Alpaca; OptionsData}
+        Alpaca [label="Alpaca Intraday\n(15-Min Bars)", fillcolor="#E3F2FD", color="#2196F3"];
+        OptionsData [label="Option Feed\n(IVolatility)", fillcolor="#E3F2FD", color="#2196F3"];
     }
 
-    subgraph cluster_data_eng {
-        label="1. Data Engineering (O(1) Access)";
-        style=filled;
-        color="#4299e1";
-        fillcolor="#ebf8ff";
+    # --- Training Pipeline ---
+    subgraph cluster_training {
+        label = "2. Neural Training (Offline)";
+        style="filled,rounded";
+        color="#E8EAF6";
+        bgcolor="#E8EAF6";
         
-        CSV [label="Raw CSV\n(10M Rows)", shape=note, fillcolor="#bee3f8"];
+        TrainScript [label="Train Harness\n(train_mamba.py)", shape=component, fillcolor="#FFCDD2", color="#D32F2F"];
         
-        subgraph cluster_lazy {
-            label="class LazySequenceDataset";
+        subgraph cluster_model {
+            label = "DeepMamba 2 Network";
             style=filled;
-            fillcolor="#ffffff";
-            color="#3182ce";
+            color="white";
             
-            MMap [label="Zero-Copy View\n(numpy.lib.stride_tricks)", shape=component];
-            Sanitizer [label="Z-Score Normalizer\n(Pre-computed Î¼, Ïƒ)", shape=box];
+            SSM [label="Mamba 2 Block Stack\n(32 Layers / 1024 Dim)\n[State Space Duality]", shape=octagon, fillcolor="#EF9A9A", color="#C62828"];
         }
+
+        ModelWeights [label="Model Weights\n(mamba_active.pth)", shape=note, fillcolor="#FFF9C4", color="#FBC02D"];
         
-        CSV -> MMap [label=" mmap"];
-        MMap -> Sanitizer [label=" On-the-fly"];
+        Alpaca -> TrainScript [label="Fetch History"];
+        TrainScript -> SSM [label="Train (GPU)"];
+        SSM -> ModelWeights [label="Save State"];
     }
 
-    subgraph cluster_model {
-        label="2. Mamba Intelligence (Model)";
-        style=filled;
-        color="#48bb78";
-        fillcolor="#f0fff4";
+    # --- Production Runtime ---
+    subgraph cluster_runtime {
+        label = "3. Production Optimizer (Runtime)";
+        style="filled,rounded";
+        color="#E8F5E9";
+        bgcolor="#E8F5E9";
         
-        ModelDef [label="{ class CondorBrain | { <enc> Mamba Backbone (d=512) | <sel> Selective Scan (CUDA) } | { <heads> Multi-Head Experts } }", shape=record, fillcolor="#c6f6d5"];
+        Optimizer [label="Optimizer Engine\n(Segmented Grid Search)", shape=hexagon, fillcolor="#A5D6A7", color="#2E7D32", fontsize=12, penwidth=2];
         
-        Context [label="Dynamic Context\n(Lookback=120..240)", shape=parallelogram, fillcolor="#9ae6b4"];
+        subgraph cluster_backtest {
+            label = "Backtest Instance";
+            style=filled;
+            color="white";
+            
+            Inference [label="Inference Engine\n(Batch GPU Pre-Compute)", fillcolor="#FFCCBC", color="#D84315"];
+            Strategy [label="Iron Condor Strategy\n(4-Leg Execution)", shape=folder, fillcolor="#C8E6C9", color="#2E7D32"];
+            
+            Inference -> Strategy [label="Regime Signal"];
+        }
+
+        Metrics [label="Profit / MaxDD\nReport", shape=ellipse, fillcolor="#EEEEEE"];
         
-        Context -> ModelDef:enc [style=dotted];
+        Optimizer -> Strategy [label="Inject Params", style=dashed];
+        Strategy -> Metrics [label="Result"];
+        Metrics -> Optimizer [label="Feedback"];
     }
 
-    subgraph cluster_sweep_engine {
-        label="3. Evolutionary Sweep Engine (sweep_condor_brain.py)";
-        style=filled;
-        color="#ed8936";
-        fillcolor="#fffaf0";
-        
-        Controller [label="{ Sweep Controller | { <iter> Loop: 20 Iters | <catch> Try/Catch (OOM) } }", fillcolor="#fbd38d"];
-        
-        subgraph cluster_job {
-            label="Training Job (Subprocess)";
-            style=rounded;
-            bgcolor="white";
-            
-            Batcher [label="DataLoader\n(Batch=1024)", shape=folder];
-            Optim [label="Optimizer (AdamW)\n+ GradScaler (FP16)", shape=box];
-            LossFn [label="CondorLoss\n(MSE + CrossEntropy)", shape=diamond];
-        }
-        
-        Controller -> Batcher [label=" Spawn"];
-        Batcher -> ModelDef [label=" GPU Transfer"];
-        ModelDef -> LossFn [label=" Logits"];
-        LossFn -> Optim [label=" Backward()"];
-        Optim -> Controller:iter [label=" Loss Metric"];
-    }
+    # Inter-Cluster Edges
+    ModelWeights -> Inference [label="Load Weights", lhead=cluster_backtest];
+    OptionsData -> Strategy [label="Tick Data"];
     
-    subgraph cluster_persistence {
-        label="4. Persistence & Analysis";
-        style=filled;
-        color="#a0aec0";
-        fillcolor="#e2e8f0";
-        
-        Checkpoint [label="Model Checkpoint\n(.pth)", shape=cylinder, fillcolor="#cbd5e0"];
-        Logs [label="Metrics Log\n(CSV/JSON)", shape=note];
-    }
-    
-    # Cross-Cluster Links
-    Sanitizer -> Batcher [label=" Yield Tensor"];
-    H100:tf32 -> ModelDef:sel [style=dashed, color="#38b2ac", label=" Acceleration"];
-    RAM:shared -> MMap [style=dashed, color="#4a5568"];
-    Controller -> Checkpoint [label=" Save Best"];
-    Optim -> Logs [label=" Track"];
 }

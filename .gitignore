@@ -39,6 +39,11 @@ reports/
 py2txt/
 *.pdf
 
+# Model checkpoints - too large for git
+models/*.pth
+models/**/*.pth
+*.pth
+
 # IDEs
 .vscode/
 .idea/

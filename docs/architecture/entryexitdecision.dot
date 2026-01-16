@@ -1,0 +1,216 @@
+digraph EntryExitFlowchart {
+      rankdir=TB;
+      node [shape=box, style=rounded, fontname="Arial"];
+      edge [fontname="Arial", fontsize=10];
+
+      // ============= START =============
+      start [label="New Bar Arrives\n(5-minute interval)", shape=ellipse, fillcolor=lightblue, style=filled];
+
+      // ============= POSITION CHECK =============
+      has_position [label="Active Position\nExists?", shape=diamond, fillcolor=yellow, style=filled];
+
+      // ============= EXIT DECISION TREE =============
+      subgraph cluster_exit {
+          label="EXIT DECISION TREE";
+          style=filled;
+          color=mistyrose;
+
+          get_mtf_exit [label="Get MTF Snapshot\n(5-min indicators)", fillcolor=lightcyan, style=filled];
+
+          calc_target [label="Calculate Profit Target\ntarget = credit × 0.90", fillcolor=lightgreen, style=filled];
+
+          calc_atr_stop [label="ATR Enabled?\nYES: Calculate dynamic stop\nstop = credit × ATR_multiplier(1.0-2.5)\n\nNO: Fixed stop\nstop = credit × 1.2", fillcolor=lightyellow, style=filled];
+
+          calc_trailing [label="Trailing Stop Enabled?\nYES: Track max_profit_seen\nIf PnL >= 50% max:\n  trail_level = 70% max\n\nNO: trail_level = 0", fillcolor=lightyellow, style=filled];
+
+          calc_bb_exit [label="BB Exit Enabled?\nYES: Check bb_position\nIf position > 95% or < 5%:\n  bb_breakout = True\n\nNO: bb_breakout = False", fillcolor=lightyellow, style=filled];
+
+          calc_expiration [label="Check Expiration\nDTE = (exp_date - now).days", fillcolor=lightgrey, style=filled];
+
+          // Priority checks
+          check_profit [label="Priority 1:\ncurrent_cost <= target?", shape=diamond, fillcolor=lightgreen, style=filled];
+
+          check_trailing [label="Priority 2:\ntrail_level > 0 AND\nPnL <= trail_level?", shape=diamond, fillcolor=orange, style=filled];
+
+          check_stop [label="Priority 3:\ncurrent_cost >= stop?", shape=diamond, fillcolor=red, style=filled];
+
+          check_bb [label="Priority 4:\nbb_breakout == True?", shape=diamond, fillcolor=orange, style=filled];
+
+          check_exp [label="Priority 5:\nDTE <= 0?", shape=diamond, fillcolor=grey, style=filled];
+
+          exit_profit [label="EXIT: Profit Take\n(90% of max profit)", fillcolor=green, fontcolor=white, style="rounded,filled"];
+
+          exit_trailing [label="EXIT: Trailing Stop\n(Lock in 70% of peak)", fillcolor=green, fontcolor=white, style="rounded,filled"];
+
+          exit_stop [label="EXIT: Stop Loss\n(ATR-adjusted or fixed)", fillcolor=red, fontcolor=white, style="rounded,filled"];
+
+          exit_bb [label="EXIT: BB Breakout\n(Volatility expansion)", fillcolor=orange, fontcolor=white, style="rounded,filled"];
+
+          exit_exp [label="EXIT: Expiration\n(Force close at DTE=0)", fillcolor=grey, fontcolor=white, style="rounded,filled"];
+
+          hold [label="HOLD Position\n(Continue to next bar)", fillcolor=lightblue, style=filled];
+      }
+
+      // ============= ENTRY DECISION TREE =============
+      subgraph cluster_entry {
+          label="ENTRY DECISION TREE";
+          style=filled;
+          color=lightcyan;
+
+          cooling_check [label="Bars Since Last Trade\n>= 100?", shape=diamond, fillcolor=yellow, style=filled];
+
+          warmup_check [label="Total Bars\n>= 60?\n(Warmup period)", shape=diamond, fillcolor=yellow, style=filled];
+
+          load_options [label="Load Option Chain\nfor Current Date", fillcolor=wheat, style=filled];
+
+          options_exist [label="Options Data\nExists?", shape=diamond, fillcolor=yellow, style=filled];
+
+          get_market [label="Get Market Context:\nIVR (simulated)\nVIX (simulated)", fillcolor=wheat, style=filled];
+
+          check_ivr_vix [label="IVR >= 30.0\nAND\nVIX <= 25.0?", shape=diamond, fillcolor=yellow, style=filled];
+
+          get_mtf [label="Get MTF Snapshot\n(1m, 5m, 15m)", fillcolor=lightcyan, style=filled];
+
+          calc_memberships [label="Calculate All Memberships:\nμ_MTF, μ_IV, μ_Regime\nμ_RSI, μ_ADX, μ_Stoch\nμ_BBands, μ_Volume, μ_SMA", fillcolor=pink, style=filled];
+
+          check_rsi [label="RSI Enabled?\nYES: μ_RSI >= 0.3?\nNO: PASS", shape=diamond, fillcolor=orange, style=filled];
+
+          check_adx [label="ADX Enabled?\nYES: μ_ADX >= 0.3?\nNO: PASS", shape=diamond, fillcolor=orange, style=filled];
+
+          check_stoch [label="Stoch Enabled?\nYES: μ_Stoch >= 0.3?\nNO: PASS", shape=diamond, fillcolor=orange, style=filled];
+
+          check_bbands [label="BBands Enabled?\nYES: μ_BBands >= 0.3?\nNO: PASS", shape=diamond, fillcolor=orange, style=filled];
+
+          check_volume [label="Volume Enabled?\nYES: μ_Volume >= 0.3?\nNO: PASS", shape=diamond, fillcolor=orange, style=filled];
+
+          check_sma [label="SMA Enabled?\nYES: μ_SMA >= 0.3?\nNO: PASS", shape=diamond, fillcolor=orange, style=filled];
+
+          check_mtf_range [label="MTF Enabled?\nYES: 0.4 <= μ_MTF <= 0.6?\nNO: PASS", shape=diamond, fillcolor=orange, style=filled];
+
+          calc_wing [label="Calculate Wing Width\nwidth = regime_wing_width()\nBased on IVR & VIX", fillcolor=wheat, style=filled];
+
+          build_condor [label="Build Iron Condor:\n- Find short call (Δ 0.15-0.20)\n- Find long call (width above)\n- Find short put (Δ 0.15-0.20)\n- Find long put (width below)", fillcolor=wheat, style=filled];
+
+          condor_valid [label="All 4 Legs\nFound?", shape=diamond, fillcolor=yellow, style=filled];
+
+          calc_credit [label="Calculate Net Credit\ncredit = (SC - LC) + (SP - LP)", fillcolor=wheat, style=filled];
+
+          check_credit [label="credit >=\nwidth × 0.25?", shape=diamond, fillcolor=yellow, style=filled];
+
+          calc_fuzzy [label="Calculate Fuzzy Confidence:\nFt = Σ(weight × μ)\nweights sum to 1.0", fillcolor=lightgreen, style=filled];
+
+          calc_vol_penalty [label="Volatility Penalty:\nσ* = (VIX - 12) / 18", fillcolor=lightcoral, style=filled];
+
+          calc_scaling [label="Scaling Factor:\ng = Ft × (1 - σ*)", fillcolor=lightgreen, style=filled];
+
+          calc_base_qty [label="Base Quantity:\nq0 = floor((2% × equity) / max_loss)", fillcolor=wheat, style=filled];
+
+          calc_final_qty [label="Final Quantity:\nq = floor(q0 × g)", fillcolor=wheat, style=filled];
+
+          qty_positive [label="q > 0?", shape=diamond, fillcolor=yellow, style=filled];
+
+          enter_trade [label="ENTER TRADE\nOpen Iron Condor\nQuantity: q\nCredit: credit × q × 100", fillcolor=green, fontcolor=white, style="rounded,filled"];
+
+          skip_entry [label="SKIP ENTRY\n(Continue to next bar)", fillcolor=lightgrey, style=filled];
+      }
+
+      // ============= END STATES =============
+      next_bar [label="Wait for Next Bar", shape=ellipse, fillcolor=lightblue, style=filled];
+
+      // ============= MAIN FLOW =============
+      start -> has_position;
+
+      // Exit flow
+      has_position -> get_mtf_exit [label="YES"];
+      get_mtf_exit -> calc_target;
+      calc_target -> calc_atr_stop;
+      calc_atr_stop -> calc_trailing;
+      calc_trailing -> calc_bb_exit;
+      calc_bb_exit -> calc_expiration;
+      calc_expiration -> check_profit;
+
+      check_profit -> exit_profit [label="YES\n(Priority 1)", color=green, penwidth=2];
+      check_profit -> check_trailing [label="NO"];
+
+      check_trailing -> exit_trailing [label="YES\n(Priority 2)", color=green, penwidth=2];
+      check_trailing -> check_stop [label="NO"];
+
+      check_stop -> exit_stop [label="YES\n(Priority 3)", color=red, penwidth=2];
+      check_stop -> check_bb [label="NO"];
+
+      check_bb -> exit_bb [label="YES\n(Priority 4)", color=orange, penwidth=2];
+      check_bb -> check_exp [label="NO"];
+
+      check_exp -> exit_exp [label="YES\n(Priority 5)", color=grey, penwidth=2];
+      check_exp -> hold [label="NO"];
+
+      exit_profit -> next_bar;
+      exit_trailing -> next_bar;
+      exit_stop -> next_bar;
+      exit_bb -> next_bar;
+      exit_exp -> next_bar;
+      hold -> next_bar;
+
+      // Entry flow
+      has_position -> cooling_check [label="NO"];
+      cooling_check -> skip_entry [label="NO\n(< 100 bars)", color=red];
+      cooling_check -> warmup_check [label="YES"];
+
+      warmup_check -> skip_entry [label="NO\n(< 60 bars)", color=red];
+      warmup_check -> load_options [label="YES"];
+
+      load_options -> options_exist;
+      options_exist -> skip_entry [label="NO", color=red];
+      options_exist -> get_market [label="YES"];
+
+      get_market -> check_ivr_vix;
+      check_ivr_vix -> skip_entry [label="NO", color=red];
+      check_ivr_vix -> get_mtf [label="YES"];
+
+      get_mtf -> calc_memberships;
+      calc_memberships -> check_rsi;
+
+      check_rsi -> skip_entry [label="FAIL", color=red];
+      check_rsi -> check_adx [label="PASS"];
+
+      check_adx -> skip_entry [label="FAIL", color=red];
+      check_adx -> check_stoch [label="PASS"];
+
+      check_stoch -> skip_entry [label="FAIL", color=red];
+      check_stoch -> check_bbands [label="PASS"];
+
+      check_bbands -> skip_entry [label="FAIL", color=red];
+      check_bbands -> check_volume [label="PASS"];
+
+      check_volume -> skip_entry [label="FAIL", color=red];
+      check_volume -> check_sma [label="PASS"];
+
+      check_sma -> skip_entry [label="FAIL", color=red];
+      check_sma -> check_mtf_range [label="PASS"];
+
+      check_mtf_range -> skip_entry [label="FAIL", color=red];
+      check_mtf_range -> calc_wing [label="PASS"];
+
+      calc_wing -> build_condor;
+      build_condor -> condor_valid;
+      condor_valid -> skip_entry [label="NO", color=red];
+      condor_valid -> calc_credit [label="YES"];
+
+      calc_credit -> check_credit;
+      check_credit -> skip_entry [label="NO", color=red];
+      check_credit -> calc_fuzzy [label="YES"];
+
+      calc_fuzzy -> calc_vol_penalty;
+      calc_vol_penalty -> calc_scaling;
+      calc_scaling -> calc_base_qty;
+      calc_base_qty -> calc_final_qty;
+      calc_final_qty -> qty_positive;
+
+      qty_positive -> skip_entry [label="NO", color=red];
+      qty_positive -> enter_trade [label="YES", color=green, penwidth=2];
+
+      skip_entry -> next_bar;
+      enter_trade -> next_bar;
+
+      next_bar -> start [label="Loop", style=dashed];
+  }

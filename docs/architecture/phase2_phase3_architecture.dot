@@ -1,0 +1,65 @@
+
+digraph Phase2_Phase3_Architecture {
+    rankdir=LR;
+    node [shape=box, fontname="Arial", fontsize=10];
+    edge [fontname="Arial", fontsize=9];
+
+    subgraph cluster_Phase2 {
+        label="Phase 2: Strategy Depth (Intelligence)";
+        style=filled;
+        color=lightblue;
+        
+        SkewAnalysis [label="Skew/Term-Structure\nAnalysis"];
+        RegimeClassifier [label="Regime Classifier\n(Volatile/Trending/Ranging)"];
+        WingWidthLogic [label="Dynamic Wing Width\n(Conditional on Regime)"];
+        ProbFilter [label="Probabilistic Entry Filter\n(Delta Breach Prob)"];
+        
+        SkewAnalysis -> WingWidthLogic [label="Shape"];
+        RegimeClassifier -> WingWidthLogic [label="State"];
+        RegimeClassifier -> ProbFilter [label="Thresholds"];
+    }
+
+    subgraph cluster_Phase3 {
+        label="Phase 3: Risk & Portfolio Controls";
+        style=filled;
+        color=lightcoral;
+        
+        RiskManager [label="RiskManager Class", shape=component];
+        GreeksAggregator [label="Portfolio Greeks\nAggregator"];
+        TradeCaps [label="Per-Trade Caps\n(Delta/Vega)"];
+        PortCaps [label="Portfolio Caps\n(Delta/Gamma/Vega)"];
+        DrawdownStop [label="Daily Drawdown Stop\n(Equity Guardrail)"];
+        StressTest [label="Stress Test Runner\n(Historical Shocks)"];
+        
+        RiskManager -> GreeksAggregator [label="Calc Total"];
+        GreeksAggregator -> PortCaps [label="Feed Current"];
+        RiskManager -> TradeCaps [label="Check New"];
+        RiskManager -> DrawdownStop [label="Check Equity"];
+    }
+
+    subgraph cluster_Execution {
+        label="Trade Execution Flow";
+        style=dashed;
+        
+        SignalGen [label="Strategy Signal"];
+        OrderPlacement [label="Broker Order"];
+    }
+
+    # Connections
+    SignalGen -> SkewAnalysis;
+    SignalGen -> RegimeClassifier;
+    
+    ProbFilter -> RiskManager [label="Passed Filters"];
+    
+    RiskManager -> TradeCaps [label="1. Check"];
+    RiskManager -> PortCaps [label="2. Check"];
+    RiskManager -> DrawdownStop [label="3. Check"];
+    
+    TradeCaps -> OrderPlacement [label="Approved"];
+    PortCaps -> OrderPlacement [label="Approved"];
+    DrawdownStop -> OrderPlacement [label="Active"];
+
+    WingWidthLogic -> SignalGen [label="Leg Selection"];
+
+    StressTest -> RiskManager [label="Validates"];
+}
