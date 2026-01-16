@@ -30,6 +30,7 @@ from tqdm import tqdm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from intelligence.condor_brain import CondorBrain, CondorLoss, HAS_MAMBA
+from intelligence.condor_loss import CompositeCondorLoss
 from intelligence.training_monitor import (
     TrainingMonitor, compute_val_head_losses, MAIN_HEADS,
     sample_predictions, display_predictions_inline
@@ -309,7 +310,26 @@ def parse_args():
     parser.add_argument("--tb-port", type=int, default=3500,
                         help="TensorBoard port (default: 3500).")
     
+    # === NEW: Model Enhancement Flags ===
+    parser.add_argument("--composite-loss", action="store_true",
+                        help="Use CompositeCondorLoss (Sharpe/drawdown/turnover penalties).")
+    parser.add_argument("--loss-lambdas", type=str, default="1.0,0.5,0.1,0.1",
+                        help="Composite loss weights: pred,sharpe,drawdown,turnover (default: 1.0,0.5,0.1,0.1).")
+    parser.add_argument("--vol-gated-attn", action="store_true", default=True,
+                        help="Enable VolGatedAttn after layers 8,16,24 (default: enabled).")
+    parser.add_argument("--no-vol-gated-attn", dest="vol_gated_attn", action="store_false",
+                        help="Disable VolGatedAttn.")
+    parser.add_argument("--topk-moe", action="store_true",
+                        help="Use TopKMoE instead of traditional 3-expert MoE.")
+    parser.add_argument("--moe-experts", type=int, default=3,
+                        help="Number of MoE experts (default: 3).")
+    parser.add_argument("--moe-k", type=int, default=1,
+                        help="Number of experts to activate per sample (default: 1).")
+    
     args = parser.parse_args()
+    
+    # Parse loss lambdas
+    args.loss_lambdas_tuple = tuple(float(x) for x in args.loss_lambdas.split(','))
     
     # Auto-generate output filename from params
     if args.output == "auto":
@@ -480,11 +500,15 @@ def train_condor_brain(args):
         n_train_batches = len(train_ds)
         n_val_batches = len(val_ds)
     
-    # Model
+    # Model with enhancement flags
     model = CondorBrain(
         d_model=args.d_model,
         n_layers=args.layers,
-        input_dim=len(FEATURE_COLS)
+        input_dim=len(FEATURE_COLS),
+        use_vol_gated_attn=args.vol_gated_attn,
+        use_topk_moe=args.topk_moe,
+        moe_n_experts=args.moe_experts,
+        moe_k=args.moe_k
     ).to(device)
     
     # Force model weights to BF16 so Mamba kernels take the BF16 fast path
@@ -514,8 +538,12 @@ def train_condor_brain(args):
     n_params = sum(p.numel() for p in model.parameters())
     print(f"[CondorBrain] Model parameters: {n_params:,}")
 
-    
-    criterion = CondorLoss()
+    # Loss function selection
+    if args.composite_loss:
+        criterion = CompositeCondorLoss(lambdas=args.loss_lambdas_tuple)
+        print(f"[CondorBrain] Using CompositeCondorLoss with lambdas={args.loss_lambdas_tuple}")
+    else:
+        criterion = CondorLoss()
     
     # Fused AdamW is faster on modern GPUs (avoids kernel launch overhead)
     use_fused = device.type == 'cuda' and 'fused' in torch.optim.AdamW.__init__.__code__.co_varnames

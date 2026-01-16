@@ -3,6 +3,10 @@ CondorBrain: Advanced Multi-Output Mamba 2 Architecture for Iron Condor Optimiza
 
 This module implements a specialized neural architecture that directly outputs
 Iron Condor trading parameters instead of just price predictions.
+
+Enhancements (2026-01-15):
+- VolGatedAttn: Dynamic volatility-gated attention after layers 8, 16, 24
+- TopKMoE: Sparse mixture-of-experts for regime-specialized output
 """
 import sys
 import os
@@ -13,7 +17,7 @@ import pandas as pd
 import pandas_ta as ta
 import logging
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any, List
 
 # Ensure project root is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -28,6 +32,10 @@ try:
     HAS_MAMBA = True
 except ImportError:
     HAS_MAMBA = False
+
+# Import enhancement modules
+from intelligence.vol_gated_attn import VolGatedAttn
+from intelligence.topk_moe import TopKMoE, BatchedTopKMoE
 
 
 # ============================================================================
@@ -264,12 +272,27 @@ class CondorBrain(nn.Module):
         d_state: int = 32,
         d_conv: int = 4,
         expand: int = 2,
-        input_dim: int = 24
+        input_dim: int = 24,
+        use_vol_gated_attn: bool = True,
+        vol_attn_layers: List[int] = None,
+        use_topk_moe: bool = False,
+        moe_n_experts: int = 3,
+        moe_k: int = 1
     ):
         super().__init__()
         
         self.d_model = d_model
+        self.n_layers = n_layers
         self.input_dim = input_dim
+        self.use_vol_gated_attn = use_vol_gated_attn
+        self.use_topk_moe = use_topk_moe
+        
+        # Default attention insertion points: after layers 8, 16, 24 (0-indexed: 7, 15, 23)
+        if vol_attn_layers is None:
+            # For 32 layers: [7, 15, 23]; for 24 layers: [7, 15, 23]; etc.
+            self.vol_attn_layers = [i for i in [7, 15, 23] if i < n_layers]
+        else:
+            self.vol_attn_layers = vol_attn_layers
         
         # Input projection
         self.input_proj = nn.Linear(input_dim, d_model)
@@ -290,6 +313,16 @@ class CondorBrain(nn.Module):
                 nn.Linear(d_model, d_model) for _ in range(n_layers)
             ])
         
+        # Volatility-gated attention modules (inserted after specified layers)
+        if use_vol_gated_attn:
+            self.vol_attn_modules = nn.ModuleDict({
+                str(layer_idx): VolGatedAttn(d_model, n_heads=8)
+                for layer_idx in self.vol_attn_layers
+            })
+            logger.info(f"[CondorBrain] VolGatedAttn enabled after layers: {self.vol_attn_layers}")
+        else:
+            self.vol_attn_modules = None
+        
         # Use our custom BF16-friendly RMSNorm (returns same dtype as input)
         self.norm = RMSNorm(d_model)
         
@@ -299,10 +332,24 @@ class CondorBrain(nn.Module):
         # Multi-horizon forecaster (price trajectory up to 45 days)
         self.horizon_forecaster = HorizonForecaster(d_model, max_horizon=45)
         
-        # 3 Expert heads (Low, Normal, High volatility)
-        self.expert_low = CondorExpertHead(d_model)
-        self.expert_normal = CondorExpertHead(d_model)
-        self.expert_high = CondorExpertHead(d_model)
+        # Output heads: TopKMoE or traditional 3 experts
+        if use_topk_moe:
+            self.moe_head = BatchedTopKMoE(
+                d_model=d_model,
+                output_dim=8,
+                n_experts=moe_n_experts,
+                k=moe_k
+            )
+            logger.info(f"[CondorBrain] TopKMoE enabled: {moe_n_experts} experts, k={moe_k}")
+            self.expert_low = None
+            self.expert_normal = None
+            self.expert_high = None
+        else:
+            self.moe_head = None
+            # 3 Expert heads (Low, Normal, High volatility)
+            self.expert_low = CondorExpertHead(d_model)
+            self.expert_normal = CondorExpertHead(d_model)
+            self.expert_high = CondorExpertHead(d_model)
         
         # Legacy single-output head (for backward compatibility)
         self.legacy_head = nn.Linear(d_model, 1)
@@ -341,6 +388,11 @@ class CondorBrain(nn.Module):
             else:
                 x = layer(x)
             
+            # Apply VolGatedAttn after specified layers
+            if self.use_vol_gated_attn and self.vol_attn_modules is not None:
+                if str(i) in self.vol_attn_modules:
+                    x = self.vol_attn_modules[str(i)](x)
+            
             # Print dtype after first layer only
             if i == 0 and (not self._dtype_sanity_printed) and x.is_cuda:
                 print(f"[DTYPE PROBE] after layer[0] (Mamba): {x.dtype}")
@@ -367,23 +419,28 @@ class CondorBrain(nn.Module):
         if forecast_days > 0:
             horizon_forecast = self.horizon_forecaster(last_hidden, num_days=forecast_days)
         
-        # Get expert outputs
-        out_low = self.expert_low(last_hidden)       # (B, 8)
-        out_normal = self.expert_normal(last_hidden)  # (B, 8)
-        out_high = self.expert_high(last_hidden)      # (B, 8)
-        
-        # Ensure experts stay in same dtype as hidden (BF16)
-        if out_low.dtype != last_hidden.dtype:
-            out_low = out_low.to(last_hidden.dtype)
-            out_normal = out_normal.to(last_hidden.dtype)
-            out_high = out_high.to(last_hidden.dtype)
-        
-        # Mixture-of-experts: weighted sum by regime probabilities (BF16 end-to-end)
-        outputs = (
-            regime_probs[:, 0:1] * out_low +
-            regime_probs[:, 1:2] * out_normal +
-            regime_probs[:, 2:3] * out_high
-        )
+        # Get expert outputs (TopKMoE or traditional 3-expert MoE)
+        if self.use_topk_moe and self.moe_head is not None:
+            # Sparse TopKMoE output
+            outputs = self.moe_head(last_hidden)  # (B, 8)
+        else:
+            # Traditional 3-expert weighted MoE
+            out_low = self.expert_low(last_hidden)       # (B, 8)
+            out_normal = self.expert_normal(last_hidden)  # (B, 8)
+            out_high = self.expert_high(last_hidden)      # (B, 8)
+            
+            # Ensure experts stay in same dtype as hidden (BF16)
+            if out_low.dtype != last_hidden.dtype:
+                out_low = out_low.to(last_hidden.dtype)
+                out_normal = out_normal.to(last_hidden.dtype)
+                out_high = out_high.to(last_hidden.dtype)
+            
+            # Mixture-of-experts: weighted sum by regime probabilities (BF16 end-to-end)
+            outputs = (
+                regime_probs[:, 0:1] * out_low +
+                regime_probs[:, 1:2] * out_normal +
+                regime_probs[:, 2:3] * out_high
+            )
         
         # Return package
         res = [outputs]
