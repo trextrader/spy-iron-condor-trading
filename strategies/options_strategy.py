@@ -13,7 +13,10 @@ from intelligence.regime_filter import check_liquidity_gate
 # CondorBrain Neural Integration (Optional - falls back to rule-based if not available)
 try:
     from intelligence.condor_brain import CondorBrainEngine, CondorSignal, HAS_MAMBA
-    HAS_CONDOR_BRAIN = HAS_MAMBA and os.path.exists("models/condor_brain.pth")
+    # Auto-discover any condor_brain model
+    import glob
+    _model_candidates = glob.glob("models/condor_brain*.pth")
+    HAS_CONDOR_BRAIN = HAS_MAMBA and len(_model_candidates) > 0
 except (ImportError, OSError):
     HAS_CONDOR_BRAIN = False
     CondorBrainEngine = None

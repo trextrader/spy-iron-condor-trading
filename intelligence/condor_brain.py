@@ -579,31 +579,44 @@ class CondorBrainEngine:
     
     def __init__(
         self,
-        model_path: str = "models/condor_brain.pth",
+        model_path: str = None,  # Auto-discover if None
         d_model: int = 1024,
-        n_layers: int = 32,
+        n_layers: int = 24,  # Default to 24 for v2.2
         input_dim: int = 24,
         lookback: int = 240,
         use_compile: bool = True,
         use_fp16: bool = True,
-        warmup_iterations: int = 3
+        warmup_iterations: int = 3,
+        # v2.2 Enhancement flags
+        use_vol_gated_attn: bool = True,
+        use_topk_moe: bool = True,
+        moe_n_experts: int = 3,
+        moe_k: int = 1
     ):
         self.lookback = lookback
         self.input_dim = input_dim
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.use_fp16 = use_fp16 and self.device.type == 'cuda'
         
-        # Initialize model
+        # Auto-discover model file if not specified
+        if model_path is None:
+            model_path = self._find_latest_model()
+        
+        # Initialize model with enhancement flags
         self.model = CondorBrain(
             d_model=d_model,
             n_layers=n_layers,
-            input_dim=input_dim
+            input_dim=input_dim,
+            use_vol_gated_attn=use_vol_gated_attn,
+            use_topk_moe=use_topk_moe,
+            moe_n_experts=moe_n_experts,
+            moe_k=moe_k
         ).to(self.device)
         
         # Load weights if available
-        if os.path.exists(model_path):
+        if model_path and os.path.exists(model_path):
             state = torch.load(model_path, map_location=self.device)
-            self.model.load_state_dict(state)
+            self.model.load_state_dict(state, strict=False)  # strict=False for enhancement compat
             logger.info(f"[CondorBrain] Loaded weights from {model_path}")
         else:
             logger.warning(f"[CondorBrain] No weights found at {model_path}. Using random init.")
@@ -644,6 +657,39 @@ class CondorBrainEngine:
         
         # Early-exit threshold (like bloom filter k-factor)
         self.min_confidence_threshold = 0.3  # Skip expensive trajectory if confidence < 0.3
+    
+    @staticmethod
+    def _find_latest_model() -> str:
+        """Auto-discover the latest CondorBrain model file."""
+        import glob
+        
+        models_dir = "models"
+        if not os.path.exists(models_dir):
+            return None
+        
+        # Priority order for model discovery
+        candidates = [
+            # Exact match
+            os.path.join(models_dir, "condor_brain.pth"),
+            # Active symlink
+            os.path.join(models_dir, "condor_brain_active.pth"),
+        ]
+        
+        # Check priority candidates first
+        for path in candidates:
+            if os.path.exists(path):
+                return path
+        
+        # Glob for any condor_brain_*.pth files and pick the most recently modified
+        pattern = os.path.join(models_dir, "condor_brain_*.pth")
+        matches = glob.glob(pattern)
+        
+        if matches:
+            # Sort by modification time, newest first
+            matches.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+            return matches[0]
+        
+        return None
         
     def predict(
         self, 
