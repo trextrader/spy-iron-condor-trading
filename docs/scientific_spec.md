@@ -596,7 +596,7 @@ $$
 - **Low volatility ($g \approx 0$):** Passthrough mode, efficient local processing via Mamba SSM
 - **High volatility ($g \approx 1$):** Full attention, captures regime-wide dependencies
 
-**Hyperparameters:** 8 attention heads, inserted at layer indices $\{7, 15, 23\}$.
+**Hyperparameters:** 8 attention heads, inserted at layer indices {7, 15, 23}.
 
 ---
 
