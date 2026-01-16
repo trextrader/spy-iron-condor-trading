@@ -1,0 +1,227 @@
+/*
+ * CondorBrain Enhanced Architecture (v2.2)
+ * Technical Graphviz Diagram - Model Training Pipeline with Advanced Enhancements
+ * 
+ * Compile: dot -Tpng enhanced_architecture.dot -o enhanced_architecture.png
+ */
+
+digraph CondorBrainEnhanced {
+    rankdir=TB;
+    fontname="Helvetica";
+    fontsize=12;
+    node [fontname="Helvetica", fontsize=10];
+    edge [fontname="Helvetica", fontsize=9];
+    
+    // Color scheme
+    compound=true;
+    bgcolor="#0a0a0a";
+    
+    // ==========================================================================
+    // INPUT LAYER
+    // ==========================================================================
+    subgraph cluster_input {
+        label="📥 INPUT LAYER";
+        style=filled;
+        fillcolor="#1a1a2e";
+        fontcolor=white;
+        color="#4a4a6a";
+        
+        raw_data [label="Raw CSV\n(10M rows)", shape=cylinder, fillcolor="#2d3748", style=filled, fontcolor=white];
+        
+        subgraph cluster_features {
+            label="Feature Engineering";
+            style=dashed;
+            color="#4a9eff";
+            fontcolor="#4a9eff";
+            
+            spot [label="Spot OHLCV\n(5 dims)", shape=box, fillcolor="#1e3a5f", style=filled, fontcolor=white];
+            greeks [label="Option Greeks\nΔ,Γ,ν,Θ,IV", shape=box, fillcolor="#1e3a5f", style=filled, fontcolor=white];
+            technicals [label="Technicals\nRSI,ATR,ADX", shape=box, fillcolor="#1e3a5f", style=filled, fontcolor=white];
+            
+            // NEW: Manifold features
+            manifold [label="🆕 Manifold Vol\nκ_curvature\nE_vol\nRSI_dyn", shape=box, fillcolor="#2e7d32", style=filled, fontcolor=white];
+            
+            // NEW: TDA features
+            tda [label="🆕 TDA Signature\nπ_TDA (H1)\nTakens(d=3,τ=5)", shape=box, fillcolor="#2e7d32", style=filled, fontcolor=white];
+        }
+        
+        feature_vec [label="x_t ∈ ℝ²⁴⁺\n(Enhanced)", shape=parallelogram, fillcolor="#3d5a80", style=filled, fontcolor=white];
+        
+        raw_data -> spot;
+        raw_data -> greeks;
+        raw_data -> technicals;
+        raw_data -> manifold;
+        raw_data -> tda;
+        spot -> feature_vec;
+        greeks -> feature_vec;
+        technicals -> feature_vec;
+        manifold -> feature_vec;
+        tda -> feature_vec;
+    }
+    
+    // ==========================================================================
+    // MAMBA BACKBONE WITH ENHANCEMENTS
+    // ==========================================================================
+    subgraph cluster_backbone {
+        label="🧠 MAMBA-2 BACKBONE (24 Layers)";
+        style=filled;
+        fillcolor="#1a2a1a";
+        fontcolor=white;
+        color="#4a6a4a";
+        
+        input_proj [label="Input Projection\nLinear(24→1024)", shape=box, fillcolor="#2d4a2d", style=filled, fontcolor=white];
+        
+        // Layer blocks with VolGatedAttn
+        subgraph cluster_layers_1_7 {
+            label="Layers 1-7";
+            style=dashed;
+            color="#6b8e23";
+            fontcolor="#6b8e23";
+            
+            mamba_1_7 [label="Mamba SSM\n×7 layers\nO(N) complexity", shape=box, fillcolor="#3d5a3d", style=filled, fontcolor=white];
+        }
+        
+        vol_attn_1 [label="🆕 VolGatedAttn\ng·Attn + (1-g)·X\n8 heads", shape=diamond, fillcolor="#ff6b6b", style=filled, fontcolor=white];
+        
+        subgraph cluster_layers_8_15 {
+            label="Layers 8-15";
+            style=dashed;
+            color="#6b8e23";
+            fontcolor="#6b8e23";
+            
+            mamba_8_15 [label="Mamba SSM\n×8 layers", shape=box, fillcolor="#3d5a3d", style=filled, fontcolor=white];
+        }
+        
+        vol_attn_2 [label="🆕 VolGatedAttn\n8 heads", shape=diamond, fillcolor="#ff6b6b", style=filled, fontcolor=white];
+        
+        subgraph cluster_layers_16_23 {
+            label="Layers 16-23";
+            style=dashed;
+            color="#6b8e23";
+            fontcolor="#6b8e23";
+            
+            mamba_16_23 [label="Mamba SSM\n×8 layers", shape=box, fillcolor="#3d5a3d", style=filled, fontcolor=white];
+        }
+        
+        vol_attn_3 [label="🆕 VolGatedAttn\n8 heads", shape=diamond, fillcolor="#ff6b6b", style=filled, fontcolor=white];
+        
+        // Layer 24
+        mamba_24 [label="Mamba Layer 24\nFinal SSM", shape=box, fillcolor="#3d5a3d", style=filled, fontcolor=white];
+        
+        rms_norm [label="RMSNorm\n(BF16-safe)", shape=box, fillcolor="#4a4a6a", style=filled, fontcolor=white];
+        
+        last_hidden [label="h_T ∈ ℝ¹⁰²⁴\nLast Hidden", shape=ellipse, fillcolor="#5a5a8a", style=filled, fontcolor=white];
+        
+        input_proj -> mamba_1_7;
+        mamba_1_7 -> vol_attn_1;
+        vol_attn_1 -> mamba_8_15;
+        mamba_8_15 -> vol_attn_2;
+        vol_attn_2 -> mamba_16_23;
+        mamba_16_23 -> vol_attn_3;
+        vol_attn_3 -> mamba_24;
+        mamba_24 -> rms_norm;
+        rms_norm -> last_hidden;
+    }
+    
+    // ==========================================================================
+    // OUTPUT HEADS
+    // ==========================================================================
+    subgraph cluster_outputs {
+        label="📤 OUTPUT HEADS";
+        style=filled;
+        fillcolor="#2a1a2a";
+        fontcolor=white;
+        color="#6a4a6a";
+        
+        regime_detector [label="Regime Detector\nσ(Wh) → [Low,Norm,High]", shape=box, fillcolor="#4a2d4a", style=filled, fontcolor=white];
+        
+        // NEW: TopKMoE
+        topk_moe [label="🆕 TopKMoE\nn=3, k=1\nSparse Routing", shape=hexagon, fillcolor="#ff9f43", style=filled, fontcolor=black];
+        
+        // Expert networks (inside MoE)
+        expert_low [label="Expert_Low\nTight Wings", shape=box, fillcolor="#3498db", style=filled, fontcolor=white];
+        expert_norm [label="Expert_Norm\nBalanced", shape=box, fillcolor="#2ecc71", style=filled, fontcolor=white];
+        expert_high [label="Expert_High\nWide Wings", shape=box, fillcolor="#e74c3c", style=filled, fontcolor=white];
+        
+        horizon_forecast [label="HorizonForecaster\nGRU → 45 days\n(FP32 weights)", shape=box, fillcolor="#4a4a6a", style=filled, fontcolor=white];
+        
+        ic_params [label="ŷ ∈ ℝ⁸\nIC Parameters\n[offsets, width, dte, risk]", shape=parallelogram, fillcolor="#8e44ad", style=filled, fontcolor=white];
+        
+        topk_moe -> expert_low [style=dashed, color="#4a9eff"];
+        topk_moe -> expert_norm [style=dashed, color="#4a9eff"];
+        topk_moe -> expert_high [style=dashed, color="#4a9eff"];
+        expert_low -> ic_params [style=dashed];
+        expert_norm -> ic_params [style=dashed];
+        expert_high -> ic_params [style=dashed];
+    }
+    
+    // ==========================================================================
+    // LOSS FUNCTION
+    // ==========================================================================
+    subgraph cluster_loss {
+        label="📉 COMPOSITE LOSS (NEW)";
+        style=filled;
+        fillcolor="#2a2a1a";
+        fontcolor=white;
+        color="#6a6a4a";
+        
+        loss_pred [label="L_pred\nHuber(ŷ,y)", shape=box, fillcolor="#e67e22", style=filled, fontcolor=white];
+        loss_sharpe [label="L_sharpe\n-E[r]/√Var(r)", shape=box, fillcolor="#27ae60", style=filled, fontcolor=white];
+        loss_dd [label="L_dd\nDrawdown²", shape=box, fillcolor="#c0392b", style=filled, fontcolor=white];
+        loss_turn [label="L_turn\n||Δŷ||₁", shape=box, fillcolor="#9b59b6", style=filled, fontcolor=white];
+        
+        composite_loss [label="🆕 L_composite\nλ₁L_pred - λ₂L_sharpe\n+ λ₃L_dd + λ₄L_turn", shape=doubleoctagon, fillcolor="#f39c12", style=filled, fontcolor=black];
+        
+        loss_pred -> composite_loss;
+        loss_sharpe -> composite_loss;
+        loss_dd -> composite_loss;
+        loss_turn -> composite_loss;
+    }
+    
+    // ==========================================================================
+    // POST-PROCESSING
+    // ==========================================================================
+    subgraph cluster_postproc {
+        label="🎯 POST-PROCESSING";
+        style=filled;
+        fillcolor="#1a1a1a";
+        fontcolor=white;
+        color="#4a4a4a";
+        
+        state_binner [label="🆕 StateBinner\nQ-Table Discretization\nK bins per dim", shape=box, fillcolor="#16a085", style=filled, fontcolor=white];
+        
+        policy_output [label="🆕 Policy Vector\nπ(a|s) = softmax(Q/τ)\n[HOLD, ENTER, EXIT, ROLL]", shape=parallelogram, fillcolor="#1abc9c", style=filled, fontcolor=white];
+        
+        trade_decision [label="Trade Decision\nIron Condor Order", shape=box3d, fillcolor="#2c3e50", style=filled, fontcolor=white];
+        
+        state_binner -> policy_output;
+        policy_output -> trade_decision;
+    }
+    
+    // ==========================================================================
+    // CONNECTIONS
+    // ==========================================================================
+    feature_vec -> input_proj [lhead=cluster_backbone, color="#4a9eff", penwidth=2];
+    last_hidden -> regime_detector [color="#9b59b6", penwidth=2];
+    last_hidden -> topk_moe [color="#ff9f43", penwidth=2];
+    last_hidden -> horizon_forecast [color="#4a9eff"];
+    ic_params -> loss_pred [color="#e67e22"];
+    ic_params -> state_binner [color="#1abc9c", penwidth=2];
+    composite_loss -> input_proj [label="∇L", style=dashed, color="#e74c3c", constraint=false];
+    
+    // ==========================================================================
+    // LEGEND
+    // ==========================================================================
+    subgraph cluster_legend {
+        label="LEGEND";
+        style=filled;
+        fillcolor="#0d0d0d";
+        fontcolor=white;
+        color="#333333";
+        
+        leg_new [label="🆕 New Module", shape=box, fillcolor="#2e7d32", style=filled, fontcolor=white];
+        leg_volattn [label="VolGatedAttn", shape=diamond, fillcolor="#ff6b6b", style=filled, fontcolor=white];
+        leg_moe [label="TopKMoE", shape=hexagon, fillcolor="#ff9f43", style=filled, fontcolor=black];
+        leg_loss [label="CompositeLoss", shape=doubleoctagon, fillcolor="#f39c12", style=filled, fontcolor=black];
+    }
+}
