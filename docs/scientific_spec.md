@@ -729,7 +729,7 @@ $$
 
 Where $\tau$ is the temperature parameter controlling exploration.
 
-**Output Actions:** $\{$ HOLD, ENTER\_IC, EXIT\_IC, ROLL\_SHORT, ROLL\_LONG $\}$
+**Output Actions:** { HOLD, ENTER_IC, EXIT_IC, ROLL_SHORT, ROLL_LONG }
 
 ---
 
