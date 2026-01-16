@@ -241,6 +241,7 @@ $$\pi(h_T) = \text{Softmax}(W_g h_T) = [P(Low), P(Normal), P(High)]^T$$
 $$
 \hat{y} = \sum_{i \in \text{Regimes}} \pi_i(h_T) \cdot \text{Expert}_i(h_T)
 $$
+
 This allows the model to maintain discrete strike selection policies for high-fright (VIX > 25) vs. low-volatility (VIX < 15) environments while sharing a common Mamba backbone for feature extraction.
 
 ### 6.3 HorizonForecaster Trajectory Mathematics
@@ -255,6 +256,7 @@ The trajectory is constrained by a price envelope calculated via the GRU hidden 
 $$
 \mathrm{Range_{max}} = \sigma(W_{\mathrm{range}} z_{45}) \in [0, 1]
 $$
+
 This provides the model with a "predictive horizon" to calibrate the Iron Condor wings against expected 45-day outliers.
 
 ---
