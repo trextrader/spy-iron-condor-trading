@@ -454,11 +454,15 @@ class CondorBrain(nn.Module):
         res.append(horizon_forecast)
         
         if return_experts:
-            res.append({
-                'low': out_low,
-                'normal': out_normal,
-                'high': out_high
-            })
+            # TopKMoE doesn't have discrete expert outputs
+            if self.use_topk_moe:
+                res.append(None)
+            else:
+                res.append({
+                    'low': out_low,
+                    'normal': out_normal,
+                    'high': out_high
+                })
             
         return tuple(res) if len(res) > 1 else outputs
     
