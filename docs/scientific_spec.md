@@ -588,6 +588,7 @@ g = \sigma\left(\text{MLP}(\text{VolEstimate}(X))\right)
 $$
 
 **Volatility Estimation:**
+
 $$
 \text{VolEstimate}(X) = \sqrt{\frac{1}{L} \sum_{t=1}^{L} (x_t - \bar{x})^2}
 $$
