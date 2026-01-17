@@ -184,9 +184,10 @@ for epoch in range(EPOCHS):
             
             # Loss Calculation
             loss_pol = criterion_policy(outputs, y_pol)
-            # Scaling Feature Loss by 1000.0 because targets (returns) are tiny (~1e-4) -> Loss ~1e-8
+            # Scaling Feature Loss by 1e6 because targets (returns) are tiny (~1e-4) -> MSE ~1e-8
             # We want Forecasting to matter as much as Policy (~5.0)
-            loss_feat = criterion_forecast(feat_pred, y_next) * 1000.0
+            # 1e-8 * 1e6 = 0.01 (Visible!)
+            loss_feat = criterion_forecast(feat_pred, y_next) * 1000000.0
             
             # Combined Loss
             loss = loss_pol + loss_feat
