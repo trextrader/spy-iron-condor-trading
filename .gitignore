@@ -60,4 +60,6 @@ models/**/*.pth
 *.log
 
 # OS
-Thumbs.db
+
+# Kaggle
+!kaggle/
