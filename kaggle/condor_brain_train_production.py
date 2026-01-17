@@ -21,11 +21,11 @@ from intelligence.condor_brain import CondorBrain
 
 # --- CONFIG ---
 EPOCHS = 4
-BATCH_SIZE = 256    # Reduced for Sequence handling
+BATCH_SIZE = 128    # Reduced for Sequence 256
 LR = 1e-4
 ROWS_TO_LOAD = 3_000_000
-SEQ_LEN = 128       # Context length for Mamba
-PREDICT_HORIZON = 5 # Not used for training loss (we predict t+1)
+SEQ_LEN = 256       # Lookback: 256 bars
+PREDICT_HORIZON = 32 # Forecast: 32 bars (Autoregressive)
 
 device = torch.device('cuda')
 n_gpus = torch.cuda.device_count()
