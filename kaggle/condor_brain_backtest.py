@@ -293,9 +293,6 @@ def simulate_backtest(predictions, df, lookback=240):
     mask = aligned_df['signal']
     aligned_df.loc[mask, 'strategy_return'] = (
         aligned_df.loc[mask, 'pred_expected_roi'] * 
-        aligned_df.loc[mask, 'pred_confidence'] * 0.01  # Scale factor
-    )
-    
     # Calculate cumulative returns
     aligned_df['cumulative_return'] = (1 + aligned_df['strategy_return']).cumprod()
     
@@ -303,15 +300,31 @@ def simulate_backtest(predictions, df, lookback=240):
     aligned_df['put_strike'] = aligned_df['close'] * (1 - aligned_df['pred_put_offset_pct'])
     aligned_df['call_strike'] = aligned_df['close'] * (1 + aligned_df['pred_call_offset_pct'])
     
-    # Executed trades log
+    # Generate Status Reasons
+    aligned_df['reason'] = 'Low Confidence'
+    aligned_df.loc[aligned_df['signal'], 'reason'] = 'Executed'
+    
+    # 1. Log Executed Trades
     trades = aligned_df[aligned_df['signal']].copy()
     if not trades.empty:
-        print(f"\n📝 Executed Trade Log (First 10 of {len(trades):,}):")
-        trade_log = trades[[
-            'close', 'put_strike', 'call_strike', 
-            'pred_expected_roi', 'pred_confidence', 'pred_prob_of_profit'
-        ]].head(10)
-        print(trade_log.to_string())
+        print(f"\n✅ EXECUTED TRADES (Total: {len(trades):,}):")
+        cols = ['close', 'put_strike', 'call_strike', 'pred_expected_roi', 'pred_confidence', 'reason']
+        print(trades[cols].head(20).to_string())
+    else:
+        print("\n❌ NO TRADES EXECUTED.")
+
+    # 2. Log "Near Misses" (Confidence 0.40 - 0.49) - Why did we skip?
+    near_misses = aligned_df[
+        (aligned_df['pred_confidence'] >= 0.3) & 
+        (aligned_df['pred_confidence'] < CONFIDENCE_THRESHOLD)
+    ].copy()
+    
+    if not near_misses.empty:
+        print(f"\n⚠️ NEAR MISSES (Skipped because Conf < {CONFIDENCE_THRESHOLD}):")
+        # Sort by confidence descending (closest to executing)
+        near_misses = near_misses.sort_values('pred_confidence', ascending=False).head(20)
+        cols = ['close', 'put_strike', 'call_strike', 'pred_expected_roi', 'pred_confidence', 'reason']
+        print(near_misses[cols].to_string())
     
     return aligned_df
 
