@@ -143,7 +143,10 @@ print("\n" + "="*50)
 print("🧠 BRAIN STATE (The Reasoning)")
 print("="*50)
 print(f"Regime      : Low({regime_probs[0]:.2f}) | Normal({regime_probs[1]:.2f}) | High({regime_probs[2]:.2f})")
-print(f"Active Exp  : {experts['routing_weights'].argmax().item()} (Strength: {experts['routing_weights'].max().item():.2f})")
+if experts is not None and 'routing_weights' in experts:
+    print(f"Active Exp  : {experts['routing_weights'].argmax().item()} (Strength: {experts['routing_weights'].max().item():.2f})")
+else:
+    print("Active Exp  : [Data Unavailable - Restart Kernel to Refresh Code]")
 
 print("\n" + "="*50)
 print("📈 META-FORECAST (Next 32 Bars)")
