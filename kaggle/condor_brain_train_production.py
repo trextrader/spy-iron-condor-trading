@@ -205,7 +205,41 @@ for epoch in range(EPOCHS):
         })
     
     avg_loss = total_loss / len(train_loader)
-    print(f"   Epoch {epoch+1} Avg: Policy={total_pol_loss/len(train_loader):.4f} | Feat={total_feat_loss/len(train_loader):.4f}")
+    print(f"   Epoch {epoch+1} Train: Policy={total_pol_loss/len(train_loader):.4f} | Feat={total_feat_loss/len(train_loader):.4f}")
+    
+    # --- VALIDATION LOOP ---
+    model.eval()
+    val_pol_loss = 0
+    val_feat_loss = 0
+    sample_printed = False
+    
+    with torch.no_grad():
+        for x_seq, y_pol, y_next in val_loader:
+            x_seq, y_pol, y_next = x_seq.to(device), y_pol.to(device), y_next.to(device)
+            
+            with torch.amp.autocast('cuda'):
+                res = model(x_seq, return_features=True)
+                outputs = res[0]
+                feat_pred = res[3]
+                
+                loss_pol = criterion_policy(outputs, y_pol)
+                loss_feat = criterion_forecast(feat_pred, y_next)
+                
+                val_pol_loss += loss_pol.item()
+                val_feat_loss += loss_feat.item()
+                
+            # Print ONE sample for visual confirmation
+            if not sample_printed:
+                print(f"\n   🔍 SAMPLE OUPUT (Epoch {epoch+1}):")
+                print(f"      Policy (Call Off) : True={y_pol[0,0]:.2f} | Pred={outputs[0,0]:.2f}")
+                print(f"      Policy (Width)    : True={y_pol[0,2]:.2f} | Pred={outputs[0,2]:.2f}")
+                print(f"      Feat (Next Ret)   : True={y_next[0,0]:.6f} | Pred={feat_pred[0,0]:.6f}")
+                print(f"      Feat (Next Vol)   : True={y_next[0,1]:.6f} | Pred={feat_pred[0,1]:.6f}")
+                sample_printed = True
+
+    avg_val_pol = val_pol_loss / len(val_loader)
+    avg_val_feat = val_feat_loss / len(val_loader)
+    print(f"   Epoch {epoch+1} Val  : Policy={avg_val_pol:.4f} | Feat={avg_val_feat:.4f}")
     
     # Save Checkpoint
     save_path = f"condor_brain_seq_e{epoch+1}.pth"
