@@ -126,9 +126,9 @@ def prepare_sequences(df, feature_cols, lookback=256):
     mad = np.median(np.abs(X - median), axis=0, keepdims=True) + 1e-8
     X_norm = np.clip((X - median) / (1.4826 * mad), -10, 10)
     
-    # Create sequences
+    # Create sequences (Float16 saves 50% RAM)
     n_samples = len(X_norm) - lookback + 1
-    sequences = np.zeros((n_samples, lookback, len(feature_cols)), dtype=np.float32)
+    sequences = np.zeros((n_samples, lookback, len(feature_cols)), dtype=np.float16)
     
     for i in range(n_samples):
         sequences[i] = X_norm[i:i+lookback]
