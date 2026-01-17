@@ -119,11 +119,14 @@ LOOKBACK = 256  # UPDATED: Matches SEQ_LEN
 
 def prepare_sequences(df, feature_cols, lookback=256):
     """Prepare feature sequences for model inference."""
-    X = df[feature_cols].values.astype(np.float32)
+    # Handle NaNs: Forward fill then fill 0
+    df_clean = df[feature_cols].ffill().fillna(0.0)
+    X = df_clean.values.astype(np.float32)
     
     # Normalize (same as training)
-    median = np.median(X, axis=0, keepdims=True)
-    mad = np.median(np.abs(X - median), axis=0, keepdims=True) + 1e-8
+    # Use nanmedian to be robust against any artifacts
+    median = np.nanmedian(X, axis=0, keepdims=True)
+    mad = np.nanmedian(np.abs(X - median), axis=0, keepdims=True) + 1e-8
     X_norm = np.clip((X - median) / (1.4826 * mad), -10, 10)
     
     # Create sequences (Float16 saves 50% RAM)
