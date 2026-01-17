@@ -184,9 +184,11 @@ for epoch in range(EPOCHS):
             
             # Loss Calculation
             loss_pol = criterion_policy(outputs, y_pol)
-            loss_feat = criterion_forecast(feat_pred, y_next)
+            # Scaling Feature Loss by 1000.0 because targets (returns) are tiny (~1e-4) -> Loss ~1e-8
+            # We want Forecasting to matter as much as Policy (~5.0)
+            loss_feat = criterion_forecast(feat_pred, y_next) * 1000.0
             
-            # Combined Loss (Weighting forecasting task equally for Meta-Forecaster utility)
+            # Combined Loss
             loss = loss_pol + loss_feat
         
         scaler.scale(loss).backward()
@@ -200,8 +202,8 @@ for epoch in range(EPOCHS):
         total_feat_loss += loss_feat.item()
         
         pbar.set_postfix({
-            'L_pol': f"{loss_pol.item():.2f}", 
-            'L_feat': f"{loss_feat.item():.2f}"
+            'L_pol': f"{loss_pol.item():.4f}", 
+            'L_feat': f"{loss_feat.item():.4f}" # Now scaled, should be visible
         })
     
     avg_loss = total_loss / len(train_loader)
