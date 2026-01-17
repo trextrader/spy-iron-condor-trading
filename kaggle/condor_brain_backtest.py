@@ -299,10 +299,24 @@ def simulate_backtest(predictions, df, lookback=240):
     # Calculate cumulative returns
     aligned_df['cumulative_return'] = (1 + aligned_df['strategy_return']).cumprod()
     
+    # Calculate potential strikes (Approximation)
+    aligned_df['put_strike'] = aligned_df['close'] * (1 - aligned_df['pred_put_offset_pct'])
+    aligned_df['call_strike'] = aligned_df['close'] * (1 + aligned_df['pred_call_offset_pct'])
+    
+    # Executed trades log
+    trades = aligned_df[aligned_df['signal']].copy()
+    if not trades.empty:
+        print(f"\n📝 Executed Trade Log (First 10 of {len(trades):,}):")
+        trade_log = trades[[
+            'close', 'put_strike', 'call_strike', 
+            'pred_expected_roi', 'pred_confidence', 'pred_prob_of_profit'
+        ]].head(10)
+        print(trade_log.to_string())
+    
     return aligned_df
 
 print("\nRunning backtest simulation...")
-results_df = simulate_backtest(predictions, df, LOOKBACK)
+results_df = simulate_backtest(predictions, pred_df, LOOKBACK)  # Pass pred_df fully processed
 
 # Performance metrics
 total_return = results_df['cumulative_return'].iloc[-1] - 1
@@ -313,7 +327,11 @@ print(f"\n📈 Backtest Results:")
 print(f"   Total Return: {total_return*100:.2f}%")
 print(f"   Sharpe Ratio: {sharpe:.2f}")
 print(f"   Number of Signals: {n_trades:,}")
-print(f"   Win Rate: N/A (requires full options pricing)")
+if n_trades > 0:
+    avg_roi = results_df.loc[results_df['signal'], 'pred_expected_roi'].mean()
+    print(f"   Avg Predicted ROI: {avg_roi*100:.2f}%")
+else:
+    print(f"   Avg Predicted ROI: 0.00%")
 
 # =============================================================================
 # CELL 9: Save Results
