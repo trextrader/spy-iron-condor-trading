@@ -337,6 +337,10 @@ class CondorBrain(nn.Module):
         
         # Multi-horizon forecaster (price trajectory up to 45 days)
         self.horizon_forecaster = HorizonForecaster(d_model, max_horizon=45)
+
+        # Feature forecasting head (Next-step prediction for Meta-Forecaster Mode 7)
+        # Predicts [r, rho, d, v]
+        self.feature_head = nn.Linear(d_model, 4)
         
         # Output heads: TopKMoE or traditional 3 experts
         if use_topk_moe:
@@ -360,7 +364,7 @@ class CondorBrain(nn.Module):
         # Legacy single-output head (for backward compatibility)
         self.legacy_head = nn.Linear(d_model, 1)
         
-    def forward(self, x: torch.Tensor, return_regime: bool = True, return_experts: bool = False, forecast_days: int = 0) -> Any:
+    def forward(self, x: torch.Tensor, return_regime: bool = True, return_experts: bool = False, return_features: bool = False, forecast_days: int = 0) -> Any:
         """
         Forward pass.
         
@@ -368,6 +372,7 @@ class CondorBrain(nn.Module):
             x: Input tensor (B, SeqLen, InputDim)
             return_regime: If True, also return regime probabilities
             return_experts: If True, also return discrete expert outputs
+            return_features: If True, also return next-step feature prediction
             forecast_days: If > 0, generate price trajectory for this many days
             
         Returns:
@@ -441,6 +446,11 @@ class CondorBrain(nn.Module):
                 regime_probs[:, 2:3] * out_high
             )
         
+        # Next-step feature prediction (for Meta-Forecaster)
+        feature_pred = None
+        if return_features:
+            feature_pred = self.feature_head(last_hidden) #(B, 4)
+        
         # Return package
         res = [outputs]
         if return_regime:
@@ -449,6 +459,11 @@ class CondorBrain(nn.Module):
             res.append(None)
             
         res.append(horizon_forecast)
+        
+        if return_features:
+            res.append(feature_pred)
+        else:
+            res.append(None)
         
         if return_experts:
             # TopKMoE doesn't have discrete expert outputs
@@ -471,6 +486,75 @@ class CondorBrain(nn.Module):
         # Final normalization stays in model dtype (BF16) for throughput; loss is cast to FP32 externally
         x = self.norm(x)
         return self.legacy_head(x[:, -1, :])
+
+    def predict_next_state(self, x: np.ndarray, steps: int = 1) -> np.ndarray:
+        """
+        Autoregressive forecast for Meta-Forecaster (Mode 7).
+        Args:
+            x: (T, 4) or (T, InputDim) numpy array of history
+            steps: Number of steps to forecast
+        Returns:
+            (steps, 4) forecasted features
+        """
+        self.eval()
+        device = next(self.parameters()).device
+        dtype = next(self.parameters()).dtype
+        
+        # Prepare input
+        # Note: Model expects specific input dim. If x is just (T,4), might need padding or projection.
+        # Assuming x matches model input dim for now.
+        if x.ndim == 2:
+            inp = torch.tensor(x, dtype=dtype, device=device).unsqueeze(0) # (1, T, D)
+        else:
+            inp = torch.tensor(x, dtype=dtype, device=device) # Already batched?
+            
+        preds = []
+        with torch.no_grad():
+            curr_seq = inp
+            for _ in range(steps):
+                # Forward pass
+                # We need the feature prediction
+                # forward returns tuple: (outputs, regime, horizon, features, experts)
+                # Note: indices depend on flags, but let's use the tailored call
+                
+                # Check signature of forward to be safe or use named args if possible (unpacking is fragile if changed)
+                # Using our new flag return_features=True
+                # Result tuple order: [outputs, regime, horizon, features, experts]
+                
+                res = self.forward(curr_seq, return_regime=False, return_features=True)
+                # res is tuple. 
+                # Structure: [outputs]
+                # + [None] (regime)
+                # + [None] (horizon)
+                # + [features]
+                
+                # Index 3 is features
+                next_feat = res[3] # (1, 4)
+                
+                preds.append(next_feat.cpu().numpy()[0])
+                
+                # Auto-regressive step: Append prediction to input
+                # WARNING: Requires input dimension to be 4 or requires projection.
+                # If model input dim > 4, we cannot strictly append result.
+                # For this prototype, we assume we can't easily auto-regress without a full environment 
+                # or if the model input is strictly these 4 features.
+                
+                # If we cannot append, we break (1-step only) or hold constant.
+                if curr_seq.shape[-1] != 4:
+                    # Model takes more than just these 4 features. 
+                    # Cannot auto-regress trivially. Return 1 step repeated or stop.
+                    if steps > 1:
+                        # Log warning or handle?
+                        # Just repeat the last pred for now to fill shape
+                        pass 
+                else:
+                    curr_seq = torch.cat([curr_seq, next_feat.unsqueeze(1)], dim=1)
+                    
+        # Fill remaining steps if any
+        while len(preds) < steps:
+            preds.append(preds[-1])
+            
+        return np.array(preds)
 
 # ============================================================================
 # CONDOR LOSS FUNCTION

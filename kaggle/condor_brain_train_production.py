@@ -1,7 +1,7 @@
 # ============================================================
-# CONDORBRAIN PRODUCTION TRAINING - 5M ROWS (2 GPUs)
+# CONDORBRAIN PRODUCTION TRAINING - SEQUENCE MODE
 # ============================================================
-print("🚀 Starting CondorBrain Production Training (5M Rows, 2 GPUs)...")
+print("🚀 Starting CondorBrain Production Training (Sequence Mode + Forecasting)...")
 
 # --- 0. PREP & CLEAN ---
 !cd spy-iron-condor-trading && git fetch origin && git reset --hard origin/main
@@ -12,7 +12,7 @@ sys.path.insert(0, '/kaggle/working/spy-iron-condor-trading')
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Dataset
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
@@ -20,11 +20,12 @@ import os
 from intelligence.condor_brain import CondorBrain
 
 # --- CONFIG ---
-EPOCHS = 5
-BATCH_SIZE = 1024   # Aggressive batch size for 2 GPUs
-LR = 3e-4          # Slightly higher LR for large batch
-ROWS_TO_LOAD = 5_000_000
-LOOKBACK = 240
+EPOCHS = 4
+BATCH_SIZE = 256    # Reduced for Sequence handling
+LR = 1e-4
+ROWS_TO_LOAD = 3_000_000
+SEQ_LEN = 128       # Context length for Mamba
+PREDICT_HORIZON = 5 # Not used for training loss (we predict t+1)
 
 device = torch.device('cuda')
 n_gpus = torch.cuda.device_count()
@@ -35,7 +36,7 @@ print(f"   Count: {n_gpus}")
 print(f"\n[1/4] Loading & Processing {ROWS_TO_LOAD:,} Rows...")
 DATA_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
 
-# Load tail of dataset (most recent 5M rows)
+# Load tail of dataset
 df = pd.read_csv(DATA_PATH).iloc[-ROWS_TO_LOAD:]
 print(f"   Shape: {df.shape}")
 
@@ -45,6 +46,44 @@ FEATURE_COLS = ['open', 'high', 'low', 'close', 'volume', 'delta', 'gamma',
                 'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 
                 'psar', 'strike', 'target_spot', 'max_dd_60m']
 
+# Extract raw arrays for target generation
+opens = df['open'].values
+highs = df['high'].values
+lows = df['low'].values
+closes = df['close'].values
+volumes = df['volume'].values
+
+# Calculate Forecasting Targets (Next Step Features: r, rho, d, v)
+# r_t = log(C_t / C_{t-1})
+# rho_t = log(H_t / L_t)
+# d_t = log(C_t / O_t)
+# v_t = log(V_t / V_{t-1})
+print("   Computing forecasting targets...")
+eps = 1e-8
+log_c = np.log(closes + eps)
+log_v = np.log(volumes + 1.0)
+
+# Shifted arrays for t+1
+# We want to predict step t+1 given history 0..t
+# Target at index t is the feature vector of t+1
+# Let's align: X[t] -> Predicts Y[t+1]
+
+# Compute features for ALL steps first
+r = np.zeros_like(closes)
+r[1:] = np.diff(log_c)
+
+rho = np.log((highs + eps) / (lows + eps))
+d = np.log((closes + eps) / (opens + eps))
+
+v = np.zeros_like(volumes, dtype=float)
+v[1:] = np.diff(log_v)
+
+# Stack targets
+# shape (N, 4)
+# Y_feat[i] contains the market state 'change' that happened at step i
+Y_feat = np.stack([r, rho, d, v], axis=1).astype(np.float32)
+
+# X features
 X = df[FEATURE_COLS].values.astype(np.float32)
 X = np.nan_to_num(X, nan=0.0, posinf=10.0, neginf=-10.0)
 
@@ -53,49 +92,54 @@ median = np.median(X, axis=0, keepdims=True)
 mad = np.median(np.abs(X - median), axis=0, keepdims=True) + 1e-8
 X_norm = np.clip((X - median) / (1.4826 * mad), -10, 10)
 
-# --- REALISTIC TARGET GENERATION (Approximation) ---
-# Since we don't have labeled 'best condor' columns, we approximate 
-# targets based on future price action to learn directional bias & volatility.
-# Target 0: Call Offset  (Higher if Bullish)
-# Target 1: Put Offset   (Higher if Bearish)
-# Target 2: Wing Width   (Higher if Volatile)
-# ...
-print("   Generating semi-realistic targets...")
+# Policy Targets (Iron Condor Params) - Semi-realistic
+print("   Generating semi-realistic policy targets...")
 returns_60m = np.roll(X[:, 3], -60) - X[:, 3]
 vol_60m = pd.Series(returns_60m).rolling(60).std().fillna(0).values
 
-y_target = np.zeros((len(X), 8), dtype=np.float32)
+Y_policy = np.zeros((len(X), 8), dtype=np.float32)
+Y_policy[:, 0] = 2.0 + np.clip(returns_60m * 0.5, -1, 1) # Call Offset
+Y_policy[:, 1] = 2.0 - np.clip(returns_60m * 0.5, -1, 1) # Put Offset
+Y_policy[:, 2] = 5.0 + np.clip(vol_60m * 20, 0, 5)       # Width
+Y_policy[:, 4] = 0.5 + np.clip(returns_60m * 0.1, -0.4, 0.4) # Prob Profit
+Y_policy[:, 7] = 0.3 + np.clip(np.abs(returns_60m), 0, 0.6)  # Confidence
 
-# Vectorized Target Logic
-# Call Offset: 2.0 base + bullish shift
-y_target[:, 0] = 2.0 + np.clip(returns_60m * 0.5, -1, 1)
-# Put Offset: 2.0 base - bearish shift
-y_target[:, 1] = 2.0 - np.clip(returns_60m * 0.5, -1, 1)
-# Width: 5.0 base + volatility expansion
-y_target[:, 2] = 5.0 + np.clip(vol_60m * 20, 0, 5)
-# Prob Profit: 0.5 + momentum
-y_target[:, 4] = 0.5 + np.clip(returns_60m * 0.1, -0.4, 0.4)
-# Confidence: Higher on clear trends
-y_target[:, 7] = 0.3 + np.clip(np.abs(returns_60m), 0, 0.6)
+class SequenceDataset(Dataset):
+    def __init__(self, X, Y_policy, Y_feat, seq_len):
+        self.X = X
+        self.Y_policy = Y_policy
+        self.Y_feat = Y_feat
+        self.seq_len = seq_len
+        
+    def __len__(self):
+        return len(self.X) - self.seq_len - 1
+        
+    def __getitem__(self, idx):
+        # Sequence input: t to t+seq_len
+        x_seq = self.X[idx : idx + self.seq_len]
+        
+        # Policy Target: The parameters relevant for the trade placed at end of sequence
+        y_pol = self.Y_policy[idx + self.seq_len - 1]
+        
+        # Forecasting Target: The market features of the NEXT step (t + seq_len)
+        # We predict what happens immediately after the sequence ends
+        y_next = self.Y_feat[idx + self.seq_len]
+        
+        return torch.tensor(x_seq), torch.tensor(y_pol), torch.tensor(y_next)
 
-# Time Series Split (Last 10% for validation)
+# Split
 split_idx = int(len(X) * 0.9)
-X_train = torch.tensor(X_norm[:split_idx], dtype=torch.float32)
-y_train = torch.tensor(y_target[:split_idx], dtype=torch.float32)
-X_val = torch.tensor(X_norm[split_idx:], dtype=torch.float32)
-y_val = torch.tensor(y_target[split_idx:], dtype=torch.float32)
+train_dataset = SequenceDataset(X_norm[:split_idx], Y_policy[:split_idx], Y_feat[:split_idx], SEQ_LEN)
+val_dataset = SequenceDataset(X_norm[split_idx:], Y_policy[split_idx:], Y_feat[split_idx:], SEQ_LEN)
 
-train_data = TensorDataset(X_train, y_train)
-train_loader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
-
-val_data = TensorDataset(X_val, y_val)
-val_loader = DataLoader(val_data, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
+train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
+val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
 
 # --- 2. MODEL SETUP ---
-print("\n[2/4] Initializing CondorBrain (Production Config)...")
+print("\n[2/4] Initializing CondorBrain (Sequence Config)...")
 model = CondorBrain(
-    d_model=1024,      # Full size
-    n_layers=24,       # Deep network
+    d_model=512,       # Reduced for sequence stability on T4
+    n_layers=12,       # Reduced layer count
     input_dim=24,
     use_vol_gated_attn=True,
     use_topk_moe=True,
@@ -103,12 +147,12 @@ model = CondorBrain(
 ).to(device)
 
 if n_gpus > 1:
-    print(f"   ⚡ Enabling DataParallel on {n_gpus} GPUs")
     model = nn.DataParallel(model)
 
 optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-5)
 scheduler = optim.lr_scheduler.OneCycleLR(optimizer, max_lr=LR, steps_per_epoch=len(train_loader), epochs=EPOCHS)
-criterion = nn.MSELoss()
+criterion_policy = nn.MSELoss()
+criterion_forecast = nn.HuberLoss() # More robust for market features
 
 # --- 3. TRAINING LOOP ---
 print("\n[3/4] Training Loop...")
@@ -117,55 +161,58 @@ best_loss = float('inf')
 
 for epoch in range(EPOCHS):
     model.train()
-    train_loss = 0
-    pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Train]")
+    total_loss = 0
+    total_pol_loss = 0
+    total_feat_loss = 0
     
-    for batch_idx, (data, target) in enumerate(pbar):
-        # Mamba requires Sequence Dim: [B, 1, F]
-        data_seq = data.unsqueeze(1).to(device)
-        target = target.to(device)
+    pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
+    
+    for x_seq, y_pol, y_next in pbar:
+        x_seq, y_pol, y_next = x_seq.to(device), y_pol.to(device), y_next.to(device)
         
         optimizer.zero_grad()
         
         with torch.amp.autocast('cuda'):
-            # DataParallel might return tuple/tensor depending on version/wrap
-            outputs = model(data_seq)
-            if isinstance(outputs, tuple): outputs = outputs[0]
-            loss = criterion(outputs, target)
+            # Forward input sequence
+            # Returns: (outputs, regime, horizon, features, experts)
+            res = model(x_seq, return_features=True)
+            
+            # Unpack (Handle DataParallel tuple return if needed, but safe here)
+            # Tuple: (outputs, regime_logits, horizon_forecast, feature_pred, experts)
+            outputs = res[0]
+            feat_pred = res[3] # feature prediction head output
+            
+            # Loss Calculation
+            loss_pol = criterion_policy(outputs, y_pol)
+            loss_feat = criterion_forecast(feat_pred, y_next)
+            
+            # Combined Loss (Weighting forecasting task equally for Meta-Forecaster utility)
+            loss = loss_pol + loss_feat
         
         scaler.scale(loss).backward()
+        nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Gradient clipping
         scaler.step(optimizer)
         scaler.update()
         scheduler.step()
         
-        train_loss += loss.item()
-        pbar.set_postfix({'loss': loss.item(), 'lr': scheduler.get_last_lr()[0]})
+        total_loss += loss.item()
+        total_pol_loss += loss_pol.item()
+        total_feat_loss += loss_feat.item()
+        
+        pbar.set_postfix({
+            'L_pol': f"{loss_pol.item():.2f}", 
+            'L_feat': f"{loss_feat.item():.2f}"
+        })
     
-    avg_train_loss = train_loss / len(train_loader)
+    avg_loss = total_loss / len(train_loader)
+    print(f"   Epoch {epoch+1} Avg: Policy={total_pol_loss/len(train_loader):.4f} | Feat={total_feat_loss/len(train_loader):.4f}")
     
-    # Validation
-    model.eval()
-    val_loss = 0
-    with torch.no_grad():
-        for data, target in val_loader:
-            data_seq = data.unsqueeze(1).to(device)
-            target = target.to(device)
-            with torch.amp.autocast('cuda'):
-                outputs = model(data_seq)
-                if isinstance(outputs, tuple): outputs = outputs[0]
-                val_loss += criterion(outputs, target).item()
-    
-    avg_val_loss = val_loss / len(val_loader)
-    print(f"   Epoch {epoch+1}: Train Loss={avg_train_loss:.6f} | Val Loss={avg_val_loss:.6f}")
-    
-    # Checkpoint
-    if avg_val_loss < best_loss:
-        best_loss = avg_val_loss
-        save_path = f"condor_brain_e{epoch+1}_loss{avg_val_loss:.4f}.pth"
-        if isinstance(model, nn.DataParallel):
-            torch.save(model.module.state_dict(), save_path)
-        else:
-            torch.save(model.state_dict(), save_path)
-        print(f"      💾 Saved Best Model: {save_path}")
+    # Save Checkpoint
+    save_path = f"condor_brain_seq_e{epoch+1}.pth"
+    if isinstance(model, nn.DataParallel):
+        torch.save(model.module.state_dict(), save_path)
+    else:
+        torch.save(model.state_dict(), save_path)
+    print(f"      💾 Saved: {save_path}")
 
-print("✅ Training Complete.")
+print("✅ Sequence Mode Training Complete.")
