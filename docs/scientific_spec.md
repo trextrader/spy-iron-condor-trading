@@ -772,6 +772,39 @@ The **Meta-Forecaster** is a higher-order cognitive module that selects the opti
 Financial time series exhibit non-stationary properties where the "generating process" shifts between linear (AR-compliant) and non-linear (Neural-compliant) dynamics.
 The Meta-Forecaster minimizes the generalization error by dynamically weighting these experts.
 
+#### 13.1.1 Feature Space Transformation ($y_t$)
+
+To stabilize the variance for the AR solvers, we transform the raw OHLCV bar into a stationary feature vector $y_t \in \mathbb{R}^4$:
+
+$$
+y_t = [r_t, \rho_t, d_t, v_t]^\top
+$$
+
+Where:
+*   $r_t = \log C_t - \log C_{t-1}$ (Close Return)
+*   $\rho_t = \log H_t - \log L_t$ (Volatility/Range)
+*   $d_t = \log C_t - \log O_t$ (Direction)
+*   $v_t = \log(V_t + 1) - \log(V_{t-1} + 1)$ (Volume Delta)
+
+**Reconstruction Physics:**
+Forecasts $\hat{y}_{t+1}$ are projected back to price space ($\mathcal{P}$) via:
+
+$$
+\widehat{C}_{t+1} = C_t \cdot \exp(\hat{r}_{t+1})
+$$
+
+$$
+\widehat{O}_{t+1} \approx C_t \quad (\text{1-min assumption})
+$$
+
+$$
+\widehat{H}_{t+1} = \max(\widehat{O}, \widehat{C}) \cdot \exp(\frac{1}{2} \hat{\rho}_{t+1})
+$$
+
+$$
+\widehat{L}_{t+1} = \min(\widehat{O}, \widehat{C}) \cdot \exp(-\frac{1}{2} \hat{\rho}_{t+1})
+$$
+
 ### 13.2 Classical Autoregressive (AR) Derivations
 
 The core assumption of the classical experts is that the feature $x_t$ is a linear combination of past values plus white noise $\epsilon_t$:
@@ -817,6 +850,46 @@ $$
 
 This guarantees $|k_p| \le 1$, ensuring a stable spectral estimate.
 
+#### 13.2.3 Covariance Method (Method 3)
+
+Minimizes prediction error *without* assuming Toeplitz structure (no zero-padding assumption outside window).
+
+$$
+\min_a \sum_{n=t-N+1}^{t} \left(y_n+\sum_{i=1}^{p} a_i y_{n-i}\right)^2
+$$
+
+This yields the normal equations $\mathbf{C}\mathbf{a} = -\mathbf{c}$, where $\mathbf{C}$ is the covariance of lagged vectors. It provides sharper spectral peaks but uses $O(Np^2)$.
+
+#### 13.2.4 Modified Covariance (Method 4)
+
+Combines forward and backward error minimization (like Burg) but solves via least-squares rather than recursive lattice.
+
+$$
+\text{Error} = \sum_n \left(|e_f[n]|^2 + |e_b[n]|^2\right)
+$$
+
+Where:
+
+$$
+e_f[n] = y_n + \sum_{i=1}^p a_i y_{n-i}, \quad e_b[n] = y_{n-p} + \sum_{i=1}^p a_i^* y_{n-p+i}
+$$
+
+This reduces spectral line splitting observed in standard Burg.
+
+#### 13.2.5 Itakura-Saito Spectral Fit (Method 5)
+
+Selects the AR spectrum $P_a(\omega)$ that minimizes the Itakura-Saito divergence from the window's periodogram $S(\omega)$.
+
+$$
+D_{IS}(S|P_a) = \int \left( \frac{S}{P_a} - \log \frac{S}{P_a} - 1 \right) d\omega
+$$
+
+Implemented via **Iterative Reweighted Least Squares (IRLS)**:
+1.  Compute FFT periodogram $S_k$.
+2.  Compute weights $w_k = 1 / (|A_k|^2 + \epsilon)$.
+3.  Solve weighted Yule-Walker equations.
+4.  Iterate.
+
 ### 13.3 Neural Forecasting (Mode 7: CondorBrain)
 
 Unlike AR models, the CondorBrain creates a non-linear mapping via the Mamba State Space:
@@ -835,23 +908,30 @@ Here, the transition matrix $\mathbf{A}$ is data-dependent (Selective Scan), all
 
 At every minute $t$, we evaluate the performance of all $M$ methods over a rolling window $W$ (default 128 measures).
 
-**1. Instantaneous Error**
+**1. Robust Huber Kernel:**
 
 $$
-\epsilon_{m,t} = || \mathbf{y}_{true, t} - \mathbf{y}_{pred, m, t} ||^2
+\ell_\delta(e) = \begin{cases} \frac{1}{2} e^2 & |e| \le \delta \\ \delta(|e| - \frac{1}{2}\delta) & |e| > \delta \end{cases}
 $$
 
-**2. Smoothed Error (EWMA)**
+**2. Composite Epsilon Score:**
 
 $$
-\bar{\epsilon}_{m,t} = \alpha \epsilon_{m,t} + (1-\alpha) \bar{\epsilon}_{m, t-1}
+\varepsilon(m,p) = \frac{1}{M} \sum_{j=1}^{M} \sum_{i=1}^{h} \lambda^{i-1} \left[ \sum_{k \in \{r, \rho, d, v\}} w_k \cdot \ell_\delta \left( y_{k, t-j+i} - \hat{y}_{k, t-j+i}^{(m,p)} \right) \right]
 $$
 
-**3. Selection (Winner Takes All with Hysteresis)**
+Parameters:
+*   $w_k$: Component importance (Default: $r=1.0, \rho=0.7, d=0.5, v=0.2$).
+*   $\lambda$: Horizon decay factor (Default: 0.8).
+*   $\delta$: Huber threshold (Default: 1.5).
+
+**3. Selection with Tib-Break:**
 
 $$
-m^*_t = \underset{m}{\text{argmin}} (\bar{\epsilon}_{m,t})
+m^*_t = \arg \min_{m, p} \varepsilon(m,p)
 $$
+
+*Tie-Break Rule*: Choose lowest order $p$ such that $\varepsilon_p \le (1 + \tau) \varepsilon_{min}$. This prefers simpler models (Occam's Razor).
     
 **Hysteresis Constraint**
 
