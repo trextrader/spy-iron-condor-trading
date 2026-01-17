@@ -167,7 +167,7 @@ def run_inference(model, sequences, batch_size=512, device='cuda'):
         batch = torch.tensor(sequences[start:end], device=device)
         
         # DataParallel returns tuple, standard returns tuple
-        outputs, regime_probs, h_T = model(batch)
+        outputs, regime_probs, h_T, *_ = model(batch)
         
         all_preds.append(outputs.cpu().numpy())
         all_regimes.append(regime_probs.argmax(dim=-1).cpu().numpy())

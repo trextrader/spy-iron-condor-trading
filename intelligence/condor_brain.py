@@ -471,8 +471,6 @@ class CondorBrain(nn.Module):
         
         if return_features:
             res.append(feature_pred)
-        else:
-            res.append(None)
         
         if return_experts:
             # TopKMoE returns routing weights
