@@ -83,6 +83,40 @@ print("Loading data...")
 df = pd.read_csv(DATA_PATH)
 print(f"Loaded {len(df):,} rows")
 
+def add_technical_indicators(df):
+    """Generate basic technical indicators using pandas (No TA-Lib dependency)."""
+    # RSI
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / (loss + 1e-8)
+    df['rsi'] = 100 - (100 / (1 + rs))
+    
+    # ATR
+    high_low = df['high'] - df['low']
+    high_close = (df['high'] - df['close'].shift()).abs()
+    low_close = (df['low'] - df['close'].shift()).abs()
+    tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df['atr'] = tr.rolling(window=14).mean()
+    
+    # SMA & Bollinger Bands
+    df['sma'] = df['close'].rolling(window=20).mean()
+    std = df['close'].rolling(window=20).std()
+    df['bb_upper'] = df['sma'] + 2 * std
+    df['bb_lower'] = df['sma'] - 2 * std
+    
+    # Stochastic K
+    low_14 = df['low'].rolling(14).min()
+    high_14 = df['high'].rolling(14).max()
+    df['stoch_k'] = 100 * ((df['close'] - low_14) / (high_14 - low_14 + 1e-8))
+    
+    # Fill remaining NaNs from rolling windows
+    df.fillna(0, inplace=True)
+    return df
+
+print("   Generating Technical Indicators...")
+df = add_technical_indicators(df)
+
 # Feature columns (MUST MATCH TRAINING EXACTLY)
 FEATURE_COLS = [
     'open', 'high', 'low', 'close', 'volume', 'delta', 'gamma', 
@@ -202,7 +236,25 @@ OUTPUT_COLS = [
 
 # Create predictions DataFrame
 pred_df = pd.DataFrame(predictions, columns=OUTPUT_COLS)
-pred_df['regime'] = regimes
+
+# Apply Activations (Model returns raw logits)
+# 0-3: Offsets/DTE -> Softplus
+for col in ['call_offset_pct', 'put_offset_pct', 'wing_width', 'dte']:
+    pred_df[col] = np.log1p(np.exp(pred_df[col])) # Softplus
+
+# 4: Prob Profit -> Sigmoid
+pred_df['prob_of_profit'] = 1 / (1 + np.exp(-pred_df['prob_of_profit']))
+
+# 5: Expected ROI -> Tanh
+pred_df['expected_roi'] = np.tanh(pred_df['expected_roi'])
+
+# 6: Max Loss -> Sigmoid
+pred_df['max_loss_pct'] = 1 / (1 + np.exp(-pred_df['max_loss_pct']))
+
+# 7: Confidence -> Sigmoid
+pred_df['confidence'] = 1 / (1 + np.exp(-pred_df['confidence']))
+
+pred_df['regime'] = regimes.astype(int)
 pred_df['regime_label'] = pred_df['regime'].map({0: 'Low', 1: 'Normal', 2: 'High'})
 
 print("\n📊 Prediction Statistics:")
