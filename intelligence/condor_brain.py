@@ -14,7 +14,11 @@ import torch
 import torch.nn as nn
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
+try:
+    import pandas_ta as ta
+    HAS_PANDAS_TA = True
+except ImportError:
+    HAS_PANDAS_TA = False
 import logging
 from dataclasses import dataclass
 from typing import Optional, Tuple, Any, List
@@ -379,8 +383,7 @@ class CondorBrain(nn.Module):
         if not hasattr(self, '_dtype_sanity_printed'):
             self._dtype_sanity_printed = False
         
-        if (not self._dtype_sanity_printed) and x.is_cuda:
-            print(f"[DTYPE PROBE] after input_proj: {x.dtype}")
+
         
         # Pass through Mamba layers (with optional gradient checkpointing)
         for i, layer in enumerate(self.layers):
@@ -395,16 +398,10 @@ class CondorBrain(nn.Module):
                 if str(i) in self.vol_attn_modules:
                     x = self.vol_attn_modules[str(i)](x)
             
-            # Print dtype after first layer only
-            if i == 0 and (not self._dtype_sanity_printed) and x.is_cuda:
-                print(f"[DTYPE PROBE] after layer[0] (Mamba): {x.dtype}")
+
         
         # RMSNorm is BF16-friendly, no cast needed
         x = self.norm(x)
-        
-        if (not self._dtype_sanity_printed) and x.is_cuda:
-            print(f"[DTYPE PROBE] after RMSNorm: {x.dtype}")
-            self._dtype_sanity_printed = True
         
         # Take last timestep
         last_hidden = x[:, -1, :]  # (B, d_model)
