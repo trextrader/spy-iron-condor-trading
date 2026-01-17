@@ -317,13 +317,14 @@ def simulate_backtest(predictions, df, lookback=240):
         print("\n❌ NO TRADES EXECUTED.")
 
     # 2. Log "Near Misses" (Confidence 0.40 - 0.49) - Why did we skip?
+    # Widen range to catch Sigmoid(0)=0.5 cases
     near_misses = aligned_df[
         (aligned_df['pred_confidence'] >= 0.3) & 
-        (aligned_df['pred_confidence'] < CONFIDENCE_THRESHOLD)
+        (aligned_df['pred_confidence'] <= CONFIDENCE_THRESHOLD)
     ].copy()
     
     if not near_misses.empty:
-        print(f"\n⚠️ NEAR MISSES (Skipped because Conf < {CONFIDENCE_THRESHOLD}):")
+        print(f"\n⚠️ NEAR MISSES (Skipped because Conf <= {CONFIDENCE_THRESHOLD}):")
         # Sort by confidence descending (closest to executing)
         near_misses = near_misses.sort_values('pred_confidence', ascending=False).head(20)
         cols = ['close', 'put_strike', 'call_strike', 'pred_expected_roi', 'pred_confidence', 'reason']
@@ -332,7 +333,8 @@ def simulate_backtest(predictions, df, lookback=240):
     return aligned_df
 
 print("\nRunning backtest simulation...")
-results_df = simulate_backtest(predictions, pred_df, LOOKBACK)  # Pass pred_df fully processed
+# FIX: Pass pred_df.values (activated predictions) and df (market data with 'close')
+results_df = simulate_backtest(pred_df.values, df, LOOKBACK)
 
 # Performance metrics
 total_return = results_df['cumulative_return'].iloc[-1] - 1
