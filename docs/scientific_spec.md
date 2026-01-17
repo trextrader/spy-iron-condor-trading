@@ -560,14 +560,14 @@ Where $r_t = f(\hat{y}_t, \text{price}_t)$ represents the PnL derived from model
 
 **3. Soft Drawdown Penalty:**
 $$
-\mathcal{L}_{\text{dd}} = \frac{1}{T} \sum_{t=1}^{T} \max\left(0, \, \text{HWM}_t - \text{Equity}_t\right)^2
+\mathcal{L}_{\text{dd}} = \frac{1}{T} \sum_{t=1}^{T} \max(0, \text{HWM}_t - \text{Equity}_t)^2
 $$
 
 Where $\text{HWM}_t$ is the running high-water mark of cumulative returns.
 
 **4. Turnover Penalty:**
 $$
-\mathcal{L}_{\text{turn}} = \frac{1}{T-1} \sum_{t=2}^{T} \|\hat{y}_t - \hat{y}_{t-1}\|_1
+\mathcal{L}_{\text{turn}} = \frac{1}{T-1} \sum_{t=2}^{T} ||\hat{y}_t - \hat{y}_{t-1}||_1
 $$
 
 This discourages excessive position changes, reducing transaction costs.
@@ -781,12 +781,12 @@ Where $p$ is the model order and $a_i$ are the AR coefficients.
 #### 13.2.1 Yule-Walker Equations (Method 1)
 We derive coefficients by minimizing the forward prediction error power. Multiplying the AR equation by $x_{t-k}$ and taking expectations yields the Yule-Walker equations:
 $$
-\Large \gamma_k = \sum_{i=1}^{p} a_i \gamma_{k-i}, \quad k=1, \dots, p
+\gamma_k = \sum_{i=1}^{p} a_i \gamma_{k-i}, \quad k=1, \dots, p
 $$
 Where $\gamma_k = E[x_t x_{t-k}]$ is the auto-covariance.
 In matrix form:
 $$
-\Large \mathbf{R} \mathbf{a} = \mathbf{r}
+\mathbf{R} \mathbf{a} = \mathbf{r}
 $$
 where $\mathbf{R}$ is the Toeplitz covariance matrix. We solve for $\mathbf{a}$ using the Levinson-Durbin recursion ($O(p^2)$ complexity).
 
@@ -794,12 +794,12 @@ where $\mathbf{R}$ is the Toeplitz covariance matrix. We solve for $\mathbf{a}$ 
 Burg's method minimizes both forward and backward prediction errors, ensuring a stable lattice filter.
 We minimize the sum of squares:
 $$
-\Large E_p = \sum_{t=p}^{N-1} [|f_{p,t}|^2 + |b_{p,t}|^2]
+E_p = \sum_{t=p}^{N-1} [|f_{p,t}|^2 + |b_{p,t}|^2]
 $$
 where $f_{p,t}$ and $b_{p,t}$ are forward and backward errors.
 The reflection coefficient $k_p$ at stage $p$ is derived as:
 $$
-\Large k_p = \frac{-2 \sum f_{p-1,t} b_{p-1,t-1}^*}{\sum [|f_{p-1,t}|^2 + |b_{p-1,t-1}|^2]}
+k_p = \frac{-2 \sum f_{p-1,t} b_{p-1,t-1}^*}{\sum [|f_{p-1,t}|^2 + |b_{p-1,t-1}|^2]}
 $$
 This guarantees $|k_p| \le 1$, ensuring a stable spectral estimate.
 
@@ -807,10 +807,10 @@ This guarantees $|k_p| \le 1$, ensuring a stable spectral estimate.
 
 Unlike AR models, the CondorBrain creates a non-linear mapping via the Mamba State Space:
 $$
-\Large h_t = \sigma( \mathbf{A} h_{t-1} + \mathbf{B} x_t )
+h_t = \sigma( \mathbf{A} h_{t-1} + \mathbf{B} x_t )
 $$
 $$
-\Large \hat{x}_{t+1} = \text{FeatureHead}(h_t)
+\hat{x}_{t+1} = \text{FeatureHead}(h_t)
 $$
 Here, the transition matrix $\mathbf{A}$ is data-dependent (Selective Scan), allowing the model to "reset" memory during regime shifts (e.g., jumps), which linear AR models cannot do.
 
