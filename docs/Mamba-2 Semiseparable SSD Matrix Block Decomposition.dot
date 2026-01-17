@@ -1,0 +1,116 @@
+digraph Mamba2_SSD_Semiseparable_Vertical {
+
+    rankdir=TB;
+    splines=true;
+    bgcolor="white";
+    fontname="Helvetica";
+
+    node [
+        shape=box,
+        style="rounded,filled",
+        fontname="Helvetica",
+        fontsize=12
+    ];
+
+    edge [
+        fontname="Helvetica",
+        fontsize=11
+    ];
+
+    /* ========= Top-level I/O ========= */
+    X [
+        label="Inputs\nX (sequence tokens / features)",
+        fillcolor="#E3F2FD"
+    ];
+
+    Y [
+        label="Outputs\nY (projected sequence / logits)",
+        fillcolor="#FFF3E0"
+    ];
+
+    /* ========= SSD Core Cluster ========= */
+    subgraph cluster_ssd {
+        label="Mamba-2 Core: Semiseparable / SSD Transition (State-Space Duality)";
+        fontname="Helvetica";
+        fontsize=12;
+        style="rounded";
+        color="#BDBDBD";
+
+        /* --- Matrix-style blocks (conceptual) --- */
+        D_orange [
+            label="Orange Diagonal Block\nDirect Map: X → Y\n(instantaneous / skip path)\nD",
+            fillcolor="#FFCC80"
+        ];
+
+        /* Low-rank pathway blocks */
+        LR_in_green [
+            label="Green Block\nLow-Rank Input Path\nX → State\n(B_in)",
+            fillcolor="#C8E6C9"
+        ];
+
+        LR_state_yellow [
+            label="Yellow Block\nLow-Rank State Update\nState → State\n(A_ssd)",
+            fillcolor="#FFF9C4"
+        ];
+
+        LR_out_blue [
+            label="Blue Block\nLow-Rank Output Path\nState → Y\n(C_out)",
+            fillcolor="#BBDEFB"
+        ];
+
+        /* Explicit State Node */
+        H [
+            label="Latent State\nH (SSM memory)",
+            fillcolor="#E8F5E9"
+        ];
+
+        /* Optional: SSD Note Node */
+        ssd_note [
+            shape=note,
+            fillcolor="#E1F5FE",
+            label="Semiseparable / SSD Decomposition\n• Diagonal direct term (D)\n• Low-rank factors for X↔H↔Y\n• Enables fast scan / kernel fusion\n• 2–8× speedups vs prior implementations"
+        ];
+    }
+
+    /* ========= Edges: show dataflow ========= */
+
+    /* Direct diagonal mapping */
+    X -> D_orange [label="X"];
+    D_orange -> Y [label="D·X"];
+
+    /* Low-rank factor pathway: X -> H -> Y */
+    X -> LR_in_green [label="factorize"];
+    LR_in_green -> H [label="B_in · X"];
+
+    H -> LR_state_yellow [label="update"];
+    LR_state_yellow -> H [label="A_ssd · H"];
+
+    H -> LR_out_blue [label="readout"];
+    LR_out_blue -> Y [label="C_out · H"];
+
+    /* Explain duality link */
+    duality_note [
+        shape=note,
+        fillcolor="#F3E5F5",
+        label="State-Space Duality (intuition)\n• Attention-like mixing emerges from SSM form\n• Semiseparable structure gives equivalent\n  long-context behavior with linear-time updates"
+    ];
+
+    /* Connect notes without clutter */
+    LR_state_yellow -> ssd_note [style=dashed, arrowhead=none];
+    D_orange -> ssd_note [style=dashed, arrowhead=none];
+    ssd_note -> duality_note [style=dashed, arrowhead=none];
+
+    /* ========= Layout helpers ========= */
+    { rank=same; X; }
+    { rank=same; D_orange; }
+    { rank=same; LR_in_green; LR_state_yellow; LR_out_blue; H; }
+    { rank=same; Y; }
+
+    /* ========= Caption ========= */
+    caption [
+        shape=plaintext,
+        fontname="Helvetica",
+        fontsize=11,
+        label="Figure: Mamba-2 Semiseparable (SSD) Matrix Block Decomposition\n\nThe orange diagonal block maps inputs directly to outputs.\nGreen/yellow/blue blocks form low-rank pathways connecting inputs, states, and outputs.\nThis structure follows from state-space duality and enables the 2–8× speedups observed in Mamba-2."
+    ];
+}

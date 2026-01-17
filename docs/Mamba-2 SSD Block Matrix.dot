@@ -1,0 +1,104 @@
+digraph Mamba2_SSD_BlockMatrix {
+
+  rankdir=TB;
+  splines=true;
+  bgcolor="white";
+  fontname="Helvetica";
+
+  node [fontname="Helvetica", fontsize=12];
+  edge [fontname="Helvetica", fontsize=11];
+
+  /* ======== I/O ======== */
+  X [
+    shape=box,
+    style="rounded,filled",
+    fillcolor="#E3F2FD",
+    label="Inputs\nX"
+  ];
+
+  Y [
+    shape=box,
+    style="rounded,filled",
+    fillcolor="#FFF3E0",
+    label="Outputs\nY"
+  ];
+
+  H [
+    shape=box,
+    style="rounded,filled",
+    fillcolor="#E8F5E9",
+    label="Latent State\nH"
+  ];
+
+  /* ======== Block Matrix (HTML table) ======== */
+  M [
+    shape=plaintext,
+    label=<
+      <TABLE BORDER="2" CELLBORDER="1" CELLSPACING="0" CELLPADDING="14">
+        <TR>
+          <TD COLSPAN="2" BGCOLOR="#F5F5F5">
+            <B>Semiseparable / SSD Block Decomposition</B><BR/>
+            <FONT POINT-SIZE="10">Conceptual 2×2 operator form</FONT>
+          </TD>
+        </TR>
+        <TR>
+          <TD BGCOLOR="#FFCC80" PORT="D">
+            <B>D (Diagonal / Direct)</B><BR/>
+            <FONT POINT-SIZE="10">X → Y</FONT>
+          </TD>
+          <TD BGCOLOR="#BBDEFB" PORT="C">
+            <B>C (Low-rank Output)</B><BR/>
+            <FONT POINT-SIZE="10">H → Y</FONT>
+          </TD>
+        </TR>
+        <TR>
+          <TD BGCOLOR="#C8E6C9" PORT="B">
+            <B>B (Low-rank Input)</B><BR/>
+            <FONT POINT-SIZE="10">X → H</FONT>
+          </TD>
+          <TD BGCOLOR="#FFF9C4" PORT="A">
+            <B>A (State Update)</B><BR/>
+            <FONT POINT-SIZE="10">H → H</FONT>
+          </TD>
+        </TR>
+      </TABLE>
+    >
+  ];
+
+  /* ======== Explanatory Note ======== */
+  note [
+    shape=note,
+    style="filled",
+    fillcolor="#E1F5FE",
+    label="State-Space Duality / SSD intuition\n• Direct diagonal term (D) handles instantaneous mapping\n• Low-rank factors (B, A, C) carry long-context memory\n• Semiseparable structure enables fused scans / kernels\n• Observed 2–8× speedups in Mamba-2"
+  ];
+
+  /* ======== Dataflow ======== */
+  X -> M:D [label="X"];
+  M:D -> Y [label="D·X"];
+
+  X -> M:B [label="factorize"];
+  M:B -> H [label="B·X"];
+
+  H -> M:A [label="recurrent"];
+  M:A -> H [label="A·H"];
+
+  H -> M:C [label="readout"];
+  M:C -> Y [label="C·H"];
+
+  /* ======== Layout ======== */
+  { rank=same; X; }
+  { rank=same; M; }
+  { rank=same; H; }
+  { rank=same; Y; }
+
+  M -> note [style=dashed, arrowhead=none];
+
+  /* ======== Caption ======== */
+  caption [
+    shape=plaintext,
+    fontname="Helvetica",
+    fontsize=11,
+    label="Figure: Mamba-2 semiseparable (SSD) matrix block decomposition.\nOrange diagonal block D maps inputs directly to outputs.\nGreen, yellow, and blue blocks form low-rank pathways X↔H↔Y (B, A, C).\nThis structure follows from state-space duality and enables the 2–8× speedups observed in Mamba-2."
+  ];
+}

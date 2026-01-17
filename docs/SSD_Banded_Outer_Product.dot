@@ -1,0 +1,364 @@
+digraph SSD_16x16_Banded_OuterProduct {
+
+  rankdir=TB;
+  splines=true;
+  bgcolor="white";
+  fontname="Helvetica";
+
+  graph [
+    pad="0.10",
+    nodesep="0.25",
+    ranksep="0.35"
+  ];
+
+  node [fontname="Helvetica", fontsize=10];
+  edge [fontname="Helvetica", fontsize=10];
+
+  /* Colors */
+  /* band: orange, row-stripe: green, col-stripe: blue, intersection: purple, background: light gray */
+  /* band width 5 means |i-j| <= 2 */
+
+  Matrix16 [shape=plaintext, label=<
+    <TABLE BORDER="2" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+      <TR>
+        <TD COLSPAN="16" BGCOLOR="#F5F5F5">
+          <B>16×16 Semiseparable / SSD Matrix (Schematic)</B><BR/>
+          <FONT POINT-SIZE="8">Diagonal band (width 5) + low-rank outer-product stripes</FONT>
+        </TD>
+      </TR>
+
+      <!-- Row 1 (i=1) -->
+      <TR>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+      </TR>
+
+      <!-- Row 2 (i=2) -->
+      <TR>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+      </TR>
+
+      <!-- Row 3 (i=3) -->
+      <TR>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+      </TR>
+
+      <!-- Row 4 (i=4)  GREEN ROW STRIPE (U-row) -->
+      <TR>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#D1C4E9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#D1C4E9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+      </TR>
+
+      <!-- Row 5 (i=5) -->
+      <TR>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+      </TR>
+
+      <!-- Row 6 (i=6) -->
+      <TR>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+      </TR>
+
+      <!-- Row 7 (i=7)  BLUE COLUMN STRIPE hits many, but here keep band priority except intersection cases -->
+      <TR>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+      </TR>
+
+      <!-- Row 8 (i=8) -->
+      <TR>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+      </TR>
+
+      <!-- Row 9 (i=9) -->
+      <TR>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+      </TR>
+
+      <!-- Row 10 (i=10) -->
+      <TR>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+      </TR>
+
+      <!-- Row 11 (i=11) -->
+      <TR>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+      </TR>
+
+      <!-- Row 12 (i=12)  GREEN ROW STRIPE (U-row) -->
+      <TR>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#D1C4E9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#D1C4E9"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+      </TR>
+
+      <!-- Row 13 (i=13) -->
+      <TR>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+      </TR>
+
+      <!-- Row 14 (i=14)  BLUE COLUMN STRIPE at col 14 -->
+      <TR>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#D1C4E9"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+      </TR>
+
+      <!-- Row 15 (i=15) -->
+      <TR>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+      </TR>
+
+      <!-- Row 16 (i=16) -->
+      <TR>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#EEEEEE"></TD>
+        <TD BGCOLOR="#C8E6C9"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#BBDEFB"></TD>
+        <TD BGCOLOR="#FFCC80"></TD>
+        <TD BGCOLOR="#FFCC80">D</TD>
+      </TR>
+
+    </TABLE>
+  >];
+
+  Legend [shape=note, style="filled", fillcolor="#F5F5F5",
+    label="Legend\nOrange = diagonal band (D term, width 5: |i-j|≤2)\nGreen = U-row stripes (u support)\nBlue = V-column stripes (v support)\nPurple = intersections (u_i v_j outer-product energy)\nGray = background"
+  ];
+
+  Eq [shape=note, style="filled", fillcolor="#E1F5FE",
+    label="SSD / Low-Rank + Band View\nM ≈ D_band + U V^T\nwhere D_band is banded (local coupling)\nand U V^T is low-rank (global coupling).\nThis yields linear-time scan kernels in Mamba-2."
+  ];
+
+  Matrix16 -> Legend [style=dashed, arrowhead=none];
+  Matrix16 -> Eq [style=dashed, arrowhead=none];
+
+}

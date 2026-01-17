@@ -1,0 +1,83 @@
+# ============================================================
+# CONDORBRAIN GPU BACKTEST - SINGLE GPU + AMP (FASTEST)
+# ============================================================
+print("🚀 Starting CondorBrain GPU Backtest (Single GPU + AMP)...")
+
+import sys
+sys.path.insert(0, '/kaggle/working/spy-iron-condor-trading')
+import torch
+import torch.nn as nn
+import pandas as pd
+import numpy as np
+from tqdm import tqdm
+
+# --- CONFIG ---
+SAMPLE_SIZE = 500_000
+LOOKBACK = 240
+BATCH_SIZE = 512  # Safe for T4 with AMP
+
+# --- SETUP ---
+device = torch.device('cuda')
+print(f"   GPU: {torch.cuda.get_device_name(0)}")
+
+# --- LOAD MODEL (20-Epoch) ---
+from intelligence.condor_brain import CondorBrain
+
+model = CondorBrain(
+    d_model=1024, n_layers=24, input_dim=24,
+    use_vol_gated_attn=True, use_topk_moe=True,
+    moe_n_experts=3, moe_k=1
+).to(device)
+
+MODEL_PATH = "/kaggle/input/condor-brain-weights-e20/condor_brain_e20_d1024_L24_lr1e04.pth"
+checkpoint = torch.load(MODEL_PATH, map_location=device, weights_only=False)
+model.load_state_dict(checkpoint, strict=False)
+model.eval()
+print(f"✅ Model loaded")
+
+# --- DATA ---
+print("   Loading data...")
+DATA_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
+df = pd.read_csv(DATA_PATH)
+
+FEATURE_COLS = ['open', 'high', 'low', 'close', 'volume', 'delta', 'gamma', 
+                'vega', 'theta', 'iv', 'ivr', 'spread_ratio', 'te', 'rsi', 
+                'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 
+                'psar', 'strike', 'target_spot', 'max_dd_60m']
+
+X = df[FEATURE_COLS].values.astype(np.float32)
+X = np.nan_to_num(X, nan=0.0, posinf=10.0, neginf=-10.0)
+median = np.median(X, axis=0, keepdims=True)
+mad = np.median(np.abs(X - median), axis=0, keepdims=True) + 1e-8
+X_norm = np.clip((X - median) / (1.4826 * mad), -10, 10)
+
+# --- INFERENCE (AMP + OPTIMIZED) ---
+print("⚡ Running Inference (AMP enabled)...")
+X_tensor = torch.tensor(X_norm[:SAMPLE_SIZE + LOOKBACK], device='cuda', dtype=torch.float32)
+sequences_view = X_tensor.unfold(0, LOOKBACK, 1).transpose(1, 2)
+
+all_preds = []
+
+# Use AMP for Tensor Core speedup on T4
+from torch.cuda.amp import autocast
+
+with torch.no_grad():
+    for start in tqdm(range(0, SAMPLE_SIZE, BATCH_SIZE), desc="Inference"):
+        end = min(start + BATCH_SIZE, SAMPLE_SIZE)
+        batch_seqs = sequences_view[start:end].contiguous()
+        
+        with autocast():
+            outputs, _, _ = model(batch_seqs)
+        
+        all_preds.append(outputs.float().cpu().numpy())
+
+predictions = np.concatenate(all_preds)
+print(f"✅ Predictions: {predictions.shape}")
+
+# --- RESULTS ---
+OUTPUT_COLS = ['call_offset', 'put_offset', 'wing_width', 'dte', 
+               'prob_profit', 'expected_roi', 'max_loss', 'confidence']
+pred_df = pd.DataFrame(predictions, columns=OUTPUT_COLS)
+print(pred_df.describe())
+print(f"\nMean Conf: {pred_df['confidence'].mean():.4f}")
+print(f"Std Conf: {pred_df['confidence'].std():.4f}")

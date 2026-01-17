@@ -296,7 +296,12 @@ def get_condor_brain() -> Optional[Any]:
         return None
     if _condor_brain_engine is None:
         try:
-            _condor_brain_engine = CondorBrainEngine()
+            _condor_brain_engine = CondorBrainEngine(
+                d_model=512,
+                n_layers=12,
+                use_vol_gated_attn=True,
+                use_topk_moe=True
+            )
         except Exception as e:
             print(f"[CondorBrain] Failed to load: {e}")
             return None

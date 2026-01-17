@@ -1,0 +1,324 @@
+digraph Mamba2_MultiPanel_SSM_SSD {
+
+  /* ===== Global styling for publication SVG ===== */
+  rankdir=TB;
+  splines=true;
+  bgcolor="white";
+  fontname="Helvetica";
+
+  graph [
+    pad="0.15",
+    nodesep="0.35",
+    ranksep="0.55",
+    labelloc="t",
+    labeljust="c"
+  ];
+
+  node [
+    fontname="Helvetica",
+    fontsize=12
+  ];
+
+  edge [
+    fontname="Helvetica",
+    fontsize=11
+  ];
+
+  /* ==========================================================
+     PANEL A — Selective SSM Block (vertical)
+     ========================================================== */
+  subgraph cluster_A {
+    label="Panel A — Selective State-Space Model (SSM) Block (Mamba-2)";
+    fontsize=13;
+    fontname="Helvetica";
+    color="#BDBDBD";
+    style="rounded";
+
+    A_x [
+      shape=box,
+      style="rounded,filled",
+      fillcolor="#E3F2FD",
+      label="Input\nx_t"
+    ];
+
+    A_hprev [
+      shape=box,
+      style="rounded,filled",
+      fillcolor="#E8F5E9",
+      label="Previous State\nh_{t-1}"
+    ];
+
+    A_gateA [
+      shape=box,
+      style="rounded,filled",
+      fillcolor="#BBDEFB",
+      label="Input-Adaptive\nState Transition\nA(x_t, h_{t-1})"
+    ];
+
+    A_gateB [
+      shape=box,
+      style="rounded,filled",
+      fillcolor="#BBDEFB",
+      label="Input-Adaptive\nInput Projection\nB(x_t)"
+    ];
+
+    A_update [
+      shape=box,
+      style="rounded,filled",
+      fillcolor="#C8E6C9",
+      label="Selective State Update\nh_t = A·h_{t-1} + B·x_t"
+    ];
+
+    A_gateC [
+      shape=box,
+      style="rounded,filled",
+      fillcolor="#FFE0B2",
+      label="Output Projection\nC(x_t)"
+    ];
+
+    A_y [
+      shape=box,
+      style="rounded,filled",
+      fillcolor="#FFF3E0",
+      label="Output\ny_t"
+    ];
+
+    A_logic [
+      shape=note,
+      style="filled",
+      fillcolor="#E1F5FE",
+      label="Selective Memory Logic\n• Adaptive Forgetting\n• Adaptive Retention\n• Content-Aware Dynamics\n• Linear-time selective scan"
+    ];
+
+    /* Dataflow */
+    A_x     -> A_gateB [label="input features"];
+    A_x     -> A_gateA [label="conditioning"];
+    A_hprev -> A_gateA [label="prior memory"];
+
+    A_gateA -> A_update [label="A·h_{t-1}"];
+    A_gateB -> A_update [label="B·x_t"];
+
+    A_update -> A_gateC [label="latent state h_t"];
+    A_gateC  -> A_y     [label="y_t"];
+
+    /* Control / intuition */
+    A_gateA -> A_logic [style=dashed, label="adaptive gating"];
+    A_gateB -> A_logic [style=dashed];
+    A_logic -> A_update [style=dashed, label="selective scan"];
+
+    /* Panel A equation note */
+    A_eq [
+      shape=note,
+      style="filled",
+      fillcolor="#F3E5F5",
+      label="SSM Update (discrete)\n h_t = \\bar{A}_t h_{t-1} + \\bar{B}_t x_t\n y_t = C_t h_t + D_t x_t\n(\\bar{A}_t,\\bar{B}_t depend on input)"
+    ];
+
+    A_update -> A_eq [style=dashed, arrowhead=none];
+
+    { rank=same; A_x; A_hprev; }
+    { rank=same; A_gateA; A_gateB; }
+    { rank=same; A_update; }
+    { rank=same; A_gateC; }
+    { rank=same; A_y; }
+  }
+
+  /* ==========================================================
+     PANEL B — SSD Semiseparable Matrix (banded look + low-rank)
+     ========================================================== */
+  subgraph cluster_B {
+    label="Panel B — Mamba-2 SSD / Semiseparable Transition as a Banded Matrix + Low-Rank Paths";
+    fontsize=13;
+    fontname="Helvetica";
+    color="#BDBDBD";
+    style="rounded";
+
+    /* Conceptual I/O */
+    B_X [
+      shape=box,
+      style="rounded,filled",
+      fillcolor="#E3F2FD",
+      label="Inputs\nX"
+    ];
+
+    B_Y [
+      shape=box,
+      style="rounded,filled",
+      fillcolor="#FFF3E0",
+      label="Outputs\nY"
+    ];
+
+    B_H [
+      shape=box,
+      style="rounded,filled",
+      fillcolor="#E8F5E9",
+      label="Latent State\nH"
+    ];
+
+    /* ======== Banded matrix visual (HTML table) ========
+       We draw an 8×8 matrix with:
+       - Orange diagonal band (D term)
+       - A light gray background grid
+       - Colored low-rank “tiles” that suggest semiseparable factors:
+         Green: X→H (B)
+         Yellow: H→H (A / state update)
+         Blue: H→Y (C)
+       This is a schematic—intended to LOOK like a banded + low-rank matrix.
+    */
+    B_Matrix [
+      shape=plaintext,
+      label=<
+        <TABLE BORDER="2" CELLBORDER="1" CELLSPACING="0" CELLPADDING="10">
+          <TR>
+            <TD COLSPAN="8" BGCOLOR="#F5F5F5">
+              <B>Semiseparable / SSD Operator (schematic banded matrix look)</B><BR/>
+              <FONT POINT-SIZE="10">Orange diagonal + low-rank off-diagonal structure</FONT>
+            </TD>
+          </TR>
+
+          <!-- Row 1 -->
+          <TR>
+            <TD BGCOLOR="#FFCC80"><B>D</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#BBDEFB"><B>C</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+          </TR>
+
+          <!-- Row 2 -->
+          <TR>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#FFCC80"><B>D</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#BBDEFB"><B>C</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+          </TR>
+
+          <!-- Row 3 -->
+          <TR>
+            <TD BGCOLOR="#C8E6C9"><B>B</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#FFCC80"><B>D</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#FFF9C4"><B>A</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+          </TR>
+
+          <!-- Row 4 -->
+          <TR>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#C8E6C9"><B>B</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#FFCC80"><B>D</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#FFF9C4"><B>A</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+          </TR>
+
+          <!-- Row 5 -->
+          <TR>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#FFF9C4"><B>A</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#FFCC80"><B>D</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#BBDEFB"><B>C</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+          </TR>
+
+          <!-- Row 6 -->
+          <TR>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#FFF9C4"><B>A</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#FFCC80"><B>D</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#BBDEFB"><B>C</B></TD>
+          </TR>
+
+          <!-- Row 7 -->
+          <TR>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#C8E6C9"><B>B</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#FFCC80"><B>D</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+          </TR>
+
+          <!-- Row 8 -->
+          <TR>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#C8E6C9"><B>B</B></TD>
+            <TD BGCOLOR="#EEEEEE"></TD>
+            <TD BGCOLOR="#FFCC80"><B>D</B></TD>
+          </TR>
+        </TABLE>
+      >
+    ];
+
+    /* ===== Math annotations (SSD equations) ===== */
+    B_eq1 [
+      shape=note,
+      style="filled",
+      fillcolor="#F3E5F5",
+      label="SSD / Semiseparable form (schematic)\nY = D·X + C·H\nH' = A·H + B·X\n(semiseparable / low-rank factors)"
+    ];
+
+    B_eq2 [
+      shape=note,
+      style="filled",
+      fillcolor="#E1F5FE",
+      label="Interpretation\n• Orange diagonal D: direct X→Y\n• Green B: inject X into state\n• Yellow A: state evolution\n• Blue C: read state into Y\nSemiseparable structure enables fast scan / kernel fusion"
+    ];
+
+    /* ===== Flow arrows to connect I/O with matrix & state ===== */
+    B_X -> B_Matrix [label="X"];
+    B_Matrix -> B_Y [label="Y"];
+
+    /* Low-rank pathway notion */
+    B_X -> B_H [style=dashed, label="B·X"];
+    B_H -> B_H [style=dashed, label="A·H"];
+    B_H -> B_Y [style=dashed, label="C·H"];
+
+    B_Matrix -> B_eq1 [style=dashed, arrowhead=none];
+    B_eq1 -> B_eq2 [style=dashed, arrowhead=none];
+
+    { rank=same; B_X; }
+    { rank=same; B_Matrix; }
+    { rank=same; B_H; }
+    { rank=same; B_Y; }
+  }
+
+  /* ==========================================================
+     Figure-level caption
+     ========================================================== */
+  figcap [
+    shape=plaintext,
+    fontname="Helvetica",
+    fontsize=11,
+    label="Figure (Multi-panel):\nPanel A shows a selective SSM block with input-adaptive gating for forgetting/retention.\nPanel B shows an SSD / semiseparable operator as a banded-matrix schematic: diagonal (D) plus low-rank paths (B, A, C).\nTogether these illustrate Mamba-2’s linear-time long-context mechanism and its semiseparable decomposition."
+  ];
+
+  /* Keep caption at bottom */
+  cluster_A -> cluster_B [style=invis];
+  cluster_B -> figcap [style=invis];
+}

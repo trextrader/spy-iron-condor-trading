@@ -1,0 +1,94 @@
+digraph Mamba2_Selective_SSM {
+
+    rankdir=LR;
+    splines=true;
+    bgcolor="white";
+    fontname="Helvetica";
+
+    node [
+        shape=box,
+        style="rounded,filled",
+        fontname="Helvetica",
+        fontsize=12
+    ];
+
+    edge [
+        fontname="Helvetica",
+        fontsize=11
+    ];
+
+    /* === Input Nodes === */
+    x_t [
+        label="Input\nx_t",
+        fillcolor="#E3F2FD"
+    ];
+
+    h_prev [
+        label="Previous State\nh_{t-1}",
+        fillcolor="#E8F5E9"
+    ];
+
+    /* === Input-Conditioned Gates === */
+    gate_A [
+        label="Input-Adaptive\nState Transition\nA(x_t, h_{t-1})",
+        fillcolor="#BBDEFB"
+    ];
+
+    gate_B [
+        label="Input-Adaptive\nInput Projection\nB(x_t)",
+        fillcolor="#BBDEFB"
+    ];
+
+    /* === Core State Update === */
+    state_update [
+        label="State Update\nh_t = A · h_{t-1} + B · x_t",
+        fillcolor="#C8E6C9"
+    ];
+
+    /* === Output Projection === */
+    gate_C [
+        label="Output Projection\nC(x_t)",
+        fillcolor="#FFE0B2"
+    ];
+
+    y_t [
+        label="Output\ny_t",
+        fillcolor="#FFF3E0"
+    ];
+
+    /* === Control / Interpretation === */
+    selective_logic [
+        label="Selective Memory Logic\n• Adaptive Forgetting\n• Adaptive Retention\n• Content-Aware Dynamics",
+        shape=note,
+        fillcolor="#E1F5FE"
+    ];
+
+    /* === Edges === */
+    x_t -> gate_B [label="input features"];
+    x_t -> gate_A [label="conditioning"];
+    h_prev -> gate_A [label="previous memory"];
+
+    gate_A -> state_update [label="A · h_{t-1}"];
+    gate_B -> state_update [label="B · x_t"];
+
+    state_update -> gate_C [label="hidden state h_t"];
+    gate_C -> y_t [label="output mapping"];
+
+    gate_A -> selective_logic [style=dashed, label="adaptive gating"];
+    gate_B -> selective_logic [style=dashed];
+    selective_logic -> state_update [style=dashed, label="selective scan"];
+
+    /* === Rank Alignment === */
+    { rank=same; x_t; h_prev; }
+    { rank=same; gate_A; gate_B; }
+    { rank=same; state_update; }
+    { rank=same; gate_C; y_t; }
+
+    /* === Caption === */
+    caption [
+        shape=plaintext,
+        label="Selective State-Space Model (SSM) Block — Mamba-2\n\nInput x_t and previous state h_{t-1} flow through\ninput-conditioned matrices A(x), B(x) enabling\nadaptive forgetting and retention.\n\nDesign preserves linear-time inference while\nretaining rich contextual reasoning.",
+        fontname="Helvetica",
+        fontsize=11
+    ];
+}

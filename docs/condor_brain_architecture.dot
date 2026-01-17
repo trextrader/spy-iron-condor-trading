@@ -1,0 +1,81 @@
+digraph CondorBrain {
+    rankdir=TD;
+    node [shape=box, style=filled, fontname="Arial", fontsize=12];
+    edge [color="#666666", penwidth=1.5];
+    bgcolor="transparent";
+
+    # Inputs
+    subgraph cluster_input {
+        label = "Input Processing";
+        style=dashed;
+        Input [label="Input Tensor\n(Batch, 240, 24)", fillcolor="#E0E0E0"];
+        NormInput [label="RobustScaler\n(Median/MAD)", fillcolor="#F5F5F5"];
+        Projection [label="Input Projection\nLinear(24 -> 512)", fillcolor="#F5F5F5"];
+    }
+
+    # Backbone
+    subgraph cluster_backbone {
+        label = "Mamba-2 Backbone\n(12 Layers)";
+        style=filled;
+        color="#FAFAFA";
+        
+        MambaBlock1 [label="Mamba Blocks 0-3\n(SSM + Conv1d)", fillcolor="#E1F5FE"];
+        VolAttn1 [label="VolGatedAttn\n(Global Context)", fillcolor="#FFF3E0", shape=component];
+        
+        MambaBlock2 [label="Mamba Blocks 4-7\n(SSM + Conv1d)", fillcolor="#E1F5FE"];
+        VolAttn2 [label="VolGatedAttn\n(Global Context)", fillcolor="#FFF3E0", shape=component];
+        
+        MambaBlock3 [label="Mamba Blocks 8-11\n(SSM + Conv1d)", fillcolor="#E1F5FE"];
+        
+        FinalNorm [label="RMSNorm\n(BF16 Friendly)", fillcolor="#F5F5F5"];
+    }
+
+    # Heads
+    subgraph cluster_heads {
+        label = "Multi-Task Heads";
+        style=dashed;
+        
+        LastState [label="Last Hidden State\n(Batch, 512)", fillcolor="#E0E0E0"];
+        
+        # Regime Helper
+        RegimeGen [label="Regime Detector\n(3-Class Logits)", fillcolor="#FFEBEE"];
+        
+        # Mixture of Experts
+        subgraph cluster_moe {
+            label = "Top-K Mixture of Experts";
+            bgcolor="#FFFFFF";
+            Router [label="Router Gate\nSelect Top-1 Expert", fillcolor="#F3E5F5", shape=diamond];
+            
+            Expert1 [label="Expert 1\n(Low Vol)", fillcolor="#E8F5E9"];
+            Expert2 [label="Expert 2\n(Normal)", fillcolor="#E8F5E9"];
+            Expert3 [label="Expert 3\n(High Vol)", fillcolor="#E8F5E9"];
+            
+            Sum [label="Weighted Sum", shape=circle, width=0.5, fixedsize=true, fillcolor="#F3E5F5"];
+        }
+    }
+
+    Output [label="Final Prediction\n(8 Parameters)", shape=doubleoctagon, fillcolor="#B9F6CA", fontsize=14];
+
+    # Connections
+    Input -> NormInput -> Projection -> MambaBlock1;
+    MambaBlock1 -> VolAttn1 -> MambaBlock2;
+    MambaBlock2 -> VolAttn2 -> MambaBlock3;
+    MambaBlock3 -> FinalNorm -> LastState;
+
+    LastState -> RegimeGen;
+    LastState -> Router;
+    
+    Router -> Expert1 [style=dashed, label="Gate"];
+    Router -> Expert2 [style=dashed];
+    Router -> Expert3 [style=dashed];
+    
+    LastState -> Expert1;
+    LastState -> Expert2;
+    LastState -> Expert3;
+    
+    Expert1 -> Sum;
+    Expert2 -> Sum;
+    Expert3 -> Sum;
+    
+    Sum -> Output;
+}

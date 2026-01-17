@@ -1,0 +1,274 @@
+"""
+CondorBrain GPU Backtest - Kaggle Notebook
+==========================================
+Upload this to Kaggle along with:
+1. condor_brain_e10_d1024_L24_lr1e04.pth (model weights)
+2. mamba_institutional_1m.csv (test data)
+
+Enable GPU: Settings -> Accelerator -> GPU T4 x2
+"""
+
+# =============================================================================
+# CELL 1: Install Dependencies
+# =============================================================================
+# !pip install mamba-ssm causal-conv1d pandas numpy torch --quiet
+
+# =============================================================================
+# CELL 2: Setup & Imports
+# =============================================================================
+import os
+import sys
+import torch
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+# Clone repo
+# !git clone https://github.com/trextrader/spy-iron-condor-trading.git repo
+# %cd repo
+
+# Add to path
+sys.path.insert(0, '/kaggle/working/repo')
+
+print(f"PyTorch: {torch.__version__}")
+print(f"CUDA available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
+
+# =============================================================================
+# CELL 3: Load Trained Model
+# =============================================================================
+from intelligence.condor_brain import CondorBrain
+
+# Model configuration (must match training)
+MODEL_CONFIG = {
+    'd_model': 1024,
+    'n_layers': 24,
+    'n_features': 24,
+    'n_outputs': 8,
+    'use_vol_gated_attn': True,
+    'use_topk_moe': True,
+    'moe_n_experts': 3,
+    'moe_k': 1,
+}
+
+# Initialize model
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model = CondorBrain(**MODEL_CONFIG).to(device)
+
+# Load weights - update path for Kaggle
+MODEL_PATH = "/kaggle/input/condor-brain-weights/condor_brain_e10_d1024_L24_lr1e04.pth"
+# Alternative: MODEL_PATH = "models/condor_brain_e10_d1024_L24_lr1e04.pth"
+
+checkpoint = torch.load(MODEL_PATH, map_location=device)
+model.load_state_dict(checkpoint['model_state_dict'] if 'model_state_dict' in checkpoint else checkpoint, strict=False)
+model.eval()
+
+print(f"✅ Model loaded on {device}")
+print(f"   Parameters: {sum(p.numel() for p in model.parameters()):,}")
+
+# =============================================================================
+# CELL 4: Load Test Data
+# =============================================================================
+DATA_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
+# Alternative: DATA_PATH = "data/processed/mamba_institutional_1m.csv"
+
+print("Loading data...")
+df = pd.read_csv(DATA_PATH)
+print(f"Loaded {len(df):,} rows")
+
+# Feature columns (must match training)
+FEATURE_COLS = [
+    'close', 'volume', 'high', 'low', 'open',
+    'vwap', 'returns_1', 'returns_5', 'returns_15',
+    'volatility_15', 'rsi_14', 'atr_14', 'adx_14',
+    'bb_upper', 'bb_lower', 'obv', 'mfi',
+    'call_volume', 'put_volume', 'total_oi',
+    'pcr_volume', 'pcr_oi', 'iv_atm', 'iv_skew'
+]
+
+# Ensure columns exist
+available_cols = [c for c in FEATURE_COLS if c in df.columns]
+print(f"Using {len(available_cols)} features")
+
+# =============================================================================
+# CELL 5: Prepare Sequences for Inference
+# =============================================================================
+LOOKBACK = 240
+
+def prepare_sequences(df, feature_cols, lookback=240):
+    """Prepare feature sequences for model inference."""
+    X = df[feature_cols].values.astype(np.float32)
+    
+    # Normalize (same as training)
+    median = np.median(X, axis=0, keepdims=True)
+    mad = np.median(np.abs(X - median), axis=0, keepdims=True) + 1e-8
+    X_norm = np.clip((X - median) / (1.4826 * mad), -10, 10)
+    
+    # Create sequences
+    n_samples = len(X_norm) - lookback + 1
+    sequences = np.zeros((n_samples, lookback, len(feature_cols)), dtype=np.float32)
+    
+    for i in range(n_samples):
+        sequences[i] = X_norm[i:i+lookback]
+    
+    return sequences
+
+print("Preparing sequences...")
+sequences = prepare_sequences(df, available_cols, LOOKBACK)
+print(f"Created {len(sequences):,} sequences of shape {sequences.shape}")
+
+# =============================================================================
+# CELL 6: Run GPU Inference
+# =============================================================================
+BATCH_SIZE = 512  # Kaggle T4 can handle this
+
+@torch.no_grad()
+def run_inference(model, sequences, batch_size=512, device='cuda'):
+    """Generate predictions on GPU."""
+    model.eval()
+    all_preds = []
+    all_regimes = []
+    
+    n_batches = (len(sequences) + batch_size - 1) // batch_size
+    
+    for i in range(n_batches):
+        start = i * batch_size
+        end = min(start + batch_size, len(sequences))
+        
+        batch = torch.tensor(sequences[start:end], device=device)
+        
+        outputs, regime_probs, h_T = model(batch)
+        
+        all_preds.append(outputs.cpu().numpy())
+        all_regimes.append(regime_probs.argmax(dim=-1).cpu().numpy())
+        
+        if (i + 1) % 100 == 0:
+            print(f"  Batch {i+1}/{n_batches}")
+    
+    return np.concatenate(all_preds), np.concatenate(all_regimes)
+
+print("Running GPU inference...")
+import time
+start_time = time.time()
+
+predictions, regimes = run_inference(model, sequences, BATCH_SIZE, device)
+
+elapsed = time.time() - start_time
+throughput = len(sequences) / elapsed
+
+print(f"✅ Inference complete!")
+print(f"   Time: {elapsed:.1f}s")
+print(f"   Throughput: {throughput:,.0f} samples/sec")
+print(f"   Predictions shape: {predictions.shape}")
+
+# =============================================================================
+# CELL 7: Analyze Predictions
+# =============================================================================
+# Output columns
+OUTPUT_COLS = [
+    'call_offset_pct', 'put_offset_pct', 'wing_width',
+    'dte', 'prob_of_profit', 'expected_roi', 'max_loss_pct', 'confidence'
+]
+
+# Create predictions DataFrame
+pred_df = pd.DataFrame(predictions, columns=OUTPUT_COLS)
+pred_df['regime'] = regimes
+pred_df['regime_label'] = pred_df['regime'].map({0: 'Low', 1: 'Normal', 2: 'High'})
+
+print("\n📊 Prediction Statistics:")
+print(pred_df.describe())
+
+print("\n📈 Regime Distribution:")
+print(pred_df['regime_label'].value_counts())
+
+print("\n🎯 Confidence Statistics:")
+print(f"   Mean confidence: {pred_df['confidence'].mean():.4f}")
+print(f"   High confidence (>0.7): {(pred_df['confidence'] > 0.7).sum():,} signals")
+
+# =============================================================================
+# CELL 8: Simulate Trading Strategy
+# =============================================================================
+def simulate_backtest(predictions, df, lookback=240):
+    """Simple backtest simulation using neural predictions."""
+    
+    # Align predictions with data
+    aligned_df = df.iloc[lookback-1:].reset_index(drop=True)
+    aligned_df = aligned_df.iloc[:len(predictions)].copy()
+    
+    # Add predictions
+    for i, col in enumerate(OUTPUT_COLS):
+        aligned_df[f'pred_{col}'] = predictions[:len(aligned_df), i]
+    
+    # Trading signals: enter when confidence > threshold
+    CONFIDENCE_THRESHOLD = 0.5
+    aligned_df['signal'] = aligned_df['pred_confidence'] > CONFIDENCE_THRESHOLD
+    
+    # Simulate returns (simplified)
+    # In reality, you'd need full options data for actual P&L
+    aligned_df['strategy_return'] = 0.0
+    
+    # For signals, use predicted expected_roi scaled by confidence
+    mask = aligned_df['signal']
+    aligned_df.loc[mask, 'strategy_return'] = (
+        aligned_df.loc[mask, 'pred_expected_roi'] * 
+        aligned_df.loc[mask, 'pred_confidence'] * 0.01  # Scale factor
+    )
+    
+    # Calculate cumulative returns
+    aligned_df['cumulative_return'] = (1 + aligned_df['strategy_return']).cumprod()
+    
+    return aligned_df
+
+print("\nRunning backtest simulation...")
+results_df = simulate_backtest(predictions, df, LOOKBACK)
+
+# Performance metrics
+total_return = results_df['cumulative_return'].iloc[-1] - 1
+n_trades = results_df['signal'].sum()
+sharpe = results_df['strategy_return'].mean() / (results_df['strategy_return'].std() + 1e-8) * np.sqrt(252 * 390)
+
+print(f"\n📈 Backtest Results:")
+print(f"   Total Return: {total_return*100:.2f}%")
+print(f"   Sharpe Ratio: {sharpe:.2f}")
+print(f"   Number of Signals: {n_trades:,}")
+print(f"   Win Rate: N/A (requires full options pricing)")
+
+# =============================================================================
+# CELL 9: Save Results
+# =============================================================================
+OUTPUT_PATH = "condor_brain_predictions.csv"
+results_df.to_csv(OUTPUT_PATH, index=False)
+print(f"\n✅ Saved predictions to {OUTPUT_PATH}")
+
+# Quick visualization (optional)
+import matplotlib.pyplot as plt
+
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+
+# Cumulative returns
+axes[0, 0].plot(results_df['cumulative_return'])
+axes[0, 0].set_title('Cumulative Returns')
+axes[0, 0].set_xlabel('Time')
+axes[0, 0].set_ylabel('Return')
+
+# Confidence distribution
+axes[0, 1].hist(results_df['pred_confidence'], bins=50, edgecolor='black')
+axes[0, 1].set_title('Confidence Distribution')
+axes[0, 1].set_xlabel('Confidence')
+
+# Regime over time
+axes[1, 0].scatter(range(len(results_df)), results_df['signal'].astype(int), alpha=0.1, s=1)
+axes[1, 0].set_title('Trading Signals')
+axes[1, 0].set_xlabel('Time')
+
+# Predicted ROI distribution
+axes[1, 1].hist(results_df['pred_expected_roi'], bins=50, edgecolor='black')
+axes[1, 1].set_title('Predicted ROI Distribution')
+axes[1, 1].set_xlabel('Expected ROI')
+
+plt.tight_layout()
+plt.savefig('backtest_analysis.png', dpi=150)
+plt.show()
+
+print("\n🎉 GPU Backtest Complete!")

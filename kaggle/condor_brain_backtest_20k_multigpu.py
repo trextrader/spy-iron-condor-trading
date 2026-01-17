@@ -1,0 +1,114 @@
+# ============================================================
+# CONDORBRAIN GPU BACKTEST - 20k SAMPLES (2 GPUs + AMP)
+# ============================================================
+print("🚀 Starting CondorBrain GPU Backtest (2 GPUs + AMP)...")
+
+# --- 0. FORCE GIT CLEAN (Fix import/debug errors) ---
+print("\n[0/6] Cleaning repository...")
+!cd spy-iron-condor-trading && git fetch origin && git reset --hard origin/main
+print("✅ Repo updated to latest main (clean condor_brain.py)")
+
+# --- 1. IMPORTS ---
+print("\n[1/6] Importing libraries...")
+import sys
+sys.path.insert(0, '/kaggle/working/spy-iron-condor-trading')
+import torch
+import torch.nn as nn
+import pandas as pd
+import numpy as np
+from tqdm import tqdm
+print("✅ Imports complete")
+
+# --- 2. CONFIG & GPU ---
+print("\n[2/6] Setup...")
+SAMPLE_SIZE = 20_000   # <--- REDUCED FOR SPEED
+LOOKBACK = 240
+BATCH_SIZE = 1024      # Higher batch size for 2 GPUs
+
+device = torch.device('cuda')
+n_gpus = torch.cuda.device_count()
+print(f"   GPU: {torch.cuda.get_device_name(0)}")
+print(f"   Count: {n_gpus}")
+
+# --- 3. LOAD MODEL (20-Epoch) ---
+print("\n[3/6] Loading CondorBrain 20-epoch model...")
+from intelligence.condor_brain import CondorBrain
+
+model = CondorBrain(
+    d_model=1024, n_layers=24, input_dim=24,
+    use_vol_gated_attn=True, use_topk_moe=True,
+    moe_n_experts=3, moe_k=1
+).to(device)
+
+if n_gpus > 1:
+    print(f"   ⚡ Enabling DataParallel on {n_gpus} GPUs")
+    model = nn.DataParallel(model)
+
+MODEL_PATH = "/kaggle/input/condor-brain-weights-e20/condor_brain_e20_d1024_L24_lr1e04.pth"
+checkpoint = torch.load(MODEL_PATH, map_location=device, weights_only=False)
+
+# Handle partial state dict loading for DataParallel
+if isinstance(model, nn.DataParallel):
+    model.module.load_state_dict(checkpoint, strict=False)
+else:
+    model.load_state_dict(checkpoint, strict=False)
+
+model.eval()
+print(f"✅ Model loaded")
+
+# --- 4. LOAD DATA ---
+print("\n[4/6] Loading data...")
+DATA_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
+df = pd.read_csv(DATA_PATH)
+print(f"   Rows: {len(df):,}")
+
+# Feature Engineering (Fastest)
+FEATURE_COLS = ['open', 'high', 'low', 'close', 'volume', 'delta', 'gamma', 
+                'vega', 'theta', 'iv', 'ivr', 'spread_ratio', 'te', 'rsi', 
+                'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 
+                'psar', 'strike', 'target_spot', 'max_dd_60m']
+
+X = df[FEATURE_COLS].values.astype(np.float32)
+X = np.nan_to_num(X, nan=0.0, posinf=10.0, neginf=-10.0)
+median = np.median(X, axis=0, keepdims=True)
+mad = np.median(np.abs(X - median), axis=0, keepdims=True) + 1e-8
+X_norm = np.clip((X - median) / (1.4826 * mad), -10, 10)
+print(f"✅ Features ready: {X_norm.shape}")
+
+# --- 5. INFERENCE (AMP + OPTIMIZED + MULTI-GPU) ---
+print("\n[5/6] Running Optimized GPU inference (20k samples)...")
+X_tensor = torch.tensor(X_norm[:SAMPLE_SIZE + LOOKBACK], device='cuda', dtype=torch.float32)
+
+# Unfold: (Sequence, Batch, Features) -> (Batch, Sequence, Features) for correct shape
+sequences_view = X_tensor.unfold(0, LOOKBACK, 1).transpose(1, 2)
+
+all_preds = []
+
+with torch.no_grad():
+    for start in tqdm(range(0, SAMPLE_SIZE, BATCH_SIZE), desc="Inference"):
+        end = min(start + BATCH_SIZE, SAMPLE_SIZE)
+        batch_seqs = sequences_view[start:end].contiguous()
+        
+        # AMP for speed on T4 (Mixed Precision)
+        with torch.amp.autocast('cuda'):
+            outputs, _, _ = model(batch_seqs)
+        
+        all_preds.append(outputs.float().cpu().numpy())
+
+predictions = np.concatenate(all_preds)
+print(f"✅ Predictions: {predictions.shape}")
+
+# --- 6. RESULTS ---
+print("\n[6/6] Analyzing results...")
+OUTPUT_COLS = ['call_offset', 'put_offset', 'wing_width', 'dte', 
+               'prob_profit', 'expected_roi', 'max_loss', 'confidence']
+
+pred_df = pd.DataFrame(predictions, columns=OUTPUT_COLS)
+
+print("\n📊 STATISTICS:")
+print(pred_df.describe())
+
+print("\n🎉 PERFORMANCE METRICS:")
+print(f"   Mean confidence: {pred_df['confidence'].mean():.4f}")
+print(f"   Std confidence: {pred_df['confidence'].std():.4f}")
+print(f"   High confidence signals (>0.7): {(pred_df['confidence'] > 0.7).sum():,}")
