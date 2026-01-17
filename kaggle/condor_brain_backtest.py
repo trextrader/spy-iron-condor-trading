@@ -56,6 +56,11 @@ MODEL_CONFIG = {
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = CondorBrain(**MODEL_CONFIG).to(device)
 
+# Enable Multi-GPU (DataParallel)
+if torch.cuda.device_count() > 1:
+    print(f"🚀 Multi-GPU Detected: {torch.cuda.device_count()} GPUs!")
+    model = torch.nn.DataParallel(model)
+
 # Load weights - update path for Kaggle
 MODEL_PATH = "condor_brain_seq_e1.pth"
 # Alternative: MODEL_PATH = "/kaggle/working/condor_brain_seq_e1.pth"
@@ -126,27 +131,32 @@ BATCH_SIZE = 512  # Kaggle T4 can handle this
 
 @torch.no_grad()
 def run_inference(model, sequences, batch_size=512, device='cuda'):
-    """Generate predictions on GPU."""
+    """Generate predictions on GPU with verbose progress."""
+    try:
+        from tqdm.auto import tqdm
+    except ImportError:
+        def tqdm(x, **kwargs): return x
+
     model.eval()
     all_preds = []
     all_regimes = []
     
     n_batches = (len(sequences) + batch_size - 1) // batch_size
     
-    for i in range(n_batches):
+    print(f"🚀 Starting Inference on {n_batches} batches ({len(sequences):,} samples)...")
+    
+    for i in tqdm(range(n_batches), desc="Inference", unit="batch"):
         start = i * batch_size
         end = min(start + batch_size, len(sequences))
         
         batch = torch.tensor(sequences[start:end], device=device)
         
+        # DataParallel returns tuple, standard returns tuple
         outputs, regime_probs, h_T = model(batch)
         
         all_preds.append(outputs.cpu().numpy())
         all_regimes.append(regime_probs.argmax(dim=-1).cpu().numpy())
         
-        if (i + 1) % 100 == 0:
-            print(f"  Batch {i+1}/{n_batches}")
-    
     return np.concatenate(all_preds), np.concatenate(all_regimes)
 
 print("Running GPU inference...")
