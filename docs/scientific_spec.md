@@ -818,18 +818,33 @@ Here, the transition matrix $\mathbf{A}$ is data-dependent (Selective Scan), all
 
 At every minute $t$, we evaluate the performance of all $M$ methods over a rolling window $W$ (default 128 measures).
 
-1.  **Instantaneous Error**:
-    $$ \epsilon_{m,t} = || \mathbf{y}_{true, t} - \mathbf{y}_{pred, m, t} ||^2 $$
+**1. Instantaneous Error**
 
-2.  **Smoothed Error (EWMA)**:
-    $$ \bar{\epsilon}_{m,t} = \alpha \epsilon_{m,t} + (1-\alpha) \bar{\epsilon}_{m, t-1} $$
+$$
+\epsilon_{m,t} = || \mathbf{y}_{true, t} - \mathbf{y}_{pred, m, t} ||^2
+$$
 
-3.  **Selection (Winner Takes All with Hysteresis)**:
-    $$ m^*_t = \underset{m}{\text{argmin}} (\bar{\epsilon}_{m,t}) $$
+**2. Smoothed Error (EWMA)**
+
+$$
+\bar{\epsilon}_{m,t} = \alpha \epsilon_{m,t} + (1-\alpha) \bar{\epsilon}_{m, t-1}
+$$
+
+**3. Selection (Winner Takes All with Hysteresis)**
+
+$$
+m^*_t = \underset{m}{\text{argmin}} (\bar{\epsilon}_{m,t})
+$$
     
-    *Hysteresis Constraint*: We switch from method $i$ to $j$ only if:
-    $$ \bar{\epsilon}_{j,t} < (1 - \delta) \bar{\epsilon}_{i,t} $$
-    Where $\delta$ (gamma) is the improvement threshold (e.g., 5%), preventing rapid oscillation (chattering) between similar models.
+**Hysteresis Constraint**
+
+We switch from method $i$ to $j$ only if:
+
+$$
+\bar{\epsilon}_{j,t} < (1 - \delta) \bar{\epsilon}_{i,t}
+$$
+
+Where $\delta$ (gamma) is the improvement threshold (e.g., 5%), preventing rapid oscillation (chattering) between similar models.
 
 ### 13.5 Multi-Step Horizon (Recursive Strategy)
 
