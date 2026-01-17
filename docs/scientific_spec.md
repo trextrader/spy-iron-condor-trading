@@ -757,4 +757,90 @@ Where $\tau$ is the temperature parameter controlling exploration.
 
 ---
 
-*Document Version: 2.2 | Last Updated: 2026-01-16*
+
+---
+
+## 13. Meta-Forecaster: Hybrid Ensemble Mathematics
+
+The **Meta-Forecaster** is a higher-order cognitive module that selects the optimal forecasting strategy in real-time. It arbitrates between six classical Signal Processing models and the CondorBrain Neural Network, ensuring robustness across all market regimes.
+
+### 13.1 Ensemble Theory
+Financial time series exhibit non-stationary properties where the "generating process" shifts between linear (AR-compliant) and non-linear (Neural-compliant) dynamics.
+The Meta-Forecaster minimizes the generalization error by dynamically weighting these experts.
+
+### 13.2 Classical Autoregressive (AR) Derivations
+
+The core assumption of the classical experts is that the feature $x_t$ is a linear combination of past values plus white noise $\epsilon_t$:
+
+$$
+x_t = \sum_{i=1}^{p} a_i x_{t-i} + \epsilon_t
+$$
+
+Where $p$ is the model order and $a_i$ are the AR coefficients.
+
+#### 13.2.1 Yule-Walker Equations (Method 1)
+We derive coefficients by minimizing the forward prediction error power. Multiplying the AR equation by $x_{t-k}$ and taking expectations yields the Yule-Walker equations:
+$$
+\Large \gamma_k = \sum_{i=1}^{p} a_i \gamma_{k-i}, \quad k=1, \dots, p
+$$
+Where $\gamma_k = E[x_t x_{t-k}]$ is the auto-covariance.
+In matrix form:
+$$
+\Large \mathbf{R} \mathbf{a} = \mathbf{r}
+$$
+where $\mathbf{R}$ is the Toeplitz covariance matrix. We solve for $\mathbf{a}$ using the Levinson-Durbin recursion ($O(p^2)$ complexity).
+
+#### 13.2.2 Burg's Maximum Entropy Method (Method 2)
+Burg's method minimizes both forward and backward prediction errors, ensuring a stable lattice filter.
+We minimize the sum of squares:
+$$
+\Large E_p = \sum_{t=p}^{N-1} [|f_{p,t}|^2 + |b_{p,t}|^2]
+$$
+where $f_{p,t}$ and $b_{p,t}$ are forward and backward errors.
+The reflection coefficient $k_p$ at stage $p$ is derived as:
+$$
+\Large k_p = \frac{-2 \sum f_{p-1,t} b_{p-1,t-1}^*}{\sum [|f_{p-1,t}|^2 + |b_{p-1,t-1}|^2]}
+$$
+This guarantees $|k_p| \le 1$, ensuring a stable spectral estimate.
+
+### 13.3 Neural Forecasting (Mode 7: CondorBrain)
+
+Unlike AR models, the CondorBrain creates a non-linear mapping via the Mamba State Space:
+$$
+\Large h_t = \sigma( \mathbf{A} h_{t-1} + \mathbf{B} x_t )
+$$
+$$
+\Large \hat{x}_{t+1} = \text{FeatureHead}(h_t)
+$$
+Here, the transition matrix $\mathbf{A}$ is data-dependent (Selective Scan), allowing the model to "reset" memory during regime shifts (e.g., jumps), which linear AR models cannot do.
+
+### 13.4 Dynamic Selection Criterion ($\epsilon$-Greedy)
+
+At every minute $t$, we evaluate the performance of all $M$ methods over a rolling window $W$ (default 128 measures).
+
+1.  **Instantaneous Error**:
+    $$ \epsilon_{m,t} = || \mathbf{y}_{true, t} - \mathbf{y}_{pred, m, t} ||^2 $$
+
+2.  **Smoothed Error (EWMA)**:
+    $$ \bar{\epsilon}_{m,t} = \alpha \epsilon_{m,t} + (1-\alpha) \bar{\epsilon}_{m, t-1} $$
+
+3.  **Selection (Winner Takes All with Hysteresis)**:
+    $$ m^*_t = \underset{m}{\text{argmin}} (\bar{\epsilon}_{m,t}) $$
+    
+    *Hysteresis Constraint*: We switch from method $i$ to $j$ only if:
+    $$ \bar{\epsilon}_{j,t} < (1 - \delta) \bar{\epsilon}_{i,t} $$
+    Where $\delta$ (gamma) is the improvement threshold (e.g., 5%), preventing rapid oscillation (chattering) between similar models.
+
+### 13.5 Multi-Step Horizon (Recursive Strategy)
+
+To predict $H=32$ bars into the future, we employ **Recursive Multi-Step Forecasting**:
+
+$$
+\Large \hat{x}_{t+k} = f_{m^*} ( \hat{x}_{t+k-1}, \dots, \hat{x}_{t+k-p} )
+$$
+
+While this accumulates error ($\text{Var}(\hat{x}_{t+k}) \propto k$), it ensures the trajectory is dynamically consistent with the chosen physics engine (AR or Neural) rather than a discontinuous direct jump.
+
+---
+
+*Document Version: 2.3 | Last Updated: 2026-01-17*
