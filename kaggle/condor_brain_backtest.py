@@ -46,7 +46,6 @@ MODEL_CONFIG = {
     'd_model': 512,    # UPDATED: Matches condor_brain_seq_e1
     'n_layers': 12,    # UPDATED: Matches condor_brain_seq_e1
     'input_dim': 24,   # Renamed from n_features to match __init__
-    'n_outputs': 8,
     'use_vol_gated_attn': True,
     'use_topk_moe': True,
     'moe_n_experts': 3,
