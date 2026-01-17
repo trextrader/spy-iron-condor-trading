@@ -83,19 +83,34 @@ print("Loading data...")
 df = pd.read_csv(DATA_PATH)
 print(f"Loaded {len(df):,} rows")
 
-# Feature columns (must match training)
+# Feature columns (MUST MATCH TRAINING EXACTLY)
 FEATURE_COLS = [
-    'close', 'volume', 'high', 'low', 'open',
-    'vwap', 'returns_1', 'returns_5', 'returns_15',
-    'volatility_15', 'rsi_14', 'atr_14', 'adx_14',
-    'bb_upper', 'bb_lower', 'obv', 'mfi',
-    'call_volume', 'put_volume', 'total_oi',
-    'pcr_volume', 'pcr_oi', 'iv_atm', 'iv_skew'
+    'open', 'high', 'low', 'close', 'volume', 'delta', 'gamma', 
+    'vega', 'theta', 'iv', 'ivr', 'spread_ratio', 'te', 'rsi', 
+    'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 
+    'psar', 'strike', 'target_spot', 'max_dd_60m'
 ]
 
 # Ensure columns exist
 available_cols = [c for c in FEATURE_COLS if c in df.columns]
-print(f"Using {len(available_cols)} features")
+missing_cols = set(FEATURE_COLS) - set(available_cols)
+if missing_cols:
+    print(f"⚠️ Warning: Missing columns: {missing_cols}")
+    print("   Attempting to generate basic indicators (Mocking Greeks)...")
+    # Basic Feature Engineering for Backtest (if columns missing)
+    # Greeks/IV might be missing in raw OHLCV, so we mock them for structural compliance
+    for col in missing_cols:
+        df[col] = 0.0 # Default pad
+    
+    available_cols = FEATURE_COLS # Now all exist (mocked or real)
+
+print(f"Using {len(available_cols)} features (Target: {len(FEATURE_COLS)})")
+
+# Slice Data to avoid OOM (Last 1M rows or fewer)
+MAX_ROWS = 1_000_000
+if len(df) > MAX_ROWS:
+    print(f"✂️ Slicing data to last {MAX_ROWS:,} rows to prevent OOM...")
+    df = df.iloc[-MAX_ROWS:].reset_index(drop=True)
 
 # =============================================================================
 # CELL 5: Prepare Sequences for Inference
