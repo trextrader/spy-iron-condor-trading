@@ -424,9 +424,18 @@ class CondorBrain(nn.Module):
             horizon_forecast = self.horizon_forecaster(last_hidden, num_days=forecast_days)
         
         # Get expert outputs (TopKMoE or traditional 3-expert MoE)
+        moe_routing_info = None
+        
         if self.use_topk_moe and self.moe_head is not None:
             # Sparse TopKMoE output
-            outputs = self.moe_head(last_hidden)  # (B, 8)
+            if return_experts and hasattr(self.moe_head, 'forward_with_routing'):
+                outputs, moe_probs, moe_indices = self.moe_head.forward_with_routing(last_hidden)
+                moe_routing_info = {
+                    'routing_weights': moe_probs,
+                    'selected_indices': moe_indices
+                }
+            else:
+                outputs = self.moe_head(last_hidden)  # (B, 8)
         else:
             # Traditional 3-expert weighted MoE
             out_low = self.expert_low(last_hidden)       # (B, 8)
@@ -466,9 +475,9 @@ class CondorBrain(nn.Module):
             res.append(None)
         
         if return_experts:
-            # TopKMoE doesn't have discrete expert outputs
+            # TopKMoE returns routing weights
             if self.use_topk_moe:
-                res.append(None)
+                res.append(moe_routing_info)
             else:
                 res.append({
                     'low': out_low,
@@ -661,10 +670,10 @@ class CondorBrainEngine:
     def __init__(
         self,
         model_path: str = None,  # Auto-discover if None
-        d_model: int = 1024,
-        n_layers: int = 24,  # Default to 24 for v2.2
+        d_model: int = 512,      # UPDATED: v2.2 Production (T4 Optimized)
+        n_layers: int = 12,      # UPDATED: v2.2 Production
         input_dim: int = 24,
-        lookback: int = 240,
+        lookback: int = 256,     # UPDATED: v2.2 Sequence Length
         use_compile: bool = True,
         use_fp16: bool = True,
         warmup_iterations: int = 3,

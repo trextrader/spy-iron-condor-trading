@@ -41,10 +41,11 @@ if torch.cuda.is_available():
 from intelligence.condor_brain import CondorBrain
 
 # Model configuration (must match training)
+# Model configuration (must match training)
 MODEL_CONFIG = {
-    'd_model': 1024,
-    'n_layers': 24,
-    'n_features': 24,
+    'd_model': 512,    # UPDATED: Matches condor_brain_seq_e1
+    'n_layers': 12,    # UPDATED: Matches condor_brain_seq_e1
+    'input_dim': 24,   # Renamed from n_features to match __init__
     'n_outputs': 8,
     'use_vol_gated_attn': True,
     'use_topk_moe': True,
@@ -57,7 +58,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = CondorBrain(**MODEL_CONFIG).to(device)
 
 # Load weights - update path for Kaggle
-MODEL_PATH = "/kaggle/input/condor-brain-weights/condor_brain_e10_d1024_L24_lr1e04.pth"
+MODEL_PATH = "condor_brain_seq_e1.pth"
+# Alternative: MODEL_PATH = "/kaggle/working/condor_brain_seq_e1.pth"
 # Alternative: MODEL_PATH = "models/condor_brain_e10_d1024_L24_lr1e04.pth"
 
 checkpoint = torch.load(MODEL_PATH, map_location=device)
@@ -94,9 +96,9 @@ print(f"Using {len(available_cols)} features")
 # =============================================================================
 # CELL 5: Prepare Sequences for Inference
 # =============================================================================
-LOOKBACK = 240
+LOOKBACK = 256  # UPDATED: Matches SEQ_LEN
 
-def prepare_sequences(df, feature_cols, lookback=240):
+def prepare_sequences(df, feature_cols, lookback=256):
     """Prepare feature sequences for model inference."""
     X = df[feature_cols].values.astype(np.float32)
     

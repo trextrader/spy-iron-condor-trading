@@ -16,7 +16,21 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 D_MODEL = 512
 N_LAYERS = 12
 SEQ_LEN = 256
-SEQ_MODEL_PATH = "condor_brain_seq_e1.pth" # Adjust epoch as needed
+
+# Auto-discover model path (Portable: Local vs Kaggle)
+POSSIBLE_PATHS = [
+    "condor_brain_seq_e1.pth",                        # Current dir
+    "/kaggle/working/condor_brain_seq_e1.pth",        # Kaggle Output
+    "/kaggle/input/condor-brain-seq-e1/condor_brain_seq_e1.pth", # Kaggle Input (if uploaded)
+    "models/condor_brain_seq_e1.pth",                 # Local Repo
+]
+SEQ_MODEL_PATH = "condor_brain_seq_e1.pth" # Default
+import os
+for p in POSSIBLE_PATHS:
+    if os.path.exists(p):
+        SEQ_MODEL_PATH = p
+        print(f"   Found model at: {SEQ_MODEL_PATH}")
+        break
 
 # 2. Initialize Model
 model = CondorBrain(
