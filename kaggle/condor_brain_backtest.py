@@ -28,7 +28,7 @@ from pathlib import Path
 # %cd repo
 
 # Add to path
-sys.path.insert(0, '/kaggle/working/repo')
+sys.path.insert(0, '/kaggle/working/spy-iron-condor-trading')
 
 print(f"PyTorch: {torch.__version__}")
 print(f"CUDA available: {torch.cuda.is_available()}")
