@@ -293,6 +293,9 @@ def simulate_backtest(predictions, df, lookback=240):
     mask = aligned_df['signal']
     aligned_df.loc[mask, 'strategy_return'] = (
         aligned_df.loc[mask, 'pred_expected_roi'] * 
+        aligned_df.loc[mask, 'pred_confidence'] * 0.01  # Scale factor
+    )
+
     # Calculate cumulative returns
     aligned_df['cumulative_return'] = (1 + aligned_df['strategy_return']).cumprod()
     
