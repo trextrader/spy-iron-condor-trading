@@ -106,10 +106,10 @@ if missing_cols:
 
 print(f"Using {len(available_cols)} features (Target: {len(FEATURE_COLS)})")
 
-# Slice Data to avoid OOM (Last 200k rows => ~5GB RAM for Sequences)
-MAX_ROWS = 200_000
+# Slice Data to avoid OOM (Last 1M rows)
+MAX_ROWS = 1_000_000
 if len(df) > MAX_ROWS:
-    print(f"✂️ Slicing data to last {MAX_ROWS:,} rows to prevent OOM...")
+    print(f"✂️ Slicing data to last {MAX_ROWS:,} rows (User Requested Limit)...")
     df = df.iloc[-MAX_ROWS:].reset_index(drop=True)
 
 # =============================================================================
