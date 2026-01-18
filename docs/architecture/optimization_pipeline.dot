@@ -18,67 +18,72 @@ digraph OptimizationPipeline {
         label = "1. Data Acquisition";
         style="dashed,rounded";
         color="#888888";
+        fontcolor="white";
         bgcolor="#0a0a0a";
         
         {rank=same; Alpaca; OptionsData}
-        Alpaca [label="Alpaca Intraday\n(15-Min Bars)", fillcolor="#E3F2FD", color="#2196F3"];
-        OptionsData [label="Option Feed\n(IVolatility)", fillcolor="#E3F2FD", color="#2196F3"];
+        Alpaca [label="Alpaca Intraday\n(15-Min Bars)", fillcolor="#1a237e", color="white", fontcolor="white"];
+        OptionsData [label="Option Feed\n(IVolatility)", fillcolor="#1a237e", color="white", fontcolor="white"];
     }
 
     # --- Training Pipeline ---
     subgraph cluster_training {
         label = "2. Neural Training (Offline)";
         style="filled,rounded";
-        color="#E8EAF6";
+        color="#424242";
+        fontcolor="white";
         bgcolor="#0a0a0a";
         
-        TrainScript [label="Train Harness\n(train_mamba.py)", shape=component, fillcolor="#FFCDD2", color="#D32F2F"];
+        TrainScript [label="Train Harness\n(train_mamba.py)", shape=component, fillcolor="#b71c1c", color="white", fontcolor="white"];
         
         subgraph cluster_model {
             label = "DeepMamba 2 Network";
             style=filled;
-            color="white";
+            color="#212121";
+            fontcolor="white";
             
-            SSM [label="Mamba 2 Block Stack\n(32 Layers / 1024 Dim)\n[State Space Duality]", shape=octagon, fillcolor="#EF9A9A", color="#C62828"];
+            SSM [label="Mamba 2 Block Stack\n(32 Layers / 1024 Dim)\n[State Space Duality]", shape=octagon, fillcolor="#880e4f", color="white", fontcolor="white"];
         }
 
-        ModelWeights [label="Model Weights\n(mamba_active.pth)", shape=note, fillcolor="#FFF9C4", color="#FBC02D"];
+        ModelWeights [label="Model Weights\n(mamba_active.pth)", shape=note, fillcolor="#f57f17", color="white", fontcolor="white"];
         
-        Alpaca -> TrainScript [label="Fetch History"];
-        TrainScript -> SSM [label="Train (GPU)"];
-        SSM -> ModelWeights [label="Save State"];
+        Alpaca -> TrainScript [label="Fetch History", color="white", fontcolor="white"];
+        TrainScript -> SSM [label="Train (GPU)", color="white", fontcolor="white"];
+        SSM -> ModelWeights [label="Save State", color="white", fontcolor="white"];
     }
 
     # --- Production Runtime ---
     subgraph cluster_runtime {
         label = "3. Production Optimizer (Runtime)";
         style="filled,rounded";
-        color="#E8F5E9";
+        color="#2e7d32";
+        fontcolor="white";
         bgcolor="#0a0a0a";
         
-        Optimizer [label="Optimizer Engine\n(Segmented Grid Search)", shape=hexagon, fillcolor="#A5D6A7", color="#2E7D32", fontsize=12, penwidth=2];
+        Optimizer [label="Optimizer Engine\n(Segmented Grid Search)", shape=hexagon, fillcolor="#1b5e20", color="white", fontcolor="white", fontsize=12, penwidth=2];
         
         subgraph cluster_backtest {
             label = "Backtest Instance";
             style=filled;
-            color="white";
+            color="#212121";
+            fontcolor="white";
             
-            Inference [label="Inference Engine\n(Batch GPU Pre-Compute)", fillcolor="#FFCCBC", color="#D84315"];
-            Strategy [label="Iron Condor Strategy\n(4-Leg Execution)", shape=folder, fillcolor="#C8E6C9", color="#2E7D32"];
+            Inference [label="Inference Engine\n(Batch GPU Pre-Compute)", fillcolor="#e64a19", color="white", fontcolor="white"];
+            Strategy [label="Iron Condor Strategy\n(4-Leg Execution)", shape=folder, fillcolor="#33691e", color="white", fontcolor="white"];
             
-            Inference -> Strategy [label="Regime Signal"];
+            Inference -> Strategy [label="Regime Signal", color="white", fontcolor="white"];
         }
 
-        Metrics [label="Profit / MaxDD\nReport", shape=ellipse, fillcolor="#EEEEEE"];
+        Metrics [label="Profit / MaxDD\nReport", shape=ellipse, fillcolor="#424242", color="white", fontcolor="white"];
         
-        Optimizer -> Strategy [label="Inject Params", style=dashed];
-        Strategy -> Metrics [label="Result"];
-        Metrics -> Optimizer [label="Feedback"];
+        Optimizer -> Strategy [label="Inject Params", style=dashed, color="white", fontcolor="white"];
+        Strategy -> Metrics [label="Result", color="white", fontcolor="white"];
+        Metrics -> Optimizer [label="Feedback", color="white", fontcolor="white"];
     }
 
     # Inter-Cluster Edges
-    ModelWeights -> Inference [label="Load Weights", lhead=cluster_backtest];
-    OptionsData -> Strategy [label="Tick Data"];
+    ModelWeights -> Inference [label="Load Weights", lhead=cluster_backtest, color="white", fontcolor="white"];
+    OptionsData -> Strategy [label="Tick Data", color="white", fontcolor="white"];
     
 }
 
