@@ -1,0 +1,78 @@
+# CondorBrain Advanced Model Enhancements
+
+## Phase 1: Indicator Modules
+- [x] Create `intelligence/indicators/__init__.py`
+- [x] Create `intelligence/indicators/manifold_volatility.py`
+- [x] Create `intelligence/indicators/tda_signature.py`
+- [x] Create `intelligence/indicators/policy_outputs.py`
+
+## Phase 2: Core Enhancement Modules
+- [x] Create `intelligence/condor_loss.py` (CompositeCondorLoss)
+- [x] Create `intelligence/vol_gated_attn.py` (VolGatedAttn)
+- [x] Create `intelligence/topk_moe.py` (TopKMoE)
+
+## Phase 3: Architecture Integration
+- [x] Modify `intelligence/condor_brain.py` to integrate new modules
+- [x] Modify `intelligence/train_condor_brain.py` for composite loss
+
+## Phase 4: Testing & Documentation
+- [x] Create `tests/test_model_enhancements.py`
+- [x] Update `docs/scientific_spec.md` with new mathematics (Section 13: Meta-Forecaster)
+- [x] Update `CHANGELOG.md` with v2.2.0 release notes
+- [x] Create `docs/architecture/enhanced_architecture.dot` diagram
+- [x] Generate PNG from Graphviz diagram
+
+## Phase 5: Training Verification
+- [x] Training smoke test with composite loss (Colab A100, 2M rows)
+- [x] Fix cuDNN GRU BF16 compatibility issues  
+- [x] Fix TopKMoE `return_experts` null handling
+- [x] Fix `sample_predictions` null experts handling
+- [x] Create walkthrough document
+
+## Phase 6: Inference & Production Integration
+- [x] Audit repo for enhancement compatibility
+- [x] Update `CondorBrainEngine` with enhancement flags
+- [x] Add model auto-discovery (`_find_latest_model`)
+- [x] Update `options_strategy.py` model detection
+- [x] Complete 2-epoch training, saved 394MB model
+
+## Phase 7: Backtesting Validation
+- [x] Run backtest with 20-epoch CondorBrain model (Failed: Model Collapsed)
+- [x] Retrain Production Model (Sequence Mode, 256-ctx, 3 Epochs)
+- [x] Verify new model with Inference Demo script (Verified: Loaded Successfully Remote)
+- [x] Verify strategy performance metrics (Pipeline Verified: Model outputs are collapsed/zeros)
+- [ ] Generate equity curve and report
+
+## Phase 8: Model Retraining (Fixing Collapse)
+- [x] Create `kaggle/condor_brain_retrain_v2.py` (Higher LR, specific init)
+- [x] Push to Repo
+- [x] Instruction: Run on Kaggle
+- [x] Monitor Training (Status: RESCUED | Epoch 1 Saved | Loss=0.15)
+- [x] Download Model Artifacts (`condor_brain_retrain_e1.pth`)
+- [x] Verify Inference (Local & Kaggle)
+    - **Result**: Valid Signals (Offsets ~$1.98, Prob=50.6%) on Demo.
+    - **Issue**: Backtest initially failed due to initialization bug.
+- [x] Diagnose Normalization Stats (Result: Stats OK. Volume MAD ~1300 is expected).
+- [/] Run Full Backtest (Status: RUNNING on Kaggle | 2xT4 | retrain_e1.pth)
+
+## Phase 9: Advanced Model Enhancements (Completed)
+- [x] **Diffusion Head**: Implement Generative Trajectory Refinement (`intelligence/generative/diffusion.py`)
+- [x] **TDA Integration**: Verify `tda_signature.py` (Persistent Homology)
+- [x] **Full Architecture**: Generate `docs/architecture/full_system_architecture.png`
+- [x] **Documentation**: Update `README.md` and `scientific_spec.md`
+- [x] **Diagram Audit**: Ensure all diagrams (including `optimization_pipeline`) are Dark Mode & V2.2 compliant
+- [x] **LaTeX Fixes**: Repair broken math rendering in `README.md`
+
+## Phase 10: Meta-Forecaster (Hybrid Ensemble)
+- [x] Implement `MetaForecaster` class (Algorithm Spec: Methods 1-7, Epsilon Logic)
+- [ ] Integrate Meta-Forecaster into Backtest Engine (PAUSED: Sync with Training)
+- [x] Verify ensemble switching logic (Local Unit Test Passed)
+
+## Training Log (v2.2 Production)
+- **Epoch 1**:
+    - Train: `L_pol=0.83`, `L_feat=574.2` (Converging).
+    - Val: `L_pol=0.6877`, `L_feat=0.0277` (No Overfitting).
+    - Saved: `condor_brain_seq_e1.pth` (394MB)
+- [ ] Epoch 2
+- [ ] Epoch 3
+- [ ] Epoch 4 (Final)
