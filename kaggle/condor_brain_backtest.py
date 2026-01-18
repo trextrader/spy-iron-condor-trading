@@ -56,10 +56,8 @@ MODEL_CONFIG = {
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = CondorBrain(**MODEL_CONFIG).to(device)
 
-# Enable Multi-GPU (DataParallel)
-if torch.cuda.device_count() > 1:
-    print(f"🚀 Multi-GPU Detected: {torch.cuda.device_count()} GPUs!")
-    model = torch.nn.DataParallel(model)
+# Multi-GPU (DataParallel) will be enabled AFTER loading weights
+# to ensure keys match (checkpoint has no 'module.' prefix)
 
 # Load weights - prioritize the new retrained model
 MODEL_PATH = "condor_brain_retrain_e1.pth"
@@ -89,8 +87,20 @@ else:
     ckpt_median = None
     ckpt_mad = None
 
-model.load_state_dict(state_dict, strict=False)
+# LOAD WEIGHTS FIRST (Before DataParallel)
+print("   Loading state dict...")
+try:
+    model.load_state_dict(state_dict, strict=True)
+except RuntimeError as e:
+    print(f"⚠️ Strict loading failed, trying strict=False. Error: {e}")
+    model.load_state_dict(state_dict, strict=False)
+
 model.eval()
+
+# Enable Multi-GPU (DataParallel) NOW
+if torch.cuda.device_count() > 1:
+    print(f"🚀 Multi-GPU Detected: {torch.cuda.device_count()} GPUs!")
+    model = torch.nn.DataParallel(model)
 
 print(f"✅ Model loaded on {device}")
 print(f"   Parameters: {sum(p.numel() for p in model.parameters()):,}")
