@@ -953,6 +953,20 @@ $$
 
 While this accumulates error ($\text{Var}(\hat{x}_{t+k}) \propto k$), it ensures the trajectory is dynamically consistent with the chosen physics engine (AR or Neural) rather than a discontinuous direct jump.
 
+### 14. Generative & Topological Enhancements (v2.2)
+
+To address the limitations of pure regression in high-volatility regimes, CondorBrain integrates generative and geometric modules.
+
+#### 14.1 Conditional Diffusion Head
+A Denoising Diffusion Probabilistic Model (DDPM) is attached to the Mamba backbone to refine the deterministic forecast into a probabilistic trajectory.
+- **Process**: The model $x_\theta(x_t, t, h)$ learns to reverse a Gaussian noise process conditioned on the hidden state $h$.
+- **Sampling**: At inference, we sample $N$ trajectories to estimate the confidence intervals of future price paths.
+
+#### 14.2 Topological Data Analysis (TDA)
+We employ **Persistent Homology** to characterizing market regimes by their topological signature (Betti numbers).
+- **Takens Embedding**: The time series is embedded into a point cloud in $\mathbb{R}^m$.
+- **H1 Persistence**: We calculate the lifespan of homological loops. Long-lived loops correspond to stable cycles (ranging markets), while trivial topology suggests strong trends.
+
 ---
 
 *Document Version: 2.3 | Last Updated: 2026-01-17*

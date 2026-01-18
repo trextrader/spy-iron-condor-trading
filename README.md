@@ -26,7 +26,7 @@ CondorBrain is an advanced algorithmic trading system designed for SPY Iron Cond
 - **High-Fidelity Backtesting**: 5-minute bar simulation with accurate mark-to-market P&L, leg-by-leg exit logic, and realistic slippage/commissions
 - **Phased Serial Optimization**: Grid-search engine optimizing for **Net Profit / Max Drawdown** ratio with hardware benchmarking
 - **10-Factor Fuzzy Intelligence**: Dynamic position sizing based on MTF Consensus, IV Rank, VIX Regime, RSI, ADX, Bollinger Bands, Stochastic, Volume, SMA Distance, and **Parabolic SAR**
-- **Mamba 2 Neural Forecasting**: Deep State-Space Model (12-32 layers, 256-1024 dim) trained on **Alpaca 15-Min Intraday Data** (2023-2025). Uses Structurated State Space Duality (SSD) to predict next-bar returns with GPU acceleration.
+- **Mamba 2 Neural Forecasting**: Deep State-Space Model (12-32 layers) with **Diffusion Head** for trajectory refinement and **Topological Data Analysis (TDA)** for regime detection.
 
 ## 🧠 DeepMamba 2 Neural Engine
 
@@ -240,7 +240,7 @@ The system architecture is tiered into four layers of intelligence, combining hi
 - **[Institutional Execution Flow](docs/architecture/institutional_execution_flow.png):** The complete lifecycle from data to trade analysis.
 
 ### Intelligence Flow Overview
-![CondorIntelligence Architecture](docs/architecture/condor_intelligence_flow_premium.png)
+![CondorIntelligence Architecture](docs/architecture/full_system_architecture.png)
 
 ### Module Hierarchy
 ```
@@ -787,13 +787,11 @@ $$ \Delta_t = \text{Softplus}(\text{Linear}(x_t)) $$
 $$ \mathbf{B}_t = \text{Linear}(x_t), \quad \mathbf{C}_t = \text{Linear}(x_t) $$
 
 ### 7.3 Feature Engineering (Input Vector)
-The model consumes a 4-dimensional feature vector per bar, embedded into $d_{model}$:
-$$ \vec{V}_t = [ \Delta \log(P_t), \text{RSI}_{norm}, \text{ATR}_{pct}, \text{Vol}_{ratio} ] $$
+The model consumes advanced features including TDA signatures and Manifold Volatility:
+$$ \vec{V}_t = [ \Delta \log(P_t), \text{RSI}_{norm}, \text{Curvature}, \text{Persistence}_1 ] $$
 
-### 7.4 Model Persistence
-Weights are stored in the `models/` directory:
-*   `mamba_v1.pth`: Baseline stable model.
-*   `mamba_active.pth`: Latest optimized weights from the current Phase 6 run.
+### 7.4 Generative Diffusion Head
+A conditional diffusion module (DDPM) refines the Mamba hidden state into a probabilistic price trajectory (32 steps), capturing uncertainty in high-volatility regimes.
 
 ---
 
