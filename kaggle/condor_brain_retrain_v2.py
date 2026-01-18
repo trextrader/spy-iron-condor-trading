@@ -30,9 +30,9 @@ SEQ_LEN = 256
 PREDICT_HORIZON = 32
 
 # Optimization Flags
-USE_DATAPARALLEL = False      # Set False for T4 on Kaggle (often faster due to gather overhead)
-DIFFUSION_WARMUP_EPOCHS = 2   # Disable diffusion for first N epochs to speed up policy learning
-DIFFUSION_STEPS_TRAIN = 50    # Default steps (can be reduced if needed, but training is O(1))
+USE_DATAPARALLEL = True       # Re-enabling: Dual T4 is significantly faster (1.76 it/s vs 0.67 it/s)
+DIFFUSION_WARMUP_EPOCHS = 2   # Keep this: Skipping diffusion on 2 GPUs will be max speed
+DIFFUSION_STEPS_TRAIN = 50    # Default steps
 
 device = torch.device('cuda')
 print(f"   GPU: {torch.cuda.get_device_name(0)}")
