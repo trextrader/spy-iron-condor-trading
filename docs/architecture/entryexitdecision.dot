@@ -1,4 +1,5 @@
 digraph EntryExitFlowchart {
+    bgcolor="#0a0a0a";
       rankdir=TB;
       node [shape=box, style=rounded, fontname="Arial"];
       edge [fontname="Arial", fontsize=10];

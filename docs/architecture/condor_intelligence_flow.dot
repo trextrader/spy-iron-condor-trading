@@ -1,10 +1,14 @@
 digraph CondorIntelligence {
     rankdir=TB;
-    node [shape=box, style=filled, fontname="Helvetica", fontsize=10];
+    bgcolor="#0a0a0a";
+    node [shape=box, style=filled, fontname="Helvetica", fontsize=10, color="white", fontcolor="black"];
+    edge [color="white", fontcolor="white"];
     compound=true;
+    fontcolor="white";
 
     subgraph cluster_input {
         label = "1. Data Inception (24 Parameters)";
+        fontcolor="white";
         style = dashed;
         color = blue;
         input_spot [label="Spot Dynamics (5)\n(OHLCV)", fillcolor="#e1f5fe"];
@@ -15,6 +19,7 @@ digraph CondorIntelligence {
 
     subgraph cluster_preprocess {
         label = "2. Tactical Normalization";
+        fontcolor="white";
         color = orange;
         norm [label="Z-Score (Med/MAD)\n+ Tanh Clipping (-10, 10)", fillcolor="#fff3e0"];
         gpu_unfold [label="GPU-Resident Unfold\n(O(1) Memory Views)", fillcolor="#fff3e0"];
@@ -22,6 +27,7 @@ digraph CondorIntelligence {
 
     subgraph cluster_backbone {
         label = "3. DeepMamba-2 Architecture";
+        fontcolor="white";
         color = purple;
         mamba_layers [label="24x Selective SSM Layers\n(Selective Scan Kernel)", fillcolor="#f3e5f5"];
         bf16 [label="BF16 Precision\n(H100 Optimized)", fillcolor="#f3e5f5"];
@@ -29,22 +35,26 @@ digraph CondorIntelligence {
 
     subgraph cluster_heads {
         label = "4. Multi-Channel Intelligence (23 Discrete Heads)";
+        fontcolor="white";
         color = green;
         
         subgraph cluster_policy {
             label = "Policy Branch (8)";
+            fontcolor="black";
             style = dotted;
             head_ic [label="Iron Condor Policy\nOffsets, Width, DTE, POP, ROI", fillcolor="#e8f5e9"];
         }
         
         subgraph cluster_regime {
             label = "Regime Experts (3)";
+            fontcolor="black";
             style = dotted;
             head_moe [label="MoE Expert Mixing\n(Low, Normal, High Vol)", fillcolor="#e8f5e9"];
         }
         
         subgraph cluster_horizon {
             label = "Horizon Forecast (12)";
+            fontcolor="black";
             style = dotted;
             head_price [label="1/3/5/10d Trajectory\n(Mean, Var, Direction)", fillcolor="#e8f5e9"];
         }
@@ -52,6 +62,7 @@ digraph CondorIntelligence {
 
     subgraph cluster_training {
         label = "5. Multi-Objective Learning";
+        fontcolor="white";
         color = red;
         loss [label="CondorLoss (Lagrangian)\n(Huber + XEnt + MSE)", fillcolor="#ffebee"];
         val [label="Cross-Validation\n(No-Shuffle Temporal Split)", fillcolor="#ffebee"];
@@ -59,6 +70,7 @@ digraph CondorIntelligence {
 
     subgraph cluster_logic {
         label = "6. Neural-Fuzzy Decision Suite";
+        fontcolor="white";
         color = navy;
         fuzzy [label="Fuzzy Engine\n(11 Membership Tiers)", fillcolor="#e8eaf6", fontcolor=black];
         money [label="Money Management\n(Risk-Weighted Sizing)", fillcolor="#3f51b5", fontcolor=white];

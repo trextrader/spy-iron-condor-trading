@@ -1,6 +1,6 @@
 digraph DataPipeline {
     rankdir=TB;
-    bgcolor="#1e1e1e";
+    bgcolor="#0a0a0a";
     fontname="Helvetica";
     fontcolor="#e0e0e0";
     node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
@@ -48,16 +48,16 @@ digraph DataPipeline {
 
     // Stage 5: MarketSnapshot
     market_snapshot [label=<<table border="0" cellborder="1" cellspacing="0">
-        <tr><td bgcolor="#f39c12" colspan="2"><b>MarketSnapshot</b></td></tr>
+        <tr><td bgcolor="#0a0a0a" colspan="2"><b>MarketSnapshot</b></td></tr>
         <tr><td align="left">ts</td><td align="left">2025-07-03 14:30:00+00:00</td></tr>
         <tr><td align="left">symbol</td><td align="left">SPY</td></tr>
         <tr><td align="left">spot</td><td align="left">625.42</td></tr>
         <tr><td align="left">bars</td><td align="left">DataFrame[600 rows × 5 cols]</td></tr>
         <tr><td align="left">option_chain</td><td align="left">DataFrame[624 rows × 16 cols]</td></tr>
-        <tr><td bgcolor="#85c1e9" align="left">option_used_ts</td><td align="left">2025-07-03 14:25:00+00:00</td></tr>
-        <tr><td bgcolor="#85c1e9" align="left">option_lag_sec</td><td align="left">300.0</td></tr>
-        <tr><td bgcolor="#85c1e9" align="left">option_iv_conf</td><td align="left">0.707</td></tr>
-        <tr><td bgcolor="#85c1e9" align="left">option_align_mode</td><td align="left">prior</td></tr>
+        <tr><td bgcolor="#0a0a0a" align="left">option_used_ts</td><td align="left">2025-07-03 14:25:00+00:00</td></tr>
+        <tr><td bgcolor="#0a0a0a" align="left">option_lag_sec</td><td align="left">300.0</td></tr>
+        <tr><td bgcolor="#0a0a0a" align="left">option_iv_conf</td><td align="left">0.707</td></tr>
+        <tr><td bgcolor="#0a0a0a" align="left">option_align_mode</td><td align="left">prior</td></tr>
     </table>>, shape=plaintext];
 
     // Stage 6: Feature Extraction
@@ -75,17 +75,17 @@ digraph DataPipeline {
 
     // Stage 7: Strategy Decision
     strategy_decision [label=<<table border="0" cellborder="1" cellspacing="0">
-        <tr><td bgcolor="#e67e22" colspan="2"><b>TradeDecision</b></td></tr>
+        <tr><td bgcolor="#0a0a0a" colspan="2"><b>TradeDecision</b></td></tr>
         <tr><td align="left">should_trade</td><td align="left">True / False</td></tr>
         <tr><td align="left">bias</td><td align="left">bullish / neutral / bearish</td></tr>
         <tr><td align="left">confidence</td><td align="left">0.0 - 1.0</td></tr>
         <tr><td align="left">rationale</td><td align="left">{"vrp_pass": True, ...}</td></tr>
-        <tr><td bgcolor="#aed6f1" align="left">vrp_edge_adj</td><td align="left">VRP × iv_conf</td></tr>
+        <tr><td bgcolor="#0a0a0a" align="left">vrp_edge_adj</td><td align="left">VRP × iv_conf</td></tr>
     </table>>, shape=plaintext];
 
     // Stage 8: Diagnostics
     diagnostics [label=<<table border="0" cellborder="1" cellspacing="0">
-        <tr><td bgcolor="#3498db" colspan="2"><b>Alignment Diagnostics</b></td></tr>
+        <tr><td bgcolor="#0a0a0a" colspan="2"><b>Alignment Diagnostics</b></td></tr>
         <tr><td align="left">Total bars</td><td align="left">79</td></tr>
         <tr><td align="left">Exact matches</td><td align="left">16 (20.3%)</td></tr>
         <tr><td align="left">Prior fallback</td><td align="left">63 (79.7%)</td></tr>
@@ -135,3 +135,4 @@ digraph DataPipeline {
     note2 [label="IV Decay Formula:\niv_conf = 0.5^(lag/300)\nHalf-life = 300s", shape=note, fillcolor="#f4d03f"];
     chain_aligner -> note2 [style=invis];
 }
+

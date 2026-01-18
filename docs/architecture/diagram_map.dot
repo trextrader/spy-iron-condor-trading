@@ -6,10 +6,12 @@ digraph DiagramMap {
     ranksep=0.8;
     
     // Global Styling
-    node [shape=note, fontname="Helvetica", fontsize=10, style=filled, fillcolor="#f8f9fa", penwidth=1.5];
-    edge [fontname="Helvetica", fontsize=9, color="#555555"];
+    bgcolor="#0a0a0a";
+    node [shape=note, fontname="Helvetica", fontsize=10, style=filled, fillcolor="#2c3e50", fontcolor="white", color="#ececec", penwidth=1.5];
+    edge [fontname="Helvetica", fontsize=9, color="#aaaaaa", fontcolor="white"];
     
     label = "CondorBrain Documentation Map\n(How the diagrams connect)";
+    fontcolor="white";
     fontsize=16;
     
     // =========================================================================

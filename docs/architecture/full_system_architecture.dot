@@ -13,7 +13,7 @@ digraph SPYIronCondorSystem {
     node [fontname="Helvetica Neue", fontsize=10, style=filled];
     edge [fontname="Helvetica Neue", fontsize=8];
     compound=true;
-    bgcolor="#0d1117";
+    bgcolor="#0a0a0a";
     splines=curved;
     nodesep=0.8;
     ranksep=1.2;
@@ -416,3 +416,4 @@ digraph SPYIronCondorSystem {
         leg_moe [label="TopKMoE", shape=hexagon, fillcolor="#ff9f43", fontcolor=black];
     }
 }
+

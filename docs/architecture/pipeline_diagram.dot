@@ -1,4 +1,5 @@
 digraph DataPipeline {
+    bgcolor="#0a0a0a";
     rankdir=LR;
     node [shape=box, style=filled, fillcolor=lightgray];
 
@@ -43,3 +44,4 @@ digraph DataPipeline {
 
     csv_final -> BacktestEngine [label="Load M1 Data"];
 }
+

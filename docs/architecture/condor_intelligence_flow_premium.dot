@@ -1,4 +1,5 @@
 digraph CondorIntelligence {
+    bgcolor="#0a0a0a";
     // General Settings for High-Fidelity Technical Visualization
     rankdir=TB;
     nodesep=0.5;
@@ -126,3 +127,4 @@ digraph CondorIntelligence {
     o2 -> trade_intent [color="#FB8C00", penwidth=2, style=bold];
     o3 -> trade_intent [color="#FB8C00", penwidth=2, style=bold];
 }
+

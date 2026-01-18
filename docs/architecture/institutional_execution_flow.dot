@@ -7,8 +7,9 @@ digraph InstitutionalWorkflow {
     compound=true;
 
     // Global Styles
-    node [shape=rect, style="filled,rounded", fontname="Arial", fontsize=10, penwidth=1.5, color="#FFFFFF"];
-    edge [color="#607D8B", penwidth=1.2, fontname="Arial", fontsize=9];
+    bgcolor="#0a0a0a";
+    node [shape=rect, style="filled,rounded", fontname="Arial", fontsize=10, penwidth=1.5, color="#FFFFFF", fontcolor="black"];
+    edge [color="#b0bec5", penwidth=1.2, fontname="Arial", fontsize=9, fontcolor="white"];
 
     // --- PHASE 1: DATA HARVESTING ---
     subgraph cluster_data {

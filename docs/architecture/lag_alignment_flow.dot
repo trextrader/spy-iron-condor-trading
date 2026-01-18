@@ -1,6 +1,6 @@
 digraph LagAwareAlignment {
     rankdir=LR;
-    bgcolor="#1e1e1e";
+    bgcolor="#0a0a0a";
     fontname="Helvetica";
     fontcolor="#e0e0e0";
     node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
@@ -86,3 +86,4 @@ digraph LagAwareAlignment {
     stale_output -> diagnostics [style=dotted, fontcolor="#7f8c8d"];
     none_output -> diagnostics [style=dotted, fontcolor="#7f8c8d"];
 }
+

@@ -1,6 +1,6 @@
 digraph FuzzySizingPipeline {
     rankdir=TB;
-    bgcolor="#1e1e1e";
+    bgcolor="#0a0a0a";
     fontname="Helvetica";
     fontcolor="#e0e0e0";
     node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
@@ -48,16 +48,16 @@ digraph FuzzySizingPipeline {
 
     // Example Values
     example [label=<<table border="0" cellborder="1" cellspacing="0">
-        <tr><td bgcolor="#34495e" colspan="2"><b>Example Calculation</b></td></tr>
+        <tr><td bgcolor="#0a0a0a" colspan="2"><b>Example Calculation</b></td></tr>
         <tr><td align="left">MTF Consensus</td><td align="right">0.60</td></tr>
         <tr><td align="left">IV Rank (high)</td><td align="right">0.80</td></tr>
         <tr><td align="left">ADX (trending)</td><td align="right">0.70</td></tr>
         <tr><td align="left">PSAR (crossover)</td><td align="right">0.90</td></tr>
-        <tr><td bgcolor="#85c1e9" align="left">→ F<SUB>t</SUB></td><td bgcolor="#85c1e9" align="right">0.68</td></tr>
+        <tr><td bgcolor="#0a0a0a" align="left">→ F<SUB>t</SUB></td><td bgcolor="#0a0a0a" align="right">0.68</td></tr>
         <tr><td align="left">σ* (vol pctl)</td><td align="right">0.30</td></tr>
-        <tr><td bgcolor="#aed6f1" align="left">→ g</td><td bgcolor="#aed6f1" align="right">0.476</td></tr>
+        <tr><td bgcolor="#0a0a0a" align="left">→ g</td><td bgcolor="#0a0a0a" align="right">0.476</td></tr>
         <tr><td align="left">Q₀ (base)</td><td align="right">5 lots</td></tr>
-        <tr><td bgcolor="#76d7c4" align="left"><b>→ Q (final)</b></td><td bgcolor="#76d7c4" align="right"><b>2 lots</b></td></tr>
+        <tr><td bgcolor="#0a0a0a" align="left"><b>→ Q (final)</b></td><td bgcolor="#0a0a0a" align="right"><b>2 lots</b></td></tr>
     </table>>, shape=plaintext];
 
     // Flow - Inputs to Weighted Sum (10 factors with correct weights)
@@ -89,4 +89,5 @@ digraph FuzzySizingPipeline {
     // Mathematical footnote
     note [label="Key:\nF_t = Fuzzy confidence (10-factor weighted sum)\nσ* = Volatility percentile (risk dampening)\ng = Final scaling factor\nQ₀ = Base position size\n\nPSAR Membership: μ = 1 - |position|\n  crossover=1.0, trending=0.0", shape=note, fillcolor="#2c3e50", fontcolor="#ecf0f1"];
 }
+
 

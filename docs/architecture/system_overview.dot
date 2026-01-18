@@ -1,6 +1,6 @@
 digraph QuantorMTFuzzArchitecture {
     rankdir=TB;
-    bgcolor="#1e1e1e";
+    bgcolor="#0a0a0a";
     fontname="Helvetica";
     fontcolor="#e0e0e0";
     node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
@@ -122,3 +122,4 @@ digraph QuantorMTFuzzArchitecture {
     // Lag-aware feedback
     strategy -> data_engine [label="alignment_policy()", style=dashed, color="#e74c3c", fontcolor="#ec7063"];
 }
+

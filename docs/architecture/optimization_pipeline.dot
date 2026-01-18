@@ -18,7 +18,7 @@ digraph OptimizationPipeline {
         label = "1. Data Acquisition";
         style="dashed,rounded";
         color="#888888";
-        bgcolor="#F9F9F9";
+        bgcolor="#0a0a0a";
         
         {rank=same; Alpaca; OptionsData}
         Alpaca [label="Alpaca Intraday\n(15-Min Bars)", fillcolor="#E3F2FD", color="#2196F3"];
@@ -30,7 +30,7 @@ digraph OptimizationPipeline {
         label = "2. Neural Training (Offline)";
         style="filled,rounded";
         color="#E8EAF6";
-        bgcolor="#E8EAF6";
+        bgcolor="#0a0a0a";
         
         TrainScript [label="Train Harness\n(train_mamba.py)", shape=component, fillcolor="#FFCDD2", color="#D32F2F"];
         
@@ -54,7 +54,7 @@ digraph OptimizationPipeline {
         label = "3. Production Optimizer (Runtime)";
         style="filled,rounded";
         color="#E8F5E9";
-        bgcolor="#E8F5E9";
+        bgcolor="#0a0a0a";
         
         Optimizer [label="Optimizer Engine\n(Segmented Grid Search)", shape=hexagon, fillcolor="#A5D6A7", color="#2E7D32", fontsize=12, penwidth=2];
         
@@ -81,3 +81,4 @@ digraph OptimizationPipeline {
     OptionsData -> Strategy [label="Tick Data"];
     
 }
+

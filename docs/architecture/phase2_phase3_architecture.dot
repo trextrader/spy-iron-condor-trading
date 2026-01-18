@@ -1,5 +1,6 @@
 
 digraph Phase2_Phase3_Architecture {
+    bgcolor="#0a0a0a";
     rankdir=LR;
     node [shape=box, fontname="Arial", fontsize=10];
     edge [fontname="Arial", fontsize=9];
@@ -63,3 +64,4 @@ digraph Phase2_Phase3_Architecture {
 
     StressTest -> RiskManager [label="Validates"];
 }
+

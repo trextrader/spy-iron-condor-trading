@@ -1,6 +1,6 @@
 digraph ExitPriority {
       rankdir=TB;
-      bgcolor="#f9f9f9";
+      bgcolor="#0a0a0a";
       fontname="Arial";
       fontsize=14;
 

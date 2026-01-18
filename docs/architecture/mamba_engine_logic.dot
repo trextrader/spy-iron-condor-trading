@@ -4,7 +4,7 @@ digraph MambaEngine {
     nodesep=0.4;
     ranksep=0.6;
     fontname="Segoe UI";
-    bgcolor="#ffffff";
+    bgcolor="#0a0a0a";
     compound=true;
     
     node [fontname="Consolas", fontsize=10, shape=record, style=filled, fillcolor="white", penwidth=1.0, color="#2d3748"];
@@ -86,3 +86,4 @@ digraph MambaEngine {
     Title [label="CondorBrain Intelligence Engine\n(Mamba 2 + Mixture of Experts)", shape=plaintext, fontsize=14, fontcolor="#2d3748"];
     Title -> Input [style=invis];
 }
+
