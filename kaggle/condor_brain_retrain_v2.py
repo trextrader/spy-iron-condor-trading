@@ -4,7 +4,9 @@
 print("🚀 Starting CondorBrain Retraining V2 (Shock Therapy)...")
 
 # --- 0. PREP & CLEAN ---
-!cd spy-iron-condor-trading && git fetch origin && git reset --hard origin/main
+import os
+print("🔄 Syncing Repo...")
+os.system("cd spy-iron-condor-trading && git fetch origin && git reset --hard origin/main")
 print("✅ Repo synced")
 
 import sys
