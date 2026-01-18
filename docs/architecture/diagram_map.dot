@@ -4,141 +4,171 @@ digraph DiagramMap {
     nodesep=0.6;
     ranksep=0.8;
     bgcolor="#0a0a0a";
+    fontname="Helvetica";
     
     // Global Styling
-    node [shape=note, fontname="Helvetica", fontsize=10, style=filled, fillcolor="#2c3e50", fontcolor="white", color="#ececec", penwidth=1.5];
-    edge [fontname="Helvetica", fontsize=9, color="#aaaaaa", fontcolor="white"];
+    node [shape=note, fontname="Helvetica", fontsize=10, style="filled,rounded", fontcolor="white", penwidth=0, margin="0.2,0.1"];
+    edge [fontname="Helvetica", fontsize=9, penwidth=1.5];
     
     label = "CondorBrain Master Architecture Map\n(All Systems Connected)";
     fontcolor="white";
-    fontsize=18;
+    fontsize=20;
     
     // =========================================================================
-    // 1. HIGH-LEVEL OVERVIEW
+    // 1. HIGH-LEVEL OVERVIEW (White/Gray)
     // =========================================================================
     subgraph cluster_overview {
         label = "1. High-Level Concepts";
         style = filled;
         fillcolor = "#1a1a1a";
-        color = "#444444";
+        color = "#ffffff";
         fontcolor = "white";
         
-        d_sys_overview [label="system_overview.png\n(The Big Picture)", href="system_overview.png", fillcolor="#34495e"];
-        d_full [label="full_system_architecture.png\n(Detailed V2.2 Spec)", href="full_system_architecture.png", fillcolor="#34495e", shape=box3d, penwidth=3];
+        d_sys_overview [label="system_overview.png\n(The Big Picture)", href="system_overview.png", fillcolor="#455a64"];
+        d_full [label="full_system_architecture.png\n(Detailed V2.2 Spec)", href="full_system_architecture.png", fillcolor="#607d8b", shape=box3d, penwidth=2, color="white"];
+        d_phase23 [label="phase2_phase3_architecture.png\n(Strategy Phases)", href="phase2_phase3_architecture.png", fillcolor="#455a64"];
         
-        d_phase23 [label="phase2_phase3_architecture.png\n(Strategy Phases)", href="phase2_phase3_architecture.png"];
-        
-        d_sys_overview -> d_full [label="Detail View"];
+        d_sys_overview -> d_full [label="Detail View", color="#cfd8dc", fontcolor="#cfd8dc"];
     }
 
     // =========================================================================
-    // 2. DATA PIPELINE LAYER
+    // 2. DATA PIPELINE LAYER (Cyan/Blue)
     // =========================================================================
     subgraph cluster_data {
         label = "2. Data Ingestion & Engineering";
         style = filled;
-        fillcolor = "#0d1b2a";
-        color = "#1b263b";
-        fontcolor = "white";
+        fillcolor = "#001f2e"; // Very Dark Cyan
+        color = "#00bcd4";
+        fontcolor = "#00bcd4";
+        
+        node [fillcolor="#006064", fontcolor="white"]; // Cyan Nodes
         
         d_pipeline [label="pipeline_diagram.png\n(ETL Scripts)", href="pipeline_diagram.png"];
         d_data_detailed [label="data_pipeline_detailed.png\n(CSV -> Snapshot)", href="data_pipeline_detailed.png"];
         d_lag [label="lag_alignment_flow.png\n(Timestamp Sync)", href="lag_alignment_flow.png"];
         
-        d_pipeline -> d_data_detailed [label="Raw Data"];
-        d_data_detailed -> d_lag [label="MarketSnapshot"];
+        d_pipeline -> d_data_detailed [label="Raw Data", color="#00acc1", fontcolor="#00acc1"];
+        d_data_detailed -> d_lag [label="MarketSnapshot", color="#00acc1", fontcolor="#00acc1"];
     }
     
     // =========================================================================
-    // 3. INTELLIGENCE CORE (Mamba, Diffusion, TDA)
+    // 3. INTELLIGENCE CORE (Purple/Violet)
     // =========================================================================
     subgraph cluster_intel {
         label = "3. Neural Intelligence Core";
         style = filled;
-        fillcolor = "#1b1b1b";
-        color = "#2d2d2d";
-        fontcolor = "white";
+        fillcolor = "#1a0b2e"; // Very Dark Purple
+        color = "#d500f9";
+        fontcolor = "#d500f9";
+        
+        node [fillcolor="#4a148c", fontcolor="white"]; // Purple Nodes
         
         d_enhanced [label="enhanced_architecture.png\n(Inputs -> Mamba -> Heads)", href="enhanced_architecture.png"];
         d_mamba_logic [label="mamba_engine_logic.png\n(SSM Block Internals)", href="mamba_engine_logic.png"];
-        
         d_flow [label="condor_intelligence_flow.png\n(Standard Flow)", href="condor_intelligence_flow.png"];
-        d_flow_prem [label="condor_intelligence_flow_premium.png\n(Premium + TDA + Diff)", href="condor_intelligence_flow_premium.png"];
+        d_flow_prem [label="condor_intelligence_flow_premium.png\n(Premium + TDA + Diff)", href="condor_intelligence_flow_premium.png", shape=component];
         
-        d_enhanced -> d_mamba_logic [label="Contains"];
-        d_flow -> d_flow_prem [label="Upgraded To"];
+        d_enhanced -> d_mamba_logic [label="Contains", color="#aa00ff", fontcolor="#aa00ff"];
+        d_flow -> d_flow_prem [label="Upgraded To", color="#aa00ff", fontcolor="#aa00ff"];
     }
 
     // =========================================================================
-    // 4. LOGIC & DECISION LAYER (Fuzzy, Dataflow)
+    // 4. LOGIC & DECISION LAYER (Green/Emerald)
     // =========================================================================
     subgraph cluster_logic {
         label = "4. Decision Logic & Sizing";
         style = filled;
-        fillcolor = "#1e272e";
-        color = "#3d3d3d";
-        fontcolor = "white";
+        fillcolor = "#051e11"; // Very Dark Green
+        color = "#00e676";
+        fontcolor = "#00e676";
+        
+        node [fillcolor="#1b5e20", fontcolor="white"]; // Green Nodes
         
         d_dataflow [label="dataflow.png\n(Indicators & Gates)", href="dataflow.png"];
         d_fuzzy [label="fuzzy_sizing_pipeline.png\n(Confidence Scoring)", href="fuzzy_sizing_pipeline.png"];
         d_membership [label="membership_curves.png\n(Fuzzy Functions)", href="membership_curves.png"];
         d_pos_sizing [label="position_sizing.png\n(Kelly & Risk)", href="position_sizing.png"];
-        
         d_entry_exit [label="entryexitdecision.png\n(Entry/Exit Trees)", href="entryexitdecision.png"];
         d_exit_prio [label="exit_priority.png\n(Exit Hierarchy)", href="exit_priority.png"];
         
-        d_membership -> d_fuzzy [label="Defines"];
-        d_dataflow -> d_fuzzy [label="Feeds"];
-        d_fuzzy -> d_pos_sizing [label="Sizing Multiplier"];
-        d_pos_sizing -> d_entry_exit [label="Order Size"];
-        d_entry_exit -> d_exit_prio [label="Manage Trade"];
+        d_membership -> d_fuzzy [label="Defines", color="#66bb6a", fontcolor="#66bb6a"];
+        d_dataflow -> d_fuzzy [label="Feeds", color="#66bb6a", fontcolor="#66bb6a"];
+        d_fuzzy -> d_pos_sizing [label="Multiplier", color="#66bb6a", fontcolor="#66bb6a"];
+        d_pos_sizing -> d_entry_exit [label="Order Size", color="#66bb6a", fontcolor="#66bb6a"];
+        d_entry_exit -> d_exit_prio [label="Manage Trade", color="#66bb6a", fontcolor="#66bb6a"];
     }
 
     // =========================================================================
-    // 5. EXECUTION & OPERATIONS
+    // 5. EXECUTION & OPERATIONS (Orange/Gold)
     // =========================================================================
     subgraph cluster_exec {
         label = "5. Execution & Ops";
         style = filled;
-        fillcolor = "#192a56";
-        color = "#273c75";
-        fontcolor = "white";
+        fillcolor = "#2e1c05"; // Very Dark Orange
+        color = "#ffab00";
+        fontcolor = "#ffab00";
+        
+        node [fillcolor="#e65100", fontcolor="white"]; // Orange Nodes
         
         d_inst_exec [label="institutional_execution_flow.png\n(Broker/Order Mgmt)", href="institutional_execution_flow.png"];
     }
 
     // =========================================================================
-    // 6. OPTIMIZATION LOOP
+    // 6. OPTIMIZATION LOOP (Red/Rose)
     // =========================================================================
     subgraph cluster_opt {
         label = "6. Optimization Loop";
         style = filled;
-        fillcolor = "#2f3640";
-        color = "#353b48";
-        fontcolor = "white";
+        fillcolor = "#2e0b0b"; // Very Dark Red
+        color = "#ff1744";
+        fontcolor = "#ff1744";
+        
+        node [fillcolor="#b71c1c", fontcolor="white"]; // Red Nodes
         
         d_opt [label="optimization_pipeline.png\n(Training & Tuning)", href="optimization_pipeline.png"];
     }
     
     // =========================================================================
-    // CONNECTIONS BETWEEN CLUSTERS
+    // LEGEND
+    // =========================================================================
+    subgraph cluster_legend {
+        label="Legend";
+        fontsize=14;
+        style=filled;
+        fillcolor="#222222";
+        color="white";
+        fontcolor="white";
+        
+        {rank=same; leg_data; leg_intel; leg_logic; leg_exec; leg_opt}
+        
+        leg_data [label="DATA PIPELINE", fillcolor="#006064", shape=rect];
+        leg_intel [label="INTELLIGENCE", fillcolor="#4a148c", shape=rect];
+        leg_logic [label="DECISION LOGIC", fillcolor="#1b5e20", shape=rect];
+        leg_exec [label="EXECUTION", fillcolor="#e65100", shape=rect];
+        leg_opt [label="OPTIMIZATION", fillcolor="#b71c1c", shape=rect];
+        
+        leg_desc [label="Edges represent data flow between major architectural components.\nColors indicate the domain of the data.", shape=plaintext, fillcolor=none];
+    }
+    
+    // =========================================================================
+    // CONNECTIONS BETWEEN CLUSTERS (Multicolored)
     // =========================================================================
     
-    // Data -> Intel
-    d_lag -> d_enhanced [label="Aligned Tensors", color="cyan"];
-    d_lag -> d_flow_prem [label="Features", color="cyan"];
+    // Data -> Intel (Cyan Edge)
+    d_lag -> d_enhanced [label="Aligned Tensors", color="#00bcd4", fontcolor="#00bcd4", penwidth=2];
+    d_lag -> d_flow_prem [label="Features", color="#00bcd4", fontcolor="#00bcd4", penwidth=2];
     
-    // Intel -> Logic
-    d_enhanced -> d_fuzzy [label="Probabilities", color="magenta"];
-    d_flow_prem -> d_dataflow [label="Signals", color="magenta"];
+    // Intel -> Logic (Purple Edge)
+    d_enhanced -> d_fuzzy [label="Probabilities", color="#d500f9", fontcolor="#d500f9", penwidth=2];
+    d_flow_prem -> d_dataflow [label="Signals", color="#d500f9", fontcolor="#d500f9", penwidth=2];
     
-    // Logic -> Exec
-    d_entry_exit -> d_inst_exec [label="Route Order", color="lime"];
+    // Logic -> Exec (Green Edge)
+    d_entry_exit -> d_inst_exec [label="Route Order", color="#00e676", fontcolor="#00e676", penwidth=2];
     
-    // Exec -> Opt
-    d_inst_exec -> d_opt [label="Trade Logs", color="yellow"];
+    // Exec -> Opt (Orange Edge)
+    d_inst_exec -> d_opt [label="Trade Logs", color="#ffab00", fontcolor="#ffab00", penwidth=2];
     
-    // Opt -> Intel (Feedback)
-    d_opt -> d_enhanced [label="Tuned Weights", color="red", style=dashed];
+    // Opt -> Intel (Red Edge - Feedback)
+    d_opt -> d_enhanced [label="Tuned Weights", color="#ff1744", fontcolor="#ff1744", penwidth=2, style=dashed];
 
 }
