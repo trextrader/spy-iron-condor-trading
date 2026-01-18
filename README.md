@@ -774,8 +774,14 @@ The system leverages a **State-Space Model (SSM)** architecture (Mamba 2) for hi
 The core of the Mamba block is a continuous-time system discretized for digital computation:
 
 #### Continuous Form
-$$ h'(t) = \mathbf{A}h(t) + \mathbf{B}x(t) $$
-$$ y(t) = \mathbf{C}h(t) $$
+
+$$
+h'(t) = \mathbf{A}h(t) + \mathbf{B}x(t)
+$$
+
+$$
+y(t) = \mathbf{C}h(t)
+$$
 
 #### Discretization (Zero-Order Hold)
 To process discrete market bars, the parameters are transformed using step size $\Delta$:
