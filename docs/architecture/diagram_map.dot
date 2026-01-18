@@ -13,7 +13,31 @@ digraph DiagramMap {
     label = "CondorBrain Master Architecture Map\n(All Systems Connected)";
     fontcolor="white";
     fontsize=20;
+    labelloc="t"; 
     
+    // =========================================================================
+    // LEGEND (TOP CENTERED)
+    // =========================================================================
+    subgraph cluster_legend {
+        label="Legend";
+        fontsize=14;
+        style=filled;
+        fillcolor="#222222";
+        color="white";
+        fontcolor="white";
+        margin=20;
+        
+        {rank=same; leg_data; leg_intel; leg_logic; leg_exec; leg_opt}
+        
+        leg_data [label="DATA PIPELINE", fillcolor="#006064", shape=rect];
+        leg_intel [label="INTELLIGENCE", fillcolor="#4a148c", shape=rect];
+        leg_logic [label="DECISION LOGIC", fillcolor="#1b5e20", shape=rect];
+        leg_exec [label="EXECUTION", fillcolor="#e65100", shape=rect];
+        leg_opt [label="OPTIMIZATION", fillcolor="#b71c1c", shape=rect];
+        
+        leg_desc [label="Edges represent data flow between major architectural components.\nColors indicate the domain of the data.", shape=plaintext, fillcolor=none];
+    }
+
     // =========================================================================
     // 1. HIGH-LEVEL OVERVIEW (White/Gray)
     // =========================================================================
@@ -129,30 +153,12 @@ digraph DiagramMap {
     }
     
     // =========================================================================
-    // LEGEND
-    // =========================================================================
-    subgraph cluster_legend {
-        label="Legend";
-        fontsize=14;
-        style=filled;
-        fillcolor="#222222";
-        color="white";
-        fontcolor="white";
-        
-        {rank=same; leg_data; leg_intel; leg_logic; leg_exec; leg_opt}
-        
-        leg_data [label="DATA PIPELINE", fillcolor="#006064", shape=rect];
-        leg_intel [label="INTELLIGENCE", fillcolor="#4a148c", shape=rect];
-        leg_logic [label="DECISION LOGIC", fillcolor="#1b5e20", shape=rect];
-        leg_exec [label="EXECUTION", fillcolor="#e65100", shape=rect];
-        leg_opt [label="OPTIMIZATION", fillcolor="#b71c1c", shape=rect];
-        
-        leg_desc [label="Edges represent data flow between major architectural components.\nColors indicate the domain of the data.", shape=plaintext, fillcolor=none];
-    }
-    
-    // =========================================================================
     // CONNECTIONS BETWEEN CLUSTERS (Multicolored)
     // =========================================================================
+    
+    // ANCHOR LEGEND TO TOP
+    // This invisible edge forces the Legend cluster to be above the Overview cluster
+    leg_data -> d_sys_overview [style=invis, weight=10];
     
     // Data -> Intel (Cyan Edge)
     d_lag -> d_enhanced [label="Aligned Tensors", color="#00bcd4", fontcolor="#00bcd4", penwidth=2];
