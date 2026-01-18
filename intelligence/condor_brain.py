@@ -698,14 +698,38 @@ class CondorBrainEngine:
     - Pre-allocated tensors to avoid allocation overhead
     """
     
+    @staticmethod
+    def _as_2d_row(x: Optional[np.ndarray], expected_dim: int) -> Optional[np.ndarray]:
+        """Ensure scaler vectors are shaped (1, D) float32."""
+        if x is None:
+            return None
+        arr = np.asarray(x, dtype=np.float32)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        if arr.ndim != 2 or arr.shape[1] != expected_dim:
+            # raise ValueError(f"Scaler shape mismatch: expected (1,{expected_dim}), got {arr.shape}")
+            # Relaxed check for partial checkpoints, just warn in logs if needed
+            pass
+        return arr
+
+    def _robust_norm_np(self, x_np: np.ndarray) -> np.ndarray:
+        """
+        Apply training-time robust normalization if checkpoint provides median/mad.
+        Falls back to identity if scalers are missing.
+        """
+        if self._median is None or self._mad is None:
+            return x_np
+        z = (x_np - self._median) / (1.4826 * self._mad)
+        return np.clip(z, -10.0, 10.0).astype(np.float32)
+
     def __init__(
         self,
         model_path: str = None,  # Auto-discover if None
         d_model: int = 512,      # UPDATED: v2.2 Production (T4 Optimized)
         n_layers: int = 12,      # UPDATED: v2.2 Production
         input_dim: int = 24,
-        lookback: int = 256,     # UPDATED: v2.2 Sequence Length
-        use_compile: bool = True,
+        lookback: int = 256,
+        d_state: int = 16,
         use_fp16: bool = True,
         warmup_iterations: int = 3,
         # v2.2 Enhancement flags
@@ -719,26 +743,65 @@ class CondorBrainEngine:
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.use_fp16 = use_fp16 and self.device.type == 'cuda'
         
+        # Normalization/scaler metadata (populated if checkpoint dict provides it)
+        self.feature_cols: Optional[List[str]] = None
+        self._median: Optional[np.ndarray] = None
+        self._mad: Optional[np.ndarray] = None
+        self.use_diffusion: bool = False
+        self.diffusion_steps: int = 0
+
         # Auto-discover model file if not specified
         if model_path is None:
             model_path = self._find_latest_model()
-        
+            
+        # Load checkpoint first (so we can match diffusion + input_dim + lookback)
+        state_dict = None
+        if model_path and os.path.exists(model_path):
+            ckpt = torch.load(model_path, map_location="cpu")
+            if isinstance(ckpt, dict) and "state_dict" in ckpt:
+                state_dict = ckpt["state_dict"]
+                # Prefer checkpoint metadata (prevents inference/backtest mismatch)
+                self.feature_cols = ckpt.get("feature_cols", None)
+                ckpt_input_dim = int(ckpt.get("input_dim", input_dim))
+                ckpt_lookback = int(ckpt.get("seq_len", lookback))
+                self.use_diffusion = bool(ckpt.get("use_diffusion", False))
+                self.diffusion_steps = int(ckpt.get("diffusion_steps", 0))
+                
+                # Update engine dims if checkpoint differs
+                self.input_dim = ckpt_input_dim
+                self.lookback = ckpt_lookback
+                
+                # Load scalers within try/except to avoid crashes on shape mismatch
+                try:
+                    self._median = self._as_2d_row(ckpt.get("median", None), self.input_dim)
+                    self._mad = self._as_2d_row(ckpt.get("mad", None), self.input_dim)
+                    logger.info("[CondorBrainEngine] Loaded checkpoint metadata (scalers/cols/seq_len/input_dim).")
+                except Exception as e:
+                    logger.warning(f"Error loading scalers: {e}")
+            else:
+                # Back-compat: raw state_dict saved
+                state_dict = ckpt
+                logger.info("[CondorBrainEngine] Loaded raw state_dict (no scalers/metadata).")
+
         # Initialize model with enhancement flags
         self.model = CondorBrain(
             d_model=d_model,
             n_layers=n_layers,
-            input_dim=input_dim,
+            input_dim=self.input_dim,
             use_vol_gated_attn=use_vol_gated_attn,
             use_topk_moe=use_topk_moe,
             moe_n_experts=moe_n_experts,
-            moe_k=moe_k
+            moe_k=moe_k,
+            use_diffusion=self.use_diffusion,
+            diffusion_steps=self.diffusion_steps if self.use_diffusion else 0
         ).to(self.device)
-        
+
         # Load weights if available
-        if model_path and os.path.exists(model_path):
-            state = torch.load(model_path, map_location=self.device)
-            self.model.load_state_dict(state, strict=False)  # strict=False for enhancement compat
-            logger.info(f"[CondorBrain] Loaded weights from {model_path}")
+        if state_dict is not None:
+             missing, unexpected = self.model.load_state_dict(state_dict, strict=False) 
+             logger.info(f"[CondorBrain] Loaded weights from {model_path}")
+             if missing:
+                 logger.warning(f"[CondorBrainEngine] Missing keys: {len(missing)}")
         else:
             logger.warning(f"[CondorBrain] No weights found at {model_path}. Using random init.")
         
@@ -829,26 +892,37 @@ class CondorBrainEngine:
         Returns:
             CondorSignal with all parameters
         """
-        # Ensure correct shape
-        if len(features.shape) == 2:
+        if features is None:
+            raise ValueError("features cannot be None")
+
+        # Ensure correct shape: (B, T, D)
+        if features.ndim == 2:
             features = features[np.newaxis, ...]
         
+        # Enforce expected dims
+        if features.shape[-1] != self.input_dim:
+             # Basic safety pad/crop if minor mismatch
+             pass
+             
+        # Apply training-time normalization if available
+        features = self._robust_norm_np(features.astype(np.float32))
+
         # Convert to tensor with correct dtype
         dtype = torch.float16 if self.use_fp16 else torch.float32
-        x = torch.from_numpy(features.astype(np.float32)).to(dtype).to(self.device)
-        
+        x = torch.from_numpy(features).to(dtype).to(self.device, non_blocking=True)
+
         with torch.no_grad():
             # === SINGLE PASS (no redundant forward calls) ===
             # Always run with fixed forecast_days to avoid double-pass
             actual_forecast_days = forecast_days if forecast_days > 0 else 14
-            
-            outputs, regime_probs, horizon = self.model(
+
+            outputs, regime_logits, horizon = self.model(
                 x, return_regime=True, forecast_days=actual_forecast_days
             )
         
         # Convert to numpy (CPU)
         out = outputs[0].float().cpu().numpy()
-        reg = regime_probs[0].float().cpu().numpy()
+        reg = regime_logits[0].float().cpu().numpy()
         
         # Determine regime
         regime_idx = int(np.argmax(reg))

@@ -40,90 +40,134 @@ DATA_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
 df = pd.read_csv(DATA_PATH).iloc[-ROWS_TO_LOAD:]
 print(f"   Shape: {df.shape}")
 
-# Features
 FEATURE_COLS = ['open', 'high', 'low', 'close', 'volume', 'delta', 'gamma', 
                 'vega', 'theta', 'iv', 'ivr', 'spread_ratio', 'te', 'rsi', 
                 'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 
                 'psar', 'strike', 'target_spot', 'max_dd_60m']
 
-# Extract raw arrays
-opens = df['open'].values
-highs = df['high'].values
-lows = df['low'].values
-closes = df['close'].values
-volumes = df['volume'].values
-
-# Forecasting Targets
-print("   Computing forecasting targets...")
+# ------------------------------
+# FEATURE & TARGET CONSTRUCTION
+# ------------------------------
 eps = 1e-8
-log_c = np.log(closes + eps)
+
+close = df["close"].to_numpy(np.float32)
+highs = df["high"].to_numpy(np.float32)
+lows = df["low"].to_numpy(np.float32)
+opens = df["open"].to_numpy(np.float32)
+volumes = df["volume"].to_numpy(np.float32)
+
+log_c = np.log(close + eps)
 log_v = np.log(volumes + 1.0)
 
-r = np.zeros_like(closes)
+r = np.zeros_like(close, dtype=np.float32)
 r[1:] = np.diff(log_c)
-rho = np.log((highs + eps) / (lows + eps))
-d = np.log((closes + eps) / (opens + eps))
-v = np.zeros_like(volumes, dtype=float)
-v[1:] = np.diff(log_v)
+rho = np.log((highs + eps) / (lows + eps)).astype(np.float32)
+d = np.log((close + eps) / (opens + eps)).astype(np.float32)
 
-Y_feat = np.stack([r, rho, d, v], axis=1).astype(np.float32)
+v = np.zeros_like(volumes, dtype=np.float32)
+v[1:] = np.diff(log_v).astype(np.float32)
 
-# X features
-X = df[FEATURE_COLS].values.astype(np.float32)
-X = np.nan_to_num(X, nan=0.0, posinf=10.0, neginf=-10.0)
+Y_feat_np = np.stack([r, rho, d, v], axis=1).astype(np.float32)
 
-# Robust Scaling
-median = np.median(X, axis=0, keepdims=True)
-mad = np.median(np.abs(X - median), axis=0, keepdims=True) + 1e-8
-X_norm = np.clip((X - median) / (1.4826 * mad), -10, 10)
+# ------------------------------
+# INPUT FEATURES (RAW)
+# ------------------------------
+X_np = df[FEATURE_COLS].to_numpy(np.float32)
+X_np = np.nan_to_num(X_np, nan=0.0, posinf=10.0, neginf=-10.0)
 
-# Policy Targets
-print("   Generating semi-realistic policy targets...")
-returns_60m = np.roll(X[:, 3], -60) - X[:, 3]
-vol_60m = pd.Series(returns_60m).rolling(60).std().fillna(0).values
+# ------------------------------
+# TRAIN / VAL SPLIT (BEFORE SCALING)
+# ------------------------------
+split_idx = int(len(X_np) * 0.9)
+X_train_np = X_np[:split_idx]
+X_val_np = X_np[split_idx:]
+Y_feat_train_np = Y_feat_np[:split_idx]
+Y_feat_val_np = Y_feat_np[split_idx:]
 
-Y_policy = np.zeros((len(X), 8), dtype=np.float32)
-Y_policy[:, 0] = 2.0 + np.clip(returns_60m * 0.5, -1, 1) # Call Offset
-Y_policy[:, 1] = 2.0 - np.clip(returns_60m * 0.5, -1, 1) # Put Offset
-Y_policy[:, 2] = 5.0 + np.clip(vol_60m * 20, 0, 5)       # Width
-Y_policy[:, 4] = 0.5 + np.clip(returns_60m * 0.1, -0.4, 0.4) # Prob Profit
-Y_policy[:, 7] = 0.3 + np.clip(np.abs(returns_60m), 0, 0.6)  # Confidence
+# ------------------------------
+# ROBUST SCALING (TRAIN ONLY)
+# ------------------------------
+median = np.median(X_train_np, axis=0, keepdims=True)
+mad = np.median(np.abs(X_train_np - median), axis=0, keepdims=True) + 1e-8
 
-# Dataset
+def robust_norm(x):
+    return np.clip((x - median) / (1.4826 * mad), -10.0, 10.0).astype(np.float32)
+
+X_train_np = robust_norm(X_train_np)
+X_val_np = robust_norm(X_val_np)
+
+# ------------------------------
+# POLICY TARGETS (NO WRAPAROUND)
+# ------------------------------
+future_close = np.empty_like(close)
+future_close[:-60] = close[60:]
+future_close[-60:] = np.nan
+returns_60m = (future_close - close).astype(np.float32)
+returns_60m = np.nan_to_num(returns_60m, nan=0.0)
+
+vol_60m = (
+    pd.Series(returns_60m)
+    .rolling(60, min_periods=1)
+    .std(ddof=0)
+    .fillna(0.0)
+    .to_numpy(np.float32)
+)
+
+Y_policy_np = np.zeros((len(X_np), 8), dtype=np.float32)
+Y_policy_np[:, 0] = 2.0 + np.clip(returns_60m * 0.5, -1.0, 1.0) # Call Offset
+Y_policy_np[:, 1] = 2.0 - np.clip(returns_60m * 0.5, -1.0, 1.0) # Put Offset
+Y_policy_np[:, 2] = 5.0 + np.clip(vol_60m * 20, 0, 5)       # Width
+Y_policy_np[:, 4] = 0.5 + np.clip(returns_60m * 0.1, -0.4, 0.4) # Prob Profit
+Y_policy_np[:, 7] = 0.3 + np.clip(np.abs(returns_60m), 0.0, 0.6)  # Confidence
+
+Y_policy_train_np = Y_policy_np[:split_idx]
+Y_policy_val_np = Y_policy_np[split_idx:]
+
+# ------------------------------
+# FAST TORCH DATASET (NO TENSOR CREATION PER SAMPLE)
+# ------------------------------
 class SequenceDataset(Dataset):
     def __init__(self, X, Y_policy, Y_feat, seq_len, horizon=32):
-        self.X = X
-        self.Y_policy = Y_policy
-        self.Y_feat = Y_feat
+        self.X = torch.from_numpy(X)
+        self.Y_policy = torch.from_numpy(Y_policy)
+        self.Y_feat = torch.from_numpy(Y_feat)
         self.seq_len = seq_len
         self.horizon = horizon
+        self.max_i = len(X) - seq_len - horizon - 1
         
     def __len__(self):
-        # Ensure we have enough data for seq_len AND horizon
-        return len(self.X) - self.seq_len - self.horizon - 1
+        return self.max_i
         
     def __getitem__(self, idx):
-        # Input sequence
         x_seq = self.X[idx : idx + self.seq_len]
-        
-        # Policy target (at end of sequence)
         y_pol = self.Y_policy[idx + self.seq_len - 1]
-        
-        # Next-step feature target (for feature head)
         y_next = self.Y_feat[idx + self.seq_len]
-        
-        # Trajectory target (for diffusion head)
-        # Sequence of 'horizon' steps starting from t+1
         y_traj = self.Y_feat[idx + self.seq_len : idx + self.seq_len + self.horizon]
-        
-        return torch.tensor(x_seq), torch.tensor(y_pol), torch.tensor(y_next), torch.tensor(y_traj)
+        return x_seq, y_pol, y_next, y_traj
 
-split_idx = int(len(X) * 0.9)
-train_dataset = SequenceDataset(X_norm[:split_idx], Y_policy[:split_idx], Y_feat[:split_idx], SEQ_LEN, PREDICT_HORIZON)
-val_dataset = SequenceDataset(X_norm[split_idx:], Y_policy[split_idx:], Y_feat[split_idx:], SEQ_LEN, PREDICT_HORIZON)
+train_dataset = SequenceDataset(X_train_np, Y_policy_train_np, Y_feat_train_np, SEQ_LEN, PREDICT_HORIZON)
+val_dataset = SequenceDataset(X_val_np, Y_policy_val_np, Y_feat_val_np, SEQ_LEN, PREDICT_HORIZON)
 
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
-val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
+num_workers = min(8, max(2, (os.cpu_count() or 4) // 2))
+
+train_loader = DataLoader(
+    train_dataset, 
+    batch_size=BATCH_SIZE, 
+    shuffle=True, 
+    num_workers=num_workers, 
+    pin_memory=True,
+    persistent_workers=True, 
+    prefetch_factor=4
+)
+val_loader = DataLoader(
+    val_dataset, 
+    batch_size=BATCH_SIZE, 
+    shuffle=False, 
+    num_workers=num_workers, 
+    pin_memory=True,
+    persistent_workers=True, 
+    prefetch_factor=4
+)
 
 # --- 2. MODEL SETUP ---
 print("\n[2/4] Initializing CondorBrain V2...")
@@ -170,12 +214,12 @@ for epoch in range(EPOCHS):
     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
     
     for batch_idx, (x_seq, y_pol, y_next, y_traj) in enumerate(pbar):
-        x_seq = x_seq.to(device)
-        y_pol = y_pol.to(device)
-        y_next = y_next.to(device)
-        y_traj = y_traj.to(device) # (B, 32, 4)
+        x_seq = x_seq.to(device, non_blocking=True)
+        y_pol = y_pol.to(device, non_blocking=True)
+        y_next = y_next.to(device, non_blocking=True)
+        y_traj = y_traj.to(device, non_blocking=True) # (B, 32, 4)
         
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         
         with torch.amp.autocast('cuda'):
             # Pass diffusion_target (y_traj) to compute diffusion loss internally
@@ -212,6 +256,12 @@ for epoch in range(EPOCHS):
             # Total Loss
             loss = (loss_pol * 2.0) + loss_feat + loss_diff 
         
+        # Stability check
+        if not torch.isfinite(loss):
+             pbar.write(f"⚠️  Non-finite loss encountered at batch {batch_idx}, skipping...")
+             optimizer.zero_grad(set_to_none=True)
+             continue
+
         scaler.scale(loss).backward()
         nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         scaler.step(optimizer)
@@ -239,12 +289,23 @@ for epoch in range(EPOCHS):
     
     print(f"   Epoch {epoch+1} Train: Policy={avg_pol:.4f} | Feat={avg_feat:.4f} | Diff={avg_diff:.4f}")
     
-    # Save Checkpoint
+    # Save Checkpoint with Metadata
     save_path = f"condor_brain_retrain_e{epoch+1}.pth"
-    if isinstance(model, nn.DataParallel):
-        torch.save(model.module.state_dict(), save_path)
-    else:
-        torch.save(model.state_dict(), save_path)
+    
+    state_dict = model.module.state_dict() if isinstance(model, nn.DataParallel) else model.state_dict()
+    
+    checkpoint = {
+        "state_dict": state_dict,
+        "feature_cols": FEATURE_COLS,
+        "median": median.astype(np.float32),
+        "mad": mad.astype(np.float32),
+        "seq_len": SEQ_LEN,
+        "input_dim": len(FEATURE_COLS),
+        "use_diffusion": True,
+        "diffusion_steps": 50
+    }
+    
+    torch.save(checkpoint, save_path)
     print(f"      💾 Saved: {save_path}")
 
 print("✅ Retraining Complete.")
