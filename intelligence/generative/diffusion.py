@@ -86,7 +86,7 @@ class ConditionalDiffusionHead(nn.Module):
         Returns:
             loss: MSE(noise, predicted_noise)
         """
-        B, H, F = x_start.shape
+        B, H, n_feats = x_start.shape
         device = x_start.device
         
         # 1. Sample t
@@ -113,7 +113,7 @@ class ConditionalDiffusionHead(nn.Module):
         inp = torch.cat([x_flat, c_emb, t_emb], dim=-1)
         
         pred_noise_flat = self.net(inp)
-        pred_noise = pred_noise_flat.view(B, H, F)
+        pred_noise = pred_noise_flat.view(B, H, n_feats)
         
         # return pred_noise
         return F.mse_loss(pred_noise, noise)
