@@ -17,12 +17,13 @@ D_MODEL = 512
 N_LAYERS = 12
 SEQ_LEN = 256
 
-# Auto-discover model path (Portable: Local vs Kaggle)
 POSSIBLE_PATHS = [
-    "condor_brain_seq_e1.pth",                        # Current dir
+    "condor_brain_retrain_e1.pth",                    # NEW CORRECT NAME (Priority 1)
+    "models/condor_brain_retrain_e1.pth",             # User custom path
+    "/kaggle/working/condor_brain_retrain_e1.pth",    # Kaggle Output
+    "condor_brain_seq_e1.pth",                        # Legacy name
     "/kaggle/working/condor_brain_seq_e1.pth",        # Kaggle Output
-    "/kaggle/input/condor-brain-seq-e1/condor_brain_seq_e1.pth", # Kaggle Input (if uploaded)
-    "models/condor_brain_seq_e1.pth",                 # Local Repo
+    "/kaggle/input/condor-brain-seq-e1/condor_brain_seq_e1.pth", # Kaggle Input
 ]
 SEQ_MODEL_PATH = "condor_brain_seq_e1.pth" # Default
 import os
