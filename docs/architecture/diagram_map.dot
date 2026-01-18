@@ -1,0 +1,99 @@
+digraph DiagramMap {
+    rankdir=TB;
+    compound=true;
+    fontname="Helvetica";
+    nodesep=0.8;
+    ranksep=0.8;
+    
+    // Global Styling
+    node [shape=note, fontname="Helvetica", fontsize=10, style=filled, fillcolor="#f8f9fa", penwidth=1.5];
+    edge [fontname="Helvetica", fontsize=9, color="#555555"];
+    
+    label = "CondorBrain Documentation Map\n(How the diagrams connect)";
+    fontsize=16;
+    
+    // =========================================================================
+    // 1. DATA LAYER
+    // =========================================================================
+    subgraph cluster_data {
+        label = "1. Data Ingestion & Alignment";
+        style = filled;
+        fillcolor = "#e3f2fd";
+        color = "#90caf9";
+        
+        d_pipeline [label="data_pipeline_detailed.png\n(Raw Ingestion)", href="data_pipeline_detailed.png"];
+        d_lag [label="lag_alignment_flow.png\n(Timestamp Sync)", href="lag_alignment_flow.png"];
+        
+        d_pipeline -> d_lag [label="Cleaned Data"];
+    }
+    
+    // =========================================================================
+    // 2. INTELLIGENCE CORE
+    // =========================================================================
+    subgraph cluster_intel {
+        label = "2. Intelligence Engine";
+        style = filled;
+        fillcolor = "#e8f5e9";
+        color = "#a5d6a7";
+        
+        d_full [label="full_system_architecture.png\n(V2.2 COMPLETE SYSTEM)\n(Mamba + Diffusion + TDA)", shape=box3d, fillcolor="#ccff90", fontsize=12, penwidth=3, href="full_system_architecture.png"];
+        
+        d_enhanced [label="enhanced_architecture.png\n(Neural Internals)", href="enhanced_architecture.png"];
+        d_premium [label="condor_intelligence_flow_premium.png\n(Logic Tiering)", href="condor_intelligence_flow_premium.png"];
+        
+        d_enhanced -> d_full [label="Component of"];
+        d_premium -> d_full [label="High-Level View"];
+    }
+    
+    // =========================================================================
+    // 3. DECISION & SIZING
+    // =========================================================================
+    subgraph cluster_decision {
+        label = "3. Decision & Sizing";
+        style = filled;
+        fillcolor = "#fff3e0";
+        color = "#ffcc80";
+        
+        d_fuzzy [label="fuzzy_sizing_pipeline.png\n(Position Sizing)", href="fuzzy_sizing_pipeline.png"];
+        d_entry [label="entryexitdecision.png\n(Trade Logic)", href="entryexitdecision.png"];
+        
+        d_full -> d_fuzzy [label="Signals & Confidence"];
+        d_fuzzy -> d_entry [label="Sized Orders"];
+    }
+    
+    // =========================================================================
+    // 4. EXECUTION
+    // =========================================================================
+    subgraph cluster_exec {
+        label = "4. Execution & Lifecycle";
+        style = filled;
+        fillcolor = "#f3e5f5";
+        color = "#ce93d8";
+        
+        d_exec [label="institutional_execution_flow.png\n(Trade Lifecycle)", href="institutional_execution_flow.png"];
+        d_overview [label="system_overview.png\n(General)", href="system_overview.png"];
+    }
+    
+    // =========================================================================
+    // 5. OPTIMIZATION LOOP
+    // =========================================================================
+    subgraph cluster_opt {
+        label = "5. Feedback Loop";
+        style = filled;
+        fillcolor = "#e0f7fa";
+        color = "#80deea";
+        
+        d_opt [label="optimization_pipeline.png\n(Hyperparam Tuning)", href="optimization_pipeline.png"];
+    }
+    
+    // Inter-Cluster Connections
+    d_lag -> d_enhanced [label="Tensors"];
+    d_entry -> d_exec [label="Orders"];
+    d_exec -> d_opt [label="P&L Metrics"];
+    d_opt -> d_enhanced [label="Tuned Weights"];
+    
+    // Key
+    {rank=source; d_overview}
+    d_overview -> d_pipeline [style=dotted, label="Drill Down"];
+    
+}
