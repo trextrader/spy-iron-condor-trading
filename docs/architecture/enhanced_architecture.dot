@@ -228,4 +228,13 @@ digraph CondorBrainEnhanced {
         leg_moe [label="TopKMoE", shape=hexagon, fillcolor="#ff9f43", style=filled, fontcolor=black];
         leg_loss [label="CompositeLoss", shape=doubleoctagon, fillcolor="#f39c12", style=filled, fontcolor=black];
     }
+
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D\nAll rights reserved."];
+    }
+
 }

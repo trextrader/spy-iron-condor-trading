@@ -88,6 +88,13 @@ digraph FuzzySizingPipeline {
 
     // Mathematical footnote
     note [label="Key:\nF_t = Fuzzy confidence (10-factor weighted sum)\nσ* = Volatility percentile (risk dampening)\ng = Final scaling factor\nQ₀ = Base position size\n\nPSAR Membership: μ = 1 - |position|\n  crossover=1.0, trending=0.0", shape=note, fillcolor="#2c3e50", fontcolor="#ecf0f1"];
+
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D\nAll rights reserved."];
+    }
+
 }
-
-

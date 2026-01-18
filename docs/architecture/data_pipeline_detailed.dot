@@ -134,5 +134,13 @@ digraph DataPipeline {
     
     note2 [label="IV Decay Formula:\niv_conf = 0.5^(lag/300)\nHalf-life = 300s", shape=note, fillcolor="#f4d03f"];
     chain_aligner -> note2 [style=invis];
-}
 
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D\nAll rights reserved."];
+    }
+
+}

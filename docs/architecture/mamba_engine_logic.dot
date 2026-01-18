@@ -85,5 +85,13 @@ digraph MambaEngine {
     # Annotations
     Title [label="CondorBrain Intelligence Engine\n(Mamba 2 + Mixture of Experts)", shape=plaintext, fontsize=14, fontcolor="#2d3748"];
     Title -> Input [style=invis];
-}
 
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D\nAll rights reserved."];
+    }
+
+}

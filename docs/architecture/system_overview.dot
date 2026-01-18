@@ -121,5 +121,13 @@ digraph QuantorMTFuzzArchitecture {
 
     // Lag-aware feedback
     strategy -> data_engine [label="alignment_policy()", style=dashed, color="#e74c3c", fontcolor="#ec7063"];
-}
 
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D\nAll rights reserved."];
+    }
+
+}

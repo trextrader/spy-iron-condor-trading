@@ -239,4 +239,13 @@
           leg5 [label="Green Box = Approved Action", fillcolor=green, fontcolor=white, shape=box];
           leg6 [label="Red Box = Rejected/Exit", fillcolor=red, fontcolor=white, shape=box];
       }
-  }
+  
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D\nAll rights reserved."];
+    }
+
+}

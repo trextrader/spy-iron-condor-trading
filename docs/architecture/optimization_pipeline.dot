@@ -12,6 +12,7 @@ digraph OptimizationPipeline {
     labelloc="t";
     label="Mamba 2 Neural Iron Condor System\nEnd-to-End Optimization Architecture";
     fontsize=18;
+    bgcolor="#0a0a0a";
 
     # --- Data Sources ---
     subgraph cluster_data {
@@ -85,5 +86,13 @@ digraph OptimizationPipeline {
     ModelWeights -> Inference [label="Load Weights", lhead=cluster_backtest, color="white", fontcolor="white"];
     OptionsData -> Strategy [label="Tick Data", color="white", fontcolor="white"];
     
-}
 
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D\nAll rights reserved."];
+    }
+
+}

@@ -32,7 +32,9 @@ digraph DiagramMap {
       </TD></TR>
       <TR><TD HEIGHT="8"></TD></TR>
       <TR><TD><FONT POINT-SIZE="11" COLOR="#999999">Edges represent data flow between major architectural components. Colors indicate the domain of the data.</FONT></TD></TR>
-      <TR><TD HEIGHT="30"></TD></TR>
+      <TR><TD HEIGHT="10"></TD></TR>
+      <TR><TD><FONT POINT-SIZE="9" COLOR="#666666">© 2026 by Dr. T. Jerry Mahabub, Ph.D — All rights reserved.</FONT></TD></TR>
+      <TR><TD HEIGHT="20"></TD></TR>
     </TABLE>
     >;
     

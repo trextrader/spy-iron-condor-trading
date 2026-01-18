@@ -126,5 +126,13 @@ digraph CondorIntelligence {
     o1 -> trade_intent [color="#FB8C00", penwidth=2, style=bold];
     o2 -> trade_intent [color="#FB8C00", penwidth=2, style=bold];
     o3 -> trade_intent [color="#FB8C00", penwidth=2, style=bold];
-}
 
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D\nAll rights reserved."];
+    }
+
+}

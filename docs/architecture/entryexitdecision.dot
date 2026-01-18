@@ -214,4 +214,13 @@ digraph EntryExitFlowchart {
       enter_trade -> next_bar;
 
       next_bar -> start [label="Loop", style=dashed];
-  }
+  
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D\nAll rights reserved."];
+    }
+
+}

@@ -63,5 +63,13 @@ digraph Phase2_Phase3_Architecture {
     WingWidthLogic -> SignalGen [label="Leg Selection"];
 
     StressTest -> RiskManager [label="Validates"];
-}
 
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D\nAll rights reserved."];
+    }
+
+}
