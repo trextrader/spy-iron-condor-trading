@@ -384,6 +384,7 @@ Where:
 - $\text{Skew} < 0$: Call skew (rare) → Potential rally risk
 
 **Risk Adjustment**:
+
 $$
 W_{\mathrm{put}} = W_{\mathrm{base}} + \Delta W \cdot \mathbb{1}_{\{\text{Skew} > \theta_{\mathrm{skew}}\}}
 $$
@@ -778,17 +779,27 @@ $$ y(t) = \mathbf{C}h(t) $$
 
 #### Discretization (Zero-Order Hold)
 To process discrete market bars, the parameters are transformed using step size $\Delta$:
-$$ \overline{\mathbf{A}} = \exp(\Delta \mathbf{A}) $$
-$$ \overline{\mathbf{B}} = (\Delta \mathbf{A})^{-1}(\exp(\Delta \mathbf{A}) - \mathbf{I}) \cdot \Delta \mathbf{B} $$
+$$
+\overline{\mathbf{A}} = \exp(\Delta \mathbf{A})
+$$
+$$
+\overline{\mathbf{B}} = (\Delta \mathbf{A})^{-1}(\exp(\Delta \mathbf{A}) - \mathbf{I}) \cdot \Delta \mathbf{B}
+$$
 
 #### Selective Mechanism
 Mamba 2 makes $\Delta, \mathbf{B}, \mathbf{C}$ functions of the input $x_t$, allowing the model to selectively propagate or reset its hidden state based on market volatility:
-$$ \Delta_t = \text{Softplus}(\text{Linear}(x_t)) $$
-$$ \mathbf{B}_t = \text{Linear}(x_t), \quad \mathbf{C}_t = \text{Linear}(x_t) $$
+$$
+\Delta_t = \text{Softplus}(\text{Linear}(x_t))
+$$
+$$
+\mathbf{B}_t = \text{Linear}(x_t), \quad \mathbf{C}_t = \text{Linear}(x_t)
+$$
 
 ### 7.3 Feature Engineering (Input Vector)
 The model consumes advanced features including TDA signatures and Manifold Volatility:
-$$ \vec{V}_t = [ \Delta \log(P_t), \text{RSI}_{norm}, \text{Curvature}, \text{Persistence}_1 ] $$
+$$
+\vec{V}_t = [ \Delta \log(P_t), \text{RSI}_{norm}, \text{Curvature}, \text{Persistence}_1 ]
+$$
 
 ### 7.4 Generative Diffusion Head
 A conditional diffusion module (DDPM) refines the Mamba hidden state into a probabilistic price trajectory (32 steps), capturing uncertainty in high-volatility regimes.
