@@ -147,6 +147,9 @@ digraph CondorBrainEnhanced {
         
         ic_params [label="ŷ ∈ ℝ⁸\nIC Parameters\n[offsets, width, dte, risk]", shape=parallelogram, fillcolor="#8e44ad", style=filled, fontcolor=white];
         
+        // NEW: Diffusion Head
+        diffusion_head [label="🆕 Diffusion Head\nGenerative Trajectory\nP(x_t | h)", shape=parallelogram, fillcolor="#FF00FF", style=filled, fontcolor=white];
+
         topk_moe -> expert_low [style=dashed, color="#4a9eff"];
         topk_moe -> expert_norm [style=dashed, color="#4a9eff"];
         topk_moe -> expert_high [style=dashed, color="#4a9eff"];
@@ -205,6 +208,7 @@ digraph CondorBrainEnhanced {
     last_hidden -> regime_detector [color="#9b59b6", penwidth=2];
     last_hidden -> topk_moe [color="#ff9f43", penwidth=2];
     last_hidden -> horizon_forecast [color="#4a9eff"];
+    last_hidden -> diffusion_head [color="#FF00FF", style=dotted];
     ic_params -> loss_pred [color="#e67e22"];
     ic_params -> state_binner [color="#1abc9c", penwidth=2];
     composite_loss -> input_proj [label="∇L", style=dashed, color="#e74c3c", constraint=false];
