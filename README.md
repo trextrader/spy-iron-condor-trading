@@ -35,8 +35,13 @@ The system uses a custom **DeepMamba** architecture based on the Mamba 2 State-S
 ### Mathematical Foundation
 The core mechanism is a discretized State Space Model:
 
-$$ h'(t) = \mathbf{A}h(t) + \mathbf{B}x(t) $$
-$$ y(t) = \mathbf{C}h(t) $$
+$$
+h'(t) = \mathbf{A}h(t) + \mathbf{B}x(t)
+$$
+
+$$
+y(t) = \mathbf{C}h(t)
+$$
 
 Where:
 *   $h(t)$ is the hidden state (memory)
@@ -213,7 +218,6 @@ Optimizes the 11-factor fuzzy weight blend including Neural Network influence.
 
 *Additional weights (BBands, Stoch, Volume, SMA, PSAR) are available but commented out to reduce search space.*
 
-
 ### Phase 1+ Analytics & Data Pipeline (NEW)
 - **Volatility Risk Premium (VRP)**: Realized vs Implied volatility edge detection
 - **SPY-ES Divergence**: Z-score based divergence trading signals
@@ -292,17 +296,25 @@ tests/                [Phase 1]
 **Theory**: The VRP is the edge captured by selling options when implied volatility exceeds realized volatility.
 
 #### Realized Volatility Calculation
-$$ RV^2 = \frac{252}{N} \sum_{t=1}^{N} r_t^2 $$
+
+$$
+RV^2 = \frac{252}{N} \sum_{t=1}^{N} r_t^2
+$$
 
 Where:
 - $r_t = \ln\left(\frac{P_t}{P_{t-1}}\right)$ = log return at time $t$
 - $N$ = rolling window length (e.g., 78 bars for 1 trading day of 5-min data)
 - $252$ = annualization factor (trading days per year)
 
-$$ RV = \sqrt{RV^2} $$
+$$
+RV = \sqrt{RV^2}
+$$
 
 #### VRP Signal
-$$ VRP = IV_{ATM} - RV $$
+
+$$
+VRP = IV_{ATM} - RV
+$$
 
 **Entry Gate**: Trade only if $VRP > \theta_{VRP}$ (e.g., $\theta_{VRP} = 0.02$ or 2%)
 
@@ -491,8 +503,13 @@ if basis < 0:
 
 The fuzzy position sizing system uses 11 indicators (10 technical + 1 neural), blending them into a final confidence score $C \in [0, 1]$:
 
-$$ F_t = \sum_{j=1}^{10} w_j \cdot \mu_j $$
-$$ C = 0.10 \cdot \mu_{\mathrm{Mamba}} + 0.90 \cdot F_t $$
+$$
+F_t = \sum_{j=1}^{10} w_j \cdot \mu_j
+$$
+
+$$
+C = 0.10 \cdot \mu_{\mathrm{Mamba}} + 0.90 \cdot F_t
+$$
 
 | # | Factor | Weight | Description |
 |---|--------|--------|-------------|
@@ -566,9 +583,13 @@ $$
 
 #### 6.4 RSI (w = 0.05) - Wilder Smoothing
 
-$$ RS = \frac{EMA_{\alpha}(\text{Gain})}{EMA_{\alpha}(\text{Loss})} $$
+$$
+RS = \frac{EMA_{\alpha}(\text{Gain})}{EMA_{\alpha}(\text{Loss})}
+$$
 
-$$ RSI = 100 - \frac{100}{1 + RS} $$
+$$
+RSI = 100 - \frac{100}{1 + RS}
+$$
 
 Where $\alpha = \frac{1}{period}$ (default $period = 14$)
 
@@ -589,13 +610,21 @@ $$
 
 #### 6.5 ADX (w = 0.05) - Wilder Smoothing
 
-$$ +DI = 100 \cdot \frac{EMA_{\alpha}(+DM)}{ATR} $$
+$$
++DI = 100 \cdot \frac{EMA_{\alpha}(+DM)}{ATR}
+$$
 
-$$ -DI = 100 \cdot \frac{EMA_{\alpha}(-DM)}{ATR} $$
+$$
+-DI = 100 \cdot \frac{EMA_{\alpha}(-DM)}{ATR}
+$$
 
-$$ DX = 100 \cdot \frac{|+DI - (-DI)|}{+DI + (-DI)} $$
+$$
+DX = 100 \cdot \frac{|+DI - (-DI)|}{+DI + (-DI)}
+$$
 
-$$ ADX = EMA_{\alpha}(DX) $$
+$$
+ADX = EMA_{\alpha}(DX)
+$$
 
 **Membership** (low ADX = weak trend = favorable):
 
@@ -707,7 +736,9 @@ $$
 
 #### 6.10 SMA Distance (w = 0.10)
 
-$$ D_{SMA} = \frac{Price - SMA_{20}}{SMA_{20}} $$
+$$
+D_{SMA} = \frac{Price - SMA_{20}}{SMA_{20}}
+$$
 
 **Membership** (near equilibrium = ideal):
 

@@ -101,23 +101,36 @@ The core of CondorBrain is a Structured State Space Model (SSM) that maps a sequ
 **Continuous-Time System (ODEs):**
 The latent state $h(t) \in \mathbb{R}^{N}$ evolves according to:
 
-$$\dot{h}(t) = \mathbf{A}h(t) + \mathbf{B}x(t)$$
+$$
+\dot{h}(t) = \mathbf{A}h(t) + \mathbf{B}x(t)
+$$
 
-$$y(t) = \mathbf{C}h(t) + \mathbf{D}x(t)$$
+$$
+y(t) = \mathbf{C}h(t) + \mathbf{D}x(t)
+$$
 
 **Hardware-Aware Discretization (Zero-Order Hold):**
 On the H100, we apply dynamic step-size $\Delta_t$ to discretize the system:
 
-$$\bar{\mathbf{A}}_t = \exp(\Delta_t \mathbf{A})$$
+$$
+\bar{\mathbf{A}}_t = \exp(\Delta_t \mathbf{A})
+$$
 
-$$\bar{\mathbf{B}}_t = (\Delta_t \mathbf{A})^{-1} (\bar{\mathbf{A}}_t - \mathbf{I}) \cdot \Delta_t \mathbf{B} \approx \Delta_t \mathbf{B}$$
+$$
+\bar{\mathbf{B}}_t = (\Delta_t \mathbf{A})^{-1} (\bar{\mathbf{A}}_t - \mathbf{I}) \cdot \Delta_t \mathbf{B} \approx \Delta_t \mathbf{B}
+$$
 
 **Selective Scan Mechanism (Associative Property):**
 Unlike LSTMs, Mamba-2 leverages the associative property of the scan operator to parallelize the recursion:
 
-$$h_t = \bar{\mathbf{A}}_t h_{t-1} + \bar{\mathbf{B}}_t x_t$$
+$$
+h_t = \bar{\mathbf{A}}_t h_{t-1} + \bar{\mathbf{B}}_t x_t
+$$
 
-$$(h_0, \dots, h_L) = \text{ParallelScan}(\{ \bar{\mathbf{A}}_t, \bar{\mathbf{B}}_t x_t \}_{t=1}^L)$$
+$$
+(h_0, \dots, h_L) = \text{ParallelScan}(\{ \bar{\mathbf{A}}_t, \bar{\mathbf{B}}_t x_t \}_{t=1}^L)
+$$
+
 The state transition $\bar{\mathbf{A}}_t$ is computed as a function of the input: $\Delta_t = \text{Softplus}(W_\Delta x_t + b_\Delta)$. This allows the model to compress sequences by "stretching" time during low-entropy market periods.
 
 ### 1.2 Performance vs Transformers
@@ -234,7 +247,9 @@ We implement a probabilistic gating network $G(h_T) \in \mathbb{R}^3$ that blend
 
 **Gating Logic:**
 
-$$\pi(h_T) = \text{Softmax}(W_g h_T) = [P(Low), P(Normal), P(High)]^T$$
+$$
+\pi(h_T) = \text{Softmax}(W_g h_T) = [P(Low), P(Normal), P(High)]^T
+$$
 
 **Output Synthesis:**
 
@@ -296,7 +311,9 @@ The primary output head generates optimal Iron Condor configuration:
 
 **Policy Head Mathematics:**
 
-$$\hat{\pi}_{IC} = \text{Softmax}\left( W_{policy} \cdot \text{RMSNorm}(h_T^{(L)}) + b_{policy} \right) \in \mathbb{R}^8$$
+$$
+\hat{\pi}_{IC} = \text{Softmax}\left( W_{policy} \cdot \text{RMSNorm}(h_T^{(L)}) + b_{policy} \right) \in \mathbb{R}^8
+$$
 
 ### 8.2 Regime Classification (3 Probability Outputs)
 
@@ -310,11 +327,15 @@ The `RegimeDetector` module classifies market volatility state:
 
 **Regime Detection Mathematics:**
 
-$$p_{regime} = \text{Softmax}\left( W_G \cdot h_T^{(L)} \right) \in \mathbb{R}^3$$
+$$
+p_{regime} = \text{Softmax}\left( W_G \cdot h_T^{(L)} \right) \in \mathbb{R}^3
+$$
 
 **Mixture-of-Experts Aggregation:**
 
-$$\hat{y}_{final} = \sum_{i \in \{low, normal, high\}} p_i \cdot E_i(h_T^{(L)})$$
+$$
+\hat{y}_{final} = \sum_{i \in \{low, normal, high\}} p_i \cdot E_i(h_T^{(L)})
+$$
 
 Where each $E_i$ is a specialized expert head trained for that volatility regime.
 
@@ -330,7 +351,9 @@ This "Synergistic Learning" ensures that the features learned for price trajecto
 ### 8.5 Real-Time Money Management Logic
 The final trade size is not static; it is a **dynamic function of predictive alignment**:
 
-$$ S_{trade} = S_{max} \cdot \left( w_1 \cdot \mu_{fuzzy} + w_2 \cdot \phi_{mamba} \right) \cdot \text{RiskFactor} $$
+$$
+S_{trade} = S_{max} \cdot \left( w_1 \cdot \mu_{fuzzy} + w_2 \cdot \phi_{mamba} \right) \cdot \text{RiskFactor}
+$$
 
 - **$\mu_{fuzzy}$:** Consensus from the 11-factor fuzzy engine.
 - **$\phi_{mamba}$:** The confidence head of the policy branch.
@@ -353,11 +376,17 @@ The `HorizonForecaster` module generates probabilistic price predictions:
 
 For each horizon $h \in \{1, 3, 5, 10\}$:
 
-$$\mu_h = W_{\mu}^{(h)} \cdot h_T^{(L)} + b_{\mu}^{(h)}$$
+$$
+\mu_h = W_{\mu}^{(h)} \cdot h_T^{(L)} + b_{\mu}^{(h)}
+$$
 
-$$\sigma_h = \text{Softplus}\left( W_{\sigma}^{(h)} \cdot h_T^{(L)} + b_{\sigma}^{(h)} \right)$$
+$$
+\sigma_h = \text{Softplus}\left( W_{\sigma}^{(h)} \cdot h_T^{(L)} + b_{\sigma}^{(h)} \right)
+$$
 
-$$p_h^{up} = \sigma\left( W_p^{(h)} \cdot h_T^{(L)} + b_p^{(h)} \right)$$
+$$
+p_h^{up} = \sigma\left( W_p^{(h)} \cdot h_T^{(L)} + b_p^{(h)} \right)
+$$
 
 ---
 
@@ -380,7 +409,9 @@ $$p_h^{up} = \sigma\left( W_p^{(h)} \cdot h_T^{(L)} + b_p^{(h)} \right)$$
 
 Simulates large batch without memory explosion:
 
-$$\nabla \theta_{eff} = \frac{1}{K} \sum_{k=1}^{K} \nabla \theta_{micro}^{(k)}$$
+$$
+\nabla \theta_{eff} = \frac{1}{K} \sum_{k=1}^{K} \nabla \theta_{micro}^{(k)}
+$$
 
 Where $K$ = `accum_steps` and effective batch = $B_{micro} \times K$.
 
@@ -388,13 +419,23 @@ Where $K$ = `accum_steps` and effective batch = $B_{micro} \times K$.
 
 Trades compute for memory by recomputing activations:
 
-$$\text{Memory} \propto O(\sqrt{L})$$ instead of $$O(L)$$
+$$
+\text{Memory} \propto O(\sqrt{L})
+$$
+
+ instead of 
+
+$$
+O(L)
+$$
 
 Enabled via `--grad-checkpoint` flag (reduces memory ~40%, increases compute ~30%).
 
 **3. BF16 Mixed Precision (Ampere+):**
 
-$$x_{BF16} = \text{round}(x_{FP32}) \in \{-3.4 \times 10^{38}, ..., 3.4 \times 10^{38}\}$$
+$$
+x_{BF16} = \text{round}(x_{FP32}) \in \{-3.4 \times 10^{38}, ..., 3.4 \times 10^{38}\}
+$$
 
 16-bit mantissa with FP32 dynamic range, no GradScaler needed.
 
@@ -436,7 +477,9 @@ python intelligence/train_condor_brain.py \
 
 The loss represents the **average error** between model predictions and ground truth. Since CondorLoss is primarily MSE-based, the **Root Mean Squared Error (RMSE)** provides intuitive interpretation:
 
-$$\text{RMSE} = \sqrt{\text{Loss}}$$
+$$
+\text{RMSE} = \sqrt{\text{Loss}}
+$$
 
 | Loss Value | RMSE | Interpretation |
 |:-----------|:-----|:---------------|
@@ -760,7 +803,6 @@ Where $\tau$ is the temperature parameter controlling exploration.
 | Policy Outputs | `indicators/policy_outputs.py` | Post-processing | Interpretable decisions |
 
 ---
-
 
 ---
 
