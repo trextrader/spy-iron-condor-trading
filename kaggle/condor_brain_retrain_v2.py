@@ -119,7 +119,9 @@ model = CondorBrain(
     input_dim=24,
     use_vol_gated_attn=True,
     use_topk_moe=True,
-    moe_n_experts=3, moe_k=1
+    moe_n_experts=3, moe_k=1,
+    use_diffusion=True,     # Enable Diffusion Head
+    diffusion_steps=50
 ).to(device)
 
 # --- INITIALIZATION FIX ---
@@ -165,12 +167,16 @@ for epoch in range(EPOCHS):
             loss_pol = criterion_policy(outputs, y_pol)
             
             # CRITICAL FIX: Reduced scale from 1e5 to 1e3
-            # Previous: 574.0 (Way too high) vs 0.8
-            # Target: ~5.0 vs 0.8 (Comparable)
             loss_feat = criterion_forecast(feat_pred, y_next) * 1000.0
+
+            # Diffusion Loss (if enabled and returned)
+            # Forward returns: (outputs, regime_logits, horizon, feat, experts, diffusion_loss)
+            loss_diff = torch.tensor(0.0, device=device)
+            if len(res) >= 6 and res[5] is not None:
+                loss_diff = res[5] * 10.0 # Scale diffusion loss (MSE ~0.1-1.0)
             
-            # Weighted mainly on policy now
-            loss = (loss_pol * 2.0) + loss_feat 
+            # Weighted mainly on policy now + diffusion support
+            loss = (loss_pol * 2.0) + loss_feat + loss_diff 
         
         scaler.scale(loss).backward()
         nn.utils.clip_grad_norm_(model.parameters(), 1.0)

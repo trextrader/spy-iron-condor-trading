@@ -40,6 +40,7 @@ except ImportError:
 # Import enhancement modules
 from intelligence.vol_gated_attn import VolGatedAttn
 from intelligence.topk_moe import TopKMoE, BatchedTopKMoE
+from intelligence.generative.diffusion import ConditionalDiffusionHead
 
 
 # ============================================================================
@@ -283,7 +284,9 @@ class CondorBrain(nn.Module):
         vol_attn_layers: List[int] = None,
         use_topk_moe: bool = False,
         moe_n_experts: int = 3,
-        moe_k: int = 1
+        moe_k: int = 1,
+        use_diffusion: bool = False,
+        diffusion_steps: int = 50
     ):
         super().__init__()
         
@@ -361,10 +364,24 @@ class CondorBrain(nn.Module):
             self.expert_normal = CondorExpertHead(d_model)
             self.expert_high = CondorExpertHead(d_model)
         
+        # Diffusion Head (Generative Forecasting)
+        self.use_diffusion = use_diffusion
+        if use_diffusion:
+            self.diffusion_head = ConditionalDiffusionHead(
+                input_dim=4,           # r, rho, d, v
+                cond_dim=d_model,
+                hidden_dim=256,
+                horizon=32,            # Fixed to 32 steps
+                n_steps=diffusion_steps
+            )
+            logger.info(f"[CondorBrain] Diffusion Head enabled: {diffusion_steps} steps")
+        else:
+            self.diffusion_head = None
+        
         # Legacy single-output head (for backward compatibility)
         self.legacy_head = nn.Linear(d_model, 1)
         
-    def forward(self, x: torch.Tensor, return_regime: bool = True, return_experts: bool = False, return_features: bool = False, forecast_days: int = 0) -> Any:
+    def forward(self, x: torch.Tensor, return_regime: bool = True, return_experts: bool = False, return_features: bool = False, forecast_days: int = 0, diffusion_target: Optional[torch.Tensor] = None) -> Any:
         """
         Forward pass.
         
@@ -373,13 +390,15 @@ class CondorBrain(nn.Module):
             return_regime: If True, also return regime probabilities
             return_experts: If True, also return discrete expert outputs
             return_features: If True, also return next-step feature prediction
-            forecast_days: If > 0, generate price trajectory for this many days
+            forecast_days: If > 0, generate price trajectory for this many days (Deterministic)
+            diffusion_target: If provided (B, Horizon, 4), computes diffusion loss
             
         Returns:
             outputs: (B, 8) IC parameters
             regime_probs: (B, 3) regime probabilities [Low, Normal, High]
             horizon_forecast: dict with daily predictions (if forecast_days > 0)
             experts: dict with discrete expert outputs (if return_experts > 0)
+            diffusion_out: scalar loss (if target provided) OR sampled trajectory (if forecast_days>0 and diffusion enabled)
         """
         # Input projection
         x = self.input_proj(x)
@@ -457,9 +476,18 @@ class CondorBrain(nn.Module):
         
         # Next-step feature prediction (for Meta-Forecaster)
         feature_pred = None
-        if return_features:
-            feature_pred = self.feature_head(last_hidden) #(B, 4)
         
+        # Diffusion Head (Training or Inference)
+        diffusion_out = None
+        if self.use_diffusion and self.diffusion_head is not None:
+            if diffusion_target is not None:
+                # Training: Compute Loss
+                diffusion_out = self.diffusion_head(diffusion_target, last_hidden) # Returns scalar loss
+            elif forecast_days > 0:
+                # Inference: Sample Trajectory
+                # Note: This might be slow; usually done offline
+                diffusion_out = self.diffusion_head.sample(last_hidden, n_samples=1)
+
         # Return package
         res = [outputs]
         if return_regime:
@@ -471,6 +499,9 @@ class CondorBrain(nn.Module):
         
         if return_features:
             res.append(feature_pred)
+            
+        if self.use_diffusion:
+            res.append(diffusion_out)
         
         if return_experts:
             # TopKMoE returns routing weights
