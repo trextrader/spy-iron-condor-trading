@@ -10,34 +10,32 @@ digraph DiagramMap {
     node [shape=note, fontname="Helvetica", fontsize=10, style="filled,rounded", fontcolor="white", penwidth=0, margin="0.2,0.1"];
     edge [fontname="Helvetica", fontsize=9, penwidth=1.5];
     
-    label = "CondorBrain Master Architecture Map\n(All Systems Connected)";
-    fontcolor="white";
-    fontsize=20;
-    labelloc="t"; 
+    // =========================================================================
+    // LEGEND AS GRAPH LABEL (Guaranteed Centering)
+    // =========================================================================
+    labelloc="t";
+    label = <
+    <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0">
+      <TR><TD><FONT POINT-SIZE="22" COLOR="white"><B>CondorBrain Master Architecture Map</B></FONT></TD></TR>
+      <TR><TD><FONT POINT-SIZE="14" COLOR="#cccccc">(All Systems Connected)</FONT></TD></TR>
+      <TR><TD HEIGHT="20"></TD></TR>
+      <TR><TD>
+        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="8" BGCOLOR="#1a1a1a" CELLPADDING="8">
+          <TR>
+            <TD BGCOLOR="#006064" WIDTH="110" HEIGHT="24" ALIGN="CENTER"><FONT COLOR="white" POINT-SIZE="11"><B>DATA PIPELINE</B></FONT></TD>
+            <TD BGCOLOR="#4a148c" WIDTH="110" HEIGHT="24" ALIGN="CENTER"><FONT COLOR="white" POINT-SIZE="11"><B>INTELLIGENCE</B></FONT></TD>
+            <TD BGCOLOR="#1b5e20" WIDTH="110" HEIGHT="24" ALIGN="CENTER"><FONT COLOR="white" POINT-SIZE="11"><B>DECISION LOGIC</B></FONT></TD>
+            <TD BGCOLOR="#e65100" WIDTH="110" HEIGHT="24" ALIGN="CENTER"><FONT COLOR="white" POINT-SIZE="11"><B>EXECUTION</B></FONT></TD>
+            <TD BGCOLOR="#b71c1c" WIDTH="110" HEIGHT="24" ALIGN="CENTER"><FONT COLOR="white" POINT-SIZE="11"><B>OPTIMIZATION</B></FONT></TD>
+          </TR>
+        </TABLE>
+      </TD></TR>
+      <TR><TD HEIGHT="8"></TD></TR>
+      <TR><TD><FONT POINT-SIZE="11" COLOR="#999999">Edges represent data flow between major architectural components. Colors indicate the domain of the data.</FONT></TD></TR>
+      <TR><TD HEIGHT="30"></TD></TR>
+    </TABLE>
+    >;
     
-    // =========================================================================
-    // LEGEND (TOP CENTERED)
-    // =========================================================================
-    subgraph cluster_legend {
-        label="Legend";
-        fontsize=14;
-        style=filled;
-        fillcolor="#222222";
-        color="white";
-        fontcolor="white";
-        margin=20;
-        
-        {rank=same; leg_data; leg_intel; leg_logic; leg_exec; leg_opt}
-        
-        leg_data [label="DATA PIPELINE", fillcolor="#006064", shape=rect];
-        leg_intel [label="INTELLIGENCE", fillcolor="#4a148c", shape=rect];
-        leg_logic [label="DECISION LOGIC", fillcolor="#1b5e20", shape=rect];
-        leg_exec [label="EXECUTION", fillcolor="#e65100", shape=rect];
-        leg_opt [label="OPTIMIZATION", fillcolor="#b71c1c", shape=rect];
-        
-        leg_desc [label="Edges represent data flow between major architectural components.\nColors indicate the domain of the data.", shape=plaintext, fillcolor=none];
-    }
-
     // =========================================================================
     // 1. HIGH-LEVEL OVERVIEW (White/Gray)
     // =========================================================================
@@ -155,11 +153,6 @@ digraph DiagramMap {
     // =========================================================================
     // CONNECTIONS BETWEEN CLUSTERS (Multicolored)
     // =========================================================================
-    
-    // ANCHOR LEGEND TO TOP CENTER
-    // Connect the MIDDLE node of the Legend (leg_logic) to the MIDDLE node of the Overview (d_full)
-    // High weight forces them to align vertically.
-    leg_logic -> d_full [style=invis, weight=100];
     
     // Data -> Intel (Cyan Edge)
     d_lag -> d_enhanced [label="Aligned Tensors", color="#00bcd4", fontcolor="#00bcd4", penwidth=2];
