@@ -61,13 +61,35 @@ if torch.cuda.device_count() > 1:
     print(f"🚀 Multi-GPU Detected: {torch.cuda.device_count()} GPUs!")
     model = torch.nn.DataParallel(model)
 
-# Load weights - update path for Kaggle
-MODEL_PATH = "condor_brain_seq_e1.pth"
-# Alternative: MODEL_PATH = "/kaggle/working/condor_brain_seq_e1.pth"
-# Alternative: MODEL_PATH = "models/condor_brain_e10_d1024_L24_lr1e04.pth"
+# Load weights - prioritize the new retrained model
+MODEL_PATH = "condor_brain_retrain_e1.pth"
+POSSIBLE_PATHS = [
+    "condor_brain_retrain_e1.pth",
+    "/kaggle/working/condor_brain_retrain_e1.pth",
+    #"/kaggle/input/condor-brain-seq-e1/condor_brain_retrain_e1.pth",
+    #"condor_brain_seq_e1.pth",
+]
 
+for p in POSSIBLE_PATHS:
+    if os.path.exists(p):
+        MODEL_PATH = p
+        break
+
+print(f"   Loading {MODEL_PATH}...")
 checkpoint = torch.load(MODEL_PATH, map_location=device)
-model.load_state_dict(checkpoint['model_state_dict'] if 'model_state_dict' in checkpoint else checkpoint, strict=False)
+
+# Handle different checkpoint formats & LOAD NORMALIZATION STATS
+if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+    state_dict = checkpoint["state_dict"]
+    ckpt_median = checkpoint.get("median", None)
+    ckpt_mad = checkpoint.get("mad", None)
+    ckpt_features = checkpoint.get("feature_cols", None)
+else:
+    state_dict = checkpoint["model_state_dict"] if "model_state_dict" in checkpoint else checkpoint
+    ckpt_median = None
+    ckpt_mad = None
+
+model.load_state_dict(state_dict, strict=False)
 model.eval()
 
 print(f"✅ Model loaded on {device}")
@@ -151,16 +173,23 @@ if len(df) > MAX_ROWS:
 # =============================================================================
 LOOKBACK = 256  # UPDATED: Matches SEQ_LEN
 
-def prepare_sequences(df, feature_cols, lookback=256):
-    """Prepare feature sequences for model inference."""
+def prepare_sequences(df, feature_cols, lookback=256, db_median=None, db_mad=None):
+    """Prepare feature sequences using ROBUST normalization from training."""
     # Handle NaNs: Forward fill then fill 0
     df_clean = df[feature_cols].ffill().fillna(0.0)
     X = df_clean.values.astype(np.float32)
     
-    # Normalize (same as training)
-    # Use nanmedian to be robust against any artifacts
-    median = np.nanmedian(X, axis=0, keepdims=True)
-    mad = np.nanmedian(np.abs(X - median), axis=0, keepdims=True) + 1e-8
+    # Normalize using TRAINING statistics (Prevent Data Leakage)
+    if db_median is not None and db_mad is not None:
+        print("   Using loaded normalization stats from checkpoint (Robust Scaling)...")
+        median = db_median
+        mad = db_mad
+    else:
+        print("⚠️ WARNING: No stats found in checkpoint. Calculating on Test Set (Possible Leakage)...")
+        median = np.nanmedian(X, axis=0, keepdims=True)
+        mad = np.nanmedian(np.abs(X - median), axis=0, keepdims=True) + 1e-8
+    
+    # Apply Robust Scaling
     X_norm = np.clip((X - median) / (1.4826 * mad), -10, 10)
     
     # Create sequences (Float16 saves 50% RAM)
@@ -173,7 +202,8 @@ def prepare_sequences(df, feature_cols, lookback=256):
     return sequences
 
 print("Preparing sequences...")
-sequences = prepare_sequences(df, available_cols, LOOKBACK)
+# Pass loaded stats to ensure we normalize exactly like the model expects
+sequences = prepare_sequences(df, available_cols, LOOKBACK, ckpt_median, ckpt_mad)
 print(f"Created {len(sequences):,} sequences of shape {sequences.shape}")
 
 # =============================================================================
