@@ -169,7 +169,7 @@ for epoch in range(EPOCHS):
     
     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
     
-    for x_seq, y_pol, y_next, y_traj in pbar:
+    for batch_idx, (x_seq, y_pol, y_next, y_traj) in enumerate(pbar):
         x_seq = x_seq.to(device)
         y_pol = y_pol.to(device)
         y_next = y_next.to(device)
@@ -228,6 +228,10 @@ for epoch in range(EPOCHS):
             'L_feat': f"{loss_feat.item():.4f}",
             'L_diff': f"{loss_diff.item():.4f}"
         })
+        
+        # Periodic Logging (every 100 batches)
+        if batch_idx % 100 == 0:
+            pbar.write(f"   [Batch {batch_idx}] L_All={loss.item():.4f} | Pol={loss_pol.item():.4f} | Diff={loss_diff.item():.4f}")
     
     avg_pol = total_pol_loss / len(train_loader)
     avg_feat = total_feat_loss / len(train_loader)
