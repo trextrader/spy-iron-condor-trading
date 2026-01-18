@@ -89,24 +89,36 @@ Y_policy[:, 7] = 0.3 + np.clip(np.abs(returns_60m), 0, 0.6)  # Confidence
 
 # Dataset
 class SequenceDataset(Dataset):
-    def __init__(self, X, Y_policy, Y_feat, seq_len):
+    def __init__(self, X, Y_policy, Y_feat, seq_len, horizon=32):
         self.X = X
         self.Y_policy = Y_policy
         self.Y_feat = Y_feat
         self.seq_len = seq_len
+        self.horizon = horizon
         
     def __len__(self):
-        return len(self.X) - self.seq_len - 1
+        # Ensure we have enough data for seq_len AND horizon
+        return len(self.X) - self.seq_len - self.horizon - 1
         
     def __getitem__(self, idx):
+        # Input sequence
         x_seq = self.X[idx : idx + self.seq_len]
+        
+        # Policy target (at end of sequence)
         y_pol = self.Y_policy[idx + self.seq_len - 1]
+        
+        # Next-step feature target (for feature head)
         y_next = self.Y_feat[idx + self.seq_len]
-        return torch.tensor(x_seq), torch.tensor(y_pol), torch.tensor(y_next)
+        
+        # Trajectory target (for diffusion head)
+        # Sequence of 'horizon' steps starting from t+1
+        y_traj = self.Y_feat[idx + self.seq_len : idx + self.seq_len + self.horizon]
+        
+        return torch.tensor(x_seq), torch.tensor(y_pol), torch.tensor(y_next), torch.tensor(y_traj)
 
 split_idx = int(len(X) * 0.9)
-train_dataset = SequenceDataset(X_norm[:split_idx], Y_policy[:split_idx], Y_feat[:split_idx], SEQ_LEN)
-val_dataset = SequenceDataset(X_norm[split_idx:], Y_policy[split_idx:], Y_feat[split_idx:], SEQ_LEN)
+train_dataset = SequenceDataset(X_norm[:split_idx], Y_policy[:split_idx], Y_feat[:split_idx], SEQ_LEN, PREDICT_HORIZON)
+val_dataset = SequenceDataset(X_norm[split_idx:], Y_policy[split_idx:], Y_feat[split_idx:], SEQ_LEN, PREDICT_HORIZON)
 
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
@@ -151,31 +163,48 @@ for epoch in range(EPOCHS):
     total_loss = 0
     total_pol_loss = 0
     total_feat_loss = 0
+    total_diff_loss = 0
     
     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
     
-    for x_seq, y_pol, y_next in pbar:
-        x_seq, y_pol, y_next = x_seq.to(device), y_pol.to(device), y_next.to(device)
+    for x_seq, y_pol, y_next, y_traj in pbar:
+        x_seq = x_seq.to(device)
+        y_pol = y_pol.to(device)
+        y_next = y_next.to(device)
+        y_traj = y_traj.to(device) # (B, 32, 4)
         
         optimizer.zero_grad()
         
         with torch.amp.autocast('cuda'):
-            res = model(x_seq, return_features=True)
-            outputs = res[0]
-            feat_pred = res[3]
+            # Pass diffusion_target (y_traj) to compute diffusion loss internally
+            # return_features=True -> output index 3
+            # use_diffusion=True -> output index 4
+            res = model(
+                x_seq, 
+                return_features=True, 
+                diffusion_target=y_traj
+            )
             
+            # Unpack results
+            # res structure: [outputs, regime, horizon, features, diffusion, experts...]
+            outputs = res[0]
+            # regime = res[1]
+            # horizon = res[2]
+            feat_pred = res[3]  # Index 3 if return_features=True
+            diff_loss_scalar = res[4] # Index 4 if use_diffusion=True
+            
+            # 1. Policy Loss
             loss_pol = criterion_policy(outputs, y_pol)
             
-            # CRITICAL FIX: Reduced scale from 1e5 to 1e3
+            # 2. Feature Loss (Next Step)
             loss_feat = criterion_forecast(feat_pred, y_next) * 1000.0
 
-            # Diffusion Loss (if enabled and returned)
-            # Forward returns: (outputs, regime_logits, horizon, feat, experts, diffusion_loss)
+            # 3. Diffusion Loss
             loss_diff = torch.tensor(0.0, device=device)
-            if len(res) >= 6 and res[5] is not None:
-                loss_diff = res[5] * 10.0 # Scale diffusion loss (MSE ~0.1-1.0)
+            if diff_loss_scalar is not None:
+                loss_diff = diff_loss_scalar * 10.0 # Scale diffusion loss
             
-            # Weighted mainly on policy now + diffusion support
+            # Total Loss
             loss = (loss_pol * 2.0) + loss_feat + loss_diff 
         
         scaler.scale(loss).backward()
@@ -187,15 +216,19 @@ for epoch in range(EPOCHS):
         total_loss += loss.item()
         total_pol_loss += loss_pol.item()
         total_feat_loss += loss_feat.item()
+        total_diff_loss += loss_diff.item()
         
         pbar.set_postfix({
             'L_pol': f"{loss_pol.item():.4f}", 
-            'L_feat': f"{loss_feat.item():.4f}" 
+            'L_feat': f"{loss_feat.item():.4f}",
+            'L_diff': f"{loss_diff.item():.4f}"
         })
     
-    avg_pol = total_pol_loss/len(train_loader)
-    avg_feat = total_feat_loss/len(train_loader)
-    print(f"   Epoch {epoch+1} Train: Policy={avg_pol:.4f} | Feat={avg_feat:.4f}")
+    avg_pol = total_pol_loss / len(train_loader)
+    avg_feat = total_feat_loss / len(train_loader)
+    avg_diff = total_diff_loss / len(train_loader)
+    
+    print(f"   Epoch {epoch+1} Train: Policy={avg_pol:.4f} | Feat={avg_feat:.4f} | Diff={avg_diff:.4f}")
     
     # Save Checkpoint
     save_path = f"condor_brain_retrain_e{epoch+1}.pth"
