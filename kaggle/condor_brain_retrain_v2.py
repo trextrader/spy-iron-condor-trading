@@ -29,10 +29,13 @@ ROWS_TO_LOAD = 3_000_000
 SEQ_LEN = 256
 PREDICT_HORIZON = 32
 
+# Optimization Flags
+USE_DATAPARALLEL = False      # Set False for T4 on Kaggle (often faster due to gather overhead)
+DIFFUSION_WARMUP_EPOCHS = 2   # Disable diffusion for first N epochs to speed up policy learning
+DIFFUSION_STEPS_TRAIN = 50    # Default steps (can be reduced if needed, but training is O(1))
+
 device = torch.device('cuda')
-n_gpus = torch.cuda.device_count()
 print(f"   GPU: {torch.cuda.get_device_name(0)}")
-print(f"   Count: {n_gpus}")
 
 # --- 1. DATA LOADING & PREP ---
 print(f"\n[1/4] Loading & Processing {ROWS_TO_LOAD:,} Rows...")
@@ -69,34 +72,31 @@ v[1:] = np.diff(log_v).astype(np.float32)
 
 Y_feat_np = np.stack([r, rho, d, v], axis=1).astype(np.float32)
 
-# ------------------------------
-# INPUT FEATURES (RAW)
-# ------------------------------
-X_np = df[FEATURE_COLS].to_numpy(np.float32)
+# X features
+X_np = df[FEATURE_COLS].values.astype(np.float32)
 X_np = np.nan_to_num(X_np, nan=0.0, posinf=10.0, neginf=-10.0)
 
 # ------------------------------
-# TRAIN / VAL SPLIT (BEFORE SCALING)
+# TRAIN / VAL SPLIT
 # ------------------------------
 split_idx = int(len(X_np) * 0.9)
 X_train_np = X_np[:split_idx]
-X_val_np = X_np[split_idx:]
+X_val_np   = X_np[split_idx:]
 Y_feat_train_np = Y_feat_np[:split_idx]
-Y_feat_val_np = Y_feat_np[split_idx:]
+Y_feat_val_np   = Y_feat_np[split_idx:]
 
 # ------------------------------
-# ROBUST SCALING (TRAIN ONLY)
+# SCALING (FIT TRAIN ONLY)
 # ------------------------------
-median = np.median(X_train_np, axis=0, keepdims=True)
-mad = np.median(np.abs(X_train_np - median), axis=0, keepdims=True) + 1e-8
+median = np.median(X_train_np, axis=0, keepdims=True).astype(np.float32)
+mad = (np.median(np.abs(X_train_np - median), axis=0, keepdims=True) + 1e-8).astype(np.float32)
 
 def robust_norm(x):
     return np.clip((x - median) / (1.4826 * mad), -10.0, 10.0).astype(np.float32)
 
 X_train_np = robust_norm(X_train_np)
-X_val_np = robust_norm(X_val_np)
+X_val_np   = robust_norm(X_val_np)
 
-# ------------------------------
 # POLICY TARGETS (NO WRAPAROUND)
 # ------------------------------
 future_close = np.empty_like(close)
@@ -179,7 +179,7 @@ model = CondorBrain(
     use_topk_moe=True,
     moe_n_experts=3, moe_k=1,
     use_diffusion=True,     # Enable Diffusion Head
-    diffusion_steps=50
+    diffusion_steps=DIFFUSION_STEPS_TRAIN
 ).to(device)
 
 # --- INITIALIZATION FIX ---
@@ -192,11 +192,23 @@ def init_weights(m):
 print("   Applying Xavier Initialization...")
 model.apply(init_weights)
 
-if n_gpus > 1:
+if USE_DATAPARALLEL and torch.cuda.device_count() > 1:
+    print(f"   Using {torch.cuda.device_count()} GPUs (DataParallel)")
     model = nn.DataParallel(model)
+else:
+    print("   Using Single GPU (USE_DATAPARALLEL=False)")
 
-optimizer = optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-5)
-scheduler = optim.lr_scheduler.OneCycleLR(optimizer, max_lr=LR, steps_per_epoch=len(train_loader), epochs=EPOCHS)
+optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=0.01)
+
+# Scheduler: Cosine Annealing with Warmup/Restarts
+scheduler = torch.optim.lr_scheduler.OneCycleLR(
+    optimizer, 
+    max_lr=LR, 
+    steps_per_epoch=len(train_loader), 
+    epochs=EPOCHS,
+    pct_start=0.1
+)
+
 criterion_policy = nn.MSELoss()
 criterion_forecast = nn.HuberLoss()
 
@@ -211,7 +223,10 @@ for epoch in range(EPOCHS):
     total_feat_loss = 0
     total_diff_loss = 0
     
-    pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
+    # 🌟 Staged Training Logic 🌟
+    use_diffusion = (epoch >= DIFFUSION_WARMUP_EPOCHS)
+    
+    pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Diff={'ON' if use_diffusion else 'OFF'}]")
     
     for batch_idx, (x_seq, y_pol, y_next, y_traj) in enumerate(pbar):
         x_seq = x_seq.to(device, non_blocking=True)
@@ -222,13 +237,16 @@ for epoch in range(EPOCHS):
         optimizer.zero_grad(set_to_none=True)
         
         with torch.amp.autocast('cuda'):
+            # Only pass diffusion target if we are past warmup
+            traj_target = y_traj if use_diffusion else None
+            
             # Pass diffusion_target (y_traj) to compute diffusion loss internally
             # return_features=True -> output index 3
             # use_diffusion=True -> output index 4
             res = model(
                 x_seq, 
                 return_features=True, 
-                diffusion_target=y_traj
+                diffusion_target=traj_target
             )
             
             # Unpack results
@@ -237,7 +255,7 @@ for epoch in range(EPOCHS):
             # regime = res[1]
             # horizon = res[2]
             feat_pred = res[3]  # Index 3 if return_features=True
-            diff_loss_scalar = res[4] # Index 4 if use_diffusion=True
+            diff_loss_scalar = res[4] if use_diffusion else None # Index 4 if use_diffusion=True
             
             # 1. Policy Loss
             loss_pol = criterion_policy(outputs, y_pol)
