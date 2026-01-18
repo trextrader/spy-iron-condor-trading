@@ -1,101 +1,144 @@
 digraph DiagramMap {
     rankdir=TB;
     compound=true;
-    fontname="Helvetica";
-    nodesep=0.8;
+    nodesep=0.6;
     ranksep=0.8;
+    bgcolor="#0a0a0a";
     
     // Global Styling
-    bgcolor="#0a0a0a";
     node [shape=note, fontname="Helvetica", fontsize=10, style=filled, fillcolor="#2c3e50", fontcolor="white", color="#ececec", penwidth=1.5];
     edge [fontname="Helvetica", fontsize=9, color="#aaaaaa", fontcolor="white"];
     
-    label = "CondorBrain Documentation Map\n(How the diagrams connect)";
+    label = "CondorBrain Master Architecture Map\n(All Systems Connected)";
     fontcolor="white";
-    fontsize=16;
+    fontsize=18;
     
     // =========================================================================
-    // 1. DATA LAYER
+    // 1. HIGH-LEVEL OVERVIEW
+    // =========================================================================
+    subgraph cluster_overview {
+        label = "1. High-Level Concepts";
+        style = filled;
+        fillcolor = "#1a1a1a";
+        color = "#444444";
+        fontcolor = "white";
+        
+        d_sys_overview [label="system_overview.png\n(The Big Picture)", href="system_overview.png", fillcolor="#34495e"];
+        d_full [label="full_system_architecture.png\n(Detailed V2.2 Spec)", href="full_system_architecture.png", fillcolor="#34495e", shape=box3d, penwidth=3];
+        
+        d_phase23 [label="phase2_phase3_architecture.png\n(Strategy Phases)", href="phase2_phase3_architecture.png"];
+        
+        d_sys_overview -> d_full [label="Detail View"];
+    }
+
+    // =========================================================================
+    // 2. DATA PIPELINE LAYER
     // =========================================================================
     subgraph cluster_data {
-        label = "1. Data Ingestion & Alignment";
+        label = "2. Data Ingestion & Engineering";
         style = filled;
-        fillcolor = "#e3f2fd";
-        color = "#90caf9";
+        fillcolor = "#0d1b2a";
+        color = "#1b263b";
+        fontcolor = "white";
         
-        d_pipeline [label="data_pipeline_detailed.png\n(Raw Ingestion)", href="data_pipeline_detailed.png"];
+        d_pipeline [label="pipeline_diagram.png\n(ETL Scripts)", href="pipeline_diagram.png"];
+        d_data_detailed [label="data_pipeline_detailed.png\n(CSV -> Snapshot)", href="data_pipeline_detailed.png"];
         d_lag [label="lag_alignment_flow.png\n(Timestamp Sync)", href="lag_alignment_flow.png"];
         
-        d_pipeline -> d_lag [label="Cleaned Data"];
+        d_pipeline -> d_data_detailed [label="Raw Data"];
+        d_data_detailed -> d_lag [label="MarketSnapshot"];
     }
     
     // =========================================================================
-    // 2. INTELLIGENCE CORE
+    // 3. INTELLIGENCE CORE (Mamba, Diffusion, TDA)
     // =========================================================================
     subgraph cluster_intel {
-        label = "2. Intelligence Engine";
+        label = "3. Neural Intelligence Core";
         style = filled;
-        fillcolor = "#e8f5e9";
-        color = "#a5d6a7";
+        fillcolor = "#1b1b1b";
+        color = "#2d2d2d";
+        fontcolor = "white";
         
-        d_full [label="full_system_architecture.png\n(V2.2 COMPLETE SYSTEM)\n(Mamba + Diffusion + TDA)", shape=box3d, fillcolor="#ccff90", fontsize=12, penwidth=3, href="full_system_architecture.png"];
+        d_enhanced [label="enhanced_architecture.png\n(Inputs -> Mamba -> Heads)", href="enhanced_architecture.png"];
+        d_mamba_logic [label="mamba_engine_logic.png\n(SSM Block Internals)", href="mamba_engine_logic.png"];
         
-        d_enhanced [label="enhanced_architecture.png\n(Neural Internals)", href="enhanced_architecture.png"];
-        d_premium [label="condor_intelligence_flow_premium.png\n(Logic Tiering)", href="condor_intelligence_flow_premium.png"];
+        d_flow [label="condor_intelligence_flow.png\n(Standard Flow)", href="condor_intelligence_flow.png"];
+        d_flow_prem [label="condor_intelligence_flow_premium.png\n(Premium + TDA + Diff)", href="condor_intelligence_flow_premium.png"];
         
-        d_enhanced -> d_full [label="Component of"];
-        d_premium -> d_full [label="High-Level View"];
+        d_enhanced -> d_mamba_logic [label="Contains"];
+        d_flow -> d_flow_prem [label="Upgraded To"];
     }
-    
+
     // =========================================================================
-    // 3. DECISION & SIZING
+    // 4. LOGIC & DECISION LAYER (Fuzzy, Dataflow)
     // =========================================================================
-    subgraph cluster_decision {
-        label = "3. Decision & Sizing";
+    subgraph cluster_logic {
+        label = "4. Decision Logic & Sizing";
         style = filled;
-        fillcolor = "#fff3e0";
-        color = "#ffcc80";
+        fillcolor = "#1e272e";
+        color = "#3d3d3d";
+        fontcolor = "white";
         
-        d_fuzzy [label="fuzzy_sizing_pipeline.png\n(Position Sizing)", href="fuzzy_sizing_pipeline.png"];
-        d_entry [label="entryexitdecision.png\n(Trade Logic)", href="entryexitdecision.png"];
+        d_dataflow [label="dataflow.png\n(Indicators & Gates)", href="dataflow.png"];
+        d_fuzzy [label="fuzzy_sizing_pipeline.png\n(Confidence Scoring)", href="fuzzy_sizing_pipeline.png"];
+        d_membership [label="membership_curves.png\n(Fuzzy Functions)", href="membership_curves.png"];
+        d_pos_sizing [label="position_sizing.png\n(Kelly & Risk)", href="position_sizing.png"];
         
-        d_full -> d_fuzzy [label="Signals & Confidence"];
-        d_fuzzy -> d_entry [label="Sized Orders"];
+        d_entry_exit [label="entryexitdecision.png\n(Entry/Exit Trees)", href="entryexitdecision.png"];
+        d_exit_prio [label="exit_priority.png\n(Exit Hierarchy)", href="exit_priority.png"];
+        
+        d_membership -> d_fuzzy [label="Defines"];
+        d_dataflow -> d_fuzzy [label="Feeds"];
+        d_fuzzy -> d_pos_sizing [label="Sizing Multiplier"];
+        d_pos_sizing -> d_entry_exit [label="Order Size"];
+        d_entry_exit -> d_exit_prio [label="Manage Trade"];
     }
-    
+
     // =========================================================================
-    // 4. EXECUTION
+    // 5. EXECUTION & OPERATIONS
     // =========================================================================
     subgraph cluster_exec {
-        label = "4. Execution & Lifecycle";
+        label = "5. Execution & Ops";
         style = filled;
-        fillcolor = "#f3e5f5";
-        color = "#ce93d8";
+        fillcolor = "#192a56";
+        color = "#273c75";
+        fontcolor = "white";
         
-        d_exec [label="institutional_execution_flow.png\n(Trade Lifecycle)", href="institutional_execution_flow.png"];
-        d_overview [label="system_overview.png\n(General)", href="system_overview.png"];
+        d_inst_exec [label="institutional_execution_flow.png\n(Broker/Order Mgmt)", href="institutional_execution_flow.png"];
     }
-    
+
     // =========================================================================
-    // 5. OPTIMIZATION LOOP
+    // 6. OPTIMIZATION LOOP
     // =========================================================================
     subgraph cluster_opt {
-        label = "5. Feedback Loop";
+        label = "6. Optimization Loop";
         style = filled;
-        fillcolor = "#e0f7fa";
-        color = "#80deea";
+        fillcolor = "#2f3640";
+        color = "#353b48";
+        fontcolor = "white";
         
-        d_opt [label="optimization_pipeline.png\n(Hyperparam Tuning)", href="optimization_pipeline.png"];
+        d_opt [label="optimization_pipeline.png\n(Training & Tuning)", href="optimization_pipeline.png"];
     }
     
-    // Inter-Cluster Connections
-    d_lag -> d_enhanced [label="Tensors"];
-    d_entry -> d_exec [label="Orders"];
-    d_exec -> d_opt [label="P&L Metrics"];
-    d_opt -> d_enhanced [label="Tuned Weights"];
+    // =========================================================================
+    // CONNECTIONS BETWEEN CLUSTERS
+    // =========================================================================
     
-    // Key
-    {rank=source; d_overview}
-    d_overview -> d_pipeline [style=dotted, label="Drill Down"];
+    // Data -> Intel
+    d_lag -> d_enhanced [label="Aligned Tensors", color="cyan"];
+    d_lag -> d_flow_prem [label="Features", color="cyan"];
     
+    // Intel -> Logic
+    d_enhanced -> d_fuzzy [label="Probabilities", color="magenta"];
+    d_flow_prem -> d_dataflow [label="Signals", color="magenta"];
+    
+    // Logic -> Exec
+    d_entry_exit -> d_inst_exec [label="Route Order", color="lime"];
+    
+    // Exec -> Opt
+    d_inst_exec -> d_opt [label="Trade Logs", color="yellow"];
+    
+    // Opt -> Intel (Feedback)
+    d_opt -> d_enhanced [label="Tuned Weights", color="red", style=dashed];
+
 }
