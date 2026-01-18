@@ -2,13 +2,13 @@
 # CONDORBRAIN RETRAINING V2 - FIXING POSTERIOR COLLAPSE
 # ============================================================
 print("🚀 Starting CondorBrain Retraining V2 (Shock Therapy)...")
-
+'''
 # --- 0. PREP & CLEAN ---
 import os
 print("🔄 Syncing Repo...")
 os.system("cd spy-iron-condor-trading && git fetch origin && git reset --hard origin/main")
 print("✅ Repo synced")
-
+'''
 import sys
 sys.path.insert(0, '/kaggle/working/spy-iron-condor-trading')
 import torch
@@ -204,6 +204,9 @@ for epoch in range(EPOCHS):
             # 3. Diffusion Loss
             loss_diff = torch.tensor(0.0, device=device)
             if diff_loss_scalar is not None:
+                # Handle DataParallel: If gathered loss is a vector (one per GPU), take mean
+                if diff_loss_scalar.dim() > 0:
+                    diff_loss_scalar = diff_loss_scalar.mean()
                 loss_diff = diff_loss_scalar * 10.0 # Scale diffusion loss
             
             # Total Loss
