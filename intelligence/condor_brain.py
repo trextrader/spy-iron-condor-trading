@@ -476,6 +476,8 @@ class CondorBrain(nn.Module):
         
         # Next-step feature prediction (for Meta-Forecaster)
         feature_pred = None
+        if return_features:
+             feature_pred = self.feature_head(last_hidden)
         
         # Diffusion Head (Training or Inference)
         diffusion_out = None
