@@ -156,9 +156,10 @@ digraph DiagramMap {
     // CONNECTIONS BETWEEN CLUSTERS (Multicolored)
     // =========================================================================
     
-    // ANCHOR LEGEND TO TOP
-    // This invisible edge forces the Legend cluster to be above the Overview cluster
-    leg_data -> d_sys_overview [style=invis, weight=10];
+    // ANCHOR LEGEND TO TOP CENTER
+    // Connect the MIDDLE node of the Legend (leg_logic) to the MIDDLE node of the Overview (d_full)
+    // High weight forces them to align vertically.
+    leg_logic -> d_full [style=invis, weight=100];
     
     // Data -> Intel (Cyan Edge)
     d_lag -> d_enhanced [label="Aligned Tensors", color="#00bcd4", fontcolor="#00bcd4", penwidth=2];
