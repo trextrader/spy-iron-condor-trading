@@ -27,6 +27,15 @@ from intelligence.canonical_feature_registry import (
     apply_semantic_nan_fill,
 )
 from intelligence.features.dynamic_features import compute_all_dynamic_features
+
+# 🔄 FIX STALE IMPORTS (Colab/Jupyter specific)
+import sys
+import importlib
+if 'intelligence.training_monitor' in sys.modules:
+    import intelligence.training_monitor
+    importlib.reload(intelligence.training_monitor)
+    print("🔄 Forcing reload of intelligence.training_monitor")
+
 from intelligence.training_monitor import (
     TrainingMonitor, compute_val_head_losses, sample_predictions, MAIN_HEADS
 )
