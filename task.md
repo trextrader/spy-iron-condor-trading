@@ -58,12 +58,14 @@
     - **Diagnosis**: Posterior Collapse (Constant Output: Conf=0.584, all rows identical)
     - **Root Cause**: 1-epoch model is a "mean guesser" - insufficient training for sequence learning
 
-## Phase 8.5: Path to Live (Roadmap Activated)
-- [ ] **Step 1A**: Integrate New **Team Indicators** (Waiting for scripts)
-- [ ] **Step 1B**: Implement New **Internal Indicators** (Waiting for User Writeups)
-- [ ] **Step 2**: Process 10M Row Dataset (Feature Engineering)
-- [ ] **Step 3**: Retrain (5 Epochs, Staged Diffusion)
-- [ ] **Step 4**: Verify & Paper Trade
+## Phase 8.5: Path to Live (V2.1 Dynamic Feature Pipeline)
+- [x] **Step 1A**: Create `intelligence/canonical_feature_registry.py`
+- [x] **Step 1B**: Create `intelligence/features/dynamic_features.py`
+- [x] **Step 2**: Update `kaggle/condor_brain_retrain_v2.py` (32 features)
+- [x] **Step 3**: Update `kaggle/condor_brain_backtest.py` (schema-driven)
+- [ ] **Step 4**: Process 10M Row Dataset (Feature Engineering)
+- [ ] **Step 5**: Retrain (5 Epochs, Staged Diffusion)
+- [ ] **Step 6**: Verify & Paper Trade
 
 ## Phase 9: Advanced Model Enhancements (Completed)
 - [x] **Diffusion Head**: Implement Generative Trajectory Refinement (`intelligence/generative/diffusion.py`)

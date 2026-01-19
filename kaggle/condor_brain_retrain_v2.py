@@ -20,6 +20,11 @@ import numpy as np
 from tqdm import tqdm
 import os
 from intelligence.condor_brain import CondorBrain
+from intelligence.canonical_feature_registry import (
+    FEATURE_COLS_V21, INPUT_DIM_V21, VERSION_V21,
+    NAN_POLICY_V21, NORMALIZATION_POLICY_V21,
+)
+from intelligence.features.dynamic_features import compute_all_dynamic_features
 
 # --- CONFIG (Shock Therapy) ---
 EPOCHS = 10         # Increased from 4
@@ -43,10 +48,10 @@ DATA_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
 df = pd.read_csv(DATA_PATH).iloc[-ROWS_TO_LOAD:]
 print(f"   Shape: {df.shape}")
 
-FEATURE_COLS = ['open', 'high', 'low', 'close', 'volume', 'delta', 'gamma', 
-                'vega', 'theta', 'iv', 'ivr', 'spread_ratio', 'te', 'rsi', 
-                'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 
-                'psar', 'strike', 'target_spot', 'max_dd_60m']
+# V2.1 FEATURE SCHEMA (32 dynamic features)
+FEATURE_COLS = FEATURE_COLS_V21
+INPUT_DIM = INPUT_DIM_V21
+print(f"   Using V2.1 Schema: {INPUT_DIM} features")
 
 # ------------------------------
 # FEATURE & TARGET CONSTRUCTION
@@ -72,9 +77,13 @@ v[1:] = np.diff(log_v).astype(np.float32)
 
 Y_feat_np = np.stack([r, rho, d, v], axis=1).astype(np.float32)
 
-# X features
+# Compute dynamic features
+print("   Computing dynamic features...")
+df = compute_all_dynamic_features(df, close_col="close", high_col="high", low_col="low")
+
+# X features (now 32 columns)
 X_np = df[FEATURE_COLS].values.astype(np.float32)
-X_np = np.nan_to_num(X_np, nan=0.0, posinf=10.0, neginf=-10.0)
+X_np = np.nan_to_num(X_np, nan=NAN_POLICY_V21["nan"], posinf=NAN_POLICY_V21["posinf"], neginf=NAN_POLICY_V21["neginf"])
 
 # ------------------------------
 # TRAIN / VAL SPLIT
@@ -174,11 +183,11 @@ print("\n[2/4] Initializing CondorBrain V2...")
 model = CondorBrain(
     d_model=512,
     n_layers=12,
-    input_dim=24,
+    input_dim=INPUT_DIM,  # V2.1: 32 features
     use_vol_gated_attn=True,
     use_topk_moe=True,
     moe_n_experts=3, moe_k=1,
-    use_diffusion=True,     # Enable Diffusion Head
+    use_diffusion=True,
     diffusion_steps=DIFFUSION_STEPS_TRAIN
 ).to(device)
 
@@ -314,11 +323,12 @@ for epoch in range(EPOCHS):
     
     checkpoint = {
         "state_dict": state_dict,
+        "version": VERSION_V21,
         "feature_cols": FEATURE_COLS,
+        "input_dim": INPUT_DIM,
         "median": median.astype(np.float32),
         "mad": mad.astype(np.float32),
         "seq_len": SEQ_LEN,
-        "input_dim": len(FEATURE_COLS),
         "use_diffusion": True,
         "diffusion_steps": 50
     }

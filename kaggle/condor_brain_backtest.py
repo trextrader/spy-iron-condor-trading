@@ -39,33 +39,22 @@ if torch.cuda.is_available():
 # CELL 3: Load Trained Model
 # =============================================================================
 from intelligence.condor_brain import CondorBrain
+from intelligence.canonical_feature_registry import (
+    FEATURE_COLS_V21, INPUT_DIM_V21, VERSION_V21,
+    NAN_POLICY_V21, FEATURE_COLS_V20, INPUT_DIM_V20,
+)
+from intelligence.features.dynamic_features import compute_all_dynamic_features
 
-# Model configuration (must match training)
-# Model configuration (must match training)
-MODEL_CONFIG = {
-    'd_model': 512,    # UPDATED: Matches condor_brain_seq_e1
-    'n_layers': 12,    # UPDATED: Matches condor_brain_seq_e1
-    'input_dim': 24,   # Renamed from n_features to match __init__
-    'use_vol_gated_attn': True,
-    'use_topk_moe': True,
-    'moe_n_experts': 3,
-    'moe_k': 1,
-}
-
-# Initialize model
+# Initialize device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = CondorBrain(**MODEL_CONFIG).to(device)
-
-# Multi-GPU (DataParallel) will be enabled AFTER loading weights
-# to ensure keys match (checkpoint has no 'module.' prefix)
 
 # Load weights - prioritize the new retrained model
 MODEL_PATH = "condor_brain_retrain_e1.pth"
 POSSIBLE_PATHS = [
     "condor_brain_retrain_e1.pth",
     "/kaggle/working/condor_brain_retrain_e1.pth",
-    #"/kaggle/input/condor-brain-seq-e1/condor_brain_retrain_e1.pth",
-    #"condor_brain_seq_e1.pth",
+    "condor_brain_v21_e1.pth",
+    "/kaggle/working/condor_brain_v21_e1.pth",
 ]
 
 for p in POSSIBLE_PATHS:
@@ -82,10 +71,40 @@ if isinstance(checkpoint, dict) and "state_dict" in checkpoint:
     ckpt_median = checkpoint.get("median", None)
     ckpt_mad = checkpoint.get("mad", None)
     ckpt_features = checkpoint.get("feature_cols", None)
+    ckpt_input_dim = checkpoint.get("input_dim", None)
+    ckpt_version = checkpoint.get("version", "unknown")
 else:
     state_dict = checkpoint["model_state_dict"] if "model_state_dict" in checkpoint else checkpoint
     ckpt_median = None
     ckpt_mad = None
+    ckpt_features = None
+    ckpt_input_dim = None
+    ckpt_version = "legacy"
+
+# Determine model configuration from checkpoint (SCHEMA-DRIVEN)
+if ckpt_features is not None and ckpt_input_dim is not None:
+    FEATURE_COLS = ckpt_features
+    INPUT_DIM = ckpt_input_dim
+    print(f"   ✅ Using checkpoint schema: {ckpt_version} ({INPUT_DIM} features)")
+else:
+    # Fallback to V2.0 for legacy checkpoints
+    print("   ⚠️ Legacy checkpoint (no schema). Using V2.0 defaults.")
+    FEATURE_COLS = FEATURE_COLS_V20
+    INPUT_DIM = INPUT_DIM_V20
+
+# Model configuration (derived from checkpoint)
+MODEL_CONFIG = {
+    'd_model': 512,
+    'n_layers': 12,
+    'input_dim': INPUT_DIM,  # SCHEMA-DRIVEN
+    'use_vol_gated_attn': True,
+    'use_topk_moe': True,
+    'moe_n_experts': 3,
+    'moe_k': 1,
+}
+
+# Initialize model with correct input_dim
+model = CondorBrain(**MODEL_CONFIG).to(device)
 
 # LOAD WEIGHTS FIRST (Before DataParallel)
 print("   Loading state dict...")
@@ -149,28 +168,21 @@ def add_technical_indicators(df):
 print("   Generating Technical Indicators...")
 df = add_technical_indicators(df)
 
-# Feature columns (MUST MATCH TRAINING EXACTLY)
-FEATURE_COLS = [
-    'open', 'high', 'low', 'close', 'volume', 'delta', 'gamma', 
-    'vega', 'theta', 'iv', 'ivr', 'spread_ratio', 'te', 'rsi', 
-    'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 
-    'psar', 'strike', 'target_spot', 'max_dd_60m'
-]
+# Compute dynamic features if using V2.1 schema
+if INPUT_DIM == INPUT_DIM_V21:
+    print("   Computing V2.1 dynamic features...")
+    df = compute_all_dynamic_features(df, close_col="close", high_col="high", low_col="low")
 
-# Ensure columns exist
+# Ensure columns exist (FEATURE_COLS loaded from checkpoint)
 available_cols = [c for c in FEATURE_COLS if c in df.columns]
 missing_cols = set(FEATURE_COLS) - set(available_cols)
 if missing_cols:
     print(f"⚠️ Warning: Missing columns: {missing_cols}")
-    print("   Attempting to generate basic indicators (Mocking Greeks)...")
-    # Basic Feature Engineering for Backtest (if columns missing)
-    # Greeks/IV might be missing in raw OHLCV, so we mock them for structural compliance
+    print("   Padding missing columns with zeros...")
     for col in missing_cols:
-        df[col] = 0.0 # Default pad
-    
-    available_cols = FEATURE_COLS # Now all exist (mocked or real)
+        df[col] = 0.0
 
-print(f"Using {len(available_cols)} features (Target: {len(FEATURE_COLS)})")
+print(f"Using {len(FEATURE_COLS)} features (Schema: {INPUT_DIM})")
 
 # Slice Data to avoid OOM (Last 1M rows)
 MAX_ROWS = 1_000_000
@@ -188,6 +200,9 @@ def prepare_sequences(df, feature_cols, lookback=256, db_median=None, db_mad=Non
     # Handle NaNs: Forward fill then fill 0
     df_clean = df[feature_cols].ffill().fillna(0.0)
     X = df_clean.values.astype(np.float32)
+    
+    # Apply NaN policy
+    X = np.nan_to_num(X, nan=NAN_POLICY_V21["nan"], posinf=NAN_POLICY_V21["posinf"], neginf=NAN_POLICY_V21["neginf"])
     
     # Normalize using TRAINING statistics (Prevent Data Leakage)
     if db_median is not None and db_mad is not None:
