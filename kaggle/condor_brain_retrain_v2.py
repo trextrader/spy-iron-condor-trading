@@ -19,6 +19,7 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 import os
+from torch.utils.tensorboard import SummaryWriter
 from intelligence.condor_brain import CondorBrain
 from intelligence.canonical_feature_registry import (
     FEATURE_COLS_V21, INPUT_DIM_V21, VERSION_V21,
@@ -26,6 +27,12 @@ from intelligence.canonical_feature_registry import (
     apply_semantic_nan_fill,
 )
 from intelligence.features.dynamic_features import compute_all_dynamic_features
+from intelligence.training_monitor import (
+    TrainingMonitor, compute_val_head_losses, sample_predictions, MAIN_HEADS
+)
+import io
+from PIL import Image
+import matplotlib.pyplot as plt
 
 # --- TRAINING CONFIG ---
 # ROWS_TO_LOAD: Number of rows from end of dataset
@@ -59,17 +66,18 @@ print(f"   GPU: {torch.cuda.get_device_name(0)} x{n_gpus} (DataParallel={'ON' if
 # --- 1. DATA LOADING & PREP ---
 print(f"\n[1/4] Loading & Processing {ROWS_TO_LOAD:,} Rows...")
 
-# Auto-detect environment: Kaggle vs Colab
+# Auto-detect environment: Kaggle vs Colab vs Local
 KAGGLE_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
 COLAB_PATH = "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m.csv"
+COLAB_ROOT_PATH = "data/processed/mamba_institutional_1m.csv"  # If already in repo root
 LOCAL_PATH = "data/processed/mamba_institutional_1m.csv"
 
-for p in [KAGGLE_PATH, COLAB_PATH, LOCAL_PATH]:
+for p in [KAGGLE_PATH, COLAB_PATH, COLAB_ROOT_PATH, LOCAL_PATH]:
     if os.path.exists(p):
         DATA_PATH = p
         break
 else:
-    raise FileNotFoundError(f"Data file not found in: {[KAGGLE_PATH, COLAB_PATH, LOCAL_PATH]}")
+    raise FileNotFoundError(f"Data file not found!")
 
 print(f"   Data: {DATA_PATH}")
 df = pd.read_csv(DATA_PATH).iloc[-ROWS_TO_LOAD:]
@@ -374,6 +382,14 @@ for epoch in range(EPOCHS):
         # Periodic Logging (every 100 batches)
         if batch_idx % 100 == 0:
             pbar.write(f"   [Batch {batch_idx}] L_All={loss.item():.4f} | Pol={loss_pol.item():.4f} | Diff={loss_diff.item():.4f}")
+            
+        # TensorBoard Logging (every batch)
+        global_step = epoch * len(train_loader) + batch_idx
+        writer.add_scalar('Loss/Total', loss.item(), global_step)
+        writer.add_scalar('Loss/Policy', loss_pol.item(), global_step)
+        writer.add_scalar('Loss/Feature', loss_feat.item(), global_step)
+        writer.add_scalar('Loss/Diffusion', loss_diff.item(), global_step)
+        writer.add_scalar('LR', scheduler.get_last_lr()[0], global_step)
     
     avg_pol = total_pol_loss / len(train_loader)
     avg_feat = total_feat_loss / len(train_loader)
@@ -381,6 +397,101 @@ for epoch in range(EPOCHS):
     
     print(f"   Epoch {epoch+1} Train: Policy={avg_pol:.4f} | Feat={avg_feat:.4f} | Diff={avg_diff:.4f}")
     
+    # TensorBoard Epoch Averages
+    writer.add_scalar('Epoch/Policy_Loss', avg_pol, epoch+1)
+    writer.add_scalar('Epoch/Feature_Loss', avg_feat, epoch+1)
+    writer.add_scalar('Epoch/Diffusion_Loss', avg_diff, epoch+1)
+    
+    # === MONITOR & TENSORBOARD VISUALIZATION ===
+    # This block replicates the rich logging from intelligence/train_condor_brain.py
+    
+    # 1. Compute per-head val losses (fast GPU accum)
+    head_losses = compute_val_head_losses(
+        model=model,
+        get_batch_fn=lambda bi: next(iter(val_loader)), # Adapting to simpler loader here
+        n_batches=len(val_loader),
+        device=device,
+        amp_dtype=torch.float16 # Standard AMP
+    )
+    
+    # 2. Log per-head scalars
+    if writer is not None:
+        for head_name, h_loss in head_losses.items():
+            writer.add_scalar(f'HeadLoss/{head_name}', h_loss, epoch+1)
+            
+    # 3. Rich Image Logging (Scatter plots & Trajectories)
+    # Run every epoch or every few epochs
+    if writer is not None:
+        try:
+            # Get sample predictions
+            samples = sample_predictions(
+                model=model,
+                get_batch_fn=lambda bi: next(iter(val_loader)),
+                device=device,
+                amp_dtype=torch.float16,
+                n_samples=32
+            )
+            
+            # A. Predicted vs Actual Scatter Plots
+            for i, head_name in enumerate(MAIN_HEADS):
+                fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+                p = samples['preds'][:, i]
+                t = samples['targets'][:, i]
+                
+                ax.scatter(t, p, alpha=0.6, s=50, c='blue', edgecolors='black')
+                vmin, vmax = min(p.min(), t.min()), max(p.max(), t.max())
+                margin = (vmax - vmin) * 0.1 + 0.01
+                ax.plot([vmin-margin, vmax+margin], [vmin-margin, vmax+margin], 'k--', alpha=0.5)
+                
+                mae = np.mean(np.abs(p - t))
+                corr = np.corrcoef(p, t)[0, 1] if np.std(p) > 1e-6 else 0
+                ax.set_title(f'{head_name}\nMAE={mae:.4f} | r={corr:.3f}')
+                ax.set_xlabel('Actual')
+                ax.set_ylabel('Predicted')
+                ax.grid(True, alpha=0.3)
+                fig.tight_layout()
+                
+                # Convert to image
+                buf = io.BytesIO()
+                fig.savefig(buf, format='png', dpi=80)
+                buf.seek(0)
+                img = Image.open(buf)
+                img_array = np.array(img)
+                plt.close(fig)
+                
+                writer.add_image(f'Predictions/{head_name}', img_array, epoch+1, dataformats='HWC')
+            
+            # B. Horizon Trajectory (45-Day Forecast)
+            if samples.get('forecast_data') is not None:
+                forecast = samples['forecast_data'][0]  # Sample 0
+                num_days = forecast.shape[0]
+                days = np.arange(num_days)
+                
+                fig, ax = plt.subplots(1, 1, figsize=(10, 6))
+                # forecast components: [close, high, low, vol]
+                ax.plot(days, forecast[:, 0], 'b-', label='Expected Close', linewidth=2)
+                ax.fill_between(days, forecast[:, 2], forecast[:, 1], color='blue', alpha=0.2, label='High/Low Envelope')
+                
+                ax.set_title(f'HorizonForecaster: 45-Day Trajectory (Epoch {epoch+1})')
+                ax.set_xlabel('Days from Now')
+                ax.set_ylabel('Normalized Price Change')
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+                buf = io.BytesIO()
+                fig.savefig(buf, format='png', dpi=100)
+                buf.seek(0)
+                img = Image.open(buf)
+                img_array = np.array(img)
+                plt.close(fig)
+                writer.add_image('Horizon/Trajectory', img_array, epoch+1, dataformats='HWC')
+
+            # Force flush to disk so Colab sees it immediately
+            writer.flush()
+            print(f"   [TensorBoard] 📸 Logged validation images (Scatter + Horizon) to {log_dir}")
+
+        except Exception as e:
+            print(f"[TensorBoard] Image logging error: {e}")
+
     # Save Checkpoint with Metadata
     save_path = f"condor_brain_retrain_e{epoch+1}.pth"
     
