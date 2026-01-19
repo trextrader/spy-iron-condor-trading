@@ -33,7 +33,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 # LOCKED IMPORT: exact module path for compute_all_dynamic_features
 from intelligence.features.dynamic_features import compute_all_dynamic_features
-from intelligence.canonical_feature_registry import FEATURE_COLS_V21, INPUT_DIM_V21
+from intelligence.canonical_feature_registry import FEATURE_COLS_V21, INPUT_DIM_V21, NEUTRAL_FILL_VALUES
 
 
 def _human(n: float) -> str:
@@ -216,6 +216,26 @@ def main() -> int:
                 print(f"  - {f}")
             return 3
         print(f"[Precompute] ✅ Schema verified: all {INPUT_DIM_V21} V2.1 features present")
+
+    # -------------------------------------------------------------------------
+    # SEMANTIC NaN FILL: Fill NaNs with neutral values so CSV has no blanks
+    # (prevents "fake oversold" etc signals from warmup period)
+    # -------------------------------------------------------------------------
+    print("[Precompute] Applying semantic NaN fill (neutral values, no blanks)...")
+    filled_count = 0
+    for col, val in NEUTRAL_FILL_VALUES.items():
+        if col in out_df.columns:
+            na_count = out_df[col].isna().sum()
+            if na_count > 0:
+                out_df[col] = out_df[col].fillna(val)
+                filled_count += na_count
+    
+    # For any remaining NaNs in V2.1 features, use 0.0 as fallback
+    for col in FEATURE_COLS_V21:
+        if col in out_df.columns:
+            out_df[col] = out_df[col].fillna(0.0)
+    
+    print(f"[Precompute] Filled {filled_count:,} warmup NaN cells with semantic neutral values")
 
     # Write CSV
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
