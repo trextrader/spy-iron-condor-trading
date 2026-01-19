@@ -127,6 +127,10 @@ v = np.zeros_like(volumes, dtype=np.float32)
 v[1:] = np.diff(log_v).astype(np.float32)
 
 Y_feat_np = np.stack([r, rho, d, v], axis=1).astype(np.float32)
+# Sanitize targets (prevent NaNs and Ints)
+Y_feat_np = np.nan_to_num(Y_feat_np, nan=0.0, posinf=5.0, neginf=-5.0)
+Y_feat_np = np.clip(Y_feat_np, -10.0, 10.0)
+
 # =========================================================================
 # CRITICAL: Compute dynamic features on UNIQUE SPOT bars, then merge back.
 # (Options data has ~100 rows per timestamp with same OHLCV)
