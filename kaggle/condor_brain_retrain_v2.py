@@ -433,9 +433,26 @@ for epoch in range(EPOCHS):
     # This block replicates the rich logging from intelligence/train_condor_brain.py
     
     # 1. Compute per-head val losses (fast GPU accum)
+    # create iterator once per epoch
+    val_iter = iter(val_loader)
+    
+    def val_batch_wrapper(bi):
+        try:
+            batch = next(val_iter)
+        except StopIteration:
+            # Fallback if length calculation slightly off
+            batch = next(iter(val_loader))
+            
+        x_seq, y_pol, y_next, y_traj = batch
+        x_seq = x_seq.to(device, non_blocking=True)
+        y_pol = y_pol.to(device, non_blocking=True)
+        # Dummy regime (not used in this training phase)
+        r = torch.zeros(x_seq.size(0), dtype=torch.long, device=device)
+        return x_seq, y_pol, r
+
     head_losses = compute_val_head_losses(
         model=model,
-        get_batch_fn=lambda bi: next(iter(val_loader)), # Adapting to simpler loader here
+        get_batch_fn=val_batch_wrapper,
         n_batches=len(val_loader),
         device=device,
         amp_dtype=torch.float16 # Standard AMP
