@@ -599,18 +599,24 @@ for epoch in range(EPOCHS):
         r = torch.zeros(x_seq.size(0), dtype=torch.long, device=device)
         return x_seq, y_pol, r
 
-    head_losses = compute_val_head_losses(
-        model=model,
-        get_batch_fn=val_batch_wrapper,
-        n_batches=len(val_loader),
-        device=device,
-        amp_dtype=torch.float16 # Standard AMP
-    )
-    
-    # 2. Log per-head scalars
-    if writer is not None:
-        for head_name, h_loss in head_losses.items():
-            writer.add_scalar(f'HeadLoss/{head_name}', h_loss, epoch+1)
+    # ⚠️ WORKAROUND: Colab bytecode cache is sticky. Wrap this in try-except 
+    # so checkpointing can still happen even if validation fails.
+    try:
+        head_losses = compute_val_head_losses(
+            model=model,
+            get_batch_fn=val_batch_wrapper,
+            n_batches=len(val_loader),
+            device=device,
+            amp_dtype=torch.float16 # Standard AMP
+        )
+        
+        # 2. Log per-head scalars
+        if writer is not None:
+            for head_name, h_loss in head_losses.items():
+                writer.add_scalar(f'HeadLoss/{head_name}', h_loss, epoch+1)
+    except Exception as val_exc:
+        print(f"   ⚠️ Validation skipped due to error: {val_exc}")
+        head_losses = {} # Fallback empty dict
             
     # 3. Rich Image Logging (Scatter plots & Trajectories)
     # Run every epoch or every few epochs
