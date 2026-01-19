@@ -53,7 +53,17 @@
     - **Result**: Valid Signals (Offsets ~$1.98, Prob=50.6%) on Demo.
     - **Issue**: Backtest initially failed due to initialization bug.
 - [x] Diagnose Normalization Stats (Result: Stats OK. Volume MAD ~1300 is expected).
-- [/] Run Full Backtest (Status: RUNNING on Kaggle | 2xT4 | retrain_e1.pth)
+- [x] Run Full Backtest (Result: **Technical Success**, **Scientific Failure**).
+    - **Metrics**: Total Return: -8.15%, Sharpe: -2666, Signals: 999,745
+    - **Diagnosis**: Posterior Collapse (Constant Output: Conf=0.584, all rows identical)
+    - **Root Cause**: 1-epoch model is a "mean guesser" - insufficient training for sequence learning
+
+## Phase 8.5: Path to Live (Roadmap Activated)
+- [ ] **Step 1A**: Integrate New **Team Indicators** (Waiting for scripts)
+- [ ] **Step 1B**: Implement New **Internal Indicators** (Waiting for User Writeups)
+- [ ] **Step 2**: Process 10M Row Dataset (Feature Engineering)
+- [ ] **Step 3**: Retrain (5 Epochs, Staged Diffusion)
+- [ ] **Step 4**: Verify & Paper Trade
 
 ## Phase 9: Advanced Model Enhancements (Completed)
 - [x] **Diffusion Head**: Implement Generative Trajectory Refinement (`intelligence/generative/diffusion.py`)
