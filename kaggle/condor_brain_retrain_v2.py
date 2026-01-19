@@ -376,14 +376,20 @@ model = CondorBrain(
 ).to(device)
 
 # --- INITIALIZATION FIX ---
-def init_weights(m):
-    if isinstance(m, nn.Linear):
-        torch.nn.init.xavier_uniform_(m.weight)
-        if m.bias is not None:
-             m.bias.data.fill_(0.01) # Small bias to prevent dead neurons
+# ⚠️ CRITICAL: Do NOT apply Xavier to Mamba internals (they have specialized init).
+# Only re-init the output heads (experts, moe, policy head, etc.)
+SAFE_INIT_PREFIXES = ('expert_', 'moe_head', 'policy_head', 'regime_detector', 'feature_head', 'horizon_forecaster')
 
-print("   Applying Xavier Initialization...")
-model.apply(init_weights)
+for name, param in model.named_parameters():
+    # Only init weights (not biases) in safe modules
+    if any(name.startswith(prefix) for prefix in SAFE_INIT_PREFIXES):
+        if 'weight' in name and param.dim() >= 2:
+            torch.nn.init.xavier_uniform_(param)
+            print(f"   Xavier init: {name}")
+        elif 'bias' in name:
+            param.data.fill_(0.01)
+
+print("   ✅ Safe Xavier Initialization applied to output heads only.")
 
 if USE_DATAPARALLEL and torch.cuda.device_count() > 1:
     print(f"   Using {torch.cuda.device_count()} GPUs (DataParallel)")
