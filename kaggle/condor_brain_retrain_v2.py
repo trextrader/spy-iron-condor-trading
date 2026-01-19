@@ -50,7 +50,7 @@ estimated_spots = max(ROWS_TO_LOAD // 100, 100)  # ~100 options per spot bar
 print(f"📊 Config: {ROWS_TO_LOAD:,} rows → ~{estimated_spots:,} unique spot bars, {EPOCHS} epochs")
 
 BATCH_SIZE = 128
-LR = 5e-4
+LR = 1e-4  # Lowered from 5e-4 for stability
 SEQ_LEN = 256
 PREDICT_HORIZON = 32
 
@@ -370,7 +370,9 @@ for epoch in range(EPOCHS):
             loss_pol = criterion_policy(outputs, y_pol)
             
             # 2. Feature Loss (Next Step)
-            loss_feat = criterion_forecast(feat_pred, y_next) * 1000.0
+            # 2. Feature Loss (Next Step)
+            # Reduced scale from 1000.0 to 100.0 for stability
+            loss_feat = criterion_forecast(feat_pred, y_next) * 100.0
 
             # 3. Diffusion Loss
             loss_diff = torch.tensor(0.0, device=device)
@@ -385,7 +387,7 @@ for epoch in range(EPOCHS):
         
         # Stability check
         if not torch.isfinite(loss):
-             pbar.write(f"⚠️  Non-finite loss encountered at batch {batch_idx}, skipping...")
+             pbar.write(f"⚠️  Non-finite loss at batch {batch_idx}: P={loss_pol.item():.4f}, F={loss_feat.item():.4f}, D={loss_diff.item():.4f}")
              optimizer.zero_grad(set_to_none=True)
              continue
 
