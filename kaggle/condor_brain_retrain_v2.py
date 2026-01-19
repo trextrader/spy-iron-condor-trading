@@ -27,18 +27,30 @@ from intelligence.canonical_feature_registry import (
 )
 from intelligence.features.dynamic_features import compute_all_dynamic_features
 
-# --- CONFIG (Shock Therapy) ---
-EPOCHS = 10         # Increased from 4
+# --- QUICK TEST FLAG ---
+# Set to True for fast iteration (100K rows, 2 epochs)
+# Set to False for full training (3M rows, 10 epochs)
+QUICK_TEST = True  # ⚡ CHANGE TO False FOR FULL TRAINING ⚡
+
+# --- CONFIG ---
+if QUICK_TEST:
+    print("⚡ QUICK TEST MODE: 100K rows, 2 epochs")
+    EPOCHS = 2
+    ROWS_TO_LOAD = 100_000
+else:
+    print("🔥 FULL TRAINING MODE: 3M rows, 10 epochs")
+    EPOCHS = 10
+    ROWS_TO_LOAD = 3_000_000
+
 BATCH_SIZE = 128
-LR = 5e-4           # Increased from 1e-4
-ROWS_TO_LOAD = 3_000_000
+LR = 5e-4
 SEQ_LEN = 256
 PREDICT_HORIZON = 32
 
 # Optimization Flags
-USE_DATAPARALLEL = True       # Re-enabling: Dual T4 is significantly faster (1.76 it/s vs 0.67 it/s)
-DIFFUSION_WARMUP_EPOCHS = 2   # Keep this: Skipping diffusion on 2 GPUs will be max speed
-DIFFUSION_STEPS_TRAIN = 50    # Default steps
+USE_DATAPARALLEL = True       # Re-enabling: Dual T4 is significantly faster
+DIFFUSION_WARMUP_EPOCHS = 2 if not QUICK_TEST else 1
+DIFFUSION_STEPS_TRAIN = 50
 
 device = torch.device('cuda')
 print(f"   GPU: {torch.cuda.get_device_name(0)}")
