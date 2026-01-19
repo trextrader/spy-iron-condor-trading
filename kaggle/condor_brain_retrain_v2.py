@@ -48,12 +48,13 @@ SEQ_LEN = 256
 PREDICT_HORIZON = 32
 
 # Optimization Flags
-USE_DATAPARALLEL = True       # Re-enabling: Dual T4 is significantly faster
-DIFFUSION_WARMUP_EPOCHS = 2 if not QUICK_TEST else 1
+DIFFUSION_WARMUP_EPOCHS = 1  # Skip diffusion for first epoch
 DIFFUSION_STEPS_TRAIN = 50
 
 device = torch.device('cuda')
-print(f"   GPU: {torch.cuda.get_device_name(0)}")
+n_gpus = torch.cuda.device_count()
+USE_DATAPARALLEL = (n_gpus > 1)  # Auto-detect: Kaggle dual T4 vs Colab single T4
+print(f"   GPU: {torch.cuda.get_device_name(0)} x{n_gpus} (DataParallel={'ON' if USE_DATAPARALLEL else 'OFF'})")
 
 # --- 1. DATA LOADING & PREP ---
 print(f"\n[1/4] Loading & Processing {ROWS_TO_LOAD:,} Rows...")
