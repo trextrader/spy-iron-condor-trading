@@ -79,10 +79,77 @@ NORMALIZATION_POLICY_V21: Dict[str, Any] = {
 }
 
 NAN_POLICY_V21: Dict[str, float] = {
-    "nan": 0.0,
+    "nan": 0.0,      # Global fallback (used for most features)
     "posinf": 10.0,
     "neginf": -10.0,
 }
+
+# =============================================================================
+# SEMANTIC NEUTRAL FILL VALUES (per-feature)
+# =============================================================================
+# For bounded oscillators, 0 means "extreme" not "neutral".
+# Use these values instead of global nan=0.0 during warmup.
+
+NEUTRAL_FILL_VALUES: Dict[str, float] = {
+    # --- These are fine with 0.0 (0 = neutral/no signal) ---
+    "log_return": 0.0,       # 0 = no change
+    "ret_z": 0.0,            # 0 = neutral z-score
+    "kappa_proxy": 0.0,      # 0 = no curvature
+    "vol_energy": 0.0,       # 0 = no energy
+    "psar_adaptive": 0.0,    # 0 = price at SAR level
+    "breakout_score": 0.0,   # 0 = no breakout
+    
+    # --- These need non-zero neutral values (0 = extreme!) ---
+    "rsi_dyn": 50.0,         # 50 = neutral RSI (not overbought/oversold)
+    "adx_adaptive": 25.0,    # 25 = weak/no trend (ADX neutral zone)
+    "stoch_k_dyn": 50.0,     # 50 = mid-range (not extreme)
+    "consolidation_score": 0.5,  # 0.5 = neither consolidation nor expansion
+    "ivr": 0.5,              # 0.5 = mid-rank IV
+    
+    # --- Volatility: use small positive (0 can cause div-by-zero) ---
+    "vol_ewma": 0.001,       # Small positive vol
+    "atr_pct": 0.005,        # ~0.5% typical ATR
+    "bb_sigma_dyn": 1.0,     # 1 std dev (arbitrary but non-zero)
+    
+    # --- Price-based: forward-fill is better, but if forced use 0 ---
+    # (These get normalized anyway, so 0 becomes ~median after scaling)
+    "bb_mu_dyn": 0.0,        # Will be overwritten by ffill typically
+    "bb_lower_dyn": 0.0,
+    "bb_upper_dyn": 0.0,
+}
+
+
+def get_neutral_fill_value(feature_name: str) -> float:
+    """Get the semantically neutral fill value for a feature."""
+    return NEUTRAL_FILL_VALUES.get(feature_name, 0.0)
+
+
+def apply_semantic_nan_fill(X: "np.ndarray", feature_cols: List[str]) -> "np.ndarray":
+    """
+    Apply per-feature semantic NaN filling instead of global 0.0.
+    
+    This prevents injecting fake 'extreme' signals during warmup periods.
+    
+    Args:
+        X: Feature array of shape (N, F) with NaN values
+        feature_cols: List of feature names matching X columns
+        
+    Returns:
+        X with NaN replaced by semantically neutral values
+    """
+    import numpy as np
+    
+    X = X.copy()
+    for i, col in enumerate(feature_cols):
+        fill_val = get_neutral_fill_value(col)
+        mask = np.isnan(X[:, i])
+        X[mask, i] = fill_val
+    
+    # Also handle inf values
+    X = np.clip(X, -1e10, 1e10)
+    np.nan_to_num(X, copy=False, nan=0.0, posinf=10.0, neginf=-10.0)
+    
+    return X
 
 # =============================================================================
 # CHECKPOINT KEYS (what must be saved/loaded)

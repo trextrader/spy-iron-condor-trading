@@ -23,6 +23,7 @@ from intelligence.condor_brain import CondorBrain
 from intelligence.canonical_feature_registry import (
     FEATURE_COLS_V21, INPUT_DIM_V21, VERSION_V21,
     NAN_POLICY_V21, NORMALIZATION_POLICY_V21,
+    apply_semantic_nan_fill,
 )
 from intelligence.features.dynamic_features import compute_all_dynamic_features
 
@@ -86,7 +87,8 @@ df = compute_all_dynamic_features(df, close_col="close", high_col="high", low_co
 
 # X features (schema-driven columns)
 X_np = df[FEATURE_COLS].values.astype(np.float32)
-X_np = np.nan_to_num(X_np, nan=NAN_POLICY_V21["nan"], posinf=NAN_POLICY_V21["posinf"], neginf=NAN_POLICY_V21["neginf"])
+# Apply per-feature semantic NaN filling (not global 0.0)
+X_np = apply_semantic_nan_fill(X_np, FEATURE_COLS)
 
 # ------------------------------
 # TRAIN / VAL SPLIT
