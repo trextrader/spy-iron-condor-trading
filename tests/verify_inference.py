@@ -17,14 +17,19 @@ def verify_inference():
     N_LAYERS = 12
     INPUT_DIM = 24
     SEQ_LEN = 256
-    MODEL_PATH = "models/condor_brain_seq_e1.pth"
+    
+    # Check for the rescued model first
+    if os.path.exists("models/condor_brain_retrain_e1.pth"):
+        MODEL_PATH = "models/condor_brain_retrain_e1.pth"
+    else:
+        MODEL_PATH = "models/condor_brain_seq_e1.pth"
     
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"   Device: {device}")
     
     # Path(s)
-    model_path = os.environ.get("CONDOR_MODEL", "condor_brain_v2.pt")
+    model_path = os.environ.get("CONDOR_MODEL", MODEL_PATH)
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model not found: {model_path}")
     print(f"[verify_inference] loading checkpoint: {model_path}")
@@ -114,16 +119,27 @@ def verify_inference():
             feat_pred = res[3]
             
             print(f"   Shape Check:")
-            print(f"   - Policy Output: {outputs.shape} (Expected: [1, 8])")
-            print(f"   - Feature Pred:  {feat_pred.shape} (Expected: [1, 4])")
+            print(f"   - Policy Output: {outputs.shape} (Expected: [B, 8])")
+            print(f"   - Feature Pred:  {feat_pred.shape} (Expected: [B, 4])")
             
-            if outputs.shape == (1, 8) and feat_pred.shape == (1, 4):
+            # ---- V2.1 & COLLAPSE CHECKS ----
+            if input_dim == 32:
+                print("✅ Input Dim = 32 (Matches V2.1 Schema)")
+            else:
+                print(f"⚠️  Input Dim = {input_dim} (Likely Legacy V2.0)")
+
+            # Collapse Check
+            pol_std = outputs.std(dim=0).mean().item()
+            print(f"   Policy output std dev: {pol_std:.6f}")
+            
+            if pol_std < 0.001:
+                print("❌ FAIL: Policy outputs are collapsed (constant). Retraining failed.")
+                return False
+            else:
+                print("✅ PASS: Policy outputs show variance (model is active).")
+
+            if outputs.shape[1] == 8 and feat_pred.shape[1] == 4:
                 print("✅ Forward Pass Successful")
-                
-                # Check Expert Usage
-                if experts:
-                    print(f"   - Experts Active: {list(experts.keys())}")
-                
                 return True
             else:
                 print("❌ Shape Mismatch")

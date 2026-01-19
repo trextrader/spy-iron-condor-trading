@@ -46,8 +46,9 @@ ROWS_TO_LOAD = 100_000  # ⚡ CHANGE THIS TO SCALE TRAINING ⚡
 EPOCHS = 2              # Quick test: 2, Full training: 10
 
 # Derived estimate
+# Derived estimate
 estimated_spots = max(ROWS_TO_LOAD // 100, 100)  # ~100 options per spot bar
-print(f"📊 Config: {ROWS_TO_LOAD:,} rows → ~{estimated_spots:,} unique spot bars, {EPOCHS} epochs")
+print(f"📊 Config: {ROWS_TO_LOAD:,} rows, {EPOCHS} epochs")
 
 BATCH_SIZE = 128
 LR = 1e-4  # Lowered from 5e-4 for stability
@@ -213,6 +214,9 @@ else:
     spot_df = spot_df.sort_values(spot_key_cols).reset_index(drop=True)
     n_unique = len(spot_df)
     print(f"   Unique spot bars: {n_unique:,} (from {len(df):,} options rows)")
+    if n_unique > 0:
+        rows_per_bar = len(df) / float(n_unique)
+        print(f"   Rows per spot bar (avg): {rows_per_bar:.2f}")
     
     # Compute dynamic features on spots only
     print("   Computing dynamic features on spot bars...")
@@ -413,7 +417,9 @@ tb_logdir = "runs/condor_brain"
 writer = SummaryWriter(log_dir=tb_logdir)
 
 print("📊 Launching TensorBoard inline...")
-_maybe_launch_tensorboard_inline(tb_logdir, port=6006)
+if not "_TB_STARTED" in globals():
+    _maybe_launch_tensorboard_inline(tb_logdir, port=6006)
+    _TB_STARTED = True
 
 for epoch in range(EPOCHS):
     model.train()
@@ -504,6 +510,10 @@ for epoch in range(EPOCHS):
                 if diff_loss_scalar.dim() > 0:
                     diff_loss_scalar = diff_loss_scalar.mean()
                 loss_diff = diff_loss_scalar * 10.0 # Scale diffusion loss
+
+                # ⚠️ SHOCK THERAPY: Clamp Diffusion Impact for first 50 batches of active diffusion
+                if use_diffusion and batch_idx < 50:
+                    loss_diff = torch.clamp(loss_diff, 0.0, 10.0)
             
             # Total Loss
             loss = (loss_pol * 2.0) + loss_feat + loss_diff 
@@ -685,5 +695,13 @@ for epoch in range(EPOCHS):
     
     torch.save(checkpoint, save_path)
     print(f"      💾 Saved: {save_path}")
+    
+    # ⬇️ Auto-download for Colab User (Safety Net)
+    try:
+        from google.colab import files
+        files.download(save_path)
+        print(f"      ⬇️ Auto-downloading {save_path}...")
+    except:
+        pass
 
 print("✅ Retraining Complete.")
