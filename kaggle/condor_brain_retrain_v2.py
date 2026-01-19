@@ -51,8 +51,8 @@ import matplotlib.pyplot as plt
 #   3M rows ≈ 30K unique spot bars (~5 min compute)
 #   Full dataset: ~10M rows ≈ 100K unique spot bars
 
-ROWS_TO_LOAD = 100_000  # ⚡ CHANGE THIS TO SCALE TRAINING ⚡
-EPOCHS = 2              # Quick test: 2, Full training: 10
+ROWS_TO_LOAD = 3_000_000  # ⚡ PRODUCTION RUN ⚡
+EPOCHS = 4                # Production: 4 epochs
 
 # Derived estimate
 # Derived estimate
