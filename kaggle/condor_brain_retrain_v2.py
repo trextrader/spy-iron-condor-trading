@@ -315,6 +315,9 @@ criterion_forecast = nn.HuberLoss()
 print("\n[3/4] Retraining Loop (Balanced Loss)...")
 scaler = torch.amp.GradScaler('cuda')
 
+# Initialize TensorBoard Writer
+writer = SummaryWriter(log_dir="runs/condor_brain")
+
 for epoch in range(EPOCHS):
     model.train()
     total_loss = 0
