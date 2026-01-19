@@ -38,9 +38,10 @@ FEATURE_COLS_V21: List[str] = [
     "target_spot",
     "max_dd_60m",
     
-    # === Dynamic / Regime-Aware Features (16) ===
+    # === Dynamic / Regime-Aware Features (17) ===
     "log_return",           # 1m log return
     "vol_ewma",             # EWMA realized vol
+    "ret_z",                # log_return / (vol_ewma + eps) - vol-normalized return
     "atr_pct",              # ATR / close
     "kappa_proxy",          # Curvature proxy (2nd diff / scale)
     "vol_energy",           # log(1 + α|κ|) - dynamic modulator
@@ -133,23 +134,24 @@ FEATURE_REGISTRY_V21: Dict[str, Any] = {
         # Dynamic Features
         {"name": "log_return", "i": 16, "kind": "kinematics", "range": "centered"},
         {"name": "vol_ewma", "i": 17, "kind": "volatility", "range": "+"},
-        {"name": "atr_pct", "i": 18, "kind": "volatility", "range": "[0, 0.05]"},
-        {"name": "kappa_proxy", "i": 19, "kind": "geometry", "range": "centered"},
-        {"name": "vol_energy", "i": 20, "kind": "energy", "range": "[0, inf)"},
+        {"name": "ret_z", "i": 18, "kind": "normalized_return", "range": "centered"},
+        {"name": "atr_pct", "i": 19, "kind": "volatility", "range": "[0, 0.05]"},
+        {"name": "kappa_proxy", "i": 20, "kind": "geometry", "range": "centered"},
+        {"name": "vol_energy", "i": 21, "kind": "energy", "range": "[0, inf)"},
         
-        {"name": "rsi_dyn", "i": 21, "kind": "oscillator", "range": "[0, 100]"},
-        {"name": "adx_adaptive", "i": 22, "kind": "trend", "range": "[0, 100]"},
-        {"name": "psar_adaptive", "i": 23, "kind": "trend", "range": "centered"},
+        {"name": "rsi_dyn", "i": 22, "kind": "oscillator", "range": "[0, 100]"},
+        {"name": "adx_adaptive", "i": 23, "kind": "trend", "range": "[0, 100]"},
+        {"name": "psar_adaptive", "i": 24, "kind": "trend", "range": "centered"},
         
-        {"name": "bb_mu_dyn", "i": 24, "kind": "band", "range": "SPY $"},
-        {"name": "bb_sigma_dyn", "i": 25, "kind": "band", "range": "+"},
-        {"name": "bb_lower_dyn", "i": 26, "kind": "band", "range": "SPY $"},
-        {"name": "bb_upper_dyn", "i": 27, "kind": "band", "range": "SPY $"},
+        {"name": "bb_mu_dyn", "i": 25, "kind": "band", "range": "SPY $"},
+        {"name": "bb_sigma_dyn", "i": 26, "kind": "band", "range": "+"},
+        {"name": "bb_lower_dyn", "i": 27, "kind": "band", "range": "SPY $"},
+        {"name": "bb_upper_dyn", "i": 28, "kind": "band", "range": "SPY $"},
         
-        {"name": "stoch_k_dyn", "i": 28, "kind": "oscillator", "range": "[0, 100]"},
+        {"name": "stoch_k_dyn", "i": 29, "kind": "oscillator", "range": "[0, 100]"},
         
-        {"name": "consolidation_score", "i": 29, "kind": "regime", "range": "[0, 1]"},
-        {"name": "breakout_score", "i": 30, "kind": "event", "range": "{-1,0,1}"},
+        {"name": "consolidation_score", "i": 30, "kind": "regime", "range": "[0, 1]"},
+        {"name": "breakout_score", "i": 31, "kind": "event", "range": "{-1,0,1}"},
     ],
 }
 

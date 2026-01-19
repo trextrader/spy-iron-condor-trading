@@ -48,10 +48,13 @@ DATA_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
 df = pd.read_csv(DATA_PATH).iloc[-ROWS_TO_LOAD:]
 print(f"   Shape: {df.shape}")
 
-# V2.1 FEATURE SCHEMA (32 dynamic features)
+# V2.1 FEATURE SCHEMA (schema-driven feature count; dynamic indicators included)
 FEATURE_COLS = FEATURE_COLS_V21
 INPUT_DIM = INPUT_DIM_V21
-print(f"   Using V2.1 Schema: {INPUT_DIM} features")
+print(f"   Using V2.1 Schema: {len(FEATURE_COLS)} features")
+assert len(FEATURE_COLS) == INPUT_DIM, (
+    f"Schema mismatch: len(FEATURE_COLS)={len(FEATURE_COLS)} != INPUT_DIM={INPUT_DIM}"
+)
 
 # ------------------------------
 # FEATURE & TARGET CONSTRUCTION
@@ -81,7 +84,7 @@ Y_feat_np = np.stack([r, rho, d, v], axis=1).astype(np.float32)
 print("   Computing dynamic features...")
 df = compute_all_dynamic_features(df, close_col="close", high_col="high", low_col="low")
 
-# X features (now 32 columns)
+# X features (schema-driven columns)
 X_np = df[FEATURE_COLS].values.astype(np.float32)
 X_np = np.nan_to_num(X_np, nan=NAN_POLICY_V21["nan"], posinf=NAN_POLICY_V21["posinf"], neginf=NAN_POLICY_V21["neginf"])
 
@@ -183,7 +186,7 @@ print("\n[2/4] Initializing CondorBrain V2...")
 model = CondorBrain(
     d_model=512,
     n_layers=12,
-    input_dim=INPUT_DIM,  # V2.1: 32 features
+    input_dim=INPUT_DIM,  # V2.1: schema-driven feature count
     use_vol_gated_attn=True,
     use_topk_moe=True,
     moe_n_experts=3, moe_k=1,

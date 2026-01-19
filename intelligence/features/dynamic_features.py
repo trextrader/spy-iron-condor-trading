@@ -427,7 +427,7 @@ def compute_all_dynamic_features(
         
     Returns:
         DataFrame with new columns:
-        - log_return, vol_ewma, atr_pct
+        - log_return, vol_ewma, ret_z, atr_pct
         - kappa_proxy, vol_energy
         - rsi_dyn, adx_adaptive, psar_adaptive
         - bb_mu_dyn, bb_sigma_dyn, bb_lower_dyn, bb_upper_dyn
@@ -446,6 +446,8 @@ def compute_all_dynamic_features(
     # Core kinematics
     df["log_return"] = compute_log_return(close)
     df["vol_ewma"] = compute_vol_ewma(close)
+    # Vol-normalized return (dimensionless, regime-stable)
+    df["ret_z"] = (df["log_return"] / (df["vol_ewma"] + 1e-12)).astype(np.float32)
     df["atr_pct"] = compute_atr_pct(high, low, close)
     
     # Curvature & energy
@@ -473,6 +475,6 @@ def compute_all_dynamic_features(
     df["consolidation_score"] = consol
     df["breakout_score"] = breakout
     
-    print(f"   ✅ Added 16 dynamic features (15 new columns)")
+    print(f"   ✅ Added 17 dynamic features (16 new columns)")
     
     return df
