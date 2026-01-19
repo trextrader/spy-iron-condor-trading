@@ -58,7 +58,20 @@ print(f"   GPU: {torch.cuda.get_device_name(0)} x{n_gpus} (DataParallel={'ON' if
 
 # --- 1. DATA LOADING & PREP ---
 print(f"\n[1/4] Loading & Processing {ROWS_TO_LOAD:,} Rows...")
-DATA_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
+
+# Auto-detect environment: Kaggle vs Colab
+KAGGLE_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
+COLAB_PATH = "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m.csv"
+LOCAL_PATH = "data/processed/mamba_institutional_1m.csv"
+
+for p in [KAGGLE_PATH, COLAB_PATH, LOCAL_PATH]:
+    if os.path.exists(p):
+        DATA_PATH = p
+        break
+else:
+    raise FileNotFoundError(f"Data file not found in: {[KAGGLE_PATH, COLAB_PATH, LOCAL_PATH]}")
+
+print(f"   Data: {DATA_PATH}")
 df = pd.read_csv(DATA_PATH).iloc[-ROWS_TO_LOAD:]
 print(f"   Shape: {df.shape}")
 
