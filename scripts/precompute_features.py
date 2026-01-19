@@ -141,17 +141,43 @@ def main() -> int:
     before_rows = len(df)
     print(f"[Precompute] Loaded rows: {before_rows:,} | cols: {before_n}")
 
-    # Compute features
-    print("[Precompute] Computing dynamic features (this can take minutes on 10M rows)...")
+    # =========================================================================
+    # CRITICAL FIX: Options data has ~100 rows per 1-minute bar (one per strike)
+    # Dynamic features must be computed on UNIQUE SPOT bars, then merged back.
+    # Otherwise rolling indicators compute across strikes instead of time.
+    # =========================================================================
+    
+    # Identify OHLCV columns (these are same for all strikes at same timestamp)
+    ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
+    spot_key_cols = ['symbol', args.dt_col]
+    
+    # Step 1: Extract unique spot bars
+    print("[Precompute] Extracting unique spot bars...")
+    spot_df = df.drop_duplicates(subset=spot_key_cols)[spot_key_cols + ohlcv_cols].copy()
+    spot_df = spot_df.sort_values(spot_key_cols).reset_index(drop=True)
+    n_unique_bars = len(spot_df)
+    print(f"[Precompute] Unique spot bars: {n_unique_bars:,} (from {before_rows:,} options rows)")
+    
+    # Step 2: Compute dynamic features on spot data only
+    print("[Precompute] Computing dynamic features on spot bars...")
     t1 = time.time()
-
-    out_df = compute_all_dynamic_features(df)
-
-    # Some implementations mutate in-place and return None
-    if out_df is None:
-        out_df = df
-
+    
+    spot_df = compute_all_dynamic_features(spot_df)
+    
     t2 = time.time()
+    
+    # Get list of newly added columns
+    dynamic_cols = [c for c in spot_df.columns if c not in spot_key_cols + ohlcv_cols]
+    print(f"[Precompute] Dynamic columns computed: {dynamic_cols}")
+    
+    # Step 3: Merge dynamic features back to full options dataframe
+    print("[Precompute] Merging dynamic features back to options data...")
+    merge_cols = spot_key_cols + dynamic_cols
+    out_df = df.merge(spot_df[merge_cols], on=spot_key_cols, how='left')
+    
+    # Verify merge didn't change row count
+    if len(out_df) != before_rows:
+        print(f"[WARN] Row count changed after merge: {before_rows:,} -> {len(out_df):,}")
 
     after_cols = list(out_df.columns)
     after_n = len(after_cols)
