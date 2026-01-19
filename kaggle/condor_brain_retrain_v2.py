@@ -63,6 +63,19 @@ n_gpus = torch.cuda.device_count()
 USE_DATAPARALLEL = (n_gpus > 1)  # Auto-detect: Kaggle dual T4 vs Colab single T4
 print(f"   GPU: {torch.cuda.get_device_name(0)} x{n_gpus} (DataParallel={'ON' if USE_DATAPARALLEL else 'OFF'})")
 
+# --- LAUNCH TENSORBOARD (Colab/Jupyter Only) ---
+try:
+    from IPython import get_ipython
+    ip = get_ipython()
+    if ip:
+        print("📊 Launching TensorBoard inline...")
+        # Reload extension to be safe
+        ip.run_line_magic('reload_ext', 'tensorboard') 
+        ip.run_line_magic('tensorboard', '--logdir=runs/condor_brain --port=6006')
+except Exception as e:
+    # Not running in IPython or other error
+    pass
+
 # --- 1. DATA LOADING & PREP ---
 print(f"\n[1/4] Loading & Processing {ROWS_TO_LOAD:,} Rows...")
 
