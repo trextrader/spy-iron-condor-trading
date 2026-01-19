@@ -69,6 +69,13 @@ try:
     ip = get_ipython()
     if ip:
         print("📊 Launching TensorBoard inline...")
+        # Kill any existing TensorBoard process on port 6006
+        try:
+            # Use fuser to kill process on TCP port 6006 (Linux/Colab)
+            ip.getoutput("fuser -k 6006/tcp")
+        except:
+            pass
+            
         # Reload extension to be safe
         ip.run_line_magic('reload_ext', 'tensorboard') 
         ip.run_line_magic('tensorboard', '--logdir=runs/condor_brain --port=6006')
