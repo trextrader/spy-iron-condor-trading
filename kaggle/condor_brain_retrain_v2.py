@@ -27,20 +27,20 @@ from intelligence.canonical_feature_registry import (
 )
 from intelligence.features.dynamic_features import compute_all_dynamic_features
 
-# --- QUICK TEST FLAG ---
-# Set to True for fast iteration (100K rows, 2 epochs)
-# Set to False for full training (3M rows, 10 epochs)
-QUICK_TEST = True  # ⚡ CHANGE TO False FOR FULL TRAINING ⚡
+# --- TRAINING CONFIG ---
+# ROWS_TO_LOAD: Number of rows from end of dataset
+#   100K rows ≈ 1K unique spot bars (~1 min compute)
+#   300K rows ≈ 3K unique spot bars (~2 min compute)
+#   1M rows ≈ 10K unique spot bars (~3 min compute)
+#   3M rows ≈ 30K unique spot bars (~5 min compute)
+#   Full dataset: ~10M rows ≈ 100K unique spot bars
 
-# --- CONFIG ---
-if QUICK_TEST:
-    print("⚡ QUICK TEST MODE: 100K rows, 2 epochs")
-    EPOCHS = 2
-    ROWS_TO_LOAD = 100_000
-else:
-    print("🔥 FULL TRAINING MODE: 3M rows, 10 epochs")
-    EPOCHS = 10
-    ROWS_TO_LOAD = 3_000_000
+ROWS_TO_LOAD = 100_000  # ⚡ CHANGE THIS TO SCALE TRAINING ⚡
+EPOCHS = 2              # Quick test: 2, Full training: 10
+
+# Derived estimate
+estimated_spots = max(ROWS_TO_LOAD // 100, 100)  # ~100 options per spot bar
+print(f"📊 Config: {ROWS_TO_LOAD:,} rows → ~{estimated_spots:,} unique spot bars, {EPOCHS} epochs")
 
 BATCH_SIZE = 128
 LR = 5e-4
