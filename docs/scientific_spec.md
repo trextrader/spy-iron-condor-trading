@@ -45,6 +45,47 @@ To prevent lookahead bias (Data Leakage), the pipeline uses an `as_of` merge str
 *   **Result:** A flattened event stream where each row is a potential trade decision point.
 *   **Scale:** $390 \text{ mins/day} \times 252 \text{ days/yr} \times 100 \text{ options/min} \approx 10,000,000+$ rows.
 
+### 2.5 V2.1 Dynamic Feature Schema (32 Parameters)
+
+**Version 2.1** extends the feature vector from 24 to **32 dimensions** by adding **8 manifold-aware dynamic indicators**. These features capture curvature, energy, and regime-transition signals that static indicators miss.
+
+| Feature | Formula | Purpose |
+|---------|---------|---------|
+| `log_return` | $r_t = \ln(C_t / C_{t-1})$ | Instantaneous price change |
+| `vol_ewma` | $\sigma_t^2 = \alpha r_t^2 + (1-\alpha)\sigma_{t-1}^2$ | Exponential volatility (GARCH-like) |
+| `atr_pct` | $\text{ATR}_{14} / C_t$ | Normalized average true range |
+| `kappa_proxy` | $\kappa_t = \text{EMA}_{64}(\ddot{r}_t) / \sigma_t$ | Curvature proxy (2nd derivative) |
+| `vol_energy` | $E_t = \ln(1 + \alpha |\kappa_t|)$ | Manifold volatility energy |
+| `rsi_dyn` | $\text{RSI}_{14} \cdot (1 + \beta \kappa_t)$ | Curvature-weighted RSI |
+| `adx_adaptive` | $\text{ADX}_{14} / (1 + \gamma E_t)$ | Energy-normalized trend strength |
+| `psar_adaptive` | $(C_t - \text{PSAR}) / \text{ATR}_{14}$ | ATR-scaled parabolic SAR distance |
+
+**Curvature Proxy Derivation:**
+
+The curvature $\kappa$ of the log-price manifold is estimated using the second difference (discrete acceleration):
+
+$$
+\ddot{r}_t = r_t - 2r_{t-1} + r_{t-2}
+$$
+
+Smoothed over 64 bars and normalized by local volatility:
+
+$$
+\kappa_t = \frac{\text{EMA}_{64}(\ddot{r}_t)}{\sigma_t + \epsilon}
+$$
+
+**Volatility Energy:**
+
+Inspired by differential geometry, we define a scalar "energy" that captures the local curvature magnitude:
+
+$$
+E_t = \ln(1 + \alpha |\kappa_t|), \quad \alpha = 1000
+$$
+
+High energy indicates regime transitions (trend reversals, breakouts).
+
+
+
 ### 2.4 Forward Pass Mathematics
 The Mamba Engine processes this stream using the following mathematical transformation:
 
