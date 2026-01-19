@@ -396,7 +396,14 @@ def compute_val_head_losses(
             batch_x, batch_y, batch_r = get_batch_fn(bi)
             
             with autocast('cuda', dtype=amp_dtype):
-                outputs, regime_logits, _ = model(batch_x, return_regime=True, forecast_days=0)
+                res = model(batch_x, return_regime=True, forecast_days=0)
+                # Handle simplified V2.1 tuple return (outputs, regime, etc...)
+                if isinstance(res, tuple):
+                    outputs = res[0]
+                    regime_logits = res[1] if len(res) > 1 else None
+                else:
+                    outputs = res
+                    regime_logits = None
             
             # Compute per-head losses (accumulate on GPU, no .item())
             for i, name in enumerate(MAIN_HEADS):

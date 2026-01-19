@@ -63,6 +63,53 @@ n_gpus = torch.cuda.device_count()
 USE_DATAPARALLEL = (n_gpus > 1)  # Auto-detect: Kaggle dual T4 vs Colab single T4
 print(f"   GPU: {torch.cuda.get_device_name(0)} x{n_gpus} (DataParallel={'ON' if USE_DATAPARALLEL else 'OFF'})")
 
+from typing import List, Tuple
+def _isfinite_np(x: np.ndarray) -> bool:
+    return np.isfinite(x).all()
+
+def _sanitize_np_to_nan(x: np.ndarray) -> np.ndarray:
+    """
+    Replace +/-inf with NaN so semantic fill can treat them as missing.
+    """
+    if not np.isfinite(x).all():
+        x = x.copy()
+        x[~np.isfinite(x)] = np.nan
+    return x
+
+def _check_finite_t(name: str, t: torch.Tensor) -> Tuple[bool, str]:
+    """
+    Returns (ok, message). If not ok, message contains diagnostic summary.
+    """
+    if t is None:
+        return True, ""
+    finite = torch.isfinite(t)
+    if finite.all():
+        return True, ""
+    bad = (~finite).sum().item()
+    msg = f"{name} has {bad} non-finite values | shape={tuple(t.shape)}"
+    # provide a little more context when possible
+    try:
+        msg += f" | min={torch.nanmin(t).item():.6g} max={torch.nanmax(t).item():.6g}"
+    except Exception:
+        pass
+    return False, msg
+
+def _maybe_launch_tensorboard_inline(logdir: str, port: int = 6006) -> None:
+    """
+    In Colab/Jupyter, render TensorBoard inline.
+    Note: plain `tensorboard --logdir ...` in a script will NOT auto-render in Colab.
+    """
+    try:
+        from IPython import get_ipython
+        ip = get_ipython()
+        if ip is None:
+            return
+        # Load TB magic + render
+        ip.run_line_magic("load_ext", "tensorboard")
+        ip.run_line_magic("tensorboard", f"--logdir {logdir} --port {port}")
+    except Exception as e:
+        print(f"   ⚠️ TensorBoard inline not available: {e}")
+
 # --- LAUNCH TENSORBOARD (Colab/Jupyter Only) ---
 try:
     from IPython import get_ipython
@@ -179,8 +226,18 @@ else:
 
 # X features (schema-driven columns)
 X_np = df[FEATURE_COLS].values.astype(np.float32)
+# IMPORTANT: Convert inf/-inf to NaN BEFORE semantic fill.
+# Otherwise median/MAD can become inf and produce inf-inf -> NaN in robust_norm.
+X_np = _sanitize_np_to_nan(X_np)
+
 # Apply per-feature semantic NaN filling (not global 0.0)
 X_np = apply_semantic_nan_fill(X_np, FEATURE_COLS)
+
+# Final hard safety: after fill, ensure no NaN/inf remain in X_np
+if not _isfinite_np(X_np):
+    n_bad = np.sum(~np.isfinite(X_np))
+    print(f"   ⚠️ X_np still has {n_bad:,} non-finite cells after semantic fill; coercing to 0.0")
+    X_np = np.nan_to_num(X_np, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
 # ------------------------------
 # TRAIN / VAL SPLIT
@@ -194,8 +251,20 @@ Y_feat_val_np   = Y_feat_np[split_idx:]
 # ------------------------------
 # SCALING (FIT TRAIN ONLY)
 # ------------------------------
+X_train_np = np.nan_to_num(X_train_np, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+X_val_np   = np.nan_to_num(X_val_np,   nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+
 median = np.median(X_train_np, axis=0, keepdims=True).astype(np.float32)
-mad = (np.median(np.abs(X_train_np - median), axis=0, keepdims=True) + 1e-8).astype(np.float32)
+mad = np.median(np.abs(X_train_np - median), axis=0, keepdims=True).astype(np.float32)
+
+# Clamp MAD to avoid division blowups and avoid NaNs from 0/0 on sparse features
+mad = np.maximum(mad, 1e-6).astype(np.float32)
+
+# If any stats are non-finite, something upstream is still broken; repair safely
+if not np.isfinite(median).all() or not np.isfinite(mad).all():
+    print("   ⚠️ Non-finite median/MAD detected; coercing stats to safe defaults")
+    median = np.nan_to_num(median, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    mad    = np.nan_to_num(mad,    nan=1.0, posinf=1.0, neginf=1.0).astype(np.float32)
 
 def robust_norm(x):
     # Ensure no division by zero (mad has epsilon, but safety first)
@@ -340,7 +409,11 @@ print("\n[3/4] Retraining Loop (Balanced Loss)...")
 scaler = torch.amp.GradScaler('cuda')
 
 # Initialize TensorBoard Writer
-writer = SummaryWriter(log_dir="runs/condor_brain")
+tb_logdir = "runs/condor_brain"
+writer = SummaryWriter(log_dir=tb_logdir)
+
+print("📊 Launching TensorBoard inline...")
+_maybe_launch_tensorboard_inline(tb_logdir, port=6006)
 
 for epoch in range(EPOCHS):
     model.train()
@@ -353,6 +426,7 @@ for epoch in range(EPOCHS):
     use_diffusion = (epoch >= DIFFUSION_WARMUP_EPOCHS)
     
     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Diff={'ON' if use_diffusion else 'OFF'}]")
+    skipped_batches = 0
     
     for batch_idx, (x_seq, y_pol, y_next, y_traj) in enumerate(pbar):
         x_seq = x_seq.to(device, non_blocking=True)
@@ -363,6 +437,20 @@ for epoch in range(EPOCHS):
         # 🛡️ SANITIZE TARGETS (Just in case)
         y_pol = torch.nan_to_num(y_pol, nan=0.0)
         y_next = torch.nan_to_num(y_next, nan=0.0)
+        y_traj = torch.nan_to_num(y_traj, nan=0.0)
+
+        # HARD BATCH SANITY CHECK (inputs/targets)
+        ok, msg = _check_finite_t("x_seq", x_seq)
+        if not ok:
+            pbar.write(f"⚠️  Skipping batch {batch_idx}: {msg}")
+            skipped_batches += 1
+            continue
+        for nm, tens in [("y_pol", y_pol), ("y_next", y_next), ("y_traj", y_traj)]:
+            ok, msg = _check_finite_t(nm, tens)
+            if not ok:
+                pbar.write(f"⚠️  Skipping batch {batch_idx}: {msg}")
+                skipped_batches += 1
+                continue
         
         optimizer.zero_grad(set_to_none=True)
         
@@ -386,6 +474,20 @@ for epoch in range(EPOCHS):
             # horizon = res[2]
             feat_pred = res[3]  # Index 3 if return_features=True
             diff_loss_scalar = res[4] if use_diffusion else None # Index 4 if use_diffusion=True
+
+            # HARD OUTPUT SANITY CHECK (model outputs)
+            ok, msg = _check_finite_t("outputs", outputs)
+            if not ok:
+                pbar.write(f"⚠️  Skipping batch {batch_idx}: {msg}")
+                skipped_batches += 1
+                optimizer.zero_grad(set_to_none=True)
+                continue
+            ok, msg = _check_finite_t("feat_pred", feat_pred)
+            if not ok:
+                pbar.write(f"⚠️  Skipping batch {batch_idx}: {msg}")
+                skipped_batches += 1
+                optimizer.zero_grad(set_to_none=True)
+                continue
             
             # 1. Policy Loss
             loss_pol = criterion_policy(outputs, y_pol)
@@ -442,6 +544,9 @@ for epoch in range(EPOCHS):
         writer.add_scalar('Loss/Feature', loss_feat.item(), global_step)
         writer.add_scalar('Loss/Diffusion', loss_diff.item(), global_step)
         writer.add_scalar('LR', scheduler.get_last_lr()[0], global_step)
+    
+    if skipped_batches:
+        print(f"   ⚠️ Epoch {epoch+1}: skipped {skipped_batches} batches due to non-finite data/outputs.")
     
     avg_pol = total_pol_loss / len(train_loader)
     avg_feat = total_feat_loss / len(train_loader)
