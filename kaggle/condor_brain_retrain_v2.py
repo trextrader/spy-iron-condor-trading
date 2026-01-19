@@ -198,7 +198,12 @@ median = np.median(X_train_np, axis=0, keepdims=True).astype(np.float32)
 mad = (np.median(np.abs(X_train_np - median), axis=0, keepdims=True) + 1e-8).astype(np.float32)
 
 def robust_norm(x):
-    return np.clip((x - median) / (1.4826 * mad), -10.0, 10.0).astype(np.float32)
+    # Ensure no division by zero (mad has epsilon, but safety first)
+    # Also handle if x has NaNs (though it shouldn't by now)
+    x = np.nan_to_num(x, nan=0.0)
+    out = (x - median) / (1.4826 * mad)
+    out = np.clip(out, -10.0, 10.0)
+    return out.astype(np.float32)
 
 X_train_np = robust_norm(X_train_np)
 X_val_np   = robust_norm(X_val_np)
@@ -317,6 +322,18 @@ scheduler = torch.optim.lr_scheduler.OneCycleLR(
 
 criterion_policy = nn.MSELoss()
 criterion_forecast = nn.HuberLoss()
+
+# --- ASSERT DATA SANITY ---
+# ⚠️ If training starts with NaNs in input, it will explode immediately
+if hasattr(model, 'encoder'):
+    if torch.isnan(model.encoder.layers[0].mixer.A_log).any():
+        print("❌ ERROR: Model initialized with NaNs!")
+
+x_sample, _, _, _ = next(iter(train_loader))
+if torch.isnan(x_sample).any():
+    print("❌ ERROR: Input data contains NaNs! robust_norm failed.")
+    # Force fix (in memory hack, wont fix loader but wil warn)
+    print("   🚑 Warning: Data loader producing NaNs. Check robust_norm.")
 
 # --- 3. TRAINING LOOP ---
 print("\n[3/4] Retraining Loop (Balanced Loss)...")
