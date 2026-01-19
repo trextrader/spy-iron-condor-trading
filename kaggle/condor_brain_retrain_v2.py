@@ -358,7 +358,11 @@ for epoch in range(EPOCHS):
         x_seq = x_seq.to(device, non_blocking=True)
         y_pol = y_pol.to(device, non_blocking=True)
         y_next = y_next.to(device, non_blocking=True)
-        y_traj = y_traj.to(device, non_blocking=True) # (B, 32, 4)
+        y_traj = y_traj.to(device, non_blocking=True)
+        
+        # 🛡️ SANITIZE TARGETS (Just in case)
+        y_pol = torch.nan_to_num(y_pol, nan=0.0)
+        y_next = torch.nan_to_num(y_next, nan=0.0)
         
         optimizer.zero_grad(set_to_none=True)
         
@@ -409,7 +413,9 @@ for epoch in range(EPOCHS):
              continue
 
         scaler.scale(loss).backward()
-        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        # 5. Optimize with Gradient Clipping
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # ⚡ CRITICAL FOR MAMBA ⚡
         scaler.step(optimizer)
         scaler.update()
         scheduler.step()
