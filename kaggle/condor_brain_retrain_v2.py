@@ -80,10 +80,44 @@ v = np.zeros_like(volumes, dtype=np.float32)
 v[1:] = np.diff(log_v).astype(np.float32)
 
 Y_feat_np = np.stack([r, rho, d, v], axis=1).astype(np.float32)
+# =========================================================================
+# CRITICAL: Compute dynamic features on UNIQUE SPOT bars, then merge back.
+# (Options data has ~100 rows per timestamp with same OHLCV)
+# =========================================================================
+print("   Extracting unique spot bars...")
+ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
+spot_key_cols = ['symbol', 'dt'] if 'dt' in df.columns else ['symbol']
+if 'dt' not in df.columns and 'timestamp' in df.columns:
+    spot_key_cols = ['symbol', 'timestamp']
 
-# Compute dynamic features
-print("   Computing dynamic features...")
-df = compute_all_dynamic_features(df, close_col="close", high_col="high", low_col="low")
+# Find actual datetime column
+dt_col = None
+for c in ['dt', 'timestamp', 'datetime', 'date']:
+    if c in df.columns:
+        dt_col = c
+        spot_key_cols = ['symbol', c] if 'symbol' in df.columns else [c]
+        break
+
+if dt_col is None:
+    # No datetime column - use row order (rare case)
+    print("   ⚠️ No datetime column found, computing on all rows...")
+    df = compute_all_dynamic_features(df, close_col="close", high_col="high", low_col="low")
+else:
+    # Extract unique spots
+    spot_df = df.drop_duplicates(subset=spot_key_cols)[spot_key_cols + ohlcv_cols].copy()
+    spot_df = spot_df.sort_values(spot_key_cols).reset_index(drop=True)
+    n_unique = len(spot_df)
+    print(f"   Unique spot bars: {n_unique:,} (from {len(df):,} options rows)")
+    
+    # Compute dynamic features on spots only
+    print("   Computing dynamic features on spot bars...")
+    spot_df = compute_all_dynamic_features(spot_df, close_col="close", high_col="high", low_col="low")
+    
+    # Get dynamic columns and merge back
+    dynamic_cols = [c for c in spot_df.columns if c not in spot_key_cols + ohlcv_cols]
+    print(f"   Dynamic columns: {len(dynamic_cols)}")
+    merge_cols = spot_key_cols + dynamic_cols
+    df = df.merge(spot_df[merge_cols], on=spot_key_cols, how='left')
 
 # X features (schema-driven columns)
 X_np = df[FEATURE_COLS].values.astype(np.float32)

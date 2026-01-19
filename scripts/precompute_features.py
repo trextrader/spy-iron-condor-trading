@@ -26,6 +26,7 @@ import sys
 import time
 
 import pandas as pd
+from tqdm import tqdm
 
 # Add project root to path for imports
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -223,17 +224,17 @@ def main() -> int:
     # -------------------------------------------------------------------------
     print("[Precompute] Applying semantic NaN fill (neutral values, no blanks)...")
     filled_count = 0
-    for col, val in NEUTRAL_FILL_VALUES.items():
-        if col in out_df.columns:
-            na_count = out_df[col].isna().sum()
-            if na_count > 0:
-                out_df[col] = out_df[col].fillna(val)
-                filled_count += na_count
+    fill_items = [(col, val) for col, val in NEUTRAL_FILL_VALUES.items() if col in out_df.columns]
+    for col, val in tqdm(fill_items, desc="Semantic fill", unit="col"):
+        na_count = out_df[col].isna().sum()
+        if na_count > 0:
+            out_df[col] = out_df[col].fillna(val)
+            filled_count += na_count
     
     # For any remaining NaNs in V2.1 features, use 0.0 as fallback
-    for col in FEATURE_COLS_V21:
-        if col in out_df.columns:
-            out_df[col] = out_df[col].fillna(0.0)
+    remaining_cols = [col for col in FEATURE_COLS_V21 if col in out_df.columns]
+    for col in tqdm(remaining_cols, desc="Fallback fill", unit="col"):
+        out_df[col] = out_df[col].fillna(0.0)
     
     print(f"[Precompute] Filled {filled_count:,} warmup NaN cells with semantic neutral values")
 
