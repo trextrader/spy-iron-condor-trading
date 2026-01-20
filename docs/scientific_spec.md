@@ -1236,11 +1236,13 @@ Where $S_{exit}$ is the spot price at trade exit.
 For each factor $F \in \{S_{conf}, S_{prob}, S_{rules}, S_{dir}\}$, we compute:
 
 **Winning Trade Average:**
+
 $$
 \bar{F}_{win} = \frac{1}{|W|} \sum_{i \in W} F_i
 $$
 
 **Losing Trade Average:**
+
 $$
 \bar{F}_{lose} = \frac{1}{|L|} \sum_{i \in L} F_i
 $$
