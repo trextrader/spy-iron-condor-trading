@@ -305,9 +305,12 @@ class RuleExecutionEngine:
                     for sv in v.values():
                         if hasattr(sv, "index"): return sv.index
             # Try data
-            if data:
-                first_d = next(iter(data.values()))
-                if hasattr(first_d, "index"): return first_d.index
+            if data is not None:
+                if hasattr(data, "index"): return data.index
+                # Fallback if data is a dict of series
+                if isinstance(data, dict) and len(data) > 0:
+                    first_val = next(iter(data.values()))
+                    if hasattr(first_val, "index"): return first_val.index
             return None
 
         idx = get_index()
