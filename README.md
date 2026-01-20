@@ -10,6 +10,57 @@ Full technical details available in [Scientific Specification](docs/scientific_s
 - **📊 Advanced Monitoring:** Real-time TensorBoard logging for per-head loss, regime expert activations, and 45-day price trajectories.
 - **🔥 Production Sweep:** Automated hyperparameter tuning infrastructure capable of training 100M+ parameter models.
 
+## 🆕 New in v2.2 (Backtesting & Analytics)
+
+### Fuzzy Logic Trade Entry
+Replaces binary thresholds with **multi-factor scoring (0-100 points)**:
+
+| Factor | Max Points | Description |
+|:-------|:----------:|:------------|
+| Model Confidence | 30 | Neural network confidence output |
+| Probability of Profit | 30 | Estimated win probability |
+| Rule Engine Signal | 30 | DSL rule aggregation |
+| Direction Alignment | 10 | Market direction vs IC fit |
+
+**Entry Threshold:** Score ≥ 40 points (fuzzy, not all-or-nothing)
+
+### Iron Condor P&L Simulation
+
+Realistic options P&L mechanics:
+
+$$\Pi_{max} = C \times N \times M \quad \text{(Credit = Max Profit)}$$
+
+$$L_{max} = (W - C) \times N \times M \quad \text{(Width - Credit = Max Loss)}$$
+
+- **Theta Collection:** Proportional time decay while spot stays between short strikes
+- **Breach Detection:** P&L reverses when spot exceeds strikes
+- **DTE Tracking:** Auto-exit at expiration (default 14 DTE)
+
+### Factor Attribution Analysis
+Post-backtest analysis comparing winning vs losing trade factors:
+
+```
+📊 TRADE SUMMARY:
+   Winners: 67 (72.0%)
+   Losers: 26 (28.0%)
+
+📈 WINNING TRADES - Factor Averages:
+   Avg Entry Score: 58.2
+   Avg Confidence:  0.7234
+   Avg Prob Profit: 0.5891
+
+🔑 KEY INSIGHTS:
+   ✅ Higher entry scores correlate with winning trades
+   ✅ Higher model confidence correlates with winning trades
+```
+
+**Output Files (in `reports/`):**
+- `trade_decisions.log` - Every bar's decision reasoning
+- `backtest_v2_result.png` - Equity curve plot
+- `trades_v2.csv` - Trade log with IC parameters
+- `factor_attribution.csv` - Factor analysis data
+
+
 ## 📋 Overview
 CondorBrain is an advanced algorithmic trading system designed for SPY Iron Condor strategies, combining Multi-Timeframe (MTF) technical intelligence, Fuzzy Logic position sizing, and institutional-grade risk management.
 

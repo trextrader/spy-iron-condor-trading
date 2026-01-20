@@ -1053,3 +1053,268 @@ We employ **Persistent Homology** to characterizing market regimes by their topo
 ---
 
 *Document Version: 2.3 | Last Updated: 2026-01-17*
+
+---
+
+## 15. Fuzzy Logic Trade Entry System (V2.2)
+
+The V2.2 backtesting system replaces binary threshold logic with a **probabilistic fuzzy scoring system** that accumulates evidence from multiple sources before making a trade decision. This approach is more robust than all-or-nothing gating.
+
+### 15.1 Entry Score Calculation
+
+The total entry score $S_{entry} \in [0, 100]$ is computed as a weighted sum of four factor scores:
+
+$$
+S_{entry} = S_{conf} + S_{prob} + S_{rules} + S_{dir}
+$$
+
+Where each factor contributes a bounded score:
+
+| Factor | Symbol | Max Points | Description |
+|:-------|:------:|:----------:|:------------|
+| Model Confidence | $S_{conf}$ | 30 | Neural network confidence output |
+| Probability of Profit | $S_{prob}$ | 30 | Estimated win probability |
+| Rule Engine Signal | $S_{rules}$ | 30 | DSL rule aggregation score |
+| Direction Alignment | $S_{dir}$ | 10 | Market direction vs strategy fit |
+
+### 15.2 Factor Scoring Functions
+
+**Confidence Score ($S_{conf}$):**
+
+$$
+S_{conf} = 
+\begin{cases}
+30 & \text{if } C > 0.7 \text{ (HIGH)} \\
+20 & \text{if } C > 0.5 \text{ (MEDIUM)} \\
+10 & \text{if } C > 0.3 \text{ (LOW)} \\
+0 & \text{otherwise (WEAK)}
+\end{cases}
+$$
+
+Where $C \in [0, 1]$ is the model's confidence output.
+
+**Probability of Profit Score ($S_{prob}$):**
+
+$$
+S_{prob} = 
+\begin{cases}
+30 & \text{if } P > 0.6 \text{ (HIGH)} \\
+20 & \text{if } P > 0.45 \text{ (MEDIUM)} \\
+10 & \text{if } P > 0.3 \text{ (LOW)} \\
+0 & \text{otherwise (WEAK)}
+\end{cases}
+$$
+
+**Rule Engine Score ($S_{rules}$):**
+
+$$
+S_{rules} = 
+\begin{cases}
+30 & \text{if } R > 0.5 \text{ (BULLISH)} \\
+15 & \text{if } R \geq 0 \text{ (NEUTRAL)} \\
+0 & \text{otherwise (BEARISH)}
+\end{cases}
+$$
+
+Where $R = \sum_{i=1}^{N} r_i$ is the net signal from the DSL rule engine.
+
+**Direction Alignment Score ($S_{dir}$):**
+
+For Iron Condors (delta-neutral strategies), neutral market direction is preferred:
+
+$$
+S_{dir} = 
+\begin{cases}
+10 & \text{if } |D| < 0.5 \text{ (NEUTRAL)} \\
+0 & \text{otherwise (BIASED)}
+\end{cases}
+$$
+
+### 15.3 Entry Decision Threshold
+
+A trade is entered if and only if:
+
+$$
+S_{entry} \geq \theta_{entry}
+$$
+
+Where $\theta_{entry} = 40$ by default. This fuzzy threshold allows entry when **multiple moderate signals align**, even if no single factor is exceptional.
+
+---
+
+## 16. Iron Condor P&L Simulation Model
+
+The V2.2 backtester implements realistic Iron Condor profit/loss mechanics based on options pricing theory.
+
+### 16.1 Iron Condor Structure
+
+An Iron Condor consists of four legs:
+- **Short Call** at strike $K_{sc}$: Sell OTM call
+- **Long Call** at strike $K_{lc} = K_{sc} + W$: Buy further OTM call
+- **Short Put** at strike $K_{sp}$: Sell OTM put
+- **Long Put** at strike $K_{lp} = K_{sp} - W$: Buy further OTM put
+
+Where $W$ is the wing width.
+
+### 16.2 P&L Boundaries
+
+**Maximum Profit (Credit Received):**
+
+$$
+\Pi_{max} = C \times N \times M
+$$
+
+Where:
+- $C$ = Credit per spread (e.g., $1.50)
+- $N$ = Number of contracts (e.g., 10)
+- $M$ = Options multiplier (100 for equity options)
+
+**Maximum Loss:**
+
+$$
+L_{max} = (W - C) \times N \times M
+$$
+
+### 16.3 Time-Proportional P&L (Theta Decay)
+
+While the position remains "safe" (spot price $S_t$ between short strikes), the Iron Condor collects theta proportionally:
+
+$$
+\Pi_t = \frac{\Pi_{max}}{T_{DTE} \times B_{day}}
+$$
+
+Where:
+- $T_{DTE}$ = Days to expiration at entry
+- $B_{day}$ = Bars per trading day (390 for 1-min data)
+
+### 16.4 Breach Detection
+
+The position is "breached" if the spot price exceeds either short strike:
+
+$$
+\text{Breached} = (S_t \geq K_{sc}) \lor (S_t \leq K_{sp})
+$$
+
+When breached, the daily P&L becomes negative:
+
+$$
+\Pi_t^{breach} = -\frac{L_{max}}{T_{DTE} \times B_{day}}
+$$
+
+### 16.5 Cumulative Equity
+
+The equity curve is computed as:
+
+$$
+E_t = E_{t-1} + \Pi_t
+$$
+
+With $E_0 = 100,000$ (initial capital).
+
+---
+
+## 17. Factor Attribution Analysis
+
+After backtesting, we perform statistical analysis to identify which entry factors correlated with profitable outcomes.
+
+### 17.1 Trade Outcome Classification
+
+Each completed trade is classified as:
+
+$$
+\text{Profitable}_i = 
+\begin{cases}
+1 & \text{if } K_{sp} < S_{exit} < K_{sc} \\
+0 & \text{otherwise}
+\end{cases}
+$$
+
+Where $S_{exit}$ is the spot price at trade exit.
+
+### 17.2 Factor Correlation Analysis
+
+For each factor $F \in \{S_{conf}, S_{prob}, S_{rules}, S_{dir}\}$, we compute:
+
+**Winning Trade Average:**
+$$
+\bar{F}_{win} = \frac{1}{|W|} \sum_{i \in W} F_i
+$$
+
+**Losing Trade Average:**
+$$
+\bar{F}_{lose} = \frac{1}{|L|} \sum_{i \in L} F_i
+$$
+
+Where $W$ and $L$ are the sets of winning and losing trades respectively.
+
+### 17.3 Factor Contribution Metric
+
+The factor contribution score indicates predictive value:
+
+$$
+\Delta_F = \bar{F}_{win} - \bar{F}_{lose}
+$$
+
+Positive $\Delta_F$ indicates the factor is predictive of profitable trades:
+- $\Delta_F > 0$: Factor correlates with winners ✅
+- $\Delta_F < 0$: Factor anti-correlates (may need inversion)
+- $\Delta_F \approx 0$: Factor is not predictive
+
+### 17.4 Win Rate Calculation
+
+$$
+WR = \frac{|W|}{|W| + |L|} \times 100\%
+$$
+
+### 17.5 Suggested Threshold Adjustment
+
+Based on factor attribution, the optimal entry threshold can be estimated:
+
+$$
+\theta_{entry}^* = \arg\max_{\theta} \left[ WR(\theta) \times \mathbb{E}[\Pi | S_{entry} \geq \theta] \right]
+$$
+
+This optimization finds the threshold that maximizes expected risk-adjusted returns.
+
+---
+
+## 18. V2.2 Feature Schema (52 Parameters)
+
+The V2.2 model extends the feature vector to **52 dimensions** by adding **20 rule primitive features** computed by the DSL engine.
+
+### 18.1 Complete Feature List
+
+| Feature Index | Feature Name | Derivation | Category |
+|:-------------:|:-------------|:-----------|:---------|
+| 0-23 | Base Features | Spot, Options, Technical | Core |
+| 24-31 | Dynamic Indicators | Curvature, Energy, Adaptive | V2.1 |
+| 32-51 | Rule Primitives | DSL Engine Outputs | V2.2 |
+
+### 18.2 Rule Primitive Features
+
+| Primitive ID | Name | Formula |
+|:------------:|:-----|:--------|
+| P001 | `adx_normalized` | $\text{ADX}_{14} / 100$ |
+| P002 | `bandwidth` | $(BB_{upper} - BB_{lower}) / BB_{mid}$ |
+| P003 | `bb_position` | $(C - BB_{lower}) / (BB_{upper} - BB_{lower})$ |
+| P004 | `rsi_normalized` | $\text{RSI}_{14} / 100$ |
+| P005 | `stoch_normalized` | $\text{Stoch}_K / 100$ |
+| P006 | `macd_signal` | $\text{sign}(\text{MACD} - \text{Signal})$ |
+| P007 | `vol_regime` | $\sigma_{20} / \bar{\sigma}_{252}$ |
+| P008 | `momentum_score` | $(C - C_{n}) / \text{ATR}_{14}$ |
+| P009 | `beta1_regime` | Hurst exponent proxy |
+| P010 | `curvature` | $\ln(1 + |\kappa_t|)$ |
+
+### 18.3 Normalization
+
+All features are normalized using **Median Absolute Deviation (MAD)** robust scaling:
+
+$$
+x_{norm} = \frac{x - \text{median}(x)}{1.4826 \times \text{MAD}(x)}
+$$
+
+With clipping to $[-10, 10]$ to handle outliers.
+
+---
+
+*Document Version: 2.4 | Last Updated: 2026-01-20*

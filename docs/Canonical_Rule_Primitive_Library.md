@@ -1023,4 +1023,54 @@ rule_a1:
 
 ---
 
+## V2.2 Backtesting Integration
+
+### Primitive-to-Feature Mapping
+
+In the V2.2 backtest (`kaggle/condor_brain_backtest_v2.py`), primitives are computed by `dynamic_features.py` and fed into the model as part of the 52-dimensional feature vector.
+
+| Feature Index | Primitive | Source Function |
+|:-------------:|:----------|:----------------|
+| 32 | `adx_normalized` | `compute_adx_normalized()` |
+| 33 | `bandwidth` | `compute_bollinger_bandwidth()` |
+| 34 | `bb_position` | `compute_bollinger_position()` |
+| 35 | `rsi_normalized` | `compute_rsi_normalized()` |
+| 36 | `stoch_normalized` | `compute_stochastic_normalized()` |
+| 37-51 | DSL Rule Signals | `RuleExecutionEngine.execute()` |
+
+### Fuzzy Entry Score Formula
+
+The backtest uses primitive outputs to compute a fuzzy entry score:
+
+$$
+S_{entry} = S_{conf}(C) + S_{prob}(P) + S_{rules}(R) + S_{dir}(D)
+$$
+
+Where:
+- $S_{conf}(C)$ = Confidence score based on model output (30 max)
+- $S_{prob}(P)$ = Probability of profit score (30 max)
+- $S_{rules}(R)$ = Net rule signal score (30 max)
+- $S_{dir}(D)$ = Direction alignment score (10 max)
+
+Trade entry: $S_{entry} \geq 40$
+
+### Factor Attribution Analysis
+
+After backtesting, the system produces a `factor_attribution.csv` that correlates each primitive's contribution with trade P&L:
+
+| Column | Description |
+|:-------|:------------|
+| `trade_num` | Sequential trade number |
+| `entry_score` | Total fuzzy entry score |
+| `conf` | Confidence at entry |
+| `prob` | Prob profit at entry |
+| `rules` | Rule signal at entry |
+| `profitable` | True/False |
+| `reason` | Exit reason (Expiration/Confidence/Rules) |
+
+This enables analysis of which primitives are most predictive of profitable trades.
+
+---
+
 **End of Canonical Rule Primitive Library v2.5**
+

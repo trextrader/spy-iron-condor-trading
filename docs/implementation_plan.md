@@ -293,8 +293,57 @@ fuzzy_weight_psar: float = 0.07  # Parabolic SAR
 | Stage 5 | ✅ Complete | 100% |
 | Stage 6 | 🔄 In Progress | 60% |
 | Stage 7 | 📋 Future | 0% |
+| **Stage 8** | ✅ Complete | 100% |
+
+---
+
+# Stage 8 — V2.2 Backtesting System ✅ (COMPLETE)
+
+**Goal**: Production-quality backtesting with realistic Iron Condor P&L and factor attribution.
+
+## 8.1 Fuzzy Logic Trade Entry
+
+Replaces binary threshold logic with multi-factor scoring:
+
+$$S_{entry} = S_{conf} + S_{prob} + S_{rules} + S_{dir}$$
+
+| Factor | Max Points | Scoring |
+|:-------|:----------:|:--------|
+| Model Confidence | 30 | >0.7=30, >0.5=20, >0.3=10 |
+| Prob Profit | 30 | >0.6=30, >0.45=20, >0.3=10 |
+| Rule Signal | 30 | >0.5=30, >=0=15 |
+| Direction | 10 | \|D\|<0.5=10 |
+
+**Entry Threshold**: $S_{entry} \geq 40$
+
+## 8.2 Iron Condor P&L Model
+
+$$\Pi_{max} = C \times N \times M \quad \text{(Credit = Max Profit)}$$
+
+$$L_{max} = (W - C) \times N \times M \quad \text{(Max Loss)}$$
+
+**Per-Bar P&L**:
+- Safe zone: $\Pi_t = \frac{\Pi_{max}}{T_{DTE} \times B_{day}}$ (theta collection)
+- Breached: $\Pi_t = -\frac{L_{max}}{T_{DTE} \times B_{day}}$ (loss)
+
+## 8.3 Factor Attribution
+
+Post-backtest analysis correlates factors with trade outcomes:
+
+$$\Delta_F = \bar{F}_{win} - \bar{F}_{lose}$$
+
+Positive $\Delta_F$ indicates predictive value for profitable trades.
+
+## 8.4 Output Files (in `reports/`)
+
+| File | Description |
+|:-----|:------------|
+| `trade_decisions.log` | Every bar's decision reasoning |
+| `backtest_v2_result.png` | Equity curve visualization |
+| `trades_v2.csv` | Complete trade log |
+| `factor_attribution.csv` | Factor analysis data |
 
 ---
 
 > [!TIP]
-> **Next Action**: Monitor Colab Optimization Run and validate results on Paper Trading.
+> **Next Action**: Run V2.2 backtest on Colab with `git pull` and analyze factor attribution results.
