@@ -1,0 +1,223 @@
+These are exact, canonical, final-form function signatures in the style that will live inside:
+intelligence/primitives/
+These signatures are:
+Immutable
+Schema-locked
+Deterministic
+Directly mappable to the DSL
+Exactly what AntiGrav needs to build the Primitive Computation Module
+14 Canonical Primitives
+(one per rule, plus the Spread Friction Gate)
+Each primitive includes:
+Function name (canonical, stable)
+Exact signature
+Exact return schema
+Short description
+Inputs required by the DSL
+This is the authoritative list AntiGrav will use.
+🔥 THE 14 CANONICAL PRIMITIVES (FINAL)
+These are the primitives corresponding to the 13 rules + the Spread Friction Gate.
+Each primitive returns a dict with a fixed schema so the DSL parser and executor can rely on it.
+P001 – Dynamic Bollinger Bands (Rule A1, A2, B1, C1, E2)
+def compute_dynamic_bbands(
+    close: float,
+    sma: float,
+    std: float,
+    k_dynamic: float
+) -> dict:
+    """
+    Returns:
+        {
+            "upper": float,
+            "middle": float,
+            "lower": float,
+            "bandwidth": float
+        }
+    """
+P002 – MACD Normalized (Rule A2)
+def compute_macd_normalized(
+    ema_fast: float,
+    ema_slow: float,
+    ema_signal: float,
+    vol_ewma: float
+) -> dict:
+    """
+    Returns:
+        {
+            "macd": float,
+            "signal": float,
+            "hist": float,
+            "macd_norm": float,
+            "signal_norm": float
+        }
+    """
+P003 – Bandwidth Percentile + Expansion (Rule A2, C1, E2)
+def compute_bandwidth_expansion(
+    bandwidth: float,
+    bandwidth_window: list[float],
+    bandwidth_prev: float
+) -> dict:
+    """
+    Returns:
+        {
+            "bw_percentile": float,
+            "expansion_rate": float
+        }
+    """
+P004 – Multi-Timeframe Consensus (Rule C1, B1, E2)
+def compute_mtf_consensus(
+    signal_1m: float,
+    signal_5m: float,
+    signal_15m: float,
+    weights: dict
+) -> dict:
+    """
+    Returns:
+        {
+            "mtf_consensus": float
+        }
+    """
+P005 – IV Confidence (Lag-Aware) (Rules A2, C1, C2, D2, E2)
+def compute_iv_confidence(
+    lag_minutes: float,
+    decay_lambda: float
+) -> dict:
+    """
+    Returns:
+        {
+            "iv_conf": float
+        }
+    """
+P006 – ADX Normalized (Rule A3)
+def compute_adx_normalized(
+    adx_raw: float,
+    vol_energy: float,
+    beta: float
+) -> dict:
+    """
+    Returns:
+        {
+            "adx_norm": float
+        }
+    """
+P007 – Dynamic RSI (Rule A3, B1, B2, D1)
+def compute_rsi_dynamic(
+    rsi_raw: float,
+    curvature_proxy: float,
+    gamma: float
+) -> dict:
+    """
+    Returns:
+        {
+            "rsi_dynamic": float
+        }
+    """
+P008 – Fuzzy Consensus (11-Factor) (Rule B1)
+def compute_fuzzy_consensus(
+    memberships: dict,
+    weights: dict
+) -> dict:
+    """
+    Returns:
+        {
+            "fuzzy_score": float
+        }
+    """
+P009 – RSI Divergence (Rule B2)
+def compute_rsi_divergence(
+    price: float,
+    price_prev_swing: float,
+    rsi: float,
+    rsi_prev_swing: float
+) -> dict:
+    """
+    Returns:
+        {
+            "divergence": bool,
+            "divergence_strength": float
+        }
+    """
+P010 – Persistent Homology Regime Score (Rule C2)
+def compute_topological_regime(
+    beta1_raw: float,
+    beta1_mean: float,
+    beta1_std: float,
+    persistence_ratio: float,
+    curvature: float,
+    vol_energy: float,
+    iv_conf: float,
+    alpha: float,
+    beta: float
+) -> dict:
+    """
+    Returns:
+        {
+            "beta1_norm": float,
+            "beta1_gated": float,
+            "regime_score": float
+        }
+    """
+P011 – Volume Spike (Rule D2)
+def compute_volume_spike(
+    volume_ratio: float,
+    vol_energy: float,
+    gamma: float
+) -> dict:
+    """
+    Returns:
+        {
+            "volume_threshold_dynamic": float,
+            "volume_spike": bool
+        }
+    """
+P012 – Chaos Membership (Rule E3)
+def compute_chaos_membership(
+    beta1_norm: float,
+    curvature: float,
+    vol_energy: float,
+    alpha: float,
+    beta: float
+) -> dict:
+    """
+    Returns:
+        {
+            "chaos_membership": float,
+            "chaos_dampening": float
+        }
+    """
+P013 – Gap Risk Score (Rule E1 override)
+def compute_gap_risk(
+    event_flag: float,
+    atr_spike: float,
+    bw_expansion: float,
+    late_day: float,
+    weights: dict
+) -> dict:
+    """
+    Returns:
+        {
+            "gap_risk_score": float
+        }
+    """
+P014 – Spread Friction Gate (THE SPREAD RULE)
+(This is the institutional execution filter)
+def compute_spread_friction(
+    spread: float,
+    avg_range_n: float,
+    theta_dynamic: float
+) -> dict:
+    """
+    Returns:
+        {
+            "friction_ratio": float,
+            "exec_allow": bool
+        }
+    """
+🔥 THIS IS THE FINAL CANONICAL PRIMITIVE SET
+These 14 primitives:
+Cover all 13 rules + the spread condition
+Match the DSL
+Match the v2.1 feature schema
+Are deterministic and schema-locked
+Are exactly what AntiGrav needs to build the Primitive Computation Module
+Are ready for unit testing and integration into the Rule Execution Engine

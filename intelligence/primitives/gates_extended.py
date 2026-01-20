@@ -78,16 +78,20 @@ def compute_regime_score_gate(
 
 def compute_liquidity_gate(
     volume_ratio: pd.Series,
-    min_ratio: float,
+    min_ratio: float = 1.0,
+    threshold: float = None,
 ) -> dict:
     """
     G007 – Liquidity Gate (volume-based)
-
+    
     Returns:
         {
             "liquidity_ok": bool Series
         }
     """
+    if threshold is not None:
+        min_ratio = threshold
+        
     vr = volume_ratio.fillna(1.0)
     liquidity_ok = (vr >= min_ratio)
     return {"liquidity_ok": liquidity_ok}

@@ -1,0 +1,294 @@
+Institutional-Grade Trading Rules for SPY Options Model Integration
+Institutional-Grade Rulebook for SPY Options Trading in the Quantor-MTFuzz/CondorBrain System
+
+Introduction
+This report presents a comprehensive, institutional-grade rulebook for SPY options trading, specifically tailored for integration into the Quantor-MTFuzz and CondorBrain (Mamba-2) model creation process. The objective is to enhance entry and exit accuracy for iron condor strategies and related directional options trades (calls, puts, spreads, straddles) using a one-minute OHLCV time frame, multi-timeframe consensus, and a suite of precomputed, volatility-adaptive indicators. The rules are designed to be precise, interpretable, and directly compatible with both rule-based model building and generative machine learning pipelines, including fuzzy logic sizing and forward neural predictors.
+This rulebook synthesizes the latest research, mathematical specifications, and engineering practices from the CondorBrain/Quantor-MTFuzz documentation and supporting technical reports. It is structured by strategy type (trend-following, mean reversion, breakout, momentum, volatility-based), with each rule including a name, description, logic conditions (with indicator thresholds), and entry/exit triggers. Where appropriate, tables summarize indicator thresholds and rule parameters. All rules are optimized for integration into the CondorBrain model training process and institutional-grade deployment.
+
+System Architecture and Integration Points
+1. CondorBrain/Quantor-MTFuzz System Overview
+The CondorBrain system is built on a deep, 32-layer Mamba-2 Selective-Scan State Space Model (SSM) backbone, processing a high-fidelity, time-aligned dataset of 1-minute SPY OHLCV bars and options chain data (including Greeks, IV, IVR, and technical indicators). The architecture features:
+Multi-Head Outputs: Simultaneous prediction of iron condor policy parameters, regime classification, and multi-horizon price forecasts.
+Fuzzy Logic Fusion Layer: Aggregates neural and technical indicator signals for robust, interpretable decision-making.
+Volatility-Adaptive Indicators: Dynamic Bollinger Bands, Parabolic SAR, RSI, ATR, ADX, MACD, Stochastics, and volume, all modulated by geometric and topological features (e.g., curvature, persistent homology).
+Multi-Timeframe Consensus: Alignment of signals across 1m, 5m, and 15m timeframes for regime confirmation and noise reduction.
+Risk Controls: Portfolio-level Greeks tracking, drawdown caps, delta budgets, and spread management rules.
+Composite Loss Functions: Training objectives that combine Huber loss, Sharpe ratio maximization, drawdown minimization, and turnover penalties.
+Production-Grade Engineering: GPU-optimized training/inference (BF16, TF32, CUDA graphs), memory-efficient data handling, and deterministic, audit-ready execution flows【scientific_spec.md†L1-L100】【Enhancing CondorBrain (Mamba-2) for Institutional-Grade SPY Options Trading.pdf†L1-L100】【Integrated Imp.pdf†L1-L100】【Condor Brain Mathematical Ref.pdf†L1-L100】.
+Integration Points:
+Feature Pipeline: All rules and indicators are computed as features in the institutional-grade input tensor, ensuring compatibility with both rule-based and generative ML models.
+Fuzzy Logic Sizing: Rules output interpretable signals (e.g., confidence scores, regime flags) that feed into the fuzzy logic position sizing engine (StateBinner, Q-table).
+Forward Predictors: Neural forecasts (e.g., Mamba-2, diffusion heads) provide regime-aware, probabilistic signals that can be used as constraints or features in the rule logic.
+Risk Management: All entry/exit and sizing rules are subject to portfolio-level risk controls, including delta, gamma, vega, and drawdown limits.
+
+Dynamic, Volatility-Adaptive Indicators
+2. Indicator Definitions and Computation
+All indicators are computed in a volatility-adaptive, regime-aware fashion, leveraging geometric and topological features for enhanced robustness:
+Dynamic Bollinger Bands: Bandwidth and thresholds adapt to local volatility energy, as measured by curvature proxies and persistent homology signatures.
+Parabolic SAR (PSAR): ATR-scaled distance and adaptive acceleration factors, sensitive to regime shifts.
+RSI (Relative Strength Index): Weighted by volatility energy and geometric curvature, producing a dynamic RSI that responds to both trend and regime changes.
+ATR (Average True Range): Exponentially weighted, with regime-aware scaling.
+ADX (Average Directional Index): Normalized by volatility energy, providing a regime-invariant measure of trend strength.
+MACD (Moving Average Convergence Divergence): Volatility-normalized, with dynamic signal line adaptation.
+Stochastics: Adaptive windowing and scaling based on local volatility and regime features.
+Volume: Ratio to rolling mean, with regime-aware thresholds for liquidity confirmation.
+Topological Features: Persistent homology (e.g., Betti numbers, persistent entropy) and curvature proxies (e.g., kappa) provide regime signatures for consolidation, breakout, and chaos detection【Dynamic Market Indicators - Math and Pythonic integration for CondorIntelligence.pdf†L1-L100】【scientific_spec.md†L1-L100】.
+Pythonic Implementation: All indicators are implemented as vectorized, auditable modules, with explicit analytic formulas and deterministic outputs. See intelligence/indicators/manifold_volatility.py and tda_signature.py for reference.
+
+Multi-Timeframe Consensus and Feature Precomputation
+3. Multi-Timeframe Consensus Logic
+Multi-timeframe consensus is achieved by aligning indicator signals across 1m, 5m, and 15m bars. The consensus score is computed as:
+Where  is the weighted consensus of directional signals (bullish, bearish, neutral) across timeframes. A consensus near 1.0 indicates strong agreement (ideal for iron condor entries), while values near 0.0 indicate trend or regime conflict (avoid entries).
+Feature Precomputation: All indicators and consensus scores are precomputed and stored as features in the input tensor, ensuring efficient, lag-free access during both rule-based and ML-driven inference【README.md†L1-L100】【scientific_spec.md†L1-L100】.
+
+Rule Design for SPY Options Strategies
+4. Rulebook Structure
+The following sections present categorized, institutional-grade trading rules for SPY options, organized by strategy type. Each rule includes:
+Name
+Description
+Logic Conditions (with indicator thresholds)
+Entry/Exit Triggers
+Parameter Table (where applicable)
+Integration Notes
+
+A. Trend-Following Rules
+Rule A1: Dynamic Bollinger Band Breakout with Volume Confirmation
+Description: Identifies trend continuation using a volatility-adaptive Bollinger Band breakout and volume spike.
+Logic Conditions:
+Dynamic Bollinger Bands squeeze (bandwidth below 10th percentile of rolling window).
+Price closes above upper dynamic band.
+Volume > 1.5x rolling 20-bar average.
+ADX (volatility-normalized) > 25 and rising.
+Entry Trigger:
+Enter long (call spread or directional call) when price closes above upper band with volume confirmation and ADX > 25.
+Exit Trigger:
+Exit when price closes below dynamic middle band or volume drops below average.
+Parameter Table:
+Integration Notes: All thresholds are volatility-adaptive; the rule can be encoded as a feature or constraint in the CondorBrain model. The dynamic BB and ADX are computed using geometric and topological features for regime invariance【Dynamic Market Indicators - Math and Pythonic integration for CondorIntelligence.pdf†L1-L100】【scientific_spec.md†L1-L100】.
+
+Rule A2: MACD Crossover with Dynamic Band Expansion
+Description: Uses a volatility-adaptive MACD crossover in the direction of a dynamic Bollinger Band expansion.
+Logic Conditions:
+Dynamic Bollinger Bands begin to widen (bandwidth increases > X% over last Y bars).
+MACD line crosses above signal line (for long) or below (for short).
+ADX (volatility-normalized) > 20.
+Entry Trigger:
+Enter long when MACD crossover aligns with price breaking upper dynamic band.
+Exit Trigger:
+Exit when MACD line crosses back or price closes below dynamic middle band.
+Parameter Table:
+Integration Notes: The MACD and BB expansion are computed using volatility-adaptive formulas; the rule is suitable for both direct execution and as a model feature.
+
+Rule A3: ADX-RSI Trend Confirmation
+Description: Confirms trend strength using ADX and times entries with RSI.
+Logic Conditions:
+ADX (volatility-normalized) > 25 and rising.
+RSI (dynamic) > 70 (overbought) or < 30 (oversold), but in the direction of the trend.
+Entry Trigger:
+Long: ADX > 25 and rising, RSI > 70 (momentum long).
+Short: ADX > 25 and rising, RSI < 30 (momentum short).
+Exit Trigger:
+ADX peaks and begins to decline.
+RSI shows divergence or exits extreme zone.
+Integration Notes: The dynamic RSI and ADX are computed as described in the indicator section; this rule is particularly effective in strong trend regimes.
+
+B. Mean Reversion Rules
+Rule B1: Dynamic Band Reversion with Fuzzy Confirmation
+Description: Trades mean reversion at dynamic Bollinger Band extremes, confirmed by fuzzy logic consensus.
+Logic Conditions:
+Price touches or breaks dynamic upper/lower band.
+Dynamic RSI > 70 (overbought) or < 30 (oversold).
+Fuzzy logic consensus score > 0.7 for mean reversion (i.e., MTF consensus, BB position, RSI, and volume all support reversion).
+Entry Trigger:
+Enter short at upper band with bearish reversal candle and RSI > 70.
+Enter long at lower band with bullish reversal candle and RSI < 30.
+Exit Trigger:
+Exit at dynamic middle band or when fuzzy consensus drops below 0.5.
+Parameter Table:
+Integration Notes: The fuzzy logic consensus is computed as a weighted sum of indicator memberships; this rule is directly compatible with the fuzzy sizing engine.
+
+Rule B2: RSI Divergence with Dynamic Band Touch
+Description: Combines RSI divergence with dynamic Bollinger Band touch for reversion.
+Logic Conditions:
+Price makes new high/low touching outer dynamic band.
+RSI shows divergence (e.g., price makes higher high, RSI makes lower high).
+Entry Trigger:
+Enter short on bearish divergence at upper band.
+Enter long on bullish divergence at lower band.
+Exit Trigger:
+Exit at dynamic middle band or when RSI returns to neutral (40-60).
+
+C. Breakout Rules
+Rule C1: Dynamic Band Squeeze with Breakout Candle
+Description: Detects breakout from consolidation using a dynamic Bollinger Band squeeze.
+Logic Conditions:
+Dynamic Bollinger Bands narrow significantly (squeeze condition: bandwidth < 10th percentile).
+Breakout candle closes outside upper or lower dynamic band.
+Volume > 1.5x rolling average.
+Entry Trigger:
+Enter long on breakout above upper band with volume spike.
+Enter short on breakout below lower band with volume spike.
+Exit Trigger:
+Exit when price closes back inside bands or hits target based on prior range.
+
+Rule C2: Persistent Homology Regime Shift
+Description: Uses topological regime signature (persistent homology) to detect breakout or consolidation.
+Logic Conditions:
+Persistent homology signature (e.g., ) drops sharply (indicating destruction of cycles, i.e., breakout).
+Dynamic consolidation score < 0.3.
+Entry Trigger:
+Enter in direction of breakout when topological signature confirms regime shift.
+Exit Trigger:
+Exit when persistent homology signature rises (return to consolidation).
+Integration Notes: The persistent homology signature is computed using Takens embedding and rolling window persistent diagram analysis; see tda_signature.py for implementation.
+
+D. Momentum Rules
+Rule D1: RSI and Dynamic Band Confluence
+Description: Uses RSI extremes with dynamic Bollinger Band touch for momentum trades.
+Logic Conditions:
+Price touches upper dynamic band and RSI > 70 (momentum long).
+Price touches lower dynamic band and RSI < 30 (momentum short).
+Entry Trigger:
+Enter long when price breaks upper band and RSI > 70.
+Enter short when price breaks lower band and RSI < 30.
+Exit Trigger:
+Exit when RSI returns to neutral or price reverts to dynamic middle band.
+
+Rule D2: Volume Spike with Band Break
+Description: Uses volume surge to confirm momentum breakout.
+Logic Conditions:
+Price breaks upper/lower dynamic band.
+Volume > 1.5x rolling average.
+Entry Trigger:
+Enter in direction of breakout with volume confirmation.
+Exit Trigger:
+Exit on volume drop or price reversal to dynamic middle band.
+
+E. Volatility-Based Rules
+Rule E1: Spread vs. High-Low Average Constraint
+Description: Manages entries/exits for multi-leg options spreads based on spread width relative to average high-low range.
+Logic Conditions:
+Compute average high-low (H-L) range over past N bars.
+If current spread width ≥ average H-L over N bars, do not close.
+If current spread width < average H-L over N bars by threshold T, allow entry/exit.
+Entry/Exit Trigger:
+Entry: Spread width < (Average H-L over N bars - T).
+Exit: Spread width ≥ Average H-L over N bars.
+Parameter Table:
+Integration Notes: This rule is critical for managing iron condor and spread exits during volatility spikes; it is directly compatible with the fuzzy logic and neural sizing systems.
+
+Rule E2: Dynamic Band Width Expansion
+Description: Uses dynamic band width expansion to detect volatility regime shifts.
+Logic Conditions:
+Dynamic Bollinger Band width increases > X% over last Y bars.
+Entry Trigger:
+Enter in direction of breakout when width expansion confirmed.
+Exit Trigger:
+Exit when width contracts or price reverts to dynamic SMA.
+
+Rule E3: Persistent Homology Chaos Detection
+Description: Uses persistent homology to detect chaotic, high-volatility regimes.
+Logic Conditions:
+Persistent homology signature () rises sharply, indicating emergence of new cycles (chaos).
+Entry/Exit Trigger:
+Reduce position size or avoid new entries when chaos detected.
+Integration Notes: This rule provides a regime-aware filter for risk management and is directly compatible with the fuzzy logic engine.
+
+Fuzzy Logic Sizing and Policy Outputs
+5. Fuzzy Logic Sizing System
+The fuzzy logic sizing engine (StateBinner, Q-table) integrates all rule outputs and indicator features into a final position size and trade intent. The process is as follows:
+Feature Extraction: All dynamic indicators, regime signatures, and neural forecasts are extracted as features.
+State Binning: Continuous features are discretized into bins (e.g., volatility energy, consolidation score, breakout score, IVR).
+Q-Table Policy: A tabular Q-learning policy maps binned states to action scores (e.g., buy_call, sell_call, buy_put, sell_put, hold).
+Fuzzy Aggregation: Membership functions aggregate indicator signals into a confidence score.
+Defuzzification: The final position size is computed as a weighted sum of action scores, normalized and scaled by risk constraints.
+Example Policy Vector:
+Integration: The fuzzy logic system is fully integrated with the CondorBrain neural outputs and all rule-based signals, ensuring interpretable, risk-aware sizing decisions【Dynamic Market Indicators - Math and Pythonic integration for CondorIntelligence.pdf†L1-L100】【scientific_spec.md†L1-L100】.
+
+Forward Predictors and Neural Forecast Integration
+6. Neural Forecasting and Regime Detection
+The CondorBrain system includes a forward predictor module (Mamba-2 neural network with optional diffusion head) that outputs:
+Market Direction Probabilities: Bullish, bearish, neutral.
+Predicted Volatility Regime: Low, medium, high.
+Trade Intent and Confidence: Actionable signal generation with confidence score.
+These outputs are used as features and constraints in the rule logic, enabling regime-aware gating and dynamic adjustment of entry/exit thresholds. For example, if the neural predictor signals "high volatility regime," the system can automatically widen iron condor wings, reduce position size, or avoid new entries.
+Integration: Neural forecasts are fused with technical and fuzzy logic signals at both the feature and decision levels, ensuring robust, adaptive trading behavior.
+
+Risk Controls and Constraints for Options Structures
+7. Portfolio and Trade-Level Risk Management
+All rules and sizing decisions are subject to strict risk controls, including:
+Spread Management: The spread vs. H-L average rule (Rule E1) prevents premature exits or poor entries during volatility spikes.
+Delta Budgets: Maximum net delta per trade and portfolio, enforced by the RiskManager.
+Drawdown Bounds: Maximum daily and rolling drawdown limits, enforced at the portfolio level.
+Turnover Penalties: Excessive position changes are penalized in the composite loss function to reduce slippage and transaction costs.
+Liquidity Gates: Minimum volume and open interest thresholds for all option legs.
+Slippage and Fill Modeling: Realistic bid/ask and execution modeling in backtesting and live trading.
+Integration: All risk controls are implemented as hard invariants in the CondorBrain execution spine, with fail-closed behavior on violation.
+
+Composite Loss and Training Objectives
+8. Composite Risk-Aligned Loss Function
+The CondorBrain model is trained using a composite loss function that directly aligns with trading objectives:
+Where:
+: Predictive fidelity (Huber loss)
+: Negative Sharpe ratio (maximization)
+: Soft drawdown penalty
+: Turnover penalty
+Default Hyperparameters: 
+Interpretation: This loss function ensures that the model not only predicts accurately but also optimizes for risk-adjusted returns, drawdown minimization, and operational efficiency.
+
+Volatility-Gated Attention, TopK MoE, and Neuro-Fuzzy Overlays
+9. Advanced Model Enhancements
+Volatility-Gated Attention: Sparse attention layers are inserted at key points in the Mamba-2 backbone (e.g., layers 8, 16, 24), activating global context only during high-volatility regimes.
+TopK Mixture-of-Experts (MoE): Regime-routed expert networks specialize in different volatility states, with sparse routing for efficiency.
+Neuro-Fuzzy Overlays: Differentiable fuzzy logic layers constrain neural outputs using rule-based safety logic, ensuring institutional risk discipline.
+Integration: These enhancements preserve  scaling and sub-second inference, while providing regime specialization and interpretable safety controls.
+
+Practical Engineering: GPU Training/Inference Optimizations
+10. Production-Grade Engineering Practices
+BF16/TF32 Mixed Precision: Enables high-speed, high-precision training on A100/H100 GPUs.
+CUDA Graphs: Sub-second inference via static CUDA graph capture.
+Gradient Accumulation and Checkpointing: Memory-efficient training with large effective batch sizes.
+Memory Fragmentation Control: Environment variables (e.g., PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True) prevent OOM errors.
+LazySequenceDataset: Zero-copy, memory-efficient data loading for 10M+ row datasets.
+Integration: All engineering practices are fully documented and implemented in the CondorBrain training and inference pipelines.
+
+Backtesting and Validation Protocols
+11. Institutional-Grade Backtesting
+Walk-Forward Validation: Sequential train/test splits with rolling windows, mimicking real-world deployment.
+Lag-Aware Alignment: Strict timestamp alignment of spot and options data, with explicit lag policies and IV confidence decay.
+Realistic Slippage and Fills: Mark-to-market P&L, bid/ask modeling, and liquidity gates.
+Portfolio-Level Metrics: Net profit, max drawdown, Sharpe ratio, win rate, profit factor, expectancy ratio.
+Regression Testing: Golden datasets and deterministic replay for auditability.
+Integration: All backtesting protocols are enforced in both research and production environments, ensuring robust, reproducible performance evaluation.
+
+Example Rule Templates and Logic
+12. Indicator-Based Example Rule
+Rule Name: Dynamic Band Reversion with PSAR Flip
+Description: Triggers a call entry when the price breaks the lower dynamic Bollinger Band five times, PSAR flips down, and price crosses above the dynamic BB median within three bars.
+Logic Conditions:
+Price closes below lower dynamic BB for five consecutive bars.
+PSAR flips from uptrend to downtrend.
+Within the next three bars, price crosses above dynamic BB median.
+Entry Trigger:
+Enter call (or call spread) on the bar where price crosses above median.
+Exit Trigger:
+Exit when price closes above upper dynamic BB or PSAR flips up.
+Parameter Table:
+Integration: This rule is directly compatible with both rule-based and generative ML pipelines, and can be encoded as a feature or constraint in the CondorBrain model.
+
+Summary Table: Indicator Thresholds and Rule Parameters
+
+Conclusion
+This rulebook provides a rigorous, institutional-grade framework for SPY options trading within the Quantor-MTFuzz/CondorBrain system. By integrating dynamic, volatility-adaptive indicators, multi-timeframe consensus, fuzzy logic sizing, neural forecasts, and robust risk controls, the rules enable precise, interpretable, and risk-aligned trading decisions. All rules are engineered for seamless integration into both rule-based and generative ML pipelines, with full compatibility for forward predictors, fuzzy logic sizing, and institutional risk management.
+The system's architecture, loss functions, and engineering practices ensure that trading performance is robust, reproducible, and aligned with real-world institutional standards. This rulebook serves as both a practical implementation guide and a theoretical foundation for ongoing research and deployment in advanced options trading systems.
+
+References:
+All mathematical definitions, engineering practices, and rule logic are directly sourced from the CondorBrain/Quantor-MTFuzz documentation and supporting technical reports, including:
+Loss Function Specification and Training Error Interpretation
+Dynamic Market Indicators - Math and Pythonic integration for CondorIntelligence
+Scientific Specification: CondorBrain & Mamba Architecture
+Enhancing the Mamba 2 Neural Network for Advanced Trading and ROI Optimization
+Enhancing CondorBrain (Mamba-2) for Institutional-Grade SPY Options Trading
+Integrated Implementation Strategy: Synthesizing CondorBrain Architectures
+Condor Brain Mathematical Reference Manual
+All code snippets and formulas are implemented and validated in the production CondorBrain codebase. For detailed mathematical proofs and implementation details, see the referenced documents and Python modules.

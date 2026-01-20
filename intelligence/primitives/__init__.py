@@ -57,6 +57,7 @@ from .signals import (
     compute_gap_exit_signal,
     compute_size_adjustment_signal,
     compute_final_execution_signal,
+    compute_bandwidth_expansion_signal,
 )
 
 __all__ = [

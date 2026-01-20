@@ -1,0 +1,643 @@
+# ======================================================================
+# Rule DSL Specification for AntiGrav & CondorBrain Integration
+# ======================================================================
+# Version: 2.5
+# Last Updated: 2026-01-19
+# Purpose: Declarative rule composition for SPY options trading
+# ======================================================================
+
+# ----------------------------------------------------------------------
+# SCHEMA DEFINITION
+# ----------------------------------------------------------------------
+
+schema_version: "2.5"
+compatible_systems:
+  - CondorBrain: "v2.5"
+  - DeepMamba: "v2.0"
+  - AntiGrav: "v1.0"
+  - FIS: "11-factor"
+
+# ----------------------------------------------------------------------
+# PRIMITIVE REFERENCE
+# ----------------------------------------------------------------------
+# All primitives are defined in Canonical_Rule_Primitive_Library.md
+# Format: {category}_{id} (e.g., P001, S003, G001, M004, C002)
+
+# ----------------------------------------------------------------------
+# RULE STRUCTURE
+# ----------------------------------------------------------------------
+
+rule_template:
+  # Metadata
+  id: "string"  # Unique identifier (e.g., "RULE_A1")
+  name: "string"  # Human-readable name
+  version: "string"  # Rule version (e.g., "2.0", "2.5")
+  category: "string"  # trend|mean_reversion|breakout|momentum|volatility
+  strategy_type: "string"  # directional|iron_condor|spread|hedge
+  description: "string"  # Brief description
+
+  # Dependencies
+  requires:
+    primitives: ["list of primitive IDs"]
+    features: ["list of feature column names"]
+    timeframes: ["list: 1m|5m|15m"]
+
+  # Primitive Invocations
+  primitives:
+    - id: "primitive_id"  # e.g., "P001"
+      alias: "string"  # Optional alias for referencing (e.g., "bb")
+      params:  # Override default parameters
+        param_name: value
+
+  # Signal Composition
+  signals:
+    entry:
+      long:
+        logic: "boolean expression"  # Combines primitive outputs
+        min_confidence: float  # 0-1
+      short:
+        logic: "boolean expression"
+        min_confidence: float
+
+    exit:
+      logic: "boolean expression"
+      conditions: ["list of exit conditions"]
+
+  # Gate Stack (evaluated in order)
+  gates:
+    - id: "gate_id"
+      type: "execution|risk|portfolio|regime"
+      action: "allow|block|defer|adjust"
+      params: {}
+
+  # Position Sizing
+  sizing:
+    method: "fixed|fuzzy|neural"
+    base_size: int  # contracts
+    multipliers:
+      - source: "primitive_id or gate_id"
+        type: "scale|dampen"
+        range: [min, max]
+
+  # Risk Management
+  risk:
+    stop_loss:
+      type: "percent|multiple|fixed"
+      value: float
+    profit_target:
+      type: "percent|multiple|fixed"
+      value: float
+    max_loss_per_trade: float  # dollars
+    max_daily_loss: float  # dollars
+
+  # Backtesting Configuration
+  backtest:
+    enabled: bool
+    metrics: ["net_profit", "sharpe", "max_dd", "win_rate"]
+    validation: "walk_forward|k_fold|rolling"
+
+  # Model Integration
+  model_integration:
+    feature_output: bool  # Export as training feature
+    auxiliary_target: bool  # Train gate outputs
+    constraint_layer: bool  # Fuzzy constraint on neural output
+
+# ----------------------------------------------------------------------
+# LOGICAL OPERATORS
+# ----------------------------------------------------------------------
+
+logical_operators:
+  AND: "All conditions must be true"
+  OR: "At least one condition must be true"
+  NOT: "Negates condition"
+  XOR: "Exactly one condition must be true"
+  THRESHOLD: "Weighted sum exceeds threshold"
+  ALL: "All items in list satisfy condition"
+  ANY: "At least one item in list satisfies condition"
+  SEQ: "Sequential conditions (time-ordered)"
+
+# Example expressions:
+# - "AND(S001, S008, G003)"
+# - "OR(S002, S005)"
+# - "AND(S001, NOT(G005))"
+# - "THRESHOLD([M001:0.25, M002:0.15, M004:0.15], 0.7)"
+
+# ----------------------------------------------------------------------
+# EXECUTION FLOW
+# ----------------------------------------------------------------------
+
+execution_flow:
+  1_precompute:
+    description: "Compute all required primitives"
+    parallelizable: true
+
+  2_evaluate_signals:
+    description: "Evaluate entry/exit signal logic"
+    output: "signal_type, direction, confidence"
+
+  3_apply_gates:
+    description: "Apply gate stack in order"
+    output: "allow|block|defer|adjust"
+    short_circuit: true  # Stop at first BLOCK
+
+  4_compute_sizing:
+    description: "Calculate position size with multipliers"
+    output: "contracts, notional, greeks"
+
+  5_risk_check:
+    description: "Validate risk constraints"
+    output: "allow|reject, adjusted_size"
+
+  6_execute:
+    description: "Submit order or record signal"
+    output: "order_id or signal_log"
+
+# ----------------------------------------------------------------------
+# EXAMPLE RULE: A1 - Dynamic BB Breakout with Volume
+# ----------------------------------------------------------------------
+
+RULE_A1:
+  id: "RULE_A1"
+  name: "Dynamic Bollinger Band Breakout with Volume Confirmation"
+  version: "2.0"
+  category: "trend_following"
+  strategy_type: "directional"
+  description: "Identifies trend continuation using volatility-adaptive BB breakout and volume spike"
+
+  requires:
+    primitives: ["P001", "P002", "P004", "P007", "P008", "P011", "S001", "S006", "S008", "S013", "G003", "G004"]
+    features: ["close", "high", "low", "volume", "atr"]
+    timeframes: ["1m", "5m", "15m"]
+
+  primitives:
+    - id: "P001"
+      alias: "bb"
+      params:
+        n: 20
+        k_0: 2.0
+        alpha: 0.2
+
+    - id: "P002"
+      alias: "bw_pct"
+      params:
+        w: 100
+
+    - id: "P004"
+      alias: "adx"
+      params:
+        period: 14
+        beta: 0.15
+
+    - id: "P007"
+      alias: "vol_ratio"
+
+    - id: "P008"
+      alias: "iv_conf"
+
+    - id: "P011"
+      alias: "mtf"
+
+    - id: "S001"
+      alias: "bb_breakout"
+
+    - id: "S006"
+      alias: "squeeze"
+
+    - id: "S008"
+      alias: "vol_spike"
+
+    - id: "S013"
+      alias: "mtf_align"
+
+    - id: "G003"
+      alias: "iv_gate"
+
+    - id: "G004"
+      alias: "mtf_gate"
+
+  signals:
+    entry:
+      long:
+        logic: "AND(squeeze, bb_breakout.bullish, vol_spike, adx.trend_bullish, mtf_align.bullish)"
+        min_confidence: 0.7
+
+      short:
+        logic: "AND(squeeze, bb_breakout.bearish, vol_spike, adx.trend_bearish, mtf_align.bearish)"
+        min_confidence: 0.7
+
+    exit:
+      logic: "OR(close < bb.middle, vol_ratio < 1.0, adx.declining)"
+      conditions:
+        - "Price closes below middle band"
+        - "Volume drops below average"
+        - "ADX declines for 2 bars"
+
+  gates:
+    - id: "G003"
+      type: "regime"
+      action: "defer"
+      params:
+        threshold: 0.5
+
+    - id: "G004"
+      type: "regime"
+      action: "block"
+      params:
+        threshold: 0.7
+
+  sizing:
+    method: "fixed"
+    base_size: 1
+    multipliers: []
+
+  risk:
+    stop_loss:
+      type: "multiple"
+      value: 2.0  # 2x initial risk
+    profit_target:
+      type: "percent"
+      value: 0.50  # 50%
+    max_loss_per_trade: 500
+
+  backtest:
+    enabled: true
+    metrics: ["net_profit", "sharpe", "max_dd"]
+
+  model_integration:
+    feature_output: true
+    auxiliary_target: false
+    constraint_layer: false
+
+# ----------------------------------------------------------------------
+# EXAMPLE RULE: B1 - Dynamic Band Reversion with Fuzzy Confirmation
+# ----------------------------------------------------------------------
+
+RULE_B1:
+  id: "RULE_B1"
+  name: "Dynamic Band Reversion with Fuzzy Confirmation"
+  version: "2.0"
+  category: "mean_reversion"
+  strategy_type: "iron_condor"
+  description: "Trades mean reversion at BB extremes with 11-factor fuzzy consensus"
+
+  requires:
+    primitives: ["P001", "P005", "P006", "P012", "S002", "G006", "G008", "M001", "M002", "M004", "M008"]
+    features: ["close", "rsi", "psar", "ivr"]
+    timeframes: ["1m", "5m", "15m"]
+
+  primitives:
+    - id: "P001"
+      alias: "bb"
+
+    - id: "P005"
+      alias: "rsi"
+
+    - id: "P006"
+      alias: "psar"
+
+    - id: "P012"
+      alias: "ivr"
+
+    - id: "S002"
+      alias: "reversion"
+
+    - id: "G006"
+      alias: "ivr_gate"
+
+    - id: "G008"
+      alias: "fuzzy_gate"
+      params:
+        threshold: 0.7
+        weights:
+          mtf: 0.25
+          ivr: 0.15
+          vix: 0.10
+          rsi: 0.15
+          stoch: 0.05
+          adx: 0.05
+          sma: 0.05
+          psar: 0.10
+          bb: 0.05
+          bbsqueeze: 0.03
+          vol: 0.02
+
+  signals:
+    entry:
+      long:
+        logic: "AND(reversion.bullish, fuzzy_gate.allow, psar.uptrend, ivr > 0.2)"
+        min_confidence: 0.7
+
+      short:
+        logic: "AND(reversion.bearish, fuzzy_gate.allow, psar.downtrend, ivr > 0.2)"
+        min_confidence: 0.7
+
+    exit:
+      logic: "OR(close == bb.middle, fuzzy_score < 0.5, rsi.neutral)"
+      conditions:
+        - "Price reaches middle band"
+        - "Fuzzy consensus deteriorates"
+        - "RSI returns to neutral (40-60)"
+
+  gates:
+    - id: "G006"
+      type: "regime"
+      action: "block"
+      params:
+        min_ivr: 20.0
+
+    - id: "G008"
+      type: "execution"
+      action: "block"
+      params:
+        threshold: 0.7
+
+  sizing:
+    method: "fuzzy"
+    base_size: 2
+    multipliers:
+      - source: "G008"
+        type: "scale"
+        range: [0.5, 1.5]
+
+  risk:
+    stop_loss:
+      type: "multiple"
+      value: 1.2
+    profit_target:
+      type: "percent"
+      value: 0.90
+    max_loss_per_trade: 600
+
+  model_integration:
+    feature_output: true
+    auxiliary_target: true  # Train fuzzy consensus
+    constraint_layer: true  # Fuzzy layer constrains neural output
+
+# ----------------------------------------------------------------------
+# EXAMPLE RULE: E1 - Spread vs H-L Constraint (Execution Filter)
+# ----------------------------------------------------------------------
+
+RULE_E1:
+  id: "RULE_E1"
+  name: "Spread vs High-Low Average Constraint"
+  version: "2.0"
+  category: "volatility"
+  strategy_type: "execution_filter"
+  description: "Prevents entries/exits when spread cost exceeds realized range"
+
+  requires:
+    primitives: ["G001", "G002"]
+    features: ["high", "low", "bid", "ask", "atr"]
+    timeframes: ["1m"]
+
+  primitives:
+    - id: "G001"
+      alias: "friction_gate"
+      params:
+        n: 20  # avg range period
+        theta_0: 1.0  # base threshold
+        theta_min: 0.5
+        theta_max: 1.5
+        a: 0.1  # ATR coefficient
+        b: 0.1  # VolRatio coefficient
+        c: 0.15  # BW coefficient
+        d: 0.2  # Event coefficient
+
+    - id: "G002"
+      alias: "gap_risk_gate"
+      params:
+        G_crit: 0.7
+        w1: 0.3  # Event weight
+        w2: 0.3  # ATR spike weight
+        w3: 0.2  # BW expansion weight
+        w4: 0.2  # Late day weight
+
+  signals:
+    # This is a pure execution filter, not a signal generator
+    entry:
+      long:
+        logic: "friction_gate.allow"
+        min_confidence: 1.0
+      short:
+        logic: "friction_gate.allow"
+        min_confidence: 1.0
+
+    exit:
+      logic: "OR(friction_gate.allow, gap_risk_gate.override)"
+      conditions:
+        - "Normal exit: friction ratio < threshold"
+        - "Override exit: gap risk critical"
+
+  gates:
+    - id: "G001"
+      type: "execution"
+      action: "block"
+
+    - id: "G002"
+      type: "risk"
+      action: "force_exit"  # Overrides all other gates
+
+  sizing:
+    method: "passthrough"  # Filter only, no sizing
+
+  risk:
+    # This filter IS the risk management
+    stop_loss: null
+    profit_target: null
+
+  model_integration:
+    feature_output: true
+    auxiliary_target: true  # Train friction gate
+    constraint_layer: false
+
+# ----------------------------------------------------------------------
+# EXAMPLE RULE: C2 - Persistent Homology Regime Shift (Advanced)
+# ----------------------------------------------------------------------
+
+RULE_C2:
+  id: "RULE_C2"
+  name: "Persistent Homology Regime Shift"
+  version: "2.5"
+  category: "breakout"
+  strategy_type: "regime_filter"
+  description: "Uses topological signatures to detect breakout/consolidation"
+
+  requires:
+    primitives: ["P009", "P010", "P008", "S010", "S011", "G003", "G005"]
+    features: ["close", "beta1_norm", "curvature", "vol_energy"]
+    timeframes: ["5m", "15m"]
+
+  primitives:
+    - id: "P009"
+      alias: "beta1"
+      params:
+        tau: 1
+        d: 3
+        theta: 0.1
+        w: 100
+
+    - id: "P010"
+      alias: "curvature"
+
+    - id: "P008"
+      alias: "iv_conf"
+
+    - id: "S010"
+      alias: "tda_breakout"
+
+    - id: "S011"
+      alias: "tda_consolidation"
+
+    - id: "G003"
+      alias: "iv_gate"
+
+    - id: "G005"
+      alias: "vol_gate"
+      params:
+        high_vol_threshold: 2.0
+
+  signals:
+    entry:
+      long:
+        logic: "AND(tda_breakout, vol_gate.allow, iv_gate.allow, beta1.regime_score > 2.0)"
+        min_confidence: 0.8
+
+      short:
+        logic: "AND(tda_breakout, vol_gate.allow, iv_gate.allow, beta1.regime_score > 2.0)"
+        min_confidence: 0.8
+
+    exit:
+      logic: "OR(tda_consolidation, beta1.regime_score < 1.0)"
+      conditions:
+        - "β₁ rises (return to consolidation)"
+        - "Regime score reverses"
+
+  gates:
+    - id: "G003"
+      type: "regime"
+      action: "defer"
+
+    - id: "G005"
+      type: "regime"
+      action: "block"
+
+  sizing:
+    method: "fixed"
+    base_size: 1
+
+  risk:
+    stop_loss:
+      type: "multiple"
+      value: 2.0
+
+  model_integration:
+    feature_output: true
+    auxiliary_target: true  # Train regime classifier
+    constraint_layer: true  # Topological constraints
+
+# ----------------------------------------------------------------------
+# ANTI-GRAV EXECUTION ENGINE PSEUDOCODE
+# ----------------------------------------------------------------------
+
+# How AntiGrav will parse and execute these rules:
+
+antigrav_execution:
+
+  load_rules:
+    """
+    1. Parse YAML rule files
+    2. Validate schema compliance
+    3. Build primitive dependency graph
+    4. Topologically sort primitives
+    """
+
+  precompute_primitives:
+    """
+    for each bar t:
+      # Parallelize independent primitives
+      for primitive in dependency_order:
+        if primitive.dependencies_satisfied(t):
+          primitive.compute(t)
+          cache[primitive.id][t] = result
+    """
+
+  evaluate_rule:
+    """
+    for each rule in active_rules:
+
+      # 1. Evaluate signal logic
+      signal = evaluate_logic_expression(rule.signals.entry.long.logic, cache)
+
+      if not signal:
+        continue  # No signal, skip to next rule
+
+      # 2. Apply gate stack (short-circuit on BLOCK)
+      for gate in rule.gates:
+        gate_result = cache[gate.id][t]
+
+        if gate.action == "block" and not gate_result.allow:
+          break  # Blocked, skip to next rule
+
+        if gate.action == "defer" and not gate_result.allow:
+          defer_entry()
+          break
+
+        if gate.action == "force_exit" and gate_result.override:
+          execute_exit_immediately()
+          break
+
+      # 3. Compute position size
+      size = rule.sizing.base_size
+      for multiplier in rule.sizing.multipliers:
+        factor = cache[multiplier.source][t].value
+        size *= clamp(factor, multiplier.range)
+
+      # 4. Risk check
+      if not risk_manager.validate(size, rule.risk):
+        reject_trade()
+        continue
+
+      # 5. Execute trade
+      execute_trade(
+        direction=signal.direction,
+        size=size,
+        stop_loss=rule.risk.stop_loss,
+        profit_target=rule.risk.profit_target
+      )
+    """
+
+# ----------------------------------------------------------------------
+# FEATURE EXPORT FOR MODEL TRAINING
+# ----------------------------------------------------------------------
+
+feature_export:
+  format: "parquet"
+  schema:
+    timestamp: "datetime64"
+    rule_id: "string"
+    signal_type: "enum[long|short|exit]"
+    confidence: "float32"
+    gate_results: "map[string, bool]"  # {gate_id: allow/block}
+    primitive_values: "map[string, float32]"  # All primitive outputs
+    executed: "bool"  # Was trade actually taken
+    pnl: "float32"  # Realized P&L if executed
+
+  partitioning:
+    by: ["date", "rule_id"]
+    format: "year=YYYY/month=MM/day=DD/rule=RULE_ID"
+
+  usage:
+    training:
+      - "Input features: All primitive_values"
+      - "Target: signal_type (classification)"
+      - "Auxiliary targets: gate_results (multi-task)"
+      - "Sample weights: confidence × executed"
+
+    validation:
+      - "Backtest performance: Compare rule signals vs model predictions"
+      - "Gate accuracy: Precision/recall of allow/block decisions"
+      - "Risk alignment: Check if neural output respects constraints"
+
+# ----------------------------------------------------------------------
+# END OF DSL SPECIFICATION
+# ----------------------------------------------------------------------

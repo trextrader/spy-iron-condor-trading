@@ -1,0 +1,623 @@
+# ======================================================================
+# Complete Ruleset for CondorBrain/AntiGrav (All 13 Rules Encoded)
+# ======================================================================
+# Version: 2.5
+# Last Updated: 2026-01-19
+# Total Rules: 13 (6 perfect, 5 minor updates, 2 major updates)
+# ======================================================================
+
+ruleset_metadata:
+  version: "2.5"
+  total_rules: 13
+  categories:
+    trend_following: 3  # A1, A2, A3
+    mean_reversion: 3  # B1, B2, PSAR Reversion
+    breakout: 2  # C1, C2
+    momentum: 2  # D1, D2
+    volatility: 2  # E2, E3
+    execution_filter: 1  # E1
+
+  alignment:
+    deep_mamba: "v2.5"
+    phase_lag: "2.5"
+    fis: "11-factor"
+
+# ======================================================================
+# TREND-FOLLOWING RULES (A Series)
+# ======================================================================
+
+RULE_A1:
+  # (Full definition in Rule_DSL_Specification.yaml - already defined)
+  # Status: Perfect as-is
+  id: "RULE_A1"
+  name: "Dynamic Bollinger Band Breakout with Volume Confirmation"
+  version: "1.0"
+  status: "perfect"
+
+RULE_A2:
+  id: "RULE_A2"
+  name: "MACD Crossover with Dynamic Band Expansion"
+  version: "2.0"
+  status: "minor_update"
+  category: "trend_following"
+  strategy_type: "directional"
+
+  requires:
+    primitives: ["P001", "P002", "P003", "P004", "P008", "P011", "S003", "S007", "S013", "G003", "G004", "G007"]
+    features: ["close", "ema_12", "ema_26", "vol_ewma", "bb_bandwidth"]
+    timeframes: ["1m", "5m", "15m"]
+
+  primitives:
+    - id: "P003"
+      alias: "macd"
+      params:
+        fast: 12
+        slow: 26
+        signal: 9
+        alpha: 0.94
+
+    - id: "P002"
+      alias: "bw_pct"
+
+    - id: "S003"
+      alias: "macd_cross"
+
+    - id: "S007"
+      alias: "bb_expansion"
+
+    - id: "G007"
+      alias: "breakout_score"
+      params:
+        threshold: 0.7
+
+  signals:
+    entry:
+      long:
+        logic: "AND(bb_expansion, macd_cross.bullish, adx > 20, close > bb.upper, breakout_score > 0.7)"
+        min_confidence: 0.7
+      short:
+        logic: "AND(bb_expansion, macd_cross.bearish, adx > 20, close < bb.lower, breakout_score > 0.7)"
+        min_confidence: 0.7
+
+    exit:
+      logic: "OR(macd_cross.reverse, close crosses bb.middle, bw_pct < 50)"
+
+  gates:
+    - id: "G003"
+      params:
+        threshold: 0.5
+    - id: "G007"
+      params:
+        threshold: 0.7
+
+  sizing:
+    method: "fixed"
+    base_size: 1
+
+  model_integration:
+    feature_output: true
+
+RULE_A3:
+  id: "RULE_A3"
+  name: "ADX-RSI Trend Confirmation"
+  version: "1.0"
+  status: "perfect"
+  category: "trend_following"
+  strategy_type: "momentum"
+
+  requires:
+    primitives: ["P004", "P005", "S004"]
+    features: ["adx_norm", "rsi_dynamic", "plus_di", "minus_di"]
+    timeframes: ["1m", "5m", "15m"]
+
+  primitives:
+    - id: "P004"
+      alias: "adx"
+    - id: "P005"
+      alias: "rsi"
+    - id: "S004"
+      alias: "trend"
+
+  signals:
+    entry:
+      long:
+        logic: "AND(adx.trend_bullish, rsi > 70, adx > 25, adx.rising)"
+        min_confidence: 0.75
+      short:
+        logic: "AND(adx.trend_bearish, rsi < 30, adx > 25, adx.rising)"
+        min_confidence: 0.75
+
+    exit:
+      logic: "OR(adx.declining, rsi.divergence, di_crossover)"
+
+  sizing:
+    method: "fixed"
+    base_size: 1
+
+# ======================================================================
+# MEAN REVERSION RULES (B Series)
+# ======================================================================
+
+RULE_B1:
+  # (Full definition in Rule_DSL_Specification.yaml - already defined)
+  # Status: Minor update
+  id: "RULE_B1"
+  name: "Dynamic Band Reversion with Fuzzy Confirmation"
+  version: "2.0"
+  status: "minor_update"
+
+RULE_B2:
+  id: "RULE_B2"
+  name: "RSI Divergence with Dynamic Band Touch"
+  version: "1.0"
+  status: "perfect"
+  category: "mean_reversion"
+  strategy_type: "reversal"
+
+  requires:
+    primitives: ["P001", "P005", "S002", "S005", "S014"]
+    features: ["close", "high", "low", "rsi_dynamic", "bb_upper", "bb_lower"]
+    timeframes: ["5m", "15m"]
+
+  primitives:
+    - id: "P001"
+      alias: "bb"
+    - id: "P005"
+      alias: "rsi"
+    - id: "S005"
+      alias: "divergence"
+    - id: "S014"
+      alias: "swing"
+
+  signals:
+    entry:
+      long:
+        logic: "AND(divergence.bullish, close <= bb.lower, swing.new_low)"
+        min_confidence: 0.75
+      short:
+        logic: "AND(divergence.bearish, close >= bb.upper, swing.new_high)"
+        min_confidence: 0.75
+
+    exit:
+      logic: "OR(close crosses bb.middle, rsi.neutral)"
+
+  sizing:
+    method: "fixed"
+    base_size: 1
+
+  model_integration:
+    feature_output: true
+    auxiliary_target: true  # Train divergence detector
+
+RULE_PSAR_REVERSION:
+  id: "RULE_PSAR_REV"
+  name: "Dynamic Band Reversion with PSAR Flip"
+  version: "1.0"
+  status: "perfect"
+  category: "mean_reversion"
+  strategy_type: "reversal"
+
+  requires:
+    primitives: ["P001", "P006", "S002", "S009"]
+    features: ["close", "bb_lower", "bb_middle", "psar"]
+    timeframes: ["1m", "5m"]
+
+  primitives:
+    - id: "P001"
+      alias: "bb"
+    - id: "P006"
+      alias: "psar"
+    - id: "S009"
+      alias: "psar_flip"
+
+  signals:
+    entry:
+      long:
+        logic: "SEQ(close < bb.lower for 5 bars, psar_flip.bearish, close > bb.middle within 3 bars)"
+        min_confidence: 0.7
+
+    exit:
+      logic: "OR(close > bb.upper, psar_flip.bullish)"
+
+  sizing:
+    method: "fixed"
+    base_size: 1
+
+# ======================================================================
+# BREAKOUT RULES (C Series)
+# ======================================================================
+
+RULE_C1:
+  id: "RULE_C1"
+  name: "Dynamic Band Squeeze with Breakout Candle"
+  version: "2.0"
+  status: "minor_update"
+  category: "breakout"
+  strategy_type: "expansion"
+
+  requires:
+    primitives: ["P001", "P002", "P007", "P008", "P011", "S001", "S006", "S008", "S013", "G003", "G004"]
+    features: ["close", "bb_bandwidth", "volume", "iv_confidence", "mtf_consensus"]
+    timeframes: ["1m", "5m", "15m"]
+
+  primitives:
+    - id: "P002"
+      alias: "bw_pct"
+    - id: "S006"
+      alias: "squeeze"
+    - id: "S001"
+      alias: "breakout"
+    - id: "S008"
+      alias: "vol_spike"
+    - id: "S013"
+      alias: "mtf"
+
+  signals:
+    entry:
+      long:
+        logic: "AND(squeeze, breakout.bullish, vol_spike, mtf.aligned_bullish, iv_conf > 0.5)"
+        min_confidence: 0.75
+      short:
+        logic: "AND(squeeze, breakout.bearish, vol_spike, mtf.aligned_bearish, iv_conf > 0.5)"
+        min_confidence: 0.75
+
+    exit:
+      logic: "OR(close crosses back inside bb, target_hit, mtf.reverses)"
+
+  gates:
+    - id: "G003"
+      params:
+        threshold: 0.5
+    - id: "G004"
+      params:
+        threshold: 0.7
+
+  sizing:
+    method: "fixed"
+    base_size: 1
+
+RULE_C2:
+  # (Full definition in Rule_DSL_Specification.yaml - already defined)
+  # Status: Major update
+  id: "RULE_C2"
+  name: "Persistent Homology Regime Shift"
+  version: "2.5"
+  status: "major_update"
+
+# ======================================================================
+# MOMENTUM RULES (D Series)
+# ======================================================================
+
+RULE_D1:
+  id: "RULE_D1"
+  name: "RSI and Dynamic Band Confluence"
+  version: "1.0"
+  status: "perfect"
+  category: "momentum"
+  strategy_type: "directional"
+
+  requires:
+    primitives: ["P001", "P005", "S001"]
+    features: ["close", "rsi_dynamic", "bb_upper", "bb_lower"]
+    timeframes: ["1m", "5m"]
+
+  primitives:
+    - id: "P001"
+      alias: "bb"
+    - id: "P005"
+      alias: "rsi"
+    - id: "S001"
+      alias: "band_break"
+
+  signals:
+    entry:
+      long:
+        logic: "AND(close touches bb.upper, rsi > 70)"
+        min_confidence: 0.7
+      short:
+        logic: "AND(close touches bb.lower, rsi < 30)"
+        min_confidence: 0.7
+
+    exit:
+      logic: "OR(rsi.neutral, close crosses bb.middle)"
+
+  sizing:
+    method: "fixed"
+    base_size: 1
+
+RULE_D2:
+  id: "RULE_D2"
+  name: "Volume Spike with Band Break"
+  version: "2.0"
+  status: "minor_update"
+  category: "momentum"
+  strategy_type: "breakout"
+
+  requires:
+    primitives: ["P001", "P007", "P008", "S001", "S008", "G003", "G007"]
+    features: ["close", "volume", "bb_upper", "bb_lower", "vol_energy", "iv_confidence"]
+    timeframes: ["1m", "5m"]
+
+  primitives:
+    - id: "P007"
+      alias: "vol_ratio"
+      params:
+        gamma: 0.3  # Volatility dampening
+
+    - id: "S008"
+      alias: "vol_spike"
+
+    - id: "S001"
+      alias: "band_break"
+
+    - id: "G007"
+      alias: "breakout_score"
+
+  signals:
+    entry:
+      long:
+        logic: "AND(band_break.bullish, vol_spike, iv_conf > 0.5, breakout_score > 1.0)"
+        min_confidence: 0.7
+      short:
+        logic: "AND(band_break.bearish, vol_spike, iv_conf > 0.5, breakout_score > 1.0)"
+        min_confidence: 0.7
+
+    exit:
+      logic: "OR(vol_ratio < 1.0, close crosses bb.middle)"
+
+  gates:
+    - id: "G003"
+      params:
+        threshold: 0.5
+    - id: "G007"
+      params:
+        threshold: 1.0
+
+  sizing:
+    method: "fixed"
+    base_size: 1
+
+# ======================================================================
+# VOLATILITY-BASED RULES (E Series)
+# ======================================================================
+
+RULE_E1:
+  # (Full definition in Rule_DSL_Specification.yaml - already defined)
+  # Status: Perfect as-is
+  id: "RULE_E1"
+  name: "Spread vs High-Low Average Constraint"
+  version: "2.0"
+  status: "perfect"
+
+RULE_E2:
+  id: "RULE_E2"
+  name: "Dynamic Band Width Expansion"
+  version: "2.0"
+  status: "minor_update"
+  category: "volatility"
+  strategy_type: "trend_detection"
+
+  requires:
+    primitives: ["P001", "P002", "P008", "P011", "S007", "S013", "G003", "G004"]
+    features: ["bb_bandwidth", "bb_percentile", "mtf_consensus", "iv_confidence"]
+    timeframes: ["1m", "5m", "15m"]
+
+  primitives:
+    - id: "P002"
+      alias: "bw_pct"
+    - id: "S007"
+      alias: "expansion"
+    - id: "P011"
+      alias: "mtf"
+
+  signals:
+    entry:
+      long:
+        logic: "AND(expansion, close > bb.upper, mtf > 0.7, iv_conf > 0.5)"
+        min_confidence: 0.7
+      short:
+        logic: "AND(expansion, close < bb.lower, mtf < -0.7, iv_conf > 0.5)"
+        min_confidence: 0.7
+
+    exit:
+      logic: "OR(bw_pct contracts, close crosses bb.sma)"
+
+  gates:
+    - id: "G003"
+      params:
+        threshold: 0.5
+    - id: "G004"
+      params:
+        threshold: 0.7
+
+  sizing:
+    method: "fixed"
+    base_size: 1
+
+RULE_E3:
+  id: "RULE_E3"
+  name: "Persistent Homology Chaos Detection"
+  version: "2.5"
+  status: "major_update"
+  category: "volatility"
+  strategy_type: "risk_filter"
+
+  requires:
+    primitives: ["P009", "P010", "S011", "S012", "G009"]
+    features: ["beta1_norm", "curvature", "vol_energy"]
+    timeframes: ["5m", "15m"]
+
+  primitives:
+    - id: "P009"
+      alias: "beta1"
+    - id: "P010"
+      alias: "curvature"
+    - id: "S012"
+      alias: "chaos"
+    - id: "G009"
+      alias: "size_dampen"
+
+  signals:
+    # This is a filter, not a signal generator
+    entry:
+      long:
+        logic: "NOT(chaos)"
+        min_confidence: 1.0
+      short:
+        logic: "NOT(chaos)"
+        min_confidence: 1.0
+
+    exit:
+      logic: "chaos"  # Exit when chaos detected
+
+  gates:
+    - id: "G009"
+      type: "sizing"
+      action: "adjust"  # Fuzzy dampening, not hard block
+
+  sizing:
+    method: "neural"
+    base_size: 2
+    multipliers:
+      - source: "G009"
+        type: "dampen"
+        range: [0.0, 1.0]  # Smooth reduction to 0% as chaos increases
+
+  risk:
+    # Chaos detection IS the risk management
+    stop_loss: null
+    profit_target: null
+
+  model_integration:
+    feature_output: true
+    auxiliary_target: true  # Train chaos classifier
+    constraint_layer: true  # Fuzzy dampening layer
+
+# ======================================================================
+# RULE COMBINATION STRATEGIES
+# ======================================================================
+
+composite_strategies:
+
+  IRON_CONDOR_STRATEGY:
+    name: "Iron Condor Entry System"
+    combines: ["RULE_B1", "RULE_E1", "RULE_E3"]
+    logic:
+      entry: "AND(RULE_B1.signal, RULE_E1.allow, NOT(RULE_E3.chaos))"
+      exit: "OR(RULE_B1.exit, RULE_E1.force_exit, RULE_E3.chaos)"
+    sizing:
+      base: 2
+      dampeners: ["RULE_E3.chaos_membership"]
+
+  TREND_FOLLOWING_STRATEGY:
+    name: "Multi-Timeframe Trend System"
+    combines: ["RULE_A1", "RULE_A2", "RULE_A3"]
+    logic:
+      entry: "ANY(RULE_A1.signal, RULE_A2.signal, RULE_A3.signal) AND MTF_consensus > 0.8"
+      exit: "ALL(RULE_A1.exit, RULE_A2.exit, RULE_A3.exit)"
+    sizing:
+      method: "consensus_weighted"
+
+  BREAKOUT_STRATEGY:
+    name: "Topology-Informed Breakout System"
+    combines: ["RULE_C1", "RULE_C2", "RULE_D2"]
+    logic:
+      entry: "RULE_C1.signal AND (RULE_C2.breakout OR RULE_D2.signal)"
+      exit: "RULE_C2.consolidation OR RULE_C1.exit"
+    sizing:
+      base: 1
+      multipliers: ["RULE_C2.regime_score"]
+
+# ======================================================================
+# BACKTEST CONFIGURATION
+# ======================================================================
+
+backtest_config:
+  date_range:
+    start: "2024-01-01"
+    end: "2024-12-31"
+
+  data:
+    spot: "data/spot/SPY_5.csv"
+    options: "data/synthetic_options/spy_options_marks.csv"
+    sync: "MTFSyncEngine (1m, 5m, 15m)"
+
+  metrics:
+    primary:
+      - net_profit
+      - sharpe_ratio
+      - max_drawdown
+      - profit_factor
+
+    per_rule:
+      - win_rate
+      - avg_win
+      - avg_loss
+      - expectancy
+      - signal_count
+
+    gate_performance:
+      - gate_id
+      - block_count
+      - block_accuracy  # Did blocking prevent losses?
+      - allow_accuracy  # Did allowing capture profit?
+
+  validation:
+    method: "walk_forward"
+    train_window: 120  # days
+    test_window: 30  # days
+    step: 15  # days
+
+# ======================================================================
+# MODEL TRAINING CONFIGURATION
+# ======================================================================
+
+model_training:
+
+  feature_engineering:
+    # All primitive outputs become features
+    primitives_as_features: true
+
+    # Lag features
+    lags: [1, 5, 10, 20]  # bars
+
+    # Rolling statistics
+    rolling_windows: [20, 50, 100]
+    rolling_stats: ["mean", "std", "min", "max"]
+
+  targets:
+    primary:
+      - signal_direction  # {-1, 0, +1}
+      - signal_confidence  # [0, 1]
+
+    auxiliary:
+      - gate_allow_flags  # Binary per gate
+      - regime_class  # {consolidation, breakout, trend, chaos}
+      - chaos_membership  # [0, 1] for fuzzy dampening
+
+  architecture:
+    backbone: "DeepMamba-2 (32 layers)"
+    heads:
+      - policy_head  # Signal direction + confidence
+      - gate_head  # Multi-task: all gate outputs
+      - regime_head  # Regime classification
+      - fuzzy_head  # 11-factor memberships
+
+  loss_function:
+    composite:
+      - huber_loss: 1.0  # Predictive fidelity
+      - neg_sharpe: 0.3  # Risk-adjusted returns
+      - drawdown_penalty: 0.2  # Soft drawdown constraint
+      - turnover_penalty: 0.1  # Reduce churn
+
+  training:
+    optimizer: "AdamW"
+    lr: 0.0001
+    batch_size: 512
+    epochs: 4
+    precision: "BF16"
+    device: "cuda"
+
+# ======================================================================
+# END OF COMPLETE RULESET
+# ======================================================================

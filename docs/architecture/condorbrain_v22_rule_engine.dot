@@ -1,0 +1,303 @@
+digraph CondorBrain_V22_RuleEngine_Architecture {
+    // POSTER MODE SETTINGS
+    rankdir=LR;
+    ratio=fill;
+    size="60,40!";
+    dpi=300;
+    splines=curved;
+    bgcolor="#000000";
+    fontname="Helvetica";
+    fontsize=12;
+    labelloc="t";
+    label="CondorBrain V2.2 + V2.5 Rule Engine Integration (Poster Mode)";
+
+    node [
+        shape=box,
+        style=filled,
+        fontname="Helvetica",
+        fontsize=11,
+        penwidth=2
+    ];
+
+    edge [
+        color="#cccccc",
+        penwidth=1.5,
+        arrowsize=0.8
+    ];
+
+    // =========================
+    // RAW DATA
+    // =========================
+    subgraph cluster_data {
+        label="RAW MARKET & OPTIONS DATA";
+        style=filled;
+        color="#1e3dff";
+        fontcolor="white";
+
+        n_raw_spot [label="SPY 1m OHLCV\n(open, high, low, close, volume)", fillcolor="#3344aa", fontcolor="white"];
+        n_raw_opts [label="Options Chain Snapshot\n(delta, gamma, vega, theta, iv, ivr,\nspread_ratio, te, strike, lag_minutes)", fillcolor="#4455cc", fontcolor="white"];
+        n_loader   [label="Data Loader\n(mamba_institutional_1m.csv)", fillcolor="#5566dd", fontcolor="white"];
+    }
+
+    // =========================
+    // FEATURE PIPELINE V2.1
+    // =========================
+    subgraph cluster_features_v21 {
+        label="Dynamic Feature Pipeline V2.1";
+        style=filled;
+        color="#00cc66";
+        fontcolor="black";
+
+        n_dyn_entry [label="compute_all_dynamic_features(df)\n16 dynamic features"];
+        n_dyn_outputs [label="V2.1 Dynamic Feature Set\n(32 total incl. market/options)"];
+    }
+
+    // =========================
+    // PRIMITIVES LIBRARY
+    // =========================
+    subgraph cluster_primitives {
+        label="Canonical Primitives Library (P/M/T/F/G/S)";
+        style=filled;
+        color="#ff9933";
+        fontcolor="black";
+
+        // Bands
+        subgraph cluster_primitives_bands {
+            label="Bands & Microstructure (P001–P007)";
+            style=filled;
+            color="#ffcc88";
+
+            p001 [label="P001 Dynamic Bollinger Bands"];
+            p002 [label="P002 Bandwidth Percentile + Expansion"];
+            p003 [label="P003 Volume Ratio"];
+            p004 [label="P004 Spread Friction Ratio"];
+            p005 [label="P005 Gap Risk Score"];
+            p006 [label="P006 IV Confidence"];
+            p007 [label="P007 MTF Consensus"];
+        }
+
+        // Momentum
+        subgraph cluster_primitives_momentum {
+            label="Momentum (M001–M004)";
+            style=filled;
+            color="#ffbb66";
+
+            m001 [label="M001 Vol-Normalized MACD"];
+            m002 [label="M002 Vol-Normalized ADX"];
+            m003 [label="M003 Dynamic RSI"];
+            m004 [label="M004 PSAR Flip Membership"];
+        }
+
+        // Topology
+        subgraph cluster_primitives_topology {
+            label="Topology & Chaos (T001–T002)";
+            style=filled;
+            color="#ffaa44";
+
+            t001 [label="T001 β₁ Regime Score"];
+            t002 [label="T002 Chaos Membership"];
+        }
+
+        // Fuzzy
+        subgraph cluster_primitives_fuzzy {
+            label="Fuzzy Logic (F001)";
+            style=filled;
+            color="#ff9933";
+
+            f001 [label="F001 11-Factor Fuzzy Reversion"];
+        }
+
+        // Gates
+        subgraph cluster_primitives_gates {
+            label="Execution Gates (G003–G010)";
+            style=filled;
+            color="#ff8844";
+
+            g003 [label="G003–G010\nTrend/Reversion/Chaos/Liquidity Gates"];
+        }
+
+        // Signals
+        subgraph cluster_primitives_signals {
+            label="Signals (S001–S015)";
+            style=filled;
+            color="#ff7733";
+
+            s001 [label="S001–S015\nMACD, Squeeze, RSI, MTF, PSAR,\nComposite Signals"];
+        }
+
+        n_primitives_export [label="intelligence.primitives.__init__\nExports all primitives"];
+    }
+
+    // =========================
+    // V2.2 FEATURE AUGMENTATION
+    // =========================
+    subgraph cluster_features_v22 {
+        label="V2.2 Primitive Feature Augmentation";
+        style=filled;
+        color="#00cc66";
+
+        n_prim_entry [label="compute_all_primitive_features_v22(df)\n20 primitive outputs"];
+        n_v22_vector [label="V2.2 Feature Vector\n52 Features (32 + 20)"];
+        n_neutral_fill [label="NEUTRAL_FILL_VALUES_V22\napply_semantic_nan_fill"];
+    }
+
+    // =========================
+    // FEATURE REGISTRY
+    // =========================
+    subgraph cluster_registry {
+        label="Canonical Feature Registry";
+        style=filled;
+        color="#666666";
+        fontcolor="white";
+
+        n_reg_v21 [label="FEATURE_COLS_V21\n32 features", fillcolor="#888888", fontcolor="white"];
+        n_reg_v22 [label="FEATURE_COLS_V22\n52 features", fillcolor="#777777", fontcolor="white"];
+        n_reg_meta [label="FEATURE_REGISTRY_V22\nprimitive_integration=True", fillcolor="#555555", fontcolor="white"];
+    }
+
+    // =========================
+    // RULE ENGINE
+    // =========================
+    subgraph cluster_rule_engine {
+        label="Rule Engine V2.5";
+        style=filled;
+        color="#9933ff";
+        fontcolor="white";
+
+        subgraph cluster_dsl {
+            label="DSL Parser";
+            style=filled;
+            color="#aa55ff";
+
+            n_dsl_yaml [label="Complete_Ruleset_DSL.yaml\nP/M/T/F/G/S references"];
+            n_dsl_parser [label="RuleDSLParser\n→ Ruleset, RuleSpec"];
+        }
+
+        subgraph cluster_executor {
+            label="RuleExecutionEngine";
+            style=filled;
+            color="#bb66ff";
+
+            n_prim_registry [label="PRIMITIVE_REGISTRY\n52+ functions"];
+            n_logic_eval [label="LogicEvaluator\nAND/OR/NOT, comparisons"];
+            n_gate_stack [label="Gate Stack\nG003–G010"];
+            n_sizing [label="Sizing Logic"];
+            n_phases [label="6-Phase Execution Loop"];
+        }
+
+        n_rule_outputs [label="Rule Engine Outputs\nEntry/Exit, Sizing, Overrides"];
+    }
+
+    // =========================
+    // TRAINING PIPELINE
+    // =========================
+    subgraph cluster_training {
+        label="CondorBrain Training V2.2";
+        style=filled;
+        color="#1e3dff";
+        fontcolor="white";
+
+        n_train_loader [label="Data Load & Split", fillcolor="#3344aa", fontcolor="white"];
+        n_feat_build [label="Feature Construction\n(V2.1 + V2.2)", fillcolor="#4455cc", fontcolor="white"];
+        n_scaling [label="Robust Scaling\nmedian/MAD", fillcolor="#5566dd", fontcolor="white"];
+        n_targets [label="Targets\nY_feat_np, Y_policy_np", fillcolor="#6677ee", fontcolor="white"];
+        n_model [label="CondorBrain\nMamba + MoE + Diffusion", fillcolor="#7788ff", fontcolor="white"];
+        n_train_loop [label="Training Loop\nLosses + Checkpoints", fillcolor="#8899ff", fontcolor="white"];
+    }
+
+    // =========================
+    // INFERENCE
+    // =========================
+    subgraph cluster_inference {
+        label="Inference & Execution";
+        style=filled;
+        color="#00ccff";
+
+        n_infer_features [label="Online Feature Pipeline"];
+        n_infer_model [label="CondorBrain Inference"];
+        n_infer_rule [label="Rule Engine Online"];
+        n_orders [label="Execution Layer\n(OMS/Broker)"];
+    }
+
+    // =========================
+    // CONNECTIONS
+    // =========================
+
+    n_raw_spot -> n_loader;
+    n_raw_opts -> n_loader;
+
+    n_loader -> n_dyn_entry;
+    n_dyn_entry -> n_dyn_outputs;
+
+    n_dyn_outputs -> n_prim_entry;
+
+    p002 -> n_prim_entry;
+    p003 -> n_prim_entry;
+    p004 -> n_prim_entry;
+    p005 -> n_prim_entry;
+    p006 -> n_prim_entry;
+    p007 -> n_prim_entry;
+    m001 -> n_prim_entry;
+    m002 -> n_prim_entry;
+    m004 -> n_prim_entry;
+    t002 -> n_prim_entry;
+    f001 -> n_prim_entry;
+
+    n_prim_entry -> n_v22_vector;
+    n_neutral_fill -> n_v22_vector;
+
+    n_v22_vector -> n_reg_v22;
+    n_reg_v21 -> n_reg_v22;
+    n_reg_v22 -> n_reg_meta;
+
+    n_v22_vector -> n_feat_build;
+    n_feat_build -> n_scaling;
+    n_scaling -> n_targets;
+    n_scaling -> n_model;
+    n_targets -> n_train_loop;
+    n_model -> n_train_loop;
+
+    n_primitives_export -> n_prim_registry;
+
+    n_dsl_yaml -> n_dsl_parser;
+    n_dsl_parser -> n_prim_registry;
+    n_prim_registry -> n_logic_eval;
+    n_logic_eval -> n_gate_stack;
+    n_gate_stack -> n_sizing;
+    n_sizing -> n_phases;
+    n_phases -> n_rule_outputs;
+
+    g003 -> n_gate_stack;
+    s001 -> n_logic_eval;
+    t002 -> n_logic_eval;
+    f001 -> n_logic_eval;
+
+    n_v22_vector -> n_infer_features;
+    n_infer_features -> n_infer_model;
+    n_infer_features -> n_infer_rule;
+    n_infer_model -> n_infer_rule;
+    n_infer_rule -> n_orders;
+
+    n_train_loop -> n_infer_model [style=dashed, label="checkpoints"];
+    
+    // =========================
+    // LEGEND
+    // =========================
+    subgraph cluster_legend {
+        label="LEGEND";
+        style=filled;
+        color="#666666";
+        fontcolor="white";
+
+        legend [shape=plaintext, fontcolor="white", label=<
+            <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+                <TR><TD BGCOLOR="#1e3dff"><FONT COLOR="white">Data Layer</FONT></TD></TR>
+                <TR><TD BGCOLOR="#00cc66"><FONT COLOR="black">Feature Pipeline</FONT></TD></TR>
+                <TR><TD BGCOLOR="#ff9933"><FONT COLOR="black">Primitives Library</FONT></TD></TR>
+                <TR><TD BGCOLOR="#9933ff"><FONT COLOR="white">Rule Engine</FONT></TD></TR>
+                <TR><TD BGCOLOR="#1e3dff"><FONT COLOR="white">Training Pipeline</FONT></TD></TR>
+                <TR><TD BGCOLOR="#00ccff"><FONT COLOR="black">Inference/Execution</FONT></TD></TR>
+            </TABLE>
+        >];
+    }
+}

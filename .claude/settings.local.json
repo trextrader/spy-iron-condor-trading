@@ -11,7 +11,11 @@
       "WebFetch(domain:pypi.org)",
       "WebFetch(domain:www.intel.com)",
       "WebSearch",
-      "Bash(where:*)"
+      "Bash(where:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(dir \"C:\\\\SPYOptionTrader_test\\\\docs\\\\trading_rules\" /b)",
+      "Bash(test:*)"
     ]
   }
 }

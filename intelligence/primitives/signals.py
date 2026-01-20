@@ -9,8 +9,8 @@ import pandas as pd
 
 def compute_macd_trend_signal(
     macd_norm: pd.Series,
-    macd_signal_norm: pd.Series,
-    threshold: float,
+    signal_norm: pd.Series,
+    threshold: float = 0.0,
 ) -> dict:
     """
     S001 – MACD Trend Signal (A2)
@@ -22,19 +22,24 @@ def compute_macd_trend_signal(
         }
     """
     macd = macd_norm.fillna(0.0)
-    sig = macd_signal_norm.fillna(0.0)
+    sig = signal_norm.fillna(0.0)
     diff = macd - sig
     trend_up = diff > threshold
     trend_down = diff < -threshold
-    return {"trend_up": trend_up, "trend_down": trend_down}
+    return {
+        "trend_up": trend_up, 
+        "trend_down": trend_down,
+        "bullish": trend_up,
+        "bearish": trend_down
+    }
 
 
 def compute_band_squeeze_breakout_signal(
-    bb_percentile: pd.Series,
-    bw_expansion_rate: pd.Series,
-    breakout_score: pd.Series,
-    pct_thresh: float,
-    expansion_thresh: float,
+    bw_percentile: pd.Series,
+    expansion_rate: pd.Series,
+    breakout_score: pd.Series = None,
+    pct_thresh: float = 0.05,
+    expansion_thresh: float = 2.0,
 ) -> dict:
     """
     S002 – Squeeze → Breakout Signal (C1/E2)
@@ -46,9 +51,9 @@ def compute_band_squeeze_breakout_signal(
             "breakout_short": bool Series,
         }
     """
-    pct = bb_percentile.fillna(50.0)
-    exp = bw_expansion_rate.fillna(0.0)
-    br = breakout_score.fillna(0.0)
+    pct = bw_percentile.fillna(50.0)
+    exp = expansion_rate.fillna(0.0)
+    br = breakout_score if breakout_score is not None else pd.Series(0, index=pct.index)
 
     squeeze = pct <= pct_thresh
     expanding = exp > expansion_thresh
@@ -65,8 +70,8 @@ def compute_band_squeeze_breakout_signal(
 
 def compute_rsi_reversion_signal(
     rsi_dynamic: pd.Series,
-    lower: float,
-    upper: float,
+    lower: float = 30.0,
+    upper: float = 70.0,
 ) -> dict:
     """
     S003 – RSI Reversion Signal (B2/D1)
@@ -85,7 +90,7 @@ def compute_rsi_reversion_signal(
 
 def compute_mtf_alignment_signal(
     mtf_consensus: pd.Series,
-    min_abs: float,
+    min_abs: float = 0.5,
 ) -> dict:
     """
     S004 – Multi-Timeframe Alignment Signal (C1/E2)
@@ -304,4 +309,24 @@ def compute_final_execution_signal(
     allow_open = ce & (~sb) & (~gfe)
     force_exit = gfe
 
-    return {"allow_open": allow_open, "force_exit": force_exit}
+
+def compute_bandwidth_expansion_signal(
+    expansion_rate: pd.Series,
+    threshold: float = 0.0,
+) -> dict:
+    """
+    S007 – Bandwidth Expansion Signal (A2 logic helper)
+    
+    Returns:
+        {
+            "is_expanding": bool Series
+        }
+    """
+    er = expansion_rate.fillna(0.0)
+    is_expanding = er > threshold
+    return {
+        "is_expanding": is_expanding,
+        "val": is_expanding,
+        "signal": is_expanding
+    }
+

@@ -10,7 +10,22 @@ os.system("cd spy-iron-condor-trading && git fetch origin && git reset --hard or
 print("✅ Repo synced")
 '''
 import sys
+import os
+
+# 1. Add Repo Root to Path (Robust for Colab/Kaggle/Local)
+# Assumes script is in <root>/kaggle/
+try:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.abspath(os.path.join(script_dir, '..'))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+except NameError:
+    # If running interactively, assume CWD or specific paths
+    pass
+
+sys.path.insert(0, '/content/spy-iron-condor-trading')
 sys.path.insert(0, '/kaggle/working/spy-iron-condor-trading')
+sys.path.insert(0, os.getcwd())
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -54,10 +69,9 @@ import matplotlib.pyplot as plt
 #   3M rows ≈ 30K unique spot bars (~5 min compute)
 #   Full dataset: ~10M rows ≈ 100K unique spot bars
 
-ROWS_TO_LOAD = 3_000_000  # ⚡ PRODUCTION RUN ⚡
-EPOCHS = 4                # Production: 4 epochs
+ROWS_TO_LOAD = 100_000    # 🧪 TEST RUN 🧪
+EPOCHS = 3                # Test: 3 epochs
 
-# Derived estimate
 # Derived estimate
 estimated_spots = max(ROWS_TO_LOAD // 100, 100)  # ~100 options per spot bar
 print(f"📊 Config: {ROWS_TO_LOAD:,} rows, {EPOCHS} epochs")
@@ -68,7 +82,7 @@ SEQ_LEN = 256
 PREDICT_HORIZON = 32
 
 # Optimization Flags
-DIFFUSION_WARMUP_EPOCHS = 1  # Skip diffusion for first epoch
+DIFFUSION_WARMUP_EPOCHS = 2  # Skip diffusion for first 2 epochs (0, 1)
 DIFFUSION_STEPS_TRAIN = 50
 
 device = torch.device('cuda')
@@ -222,7 +236,13 @@ if dt_col is None:
     df = compute_all_dynamic_features(df, close_col="close", high_col="high", low_col="low")
 else:
     # Extract unique spots
-    spot_df = df.drop_duplicates(subset=spot_key_cols)[spot_key_cols + ohlcv_cols].copy()
+    # Retain auxiliary columns needed for Primitives if they exist
+    aux_cols = []
+    for c in ["spread_ratio", "lag_minutes"]:
+        if c in df.columns:
+            aux_cols.append(c)
+    
+    spot_df = df.drop_duplicates(subset=spot_key_cols)[spot_key_cols + ohlcv_cols + aux_cols].copy()
     spot_df = spot_df.sort_values(spot_key_cols).reset_index(drop=True)
     n_unique = len(spot_df)
     print(f"   Unique spot bars: {n_unique:,} (from {len(df):,} options rows)")

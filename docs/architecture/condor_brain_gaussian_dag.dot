@@ -1,0 +1,116 @@
+digraph CondorBrainGaussianDAG {
+  rankdir=TB;  // CHANGED: Top-to-Bottom (Portrait)
+  bgcolor="#0D1117"; // CHANGED: Dark Background
+  splines=true;
+  nodesep=0.4;
+  ranksep=0.8;
+  fontname="Inter";
+  
+  // Default Node Style (Dark Mode)
+  node [
+    shape=box, 
+    style="rounded,filled", 
+    fontname="Inter", 
+    fontsize=10, 
+    fillcolor="#161B22", 
+    color="#30363D", 
+    fontcolor="#C9D1D9"
+  ];
+  
+  // Default Edge Style (Dark Mode)
+  edge [
+    color="#8B949E", 
+    penwidth=1.2, 
+    arrowsize=0.8, 
+    fontcolor="#8B949E",
+    fontsize=9
+  ];
+
+  // Copyright Label
+  label="(c) 2026 by Dr. T. Jerry Mahabub";
+  labelloc="b";
+  labeljust="r";
+  fontcolor="#8B949E";
+  fontsize=10;
+
+  // --- Legend ---
+  subgraph cluster_legend {
+    label="Legend";
+    fontcolor="#C9D1D9";
+    fontsize=10;
+    style="rounded,dashed";
+    color="#30363D";
+    
+    // High contrast legend colors
+    L_done  [label="✔ Complete", fillcolor="#238636", color="#2EA043", fontcolor="#FFFFFF"];
+    L_part  [label="⚠ Partial",  fillcolor="#9E6A03", color="#D29922", fontcolor="#FFFFFF"];
+    L_block [label="❌ Blocker",  fillcolor="#DA3633", color="#F85149", fontcolor="#FFFFFF"];
+  }
+
+  // --- CondorBrain spine (benchmark pipeline) ---
+  subgraph cluster_condor {
+    label="CondorBrain Benchmark Spine (Execution + Risk + Validation)";
+    fontcolor="#C9D1D9";
+    fontsize=12;
+    style="rounded";
+    color="#30363D";
+
+    // Completed Nodes (Green)
+    node [fillcolor="#1F2926", color="#238636", fontcolor="#7EE787"];
+    S0 [label="Stage 0\nBaseline & Safety\n✔"];
+    S1 [label="Stage 1\nMarket Realism\n✔"];
+    S2 [label="Stage 2\nStrategy Depth\n✔"];
+
+    P1 [label="Phase 1\nDTOs & Analytics Foundation\n✔"];
+    P2 [label="Phase 2\nDataFactory + Trace Harness\n✔"];
+    P25 [label="Phase 2.5\nLag-Aware Alignment\n✔"];
+    P5 [label="Phase 5\nRisk Layer Enhancement\n✔"];
+
+    // Partial Nodes (Orange)
+    node [fillcolor="#272115", color="#9E6A03", fontcolor="#D29922"];
+    P3 [label="Phase 3\nStrategy Refactor\n⚠\n(analytics.* integration pending)"];
+    P4 [label="Phase 4\nFIS Pipeline\n⚠\n(FIS integration tests pending)"];
+
+    // Blocker/Future Nodes (Red/Grey)
+    node [fillcolor="#291818", color="#DA3633", fontcolor="#FF7B72"];
+    P6 [label="Phase 6\nFull Orchestration\n❌\n(TradingEngine + Router + RunMode)"];
+    P7 [label="Phase 7\nTesting & Validation\n❌\n(E2E + Regression + Perf)"];
+
+    // Future Deployment (Grey)
+    node [fillcolor="#161B22", color="#30363D", fontcolor="#8B949E"];
+    PAPER [label="Paper Trading\n(2 weeks)\nOperational validation"];
+    LIVE  [label="LIVE TRADING\nCapital enabled", fontcolor="#FFFFFF", color="#1F6FEB", penwidth=2];
+  }
+
+  // --- Gaussian side integration surface ---
+  subgraph cluster_gaussian {
+    label="Gaussian Side (Integrates Against CondorBrain Spine)";
+    fontcolor="#C9D1D9";
+    fontsize=12;
+    style="rounded";
+    color="#30363D";
+
+    // Gaussian Nodes (Blueish/Neutral)
+    node [fillcolor="#161B22", color="#1F6FEB", fontcolor="#58A6FF"];
+    G_feat [label="Gaussian Feature/Signal Outputs\n(Indicators / distributions)\n→ Strategy inputs"];
+    G_fore [label="Gaussian Forecasts\n(distributional / regime)\n→ FIS sizing inputs"];
+    G_risk [label="Gaussian Risk Inputs\n(envelopes / stress scenarios)\n→ RiskManager invariants"];
+    G_mon  [label="Gaussian Telemetry\n(latency, drift, data quality)\n→ Trace + Benchmarks"];
+  }
+
+  // --- Core pipeline edges ---
+  S0 -> S1 -> S2 -> P1 -> P2 -> P25 -> P3 -> P4 -> P5 -> P6 -> P7 -> PAPER -> LIVE;
+
+  // --- Docking edges (where Gaussian dovetails) ---
+  edge [style=dashed, color="#484F58"];
+  G_feat -> P3 [label="schema: FeatureVector vN"];
+  G_fore -> P4 [label="schema: ForecastBundle vN"];
+  G_risk -> P5 [label="schema: RiskEnvelope vN"];
+  G_mon  -> P2  [label="metrics: trace/bench"];
+
+  // --- Hard gates ---
+  edge [style=dotted, color="#DA3633", penwidth=1.5];
+  P3 -> P6 [label="Must fuse before orchestration"];
+  P4 -> P6 [label="Tested FIS required"];
+  P6 -> PAPER [label="Paper trading unlocked only after orchestration + tests"];
+}
