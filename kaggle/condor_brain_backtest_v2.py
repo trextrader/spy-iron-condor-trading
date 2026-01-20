@@ -50,6 +50,15 @@ DATA_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
 RULESET_PATH = "docs/Complete_Ruleset_DSL.yaml"
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+# Output directory
+REPORTS_DIR = "reports"
+os.makedirs(REPORTS_DIR, exist_ok=True)
+
+# Iron Condor P&L Config
+IC_CREDIT_PER_SPREAD = 1.50  # $1.50 credit per spread (typical)
+IC_CONTRACTS = 10  # Number of contracts per trade
+IC_MULTIPLIER = 100  # Options multiplier
+
 def load_data_and_features(data_path, rows=None):
     print(f"Loading data from {data_path}...")
     df = pd.read_csv(data_path)
@@ -174,7 +183,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
     print("=" * 80)
     
     # Open log file for writing
-    log_file = open("trade_decisions.log", "w")
+    log_file = open(os.path.join(REPORTS_DIR, "trade_decisions.log"), "w")
     log_file.write("=" * 80 + "\n")
     log_file.write("TRADE DECISION LOG (ALL BARS)\n")
     log_file.write("=" * 80 + "\n\n")
@@ -215,80 +224,137 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
         if rule_signals is not None:
             net_rule_signal = rule_signals.iloc[i].sum()
         
-        # 4. Decision Logic with explicit reasoning
+        # 4. FUZZY LOGIC Entry Decision
+        # Score-based entry: accumulate evidence from multiple sources
+        # This allows entry even if not ALL conditions are perfect
         action = 0
         rejection_reason = None
         
         if position == 0:
-            # Check entry conditions
-            conf_check = confidence > 0.3
-            prob_check = prob_profit > 0.3
-            rule_check = net_rule_signal >= 0
+            # Calculate fuzzy entry score (0-100)
+            entry_score = 0
+            entry_factors = []
             
-            if conf_check or prob_check:
-                if rule_check:
-                    action = 1
-                    spot = df['close'].iloc[i]
-                    trade_num = len(trades) + 1
-                    
-                    # Extract OPTIONS parameters from policy head
-                    call_offset = all_outputs['call_off'] or 0
-                    put_offset = all_outputs['put_off'] or 0
-                    width = all_outputs['width'] or 5
-                    te_suggested = all_outputs['te'] or 30
-                    direction = all_outputs['direction'] or 0
-                    
-                    # Compute suggested strikes (offset from ATM)
-                    short_call_strike = spot + (call_offset * spot * 0.01)  # ~1% per unit
-                    long_call_strike = short_call_strike + width
-                    short_put_strike = spot - (put_offset * spot * 0.01)
-                    long_put_strike = short_put_strike - width
-                    
-                    # TRADE STATS - Iron Condor specific
-                    trade_msg = f"""
+            # Factor 1: Model Confidence (0-30 points)
+            if confidence > 0.7:
+                entry_score += 30
+                entry_factors.append(f"Confidence HIGH ({confidence:.2f}) +30")
+            elif confidence > 0.5:
+                entry_score += 20
+                entry_factors.append(f"Confidence MED ({confidence:.2f}) +20")
+            elif confidence > 0.3:
+                entry_score += 10
+                entry_factors.append(f"Confidence LOW ({confidence:.2f}) +10")
+            else:
+                entry_factors.append(f"Confidence WEAK ({confidence:.2f}) +0")
+            
+            # Factor 2: Probability of Profit (0-30 points)
+            if prob_profit > 0.6:
+                entry_score += 30
+                entry_factors.append(f"ProbProfit HIGH ({prob_profit:.2f}) +30")
+            elif prob_profit > 0.45:
+                entry_score += 20
+                entry_factors.append(f"ProbProfit MED ({prob_profit:.2f}) +20")
+            elif prob_profit > 0.3:
+                entry_score += 10
+                entry_factors.append(f"ProbProfit LOW ({prob_profit:.2f}) +10")
+            else:
+                entry_factors.append(f"ProbProfit WEAK ({prob_profit:.2f}) +0")
+            
+            # Factor 3: Rule Engine Signal (0-30 points)
+            if net_rule_signal > 0.5:
+                entry_score += 30
+                entry_factors.append(f"Rules BULLISH ({net_rule_signal:.2f}) +30")
+            elif net_rule_signal >= 0:
+                entry_score += 15
+                entry_factors.append(f"Rules NEUTRAL ({net_rule_signal:.2f}) +15")
+            else:
+                entry_factors.append(f"Rules BEARISH ({net_rule_signal:.2f}) +0")
+            
+            # Factor 4: Direction alignment (0-10 points)
+            direction = all_outputs['direction'] or 0
+            if abs(direction) < 0.5:  # Iron Condor likes neutral
+                entry_score += 10
+                entry_factors.append(f"Direction NEUTRAL ({direction:.2f}) +10")
+            else:
+                entry_factors.append(f"Direction BIASED ({direction:.2f}) +0")
+            
+            # Entry threshold: 40+ points (fuzzy, not all-or-nothing)
+            ENTRY_THRESHOLD = 40
+            
+            if entry_score >= ENTRY_THRESHOLD:
+                action = 1
+                spot = df['close'].iloc[i]
+                trade_num = len([t for t in trades if t.get('action') == 'OPEN']) + 1
+                
+                # Extract OPTIONS parameters from policy head
+                call_offset = all_outputs['call_off'] or 0
+                put_offset = all_outputs['put_off'] or 0
+                width = all_outputs['width'] or 5
+                te_suggested = all_outputs['te'] or 30
+                direction = all_outputs['direction'] or 0
+                
+                # Compute suggested strikes (offset from ATM)
+                short_call_strike = spot + (call_offset * spot * 0.01)  # ~1% per unit
+                long_call_strike = short_call_strike + width
+                short_put_strike = spot - (put_offset * spot * 0.01)
+                long_put_strike = short_put_strike - width
+                
+                # Calculate Iron Condor credit (max profit)
+                credit_received = IC_CREDIT_PER_SPREAD * IC_CONTRACTS * IC_MULTIPLIER
+                max_loss = (width - IC_CREDIT_PER_SPREAD) * IC_CONTRACTS * IC_MULTIPLIER
+                
+                # TRADE STATS with fuzzy score breakdown
+                factors_str = "\\n║   ".join(entry_factors)
+                trade_msg = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║ 🦅 IRON CONDOR #{trade_num} @ Bar {i}
+║ 🦅 IRON CONDOR #{trade_num} ENTRY @ Bar {i}
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║ SPOT:          ${spot:.2f}
-║ MODEL OUTPUTS:
-║   Call Offset: {call_offset:.4f}  → Short Call: ${short_call_strike:.2f}
-║   Put Offset:  {put_offset:.4f}  → Short Put:  ${short_put_strike:.2f}
-║   Width:       {width:.2f}       → Long Call:  ${long_call_strike:.2f}, Long Put: ${long_put_strike:.2f}
-║   DTE Target:  {te_suggested:.1f} days
-║   Direction:   {direction:.4f} (>0=Bullish, <0=Bearish)
-╠══════════════════════════════════════════════════════════════════════════════╣
-║ SIGNALS:
-║   Prob Profit: {prob_profit:.4f}  (threshold: 0.3)
-║   Confidence:  {confidence:.4f}  (threshold: 0.3) 
-║   Rule Signal: {net_rule_signal:.2f}  (must be >= 0)
+║ FUZZY SCORE:   {entry_score}/100 (threshold: {ENTRY_THRESHOLD})
+╠─────────────────────────── DECISION FACTORS ─────────────────────────────────╣
+║   {factors_str}
+╠─────────────────────────── IRON CONDOR SETUP ────────────────────────────────╣
+║   Short Call:  ${short_call_strike:.2f}  |  Long Call:  ${long_call_strike:.2f}
+║   Short Put:   ${short_put_strike:.2f}  |  Long Put:   ${long_put_strike:.2f}
+║   Width:       ${width:.2f}  |  DTE: {te_suggested:.0f} days
+╠─────────────────────────── P&L POTENTIAL ────────────────────────────────────╣
+║   Credit:      ${credit_received:,.2f} (Max Profit)
+║   Max Loss:    ${max_loss:,.2f}
+║   Contracts:   {IC_CONTRACTS}
 ╚══════════════════════════════════════════════════════════════════════════════╝"""
-                    print(trade_msg)
-                    log_file.write(trade_msg + "\n")
-                    
-                    # Set DTE for expiration tracking
-                    trade_entry_bar = i
-                    trade_dte = te_suggested if te_suggested > 0 else DEFAULT_DTE
-                    
-                    trades.append({
-                        'idx': i, 
-                        'type': 'IRON_CONDOR', 
-                        'action': 'OPEN',
-                        'spot': spot,
-                        'short_call': short_call_strike,
-                        'long_call': long_call_strike,
-                        'short_put': short_put_strike,
-                        'long_put': long_put_strike,
-                        'width': width,
-                        'dte': trade_dte,
-                        'conf': float(confidence), 
-                        'prob': float(prob_profit),
-                        'rules': float(net_rule_signal)
-                    })
-                    position = 1
-                else:
-                    rejection_reason = f"RULES_BEARISH (signal={net_rule_signal:.2f})"
+                print(trade_msg)
+                log_file.write(trade_msg + "\n")
+                
+                # Set DTE for expiration tracking
+                trade_entry_bar = i
+                trade_dte = te_suggested if te_suggested > 0 else DEFAULT_DTE
+                trade_credit = credit_received  # Store for P&L calc
+                trade_max_loss = max_loss
+                
+                trades.append({
+                    'idx': i, 
+                    'type': 'IRON_CONDOR', 
+                    'action': 'OPEN',
+                    'spot': spot,
+                    'short_call': short_call_strike,
+                    'long_call': long_call_strike,
+                    'short_put': short_put_strike,
+                    'long_put': long_put_strike,
+                    'width': width,
+                    'dte': trade_dte,
+                    'credit': credit_received,
+                    'max_loss': max_loss,
+                    'entry_score': entry_score,
+                    'conf': float(confidence), 
+                    'prob': float(prob_profit),
+                    'rules': float(net_rule_signal)
+                })
+                position = 1
             else:
-                rejection_reason = f"LOW_CONFIDENCE (conf={confidence:.4f}, prob={prob_profit:.4f})"
+                # Rejection: entry score below threshold
+                rejection_reason = f"SCORE_TOO_LOW ({entry_score}/{ENTRY_THRESHOLD})"
+                rejection_factors = entry_factors
         
         elif position == 1:
             # Calculate remaining DTE
@@ -368,11 +434,35 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
                 print(line)
             logged_count += 1
             
-        # 5. PnL Simulation
-        ret = df['close'].iloc[i+1] / df['close'].iloc[i] - 1.0
+        # 5. Iron Condor P&L Simulation
+        # IC P&L: Collect theta (time decay) while in position, lose if breached
+        spot = df['close'].iloc[i]
         
-        if position == 1:
-            capital *= (1.0 + ret)
+        if position == 1 and trade_entry_bar is not None:
+            # Get open trade data
+            open_trade = [t for t in trades if t.get('action') == 'OPEN'][-1] if trades else None
+            if open_trade:
+                short_call = open_trade.get('short_call', spot + 10)
+                short_put = open_trade.get('short_put', spot - 10)
+                credit = open_trade.get('credit', IC_CREDIT_PER_SPREAD * IC_CONTRACTS * IC_MULTIPLIER)
+                max_loss = open_trade.get('max_loss', 5 * IC_CONTRACTS * IC_MULTIPLIER)
+                
+                # Check if breached (spot outside short strikes)
+                if spot >= short_call:
+                    # Call side breached - full loss on call spread
+                    daily_pnl = -max_loss / (trade_dte * BARS_PER_DAY) if trade_dte else 0
+                elif spot <= short_put:
+                    # Put side breached - full loss on put spread  
+                    daily_pnl = -max_loss / (trade_dte * BARS_PER_DAY) if trade_dte else 0
+                else:
+                    # Safe zone - collect theta (proportional time decay)
+                    bars_remaining = (trade_dte * BARS_PER_DAY) - (i - trade_entry_bar)
+                    if bars_remaining > 0:
+                        daily_pnl = credit / (trade_dte * BARS_PER_DAY)  # Steady theta collection
+                    else:
+                        daily_pnl = 0
+                
+                capital += daily_pnl
         
         equity_curve.append(capital)
     
@@ -458,19 +548,101 @@ def main():
         # 5. Report
         print(f"Final Capital: ${equity[-1]:,.2f}")
         print(f"Trades: {len(trades)}")
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(12, 6))
         plt.plot(equity)
-        plt.title(f"Equity Curve (Hybrid V2.2) - {len(trades)} Trades")
+        plt.title(f"Equity Curve (Iron Condor V2.2) - {len(trades)} Trades")
         plt.xlabel("Bars")
-        plt.ylabel("Capital")
+        plt.ylabel("Capital ($)")
         plt.grid(True)
-        plt.savefig("backtest_v2_result.png")
-        print("Saved plot to backtest_v2_result.png")
+        plot_path = os.path.join(REPORTS_DIR, "backtest_v2_result.png")
+        plt.savefig(plot_path)
+        print(f"Saved plot to {plot_path}")
         
         # Save Trades CSV
         if trades:
-            pd.DataFrame(trades).to_csv("trades_v2.csv", index=False)
-            print("Saved trades to trades_v2.csv")
+            csv_path = os.path.join(REPORTS_DIR, "trades_v2.csv")
+            pd.DataFrame(trades).to_csv(csv_path, index=False)
+            print(f"Saved trades to {csv_path}")
+            
+            # 6. FACTOR ATTRIBUTION ANALYSIS
+            print("\n" + "=" * 80)
+            print("FACTOR ATTRIBUTION ANALYSIS")
+            print("=" * 80)
+            
+            # Separate opens and closes
+            opens = [t for t in trades if t.get('action') == 'OPEN']
+            closes = [t for t in trades if t.get('action') == 'CLOSE']
+            
+            # Match opens with closes to get P&L
+            trade_results = []
+            for i, open_t in enumerate(opens):
+                if i < len(closes):
+                    close_t = closes[i]
+                    # Simple P&L: if spot stayed inside strikes, profitable
+                    entry_spot = open_t.get('spot', 0)
+                    exit_spot = close_t.get('spot', 0)
+                    short_call = open_t.get('short_call', entry_spot + 10)
+                    short_put = open_t.get('short_put', entry_spot - 10)
+                    
+                    # Profitable if spot stayed within short strikes throughout
+                    profitable = short_put < exit_spot < short_call
+                    
+                    trade_results.append({
+                        'trade_num': i + 1,
+                        'entry_score': open_t.get('entry_score', 0),
+                        'conf': open_t.get('conf', 0),
+                        'prob': open_t.get('prob', 0),
+                        'rules': open_t.get('rules', 0),
+                        'profitable': profitable,
+                        'reason': close_t.get('reason', 'Unknown')
+                    })
+            
+            if trade_results:
+                results_df = pd.DataFrame(trade_results)
+                winners = results_df[results_df['profitable'] == True]
+                losers = results_df[results_df['profitable'] == False]
+                
+                print(f"\n📊 TRADE SUMMARY:")
+                print(f"   Total Trades: {len(trade_results)}")
+                print(f"   Winners: {len(winners)} ({100*len(winners)/len(trade_results):.1f}%)")
+                print(f"   Losers: {len(losers)} ({100*len(losers)/len(trade_results):.1f}%)")
+                
+                print(f"\n📈 WINNING TRADES - Factor Averages:")
+                if not winners.empty:
+                    print(f"   Avg Entry Score: {winners['entry_score'].mean():.1f}")
+                    print(f"   Avg Confidence:  {winners['conf'].mean():.4f}")
+                    print(f"   Avg Prob Profit: {winners['prob'].mean():.4f}")
+                    print(f"   Avg Rule Signal: {winners['rules'].mean():.2f}")
+                else:
+                    print("   (No winning trades)")
+                
+                print(f"\n📉 LOSING TRADES - Factor Averages:")
+                if not losers.empty:
+                    print(f"   Avg Entry Score: {losers['entry_score'].mean():.1f}")
+                    print(f"   Avg Confidence:  {losers['conf'].mean():.4f}")
+                    print(f"   Avg Prob Profit: {losers['prob'].mean():.4f}")
+                    print(f"   Avg Rule Signal: {losers['rules'].mean():.2f}")
+                else:
+                    print("   (No losing trades)")
+                
+                # Save factor analysis
+                analysis_path = os.path.join(REPORTS_DIR, "factor_attribution.csv")
+                results_df.to_csv(analysis_path, index=False)
+                print(f"\n💾 Saved factor attribution to {analysis_path}")
+                
+                # Key Insights
+                print("\n🔑 KEY INSIGHTS:")
+                if not winners.empty and not losers.empty:
+                    if winners['entry_score'].mean() > losers['entry_score'].mean():
+                        print("   ✅ Higher entry scores correlate with winning trades")
+                    if winners['conf'].mean() > losers['conf'].mean():
+                        print("   ✅ Higher model confidence correlates with winning trades")
+                    if winners['prob'].mean() > losers['prob'].mean():
+                        print("   ✅ Higher prob_profit correlates with winning trades")
+                    if winners['rules'].mean() > losers['rules'].mean():
+                        print("   ✅ Higher rule signals correlate with winning trades")
+                
+            print("=" * 80)
         
     else:
         print(f"Model not found at {model_path}.")
