@@ -225,24 +225,50 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
                     spot = df['close'].iloc[i]
                     trade_num = len(trades) + 1
                     
-                    # TRADE STATS - Print immediately
+                    # Extract OPTIONS parameters from policy head
+                    call_offset = all_outputs['call_off'] or 0
+                    put_offset = all_outputs['put_off'] or 0
+                    width = all_outputs['width'] or 5
+                    te_suggested = all_outputs['te'] or 30
+                    direction = all_outputs['direction'] or 0
+                    
+                    # Compute suggested strikes (offset from ATM)
+                    short_call_strike = spot + (call_offset * spot * 0.01)  # ~1% per unit
+                    long_call_strike = short_call_strike + width
+                    short_put_strike = spot - (put_offset * spot * 0.01)
+                    long_put_strike = short_put_strike - width
+                    
+                    # TRADE STATS - Iron Condor specific
                     trade_msg = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║ 🔔 TRADE #{trade_num}: ENTER LONG @ Bar {i}
+║ 🦅 IRON CONDOR #{trade_num} @ Bar {i}
 ╠══════════════════════════════════════════════════════════════════════════════╣
-║ Spot Price:    ${spot:.2f}
-║ Confidence:    {confidence:.4f}  (threshold: 0.3)
-║ Prob Profit:   {prob_profit:.4f}  (threshold: 0.3)
-║ Rule Signal:   {net_rule_signal:.2f}  (must be >= 0)
-║ All Pol Out:   {[f'{x:.4f}' for x in pol[:8]]}
+║ SPOT:          ${spot:.2f}
+║ MODEL OUTPUTS:
+║   Call Offset: {call_offset:.4f}  → Short Call: ${short_call_strike:.2f}
+║   Put Offset:  {put_offset:.4f}  → Short Put:  ${short_put_strike:.2f}
+║   Width:       {width:.2f}       → Long Call:  ${long_call_strike:.2f}, Long Put: ${long_put_strike:.2f}
+║   DTE Target:  {te_suggested:.1f} days
+║   Direction:   {direction:.4f} (>0=Bullish, <0=Bearish)
+╠══════════════════════════════════════════════════════════════════════════════╣
+║ SIGNALS:
+║   Prob Profit: {prob_profit:.4f}  (threshold: 0.3)
+║   Confidence:  {confidence:.4f}  (threshold: 0.3) 
+║   Rule Signal: {net_rule_signal:.2f}  (must be >= 0)
 ╚══════════════════════════════════════════════════════════════════════════════╝"""
                     print(trade_msg)
                     log_file.write(trade_msg + "\n")
                     
                     trades.append({
                         'idx': i, 
-                        'type': 'LONG', 
-                        'price': spot, 
+                        'type': 'IRON_CONDOR', 
+                        'spot': spot,
+                        'short_call': short_call_strike,
+                        'long_call': long_call_strike,
+                        'short_put': short_put_strike,
+                        'long_put': long_put_strike,
+                        'width': width,
+                        'dte': te_suggested,
                         'conf': float(confidence), 
                         'prob': float(prob_profit),
                         'rules': float(net_rule_signal)
