@@ -186,19 +186,18 @@ else:
         print(f"DEBUG: data/processed Files: {os.listdir('data/processed')}")
     raise FileNotFoundError(f"Data file not found! Checked: {POSSIBLE_PATHS}")
 
-ROWS_TO_LOAD = 100_000    # 🧪 TEST RUN 🧪
-SLICE_MODE = "LAST"       # "LAST" (Recent) or "FIRST" (Oldest)
+ROWS_TO_LOAD = 3_000_000  # ⚡ PRODUCTION RUN ⚡
+SLICE_MODE = "FIRST"      # Load full dataset (usually starts from beginning)
 
 print(f"   Data: {DATA_PATH}")
 
 if SLICE_MODE == "LAST":
     # Load all keys, slice last N
-    # Read optimized if file is large? For 500k file, read_csv is fast.
     df = pd.read_csv(DATA_PATH)
     if len(df) > ROWS_TO_LOAD:
         df = df.iloc[-ROWS_TO_LOAD:]
 else:
-    # Load first N
+    # Load first N (Standard behavior)
     df = pd.read_csv(DATA_PATH, nrows=ROWS_TO_LOAD)
 
 print(f"   Shape: {df.shape} ({SLICE_MODE} rows)")
