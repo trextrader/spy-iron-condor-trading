@@ -475,7 +475,17 @@ def compute_all_dynamic_features(
     df["consolidation_score"] = consol
     df["breakout_score"] = breakout
     
-    print(f"   ✅ Added 17 dynamic features (16 new columns)")
+    # Spread Ratio (Critical for Primitives)
+    if "ask" in df.columns and "bid" in df.columns:
+        # Avoid zero division
+        mid = (df["ask"] + df["bid"]) / 2.0
+        mid = mid.replace(0, 1.0) 
+        df["spread_ratio"] = (df["ask"] - df["bid"]) / mid
+    elif "spread_ratio" not in df.columns:
+        # Default if missing (e.g. OHLCV only)
+        df["spread_ratio"] = 0.0001 # 1bp default
+    
+    print(f"   ✅ Added dynamic features + spread_ratio")
     
     return df
 

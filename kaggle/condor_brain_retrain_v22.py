@@ -264,7 +264,9 @@ else:
     )
     
     # Get dynamic columns and merge back
-    dynamic_cols = [c for c in spot_df.columns if c not in spot_key_cols + ohlcv_cols]
+    # Exclude aux_cols (like spread_ratio) if they were already in df to prevent collision/suffixes
+    exclude_cols = spot_key_cols + ohlcv_cols + aux_cols
+    dynamic_cols = [c for c in spot_df.columns if c not in exclude_cols]
     print(f"   Dynamic columns: {len(dynamic_cols)}")
     merge_cols = spot_key_cols + dynamic_cols
     df = df.merge(spot_df[merge_cols], on=spot_key_cols, how='left')
