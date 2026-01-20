@@ -507,17 +507,16 @@ def main():
     
     # 3. Model
     POSSIBLE_PATHS = [
-        # Colab 500K trained models (prioritized)
-        "/content/spy-iron-condor-trading/condor_brain_retrain_e2_500k.pth",  # ✅ 500K E2 (use this!)
-        "/content/spy-iron-condor-trading/condor_brain_retrain_e1_500K.pth",  # ✅ 500K E1
-        "/content/spy-iron-condor-trading/condor_brain_retrain_e3+500k.pth",  # May be corrupted
+        # Colab 500K trained models (E3 first)
+        "/content/spy-iron-condor-trading/condor_brain_retrain_e3+500k.pth",  # 🚀 E3 500K
+        "/content/spy-iron-condor-trading/condor_brain_retrain_e2_500k.pth",
+        "/content/spy-iron-condor-trading/condor_brain_retrain_e1_500K.pth",
         "/content/spy-iron-condor-trading/condor_brain_retrain_e3.pth",
         # Local paths
+        "condor_brain_retrain_e3+500k.pth",
         "condor_brain_retrain_e2_500k.pth",
         "condor_brain_retrain_e1_500K.pth",
         "condor_brain_retrain_v22_e3.pth",
-        "condor_brain_retrain_v22_e2.pth", 
-        "condor_brain_retrain_v22_e1.pth", 
         "condor_brain_retrain_e3.pth",
         # Kaggle paths
         "/kaggle/working/condor_brain_retrain_e3.pth",
