@@ -167,8 +167,14 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
     print("TRADE DECISION LOG (First 50 bars after warmup)")
     print("=" * 80)
     
+    # Open log file for writing
+    log_file = open("trade_decisions.log", "w")
+    log_file.write("=" * 80 + "\n")
+    log_file.write("TRADE DECISION LOG (ALL BARS)\n")
+    log_file.write("=" * 80 + "\n\n")
+    
     logged_count = 0
-    MAX_LOGS = 50
+    MAX_LOGS = 50  # Console only
     
     # Start from SEQ_LEN
     for i in tqdm(range(SEQ_LEN, len(df) - 1)):
@@ -237,21 +243,31 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
                 trades.append({'idx': i, 'type': 'EXIT_LONG', 'price': df['close'].iloc[i], 'pnl': 0}) 
                 position = 0
         
-        # LOG: First N bars with full details
+        # LOG: ALL bars to file, first N to console
+        spot = df['close'].iloc[i]
+        log_lines = [
+            f"\n--- Bar {i} | Spot: ${spot:.2f} | Position: {position} ---",
+            f"  Model Outputs: {pol[:8]}",
+            f"  Confidence: {confidence:.4f} | Prob_Profit: {prob_profit:.4f}",
+            f"  Rule Signal: {net_rule_signal:.2f}",
+        ]
+        if action == 1:
+            log_lines.append(f"  >> ACTION: ENTER LONG")
+        elif action == -1:
+            log_lines.append(f"  >> ACTION: EXIT LONG")
+        elif rejection_reason:
+            log_lines.append(f"  >> REJECTED: {rejection_reason}")
+        else:
+            log_lines.append(f"  >> NO ACTION")
+        
+        # Write to file (ALL bars)
+        for line in log_lines:
+            log_file.write(line + "\n")
+        
+        # Print to console (first 50 only)
         if logged_count < MAX_LOGS:
-            spot = df['close'].iloc[i]
-            print(f"\n--- Bar {i} | Spot: ${spot:.2f} | Position: {position} ---")
-            print(f"  Model Outputs: {pol[:8]}")
-            print(f"  Confidence: {confidence:.4f} | Prob_Profit: {prob_profit:.4f}")
-            print(f"  Rule Signal: {net_rule_signal:.2f}")
-            if action == 1:
-                print(f"  ✅ ACTION: ENTER LONG")
-            elif action == -1:
-                print(f"  ✅ ACTION: EXIT LONG")
-            elif rejection_reason:
-                print(f"  ❌ REJECTED: {rejection_reason}")
-            else:
-                print(f"  ⏸️  NO ACTION (Already in position or no signal)")
+            for line in log_lines:
+                print(line)
             logged_count += 1
             
         # 5. PnL Simulation
@@ -261,9 +277,16 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
             capital *= (1.0 + ret)
         
         equity_curve.append(capital)
-        
+    
+    # Close log file
+    log_file.write("\n" + "=" * 80 + "\n")
+    log_file.write(f"LOG END. Total Trades: {len(trades)}\n")
+    log_file.write("=" * 80 + "\n")
+    log_file.close()
+    
     print("=" * 80)
     print(f"LOG END. Total Trades: {len(trades)}")
+    print(f"Full log saved to: trade_decisions.log")
     print("=" * 80)
         
     return equity_curve, trades
