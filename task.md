@@ -63,8 +63,8 @@
 - [x] **Step 1B**: Create `intelligence/features/dynamic_features.py`
 - [x] **Step 2**: Update `kaggle/condor_brain_retrain_v2.py` (32 features)
 - [x] **Step 3**: Update `kaggle/condor_brain_backtest.py` (schema-driven)
-- [ ] **Step 4**: Process 10M Row Dataset (Feature Engineering)
-- [ ] **Step 5**: Retrain (5 Epochs, Staged Diffusion)
+- [x] **Step 4**: Process 10M Row Dataset (Feature Engineering) (Mechanism Verified via on-the-fly & precompute)
+- [/] **Step 5**: Retrain (5 Epochs, Staged Diffusion) (Iterating on visual feedback)
 - [ ] **Step 6**: Verify & Paper Trade
 
 ## Phase 9: Advanced Model Enhancements (Completed)
