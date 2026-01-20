@@ -242,11 +242,13 @@ def main():
     
     # 3. Model
     POSSIBLE_PATHS = [
-        "condor_brain_retrain_v22_e1.pth", # Explicit E1
+        "condor_brain_retrain_v22_e2.pth", # Latest check
+        "condor_brain_retrain_v22_e1.pth", 
         "condor_brain_retrain_v22_e3.pth",
         "condor_brain_retrain_e3.pth",
         "/kaggle/working/condor_brain_retrain_e3.pth",
-        "/kaggle/working/condor_brain_retrain_v22_e1.pth", # Colab E1
+        "/kaggle/working/condor_brain_retrain_v22_e1.pth", 
+        "/kaggle/working/condor_brain_retrain_v22_e2.pth", # Colab E2
         "/kaggle/working/condor_brain_retrain_v22_e3.pth"
     ]
     model_path = MODEL_PATH
