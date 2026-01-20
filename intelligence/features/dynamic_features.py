@@ -478,3 +478,213 @@ def compute_all_dynamic_features(
     print(f"   ✅ Added 17 dynamic features (16 new columns)")
     
     return df
+
+
+# =============================================================================
+# V2.2 PRIMITIVE FEATURES (14 CANONICAL PRIMITIVES)
+# =============================================================================
+
+def compute_all_primitive_features_v22(
+    df: pd.DataFrame,
+    close_col: str = "close",
+    high_col: str = "high",
+    low_col: str = "low",
+    volume_col: str = "volume",
+    spread_col: str = "spread_ratio",
+    lag_minutes_col: str = "lag_minutes",
+    inplace: bool = True,
+) -> pd.DataFrame:
+    """
+    Compute all 20 V2.2 primitive features and add to DataFrame.
+    
+    This extends V2.1 (32 features) with 20 primitive outputs = 52 total.
+    Must be called AFTER compute_all_dynamic_features().
+    
+    Args:
+        df: DataFrame with V2.1 features already computed
+        close_col, high_col, low_col, volume_col: Column names
+        spread_col: Spread ratio column (for friction gate)
+        lag_minutes_col: IV lag column (for IV confidence)
+        inplace: If True, add columns to df
+        
+    Returns:
+        DataFrame with 20 new primitive columns
+    """
+    from intelligence.primitives import (
+        compute_dynamic_bollinger_bands,
+        compute_bandwidth_percentile_and_expansion,
+        compute_volume_ratio,
+        compute_spread_friction_ratio,
+        compute_gap_risk_score,
+        compute_iv_confidence,
+        compute_mtf_consensus,
+        compute_vol_normalized_macd,
+        compute_vol_normalized_adx,
+        compute_dynamic_rsi as prim_compute_dynamic_rsi,
+        compute_psar_flip_membership,
+        compute_chaos_membership,
+        compute_fuzzy_reversion_score_11,
+    )
+    
+    if not inplace:
+        df = df.copy()
+    
+    close = df[close_col]
+    high = df[high_col]
+    low = df[low_col]
+    volume = df[volume_col] if volume_col in df.columns else pd.Series(0, index=df.index)
+    
+    print("   Computing V2.2 primitive features...")
+    
+    # === Get existing V2.1 features ===
+    vol_ewma = df.get("vol_ewma", pd.Series(0.01, index=df.index))
+    vol_energy = df.get("vol_energy", pd.Series(0, index=df.index))
+    kappa_proxy = df.get("kappa_proxy", pd.Series(0, index=df.index))
+    atr_pct = df.get("atr_pct", pd.Series(0.01, index=df.index))
+    psar_adaptive = df.get("psar_adaptive", pd.Series(0, index=df.index))
+    
+    # === P001-P007: Bands, Microstructure ===
+    
+    # P002: Bandwidth percentile & expansion
+    bandwidth = df.get("bb_sigma_dyn", close.rolling(20).std())
+    bw_result = compute_bandwidth_percentile_and_expansion(
+        bandwidth=bandwidth,
+        window=100,
+        expansion_lookback=5,
+    )
+    df["bb_percentile"] = bw_result["bw_percentile"].astype(np.float32)
+    df["bw_expansion_rate"] = bw_result["expansion_rate"].fillna(0).astype(np.float32)
+    
+    # P003: Volume ratio
+    df["volume_ratio"] = compute_volume_ratio(volume, window=20).fillna(1.0).astype(np.float32)
+    
+    # P004: Spread friction (if spread available)
+    if spread_col in df.columns:
+        spread = df[spread_col]
+        # Create placeholder event flag (0 = no event)
+        event_flag = pd.Series(0.0, index=df.index)
+        friction_result = compute_spread_friction_ratio(
+            spread=spread,
+            high=high,
+            low=low,
+            n=20,
+            atr_norm=atr_pct,
+            vol_ratio=df["volume_ratio"],
+            bandwidth=bandwidth,
+            event_flag=event_flag,
+            theta0=1.0, a=0.1, b=0.1, c=0.1, d=0.2,
+            theta_min=0.5, theta_max=1.5,
+        )
+        df["friction_ratio"] = friction_result["friction_ratio"].fillna(0.5).astype(np.float32)
+        df["exec_allow"] = friction_result["exec_allow"].fillna(1).astype(np.float32)
+    else:
+        df["friction_ratio"] = 0.5
+        df["exec_allow"] = 1.0
+    
+    # P005: Gap risk score
+    atr_spike = (atr_pct > atr_pct.rolling(20).mean() * 1.5).astype(float)
+    bw_expansion = (df["bw_expansion_rate"] > 0.1).astype(float)
+    late_day_flag = pd.Series(0.0, index=df.index)  # Placeholder
+    gap_result = compute_gap_risk_score(
+        event_flag=pd.Series(0.0, index=df.index),
+        atr_spike=atr_spike,
+        bw_expansion=bw_expansion,
+        late_day_flag=late_day_flag,
+        w_event=0.3, w_atr=0.3, w_bw=0.2, w_late=0.2,
+        g_crit=0.7,
+    )
+    df["gap_risk_score"] = gap_result["gap_risk_score"].astype(np.float32)
+    
+    # P006: IV confidence
+    if lag_minutes_col in df.columns:
+        lag_mins = df[lag_minutes_col]
+    else:
+        lag_mins = pd.Series(0.0, index=df.index)  # Assume fresh data
+    df["iv_confidence"] = compute_iv_confidence(lag_mins, lambda_decay=0.05).astype(np.float32)
+    
+    # P007: MTF consensus (stub - requires multi-TF data)
+    # For now, use breakout_score as proxy
+    signal_1m = df.get("breakout_score", pd.Series(0, index=df.index))
+    df["mtf_consensus"] = compute_mtf_consensus(
+        signal_1m=signal_1m,
+        signal_5m=signal_1m.rolling(5).mean().fillna(0),
+        signal_15m=signal_1m.rolling(15).mean().fillna(0),
+        w_1m=0.2, w_5m=0.3, w_15m=0.5,
+    ).astype(np.float32)
+    
+    # === M001-M004: Momentum ===
+    
+    # M001: Vol-normalized MACD
+    macd_result = compute_vol_normalized_macd(
+        close=close,
+        fast=12, slow=26, signal=9,
+        vol_ewma=vol_ewma,
+    )
+    df["macd_norm"] = macd_result["macd_norm"].fillna(0).astype(np.float32)
+    df["macd_signal_norm"] = macd_result["signal_norm"].fillna(0).astype(np.float32)
+    df["macd_histogram"] = (df["macd_norm"] - df["macd_signal_norm"]).astype(np.float32)
+    
+    # M002: Vol-normalized ADX with +DI/-DI
+    adx_norm = compute_vol_normalized_adx(
+        high=high, low=low, close=close,
+        period=14, beta=0.15,
+        volatility_energy=vol_energy,
+    )
+    # Compute +DI and -DI separately
+    prev_close = close.shift(1)
+    tr = pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+    tr_smooth = tr.rolling(14).sum()
+    df["plus_di"] = (100 * pd.Series(plus_dm, index=df.index).rolling(14).sum() / (tr_smooth + 1e-12)).fillna(25).astype(np.float32)
+    df["minus_di"] = (100 * pd.Series(minus_dm, index=df.index).rolling(14).sum() / (tr_smooth + 1e-12)).fillna(25).astype(np.float32)
+    
+    # M004: PSAR flip membership
+    psar_result = compute_psar_flip_membership(
+        close=close,
+        psar=close - psar_adaptive * atr_pct * close,  # Reconstruct PSAR from normalized value
+    )
+    df["psar_trend"] = psar_result["psar_trend"].astype(np.float32)
+    df["psar_reversion_mu"] = psar_result["psar_reversion_membership"].astype(np.float32)
+    
+    # === T001-T002: Topology (Stubbed for V2.2) ===
+    df["beta1_norm_stub"] = 0.0  # TDA deferred to V2.3
+    
+    # T002: Chaos membership (using vol_energy as proxy for beta1_gated)
+    chaos_result = compute_chaos_membership(
+        beta1_gated=vol_energy * 2,  # Scale vol_energy to approximate beta1 range
+        chaos_threshold=2.0,
+        relax_threshold=1.0,
+    )
+    df["chaos_membership"] = chaos_result["chaos_membership"].astype(np.float32)
+    df["position_size_mult"] = chaos_result["position_size_multiplier"].astype(np.float32)
+    
+    # === F001: Fuzzy reversion score ===
+    # Compute membership functions
+    mu_mtf = df["mtf_consensus"].abs()
+    mu_ivr = df.get("ivr", pd.Series(0.5, index=df.index))
+    mu_vix = pd.Series(0.5, index=df.index)  # Placeholder
+    mu_rsi = (df.get("rsi_dyn", pd.Series(50, index=df.index)) - 50).abs() / 50
+    mu_stoch = (df.get("stoch_k_dyn", pd.Series(50, index=df.index)) - 50).abs() / 50
+    mu_adx = 1 - df.get("adx_adaptive", pd.Series(25, index=df.index)) / 50
+    mu_sma = pd.Series(0.5, index=df.index)  # Placeholder
+    mu_psar = df["psar_reversion_mu"]
+    mu_bb = pd.Series(0.5, index=df.index)  # Placeholder
+    mu_bbsqueeze = 1 - df["bb_percentile"] / 100
+    mu_vol = df["volume_ratio"].clip(0, 2) / 2
+    
+    df["fuzzy_reversion_11"] = compute_fuzzy_reversion_score_11(
+        mu_mtf=mu_mtf, mu_ivr=mu_ivr, mu_vix=mu_vix,
+        mu_rsi=mu_rsi, mu_stoch=mu_stoch, mu_adx=mu_adx,
+        mu_sma=mu_sma, mu_psar=mu_psar, mu_bb=mu_bb,
+        mu_bbsqueeze=mu_bbsqueeze, mu_vol=mu_vol,
+        w_mtf=0.25, w_ivr=0.15, w_vix=0.10, w_rsi=0.15, w_stoch=0.05,
+        w_adx=0.05, w_sma=0.05, w_psar=0.10, w_bb=0.05, w_bbsqueeze=0.03, w_vol=0.02,
+    ).astype(np.float32)
+    
+    print(f"   ✅ Added 20 V2.2 primitive features")
+    
+    return df
+

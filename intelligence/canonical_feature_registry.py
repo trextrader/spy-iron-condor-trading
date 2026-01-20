@@ -263,3 +263,108 @@ FEATURE_COLS_V20: List[str] = [
 
 INPUT_DIM_V20: int = 24
 VERSION_V20: str = "condorbrain_v2.0_static"
+
+# =============================================================================
+# V2.2 FEATURE COLUMNS (14 CANONICAL PRIMITIVES INTEGRATED)
+# =============================================================================
+# Expands V2.1 (32 features) with 20 primitive outputs = 52 total
+
+FEATURE_COLS_V22: List[str] = [
+    # === V2.1 Base Features (32) ===
+    # Market Primitives (5)
+    "open", "high", "low", "close", "volume",
+    # Options / Chain State (9)
+    "delta", "gamma", "vega", "theta", "iv", "ivr", "spread_ratio", "te", "strike",
+    # Strategy / Targets / Risk (2)
+    "target_spot", "max_dd_60m",
+    # Dynamic / Regime-Aware (16)
+    "log_return", "vol_ewma", "ret_z", "atr_pct", "kappa_proxy", "vol_energy",
+    "rsi_dyn", "adx_adaptive", "psar_adaptive",
+    "bb_mu_dyn", "bb_sigma_dyn", "bb_lower_dyn", "bb_upper_dyn",
+    "stoch_k_dyn", "consolidation_score", "breakout_score",
+    
+    # === V2.2 Primitive Outputs (20) ===
+    # P001-P007: Bands, Microstructure, Regime
+    "bb_percentile",        # P002: Bandwidth percentile rank
+    "bw_expansion_rate",    # P002: Bandwidth expansion rate
+    "volume_ratio",         # P003: Volume / SMA_20(Volume)
+    "friction_ratio",       # P004: Spread / AvgRange
+    "exec_allow",           # P004: Friction gate output
+    "gap_risk_score",       # P005: Composite gap risk
+    "iv_confidence",        # P006: exp(-λ * lag_minutes)
+    "mtf_consensus",        # P007: Multi-timeframe consensus
+    
+    # M001-M004: Momentum
+    "macd_norm",            # M001: MACD / vol_ewma
+    "macd_signal_norm",     # M001: Signal / vol_ewma
+    "macd_histogram",       # M001: macd_norm - signal_norm
+    "plus_di",              # M002: +DI from ADX
+    "minus_di",             # M002: -DI from ADX
+    "psar_trend",           # M004: PSAR trend direction
+    "psar_reversion_mu",    # M004: PSAR reversion membership
+    
+    # T001-T002: Topology (stubbed for V2.2, full in V2.3)
+    "beta1_norm_stub",      # T001: Placeholder (=0.0)
+    "chaos_membership",     # T002: Chaos membership
+    "position_size_mult",   # T002: Position size multiplier
+    
+    # F001: Fuzzy
+    "fuzzy_reversion_11",   # F001: 11-factor fuzzy score
+]
+
+INPUT_DIM_V22: int = len(FEATURE_COLS_V22)  # Should be 52
+VERSION_V22: str = "condorbrain_v2.2_primitives"
+
+# V2.2 Neutral Fill Values (additions)
+NEUTRAL_FILL_VALUES_V22: Dict[str, float] = {
+    **NEUTRAL_FILL_VALUES,  # Inherit V2.1 values
+    # Primitives
+    "bb_percentile": 50.0,      # Mid-percentile = neutral
+    "bw_expansion_rate": 0.0,   # No expansion
+    "volume_ratio": 1.0,        # Average volume
+    "friction_ratio": 0.5,      # Mid-friction
+    "exec_allow": 1.0,          # Allow by default
+    "gap_risk_score": 0.0,      # No gap risk
+    "iv_confidence": 1.0,       # Full confidence
+    "mtf_consensus": 0.0,       # Neutral consensus
+    "macd_norm": 0.0,           # No momentum
+    "macd_signal_norm": 0.0,
+    "macd_histogram": 0.0,
+    "plus_di": 25.0,            # Neutral DI
+    "minus_di": 25.0,
+    "psar_trend": 0.0,          # No trend
+    "psar_reversion_mu": 0.0,   # No reversion
+    "beta1_norm_stub": 0.0,     # TDA stub
+    "chaos_membership": 0.0,    # No chaos
+    "position_size_mult": 1.0,  # Full size
+    "fuzzy_reversion_11": 0.5,  # Neutral fuzzy
+}
+
+# V2.2 Checkpoint Keys
+CHECKPOINT_REQUIRED_KEYS_V22: List[str] = [
+    "state_dict",
+    "feature_cols",
+    "median",
+    "mad",
+    "input_dim",
+    "version",
+    "primitive_params",  # New: stores primitive hyperparameters
+]
+
+# V2.2 Feature Registry
+FEATURE_REGISTRY_V22: Dict[str, Any] = {
+    "version": VERSION_V22,
+    "n_features": INPUT_DIM_V22,
+    "dtype": "float32",
+    "nan_policy": NAN_POLICY_V21,
+    "scaling": NORMALIZATION_POLICY_V21,
+    "feature_cols": FEATURE_COLS_V22,
+    "primitive_integration": True,
+    "tda_enabled": False,  # Deferred to V2.3
+}
+
+
+def get_neutral_fill_value_v22(feature_name: str) -> float:
+    """Get the semantically neutral fill value for a V2.2 feature."""
+    return NEUTRAL_FILL_VALUES_V22.get(feature_name, 0.0)
+
