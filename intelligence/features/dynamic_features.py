@@ -557,6 +557,7 @@ def compute_all_primitive_features_v22(
     
     # P002: Bandwidth percentile & expansion
     bandwidth = df.get("bb_sigma_dyn", close.rolling(20).std())
+    df["bandwidth"] = bandwidth.astype(np.float32)  # Expose for Executor P002 input
     bw_result = compute_bandwidth_percentile_and_expansion(
         bandwidth=bandwidth,
         window=100,

@@ -196,6 +196,10 @@ class LogicEvaluator:
             if op == ">=": return l_val >= r_val
             if op == "<=": return l_val <= r_val
             if op == "==": return l_val == r_val
+        except TypeError:
+            # Handle mixed types (e.g. dict vs float) by treating as False
+            logger.warning(f"Comparison error in {expr}: {type(l_val)} vs {type(r_val)}")
+            return False
             
         # SEQ operator (Placeholder: treat as AND for MVP)
         if expr.startswith("SEQ("):
