@@ -164,9 +164,11 @@ print(f"\n[1/4] Loading & Processing {ROWS_TO_LOAD:,} Rows...")
 POSSIBLE_PATHS = [
     "/kaggle/input/spy-options-data/mamba_institutional_1m.csv",
     "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m.csv",
-    "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m_500k.csv", # New variant
+    "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m_500k.csv",
+    "/content/spy-iron-condor-trading/data/mamba_institutional_1m_500k.csv", # User specific
     "data/processed/mamba_institutional_1m.csv",
     "data/processed/mamba_institutional_1m_500k.csv",
+    "data/mamba_institutional_1m_500k.csv", # User specific local
     "mamba_institutional_1m.csv",
     "mamba_institutional_1m_500k.csv"
 ]
@@ -178,6 +180,8 @@ for p in POSSIBLE_PATHS:
 else:
     # Debug: List what IS there
     print(f"DEBUG: CWD Files: {os.listdir('.')}")
+    if os.path.exists('data'):
+        print(f"DEBUG: data/ Files: {os.listdir('data')}")
     if os.path.exists('data/processed'):
         print(f"DEBUG: data/processed Files: {os.listdir('data/processed')}")
     raise FileNotFoundError(f"Data file not found! Checked: {POSSIBLE_PATHS}")
