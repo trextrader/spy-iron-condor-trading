@@ -107,34 +107,27 @@ def run_rule_engine(df, ruleset_path):
     
     rule_signals = pd.DataFrame(index=df.index)
     
-    for rule in ruleset.rules:
-        r_res = results.get(rule.id)
-        if r_res:
-            # Entry Signal (1=Long, -1=Short, 0=None)
-            # Engine result 'exit' is boolean. 'long'/'short' is boolean.
-            # We map to single signal col: 1 (Long), -1 (Short), 0 (Neutral)
-            
-            # Extract raw logic outputs from engine if available, OR infer?
-            # Engine execute return: {'signals': list of events? No.}
-            # Wait, verify_ruleset returns:
-            # "Rule RULE_E3: ... Signals: ... "
-            # engine.execute returns `results` dict.
-            # executor.execute() returns: {rule.id: rule_result}
-            # rule_result = self._evaluate_signal_logic(...)
-            # Evaluator returns: {'entry_long': Series, 'entry_short': Series, 'exit': Series}
-            
-            long_s = r_res['entry_long'].fillna(False).astype(int)
-            short_s = r_res['entry_short'].fillna(False).astype(int)
-            
-            # Combine: Long=1, Short=-1. (If both, 0 or 1? Priority?)
-            # Usually Long - Short.
-            sig = long_s - short_s
-            rule_signals[f"{rule.id}_signal"] = sig
-            
-            # Block/Gate status?
-            # Engine doesn't return block status explicitly in top level?
-            # It returns signals AFTER gates.
-            # So if Gated, signal is 0.
+    for rule_id, rule in ruleset.rules.items():
+        r_res = results.get(rule_id)
+        if r_res is None:
+            continue
+        
+        # Entry Signal (1=Long, -1=Short, 0=None)
+        long_s = r_res.get('entry_long', pd.Series(False, index=df.index))
+        short_s = r_res.get('entry_short', pd.Series(False, index=df.index))
+        
+        if hasattr(long_s, 'fillna'):
+            long_s = long_s.fillna(False).astype(int)
+        else:
+            long_s = pd.Series(0, index=df.index)
+        if hasattr(short_s, 'fillna'):
+            short_s = short_s.fillna(False).astype(int)
+        else:
+            short_s = pd.Series(0, index=df.index)
+        
+        # Combine: Long=1, Short=-1
+        sig = long_s - short_s
+        rule_signals[f"{rule_id}_signal"] = sig
             
     print(f"Generated signals for {len(ruleset.rules)} rules.")
     return df, rule_signals
