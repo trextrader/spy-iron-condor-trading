@@ -50,9 +50,11 @@ DATA_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
 RULESET_PATH = "docs/Complete_Ruleset_DSL.yaml"
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def load_data_and_features(data_path, rows=100_000):
+def load_data_and_features(data_path, rows=None):
     print(f"Loading data from {data_path}...")
-    df = pd.read_csv(data_path).iloc[-rows:].reset_index(drop=True)
+    df = pd.read_csv(data_path)
+    if rows is not None:
+        df = df.iloc[-rows:].reset_index(drop=True)
     
     # 1. Base Features (V2.1)
     print("Computing V2.1 Dynamic Features...")
@@ -233,7 +235,7 @@ def main():
             
     # 1. Pipeline
     # Load limited rows for test? Or all.
-    df = load_data_and_features(use_data_path, rows=100_000)
+    df = load_data_and_features(use_data_path)  # Load ALL rows
     
     # 2. Rules
     df, rule_signals = run_rule_engine(df, RULESET_PATH)
