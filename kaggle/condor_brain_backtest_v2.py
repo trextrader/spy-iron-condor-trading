@@ -163,6 +163,13 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
     
     # Iterate
     print(f"Simulating {len(df)} bars...")
+    print("=" * 80)
+    print("TRADE DECISION LOG (First 50 bars after warmup)")
+    print("=" * 80)
+    
+    logged_count = 0
+    MAX_LOGS = 50
+    
     # Start from SEQ_LEN
     for i in tqdm(range(SEQ_LEN, len(df) - 1)):
         # 1. State
@@ -173,49 +180,91 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
         with torch.no_grad():
             outputs = model(x_seq)
             
-        pol = outputs[0].cpu().numpy()
-        # [call_off, put_off, width, ..., prob_profit, ..., confidence]
-        prob_profit = pol[0, 4]
-        confidence = pol[0, 7]
+        pol = outputs[0].cpu().numpy().flatten()
         
-        # DEBUG: Print model outputs for first 10 bars
-        if i < SEQ_LEN + 10:
-            print(f"Bar {i}: conf={confidence:.4f}, prob_profit={prob_profit:.4f}, rule_signal={rule_signals.iloc[i].sum() if rule_signals is not None else 0}")
+        # Extract ALL policy outputs for logging
+        # Policy head: [call_off, put_off, width, te, prob_profit, stop_mult, direction, confidence]
+        all_outputs = {
+            'call_off': pol[0] if len(pol) > 0 else None,
+            'put_off': pol[1] if len(pol) > 1 else None,
+            'width': pol[2] if len(pol) > 2 else None,
+            'te': pol[3] if len(pol) > 3 else None,
+            'prob_profit': pol[4] if len(pol) > 4 else None,
+            'stop_mult': pol[5] if len(pol) > 5 else None,
+            'direction': pol[6] if len(pol) > 6 else None,
+            'confidence': pol[7] if len(pol) > 7 else None,
+        }
         
-        # 3. Rule Signal Check (Look up pre-computed signal)
-        action = 0
+        prob_profit = all_outputs['prob_profit'] or 0
+        confidence = all_outputs['confidence'] or 0
+        
+        # 3. Rule Signal Check
         net_rule_signal = 0
         if rule_signals is not None:
-             # Sum of signals for this bar
-             # rule_signals is aligned with df. Index i matches.
-             net_rule_signal = rule_signals.iloc[i].sum()
+            net_rule_signal = rule_signals.iloc[i].sum()
+        
+        # 4. Decision Logic with explicit reasoning
+        action = 0
+        rejection_reason = None
         
         if position == 0:
-            # Hybrid Entry: Lower thresholds for testing
-            # Original: confidence > 0.6 and prob_profit > 0.6
-            if confidence > 0.3 or prob_profit > 0.3:  # Relaxed for testing
-                if net_rule_signal >= 0: 
+            # Check entry conditions
+            conf_check = confidence > 0.3
+            prob_check = prob_profit > 0.3
+            rule_check = net_rule_signal >= 0
+            
+            if conf_check or prob_check:
+                if rule_check:
                     action = 1
-                    trades.append({'idx': i, 'type': 'LONG', 'price': df['close'].iloc[i], 'conf': float(confidence), 'rules': float(net_rule_signal)})
+                    trades.append({
+                        'idx': i, 
+                        'type': 'LONG', 
+                        'price': df['close'].iloc[i], 
+                        'conf': float(confidence), 
+                        'prob': float(prob_profit),
+                        'rules': float(net_rule_signal)
+                    })
                     position = 1
+                else:
+                    rejection_reason = f"RULES_BEARISH (signal={net_rule_signal:.2f})"
+            else:
+                rejection_reason = f"LOW_CONFIDENCE (conf={confidence:.4f}, prob={prob_profit:.4f})"
         
         elif position == 1:
-            # Hybrid Exit: Model Loss of Confidence OR Rule Bearish Signal
+            # Exit logic
             if confidence < 0.3 or net_rule_signal < 0:
                 action = -1
                 trades.append({'idx': i, 'type': 'EXIT_LONG', 'price': df['close'].iloc[i], 'pnl': 0}) 
                 position = 0
+        
+        # LOG: First N bars with full details
+        if logged_count < MAX_LOGS:
+            spot = df['close'].iloc[i]
+            print(f"\n--- Bar {i} | Spot: ${spot:.2f} | Position: {position} ---")
+            print(f"  Model Outputs: {pol[:8]}")
+            print(f"  Confidence: {confidence:.4f} | Prob_Profit: {prob_profit:.4f}")
+            print(f"  Rule Signal: {net_rule_signal:.2f}")
+            if action == 1:
+                print(f"  ✅ ACTION: ENTER LONG")
+            elif action == -1:
+                print(f"  ✅ ACTION: EXIT LONG")
+            elif rejection_reason:
+                print(f"  ❌ REJECTED: {rejection_reason}")
+            else:
+                print(f"  ⏸️  NO ACTION (Already in position or no signal)")
+            logged_count += 1
             
-        # 4. Simulation (PnL - Simplified: Underlying Return)
-        # Using Underlying Return is proxy for Delta 1 Long.
-        # Condor is delta neutral. This simulation logic needs refinement for Options PnL.
-        # But for Signal Verification, this suffices.
+        # 5. PnL Simulation
         ret = df['close'].iloc[i+1] / df['close'].iloc[i] - 1.0
         
         if position == 1:
             capital *= (1.0 + ret)
         
         equity_curve.append(capital)
+        
+    print("=" * 80)
+    print(f"LOG END. Total Trades: {len(trades)}")
+    print("=" * 80)
         
     return equity_curve, trades
 
