@@ -217,10 +217,14 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
 def main():
     # 0. Data Path Detection
     possible_data_paths = [
-        DATA_PATH, # Kaggle default
-        "data/processed/mamba_institutional_1m.csv", # Local
-        "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m.csv", # Colab
-        "mamba_institutional_1m.csv" # Root
+        MODEL_PATH, # Kaggle default config (Line 42 might be overwritten)
+        "/kaggle/input/spy-options-data/mamba_institutional_1m.csv",
+        "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m.csv",
+        "/content/spy-iron-condor-trading/data/mamba_institutional_1m_500k.csv",
+        "data/processed/mamba_institutional_1m.csv",
+        "data/mamba_institutional_1m_500k.csv",
+        "mamba_institutional_1m.csv",
+        "mamba_institutional_1m_500k.csv"
     ]
     use_data_path = DATA_PATH
     for p in possible_data_paths:
