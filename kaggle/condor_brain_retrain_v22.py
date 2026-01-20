@@ -69,7 +69,7 @@ import matplotlib.pyplot as plt
 #   3M rows ≈ 30K unique spot bars (~5 min compute)
 #   Full dataset: ~10M rows ≈ 100K unique spot bars
 
-ROWS_TO_LOAD = 100_000    # 🧪 TEST RUN 🧪
+ROWS_TO_LOAD = 500_000    # 🧪 TEST RUN (Medium) 🧪
 EPOCHS = 3                # Test: 3 epochs
 
 # Derived estimate
@@ -161,21 +161,43 @@ except Exception as e:
 print(f"\n[1/4] Loading & Processing {ROWS_TO_LOAD:,} Rows...")
 
 # Auto-detect environment: Kaggle vs Colab vs Local
-KAGGLE_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
-COLAB_PATH = "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m.csv"
-COLAB_ROOT_PATH = "data/processed/mamba_institutional_1m.csv"  # If already in repo root
-LOCAL_PATH = "data/processed/mamba_institutional_1m.csv"
+POSSIBLE_PATHS = [
+    "/kaggle/input/spy-options-data/mamba_institutional_1m.csv",
+    "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m.csv",
+    "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m_500k.csv", # New variant
+    "data/processed/mamba_institutional_1m.csv",
+    "data/processed/mamba_institutional_1m_500k.csv",
+    "mamba_institutional_1m.csv",
+    "mamba_institutional_1m_500k.csv"
+]
 
-for p in [KAGGLE_PATH, COLAB_PATH, COLAB_ROOT_PATH, LOCAL_PATH]:
+for p in POSSIBLE_PATHS:
     if os.path.exists(p):
         DATA_PATH = p
         break
 else:
-    raise FileNotFoundError(f"Data file not found!")
+    # Debug: List what IS there
+    print(f"DEBUG: CWD Files: {os.listdir('.')}")
+    if os.path.exists('data/processed'):
+        print(f"DEBUG: data/processed Files: {os.listdir('data/processed')}")
+    raise FileNotFoundError(f"Data file not found! Checked: {POSSIBLE_PATHS}")
+
+ROWS_TO_LOAD = 100_000    # 🧪 TEST RUN 🧪
+SLICE_MODE = "LAST"       # "LAST" (Recent) or "FIRST" (Oldest)
 
 print(f"   Data: {DATA_PATH}")
-df = pd.read_csv(DATA_PATH).iloc[-ROWS_TO_LOAD:]
-print(f"   Shape: {df.shape}")
+
+if SLICE_MODE == "LAST":
+    # Load all keys, slice last N
+    # Read optimized if file is large? For 500k file, read_csv is fast.
+    df = pd.read_csv(DATA_PATH)
+    if len(df) > ROWS_TO_LOAD:
+        df = df.iloc[-ROWS_TO_LOAD:]
+else:
+    # Load first N
+    df = pd.read_csv(DATA_PATH, nrows=ROWS_TO_LOAD)
+
+print(f"   Shape: {df.shape} ({SLICE_MODE} rows)")
 
 # V2.2 FEATURE SCHEMA (52 features: 32 V2.1 + 20 primitives)
 FEATURE_COLS = FEATURE_COLS_V22
