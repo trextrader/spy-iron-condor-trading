@@ -1,4 +1,100 @@
-"""
+Already up to date.
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/selective_scan_interface.py:163: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  @custom_fwd
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/selective_scan_interface.py:239: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  @custom_bwd
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/triton/layer_norm.py:985: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  @custom_fwd
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/triton/layer_norm.py:1044: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  @custom_bwd
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/distributed/tensor_parallel.py:25: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  @custom_fwd
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/distributed/tensor_parallel.py:61: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  @custom_bwd
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/triton/ssd_combined.py:757: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  @custom_fwd
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/triton/ssd_combined.py:835: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  @custom_bwd
+Found data at: /content/spy-iron-condor-trading/data/mamba_institutional_1m_500k.csv
+Loading data from /content/spy-iron-condor-trading/data/mamba_institutional_1m_500k.csv...
+Computing V2.1 Dynamic Features...
+   Computing dynamic features...
+   ✅ Added dynamic features + spread_ratio
+Computing V2.2 Primitive Features...
+   Computing V2.2 primitive features...
+   ✅ Added 20 V2.2 primitive features
+Initializing Rule Engine from docs/Complete_Ruleset_DSL.yaml...
+INFO:intelligence.rule_engine.dsl_parser:Loaded 13 rules from docs/Complete_Ruleset_DSL.yaml (v2.5)
+Executing Rules Vectorized...
+Traceback (most recent call last):
+  File "/content/spy-iron-condor-trading/kaggle/condor_brain_backtest_v2.py", line 309, in <module>
+    main()
+  File "/content/spy-iron-condor-trading/kaggle/condor_brain_backtest_v2.py", line 246, in main
+    df, rule_signals = run_rule_engine(df, RULESET_PATH)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/spy-iron-condor-trading/kaggle/condor_brain_backtest_v2.py", line 103, in run_rule_engine
+    results = engine.execute(df)
+              ^^^^^^^^^^^^^^^^^^
+  File "/content/spy-iron-condor-trading/intelligence/rule_engine/executor.py", line 422, in execute
+    signals = self._evaluate_signal_logic(rule, primitives, data)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/spy-iron-condor-trading/intelligence/rule_engine/executor.py", line 313, in _evaluate_signal_logic
+    idx = get_index()
+          ^^^^^^^^^^^
+  File "/content/spy-iron-condor-trading/intelligence/rule_engine/executor.py", line 308, in get_index
+    if data:
+       ^^^^
+  File "/usr/local/lib/python3.12/dist-packages/pandas/core/generic.py", line 1580, in __nonzero__
+    raise ValueError(
+ValueError: The truth value of a DataFrame is ambiguous. Use a.empty, a.bool(), a.item(), a.any() or a.all().Already up to date.
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/selective_scan_interface.py:163: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  @custom_fwd
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/selective_scan_interface.py:239: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  @custom_bwd
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/triton/layer_norm.py:985: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  @custom_fwd
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/triton/layer_norm.py:1044: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  @custom_bwd
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/distributed/tensor_parallel.py:25: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  @custom_fwd
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/distributed/tensor_parallel.py:61: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  @custom_bwd
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/triton/ssd_combined.py:757: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  @custom_fwd
+/usr/local/lib/python3.12/dist-packages/mamba_ssm/ops/triton/ssd_combined.py:835: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  @custom_bwd
+Found data at: /content/spy-iron-condor-trading/data/mamba_institutional_1m_500k.csv
+Loading data from /content/spy-iron-condor-trading/data/mamba_institutional_1m_500k.csv...
+Computing V2.1 Dynamic Features...
+   Computing dynamic features...
+   ✅ Added dynamic features + spread_ratio
+Computing V2.2 Primitive Features...
+   Computing V2.2 primitive features...
+   ✅ Added 20 V2.2 primitive features
+Initializing Rule Engine from docs/Complete_Ruleset_DSL.yaml...
+INFO:intelligence.rule_engine.dsl_parser:Loaded 13 rules from docs/Complete_Ruleset_DSL.yaml (v2.5)
+Executing Rules Vectorized...
+Traceback (most recent call last):
+  File "/content/spy-iron-condor-trading/kaggle/condor_brain_backtest_v2.py", line 309, in <module>
+    main()
+  File "/content/spy-iron-condor-trading/kaggle/condor_brain_backtest_v2.py", line 246, in main
+    df, rule_signals = run_rule_engine(df, RULESET_PATH)
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/spy-iron-condor-trading/kaggle/condor_brain_backtest_v2.py", line 103, in run_rule_engine
+    results = engine.execute(df)
+              ^^^^^^^^^^^^^^^^^^
+  File "/content/spy-iron-condor-trading/intelligence/rule_engine/executor.py", line 422, in execute
+    signals = self._evaluate_signal_logic(rule, primitives, data)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/spy-iron-condor-trading/intelligence/rule_engine/executor.py", line 313, in _evaluate_signal_logic
+    idx = get_index()
+          ^^^^^^^^^^^
+  File "/content/spy-iron-condor-trading/intelligence/rule_engine/executor.py", line 308, in get_index
+    if data:
+       ^^^^
+  File "/usr/local/lib/python3.12/dist-packages/pandas/core/generic.py", line 1580, in __nonzero__
+    raise ValueError(
+ValueError: The truth value of a DataFrame is ambiguous. Use a.empty, a.bool(), a.item(), a.any() or a.all()."""
 CondorBrain V2.2 Backtest (with Rule Engine)
 ============================================
 Integrates CondorBrain V2.2 Model (52 features) with Rule Engine V2.5.
@@ -247,14 +343,14 @@ def main():
     
     # 3. Model
     POSSIBLE_PATHS = [
-        "condor_brain_retrain_v22_e2.pth", # Latest check
+        "condor_brain_retrain_v22_e3.pth", # 🚀 Final Model
+        "condor_brain_retrain_v22_e2.pth", 
         "condor_brain_retrain_v22_e1.pth", 
-        "condor_brain_retrain_v22_e3.pth",
         "condor_brain_retrain_e3.pth",
         "/kaggle/working/condor_brain_retrain_e3.pth",
+        "/kaggle/working/condor_brain_retrain_v22_e3.pth", # Colab E3
         "/kaggle/working/condor_brain_retrain_v22_e1.pth", 
-        "/kaggle/working/condor_brain_retrain_v22_e2.pth", # Colab E2
-        "/kaggle/working/condor_brain_retrain_v22_e3.pth"
+        "/kaggle/working/condor_brain_retrain_v22_e2.pth"
     ]
     model_path = MODEL_PATH
     for p in POSSIBLE_PATHS:
