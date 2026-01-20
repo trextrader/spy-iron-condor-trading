@@ -178,6 +178,10 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
         prob_profit = pol[0, 4]
         confidence = pol[0, 7]
         
+        # DEBUG: Print model outputs for first 10 bars
+        if i < SEQ_LEN + 10:
+            print(f"Bar {i}: conf={confidence:.4f}, prob_profit={prob_profit:.4f}, rule_signal={rule_signals.iloc[i].sum() if rule_signals is not None else 0}")
+        
         # 3. Rule Signal Check (Look up pre-computed signal)
         action = 0
         net_rule_signal = 0
@@ -187,8 +191,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
              net_rule_signal = rule_signals.iloc[i].sum()
         
         if position == 0:
-            # Hybrid Entry: Model Confident AND Rules Support (or Neutral)
-            if confidence > 0.6 and prob_profit > 0.6:
+            # Hybrid Entry: Lower thresholds for testing
+            # Original: confidence > 0.6 and prob_profit > 0.6
+            if confidence > 0.3 or prob_profit > 0.3:  # Relaxed for testing
                 if net_rule_signal >= 0: 
                     action = 1
                     trades.append({'idx': i, 'type': 'LONG', 'price': df['close'].iloc[i], 'conf': float(confidence), 'rules': float(net_rule_signal)})
