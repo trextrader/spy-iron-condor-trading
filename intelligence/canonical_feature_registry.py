@@ -291,6 +291,7 @@ FEATURE_COLS_V22: List[str] = [
     "friction_ratio",       # P004: Spread / AvgRange
     "exec_allow",           # P004: Friction gate output
     "gap_risk_score",       # P005: Composite gap risk
+    "risk_override",        # P005: Gap risk override flag
     "iv_confidence",        # P006: exp(-λ * lag_minutes)
     "mtf_consensus",        # P007: Multi-timeframe consensus
     
@@ -325,6 +326,7 @@ NEUTRAL_FILL_VALUES_V22: Dict[str, float] = {
     "friction_ratio": 0.5,      # Mid-friction
     "exec_allow": 1.0,          # Allow by default
     "gap_risk_score": 0.0,      # No gap risk
+    "risk_override": 0.0,       # No override
     "iv_confidence": 1.0,       # Full confidence
     "mtf_consensus": 0.0,       # Neutral consensus
     "macd_norm": 0.0,           # No momentum

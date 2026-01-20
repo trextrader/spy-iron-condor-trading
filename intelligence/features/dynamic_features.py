@@ -594,6 +594,7 @@ def compute_all_primitive_features_v22(
         g_crit=0.7,
     )
     df["gap_risk_score"] = gap_result["gap_risk_score"].astype(np.float32)
+    df["risk_override"] = gap_result["risk_override"].astype(np.float32)
     
     # P006: IV confidence
     if lag_minutes_col in df.columns:
