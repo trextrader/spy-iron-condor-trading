@@ -101,29 +101,37 @@ class LogicEvaluator:
             return self.context[token]
             
         logger.warning(f"Token '{token}' not found in context")
-        return pd.Series(0, index=next(iter(self.context.values())).index) if self.context else 0
+        # Try to find a valid index from context to return zeros
+        idx = None
+        for v in self.context.values():
+            if hasattr(v, "index"):
+                idx = v.index
+                break
+            if isinstance(v, dict):
+                for sub_v in v.values():
+                    if hasattr(sub_v, "index"):
+                        idx = sub_v.index
+                        break
+            if idx is not None: break
+            
+        if idx is not None:
+            return pd.Series(0, index=idx)
+        return 0
 
     def evaluate(self, expr: str) -> pd.Series:
         if not expr:
             return None
-            
-        # Comparison logic (simple support)
-        # Matches: term > value, term < value, term >= value, term <= value, term == value
-        comp_match = re.match(r"(.+?)\s*(>=|<=|>|<|==)\s*(.+)", expr)
-        if comp_match:
-            left, op, right = comp_match.groups()
-            l_val = self._get_value(left)
-            r_val = self._get_value(right)
-            
-            if op == ">": return l_val > r_val
-            if op == "<": return l_val < r_val
-            if op == ">=": return l_val >= r_val
-            if op == "<=": return l_val <= r_val
-            if op == "==": return l_val == r_val
+        
+        expr = expr.strip()
 
-        # Logical operators
+        # Logical operators (Check these FIRST to avoid greedy regex matching inside parens)
+        # Note: This naive parser struggles with nested calls containing commas inside args
+        # e.g. AND(OR(A,B), C) work if split(",") handles nested parens. 
+        # For V2.5 MVP we assume flat logic at top level or handle carefully.
+        
         if expr.startswith("AND(") and expr.endswith(")"):
             inner = expr[4:-1]
+            # TODO: Robust split ignoring nested parens
             parts = [self.evaluate(p.strip()) for p in inner.split(",")]
             res = parts[0]
             for p in parts[1:]:
@@ -142,6 +150,20 @@ class LogicEvaluator:
             inner = expr[4:-1]
             val = self.evaluate(inner)
             return ~val
+            
+        # Comparison logic (simple support)
+        # Matches: term > value, term < value, term >= value, term <= value, term == value
+        comp_match = re.match(r"(.+?)\s*(>=|<=|>|<|==)\s*(.+)", expr)
+        if comp_match:
+            left, op, right = comp_match.groups()
+            l_val = self._get_value(left)
+            r_val = self._get_value(right)
+            
+            if op == ">": return l_val > r_val
+            if op == "<": return l_val < r_val
+            if op == ">=": return l_val >= r_val
+            if op == "<=": return l_val <= r_val
+            if op == "==": return l_val == r_val
 
         # Fallback to direct value lookup
         return self._get_value(expr)
@@ -172,56 +194,26 @@ class RuleExecutionEngine:
             
             # Map inputs
             kwargs = {}
-            # TODO: Map inputs from p_spec.inputs (e.g. {'close': 'close'})
-            # For now assuming canonical functions take kwargs fitting `data` + `params`
-            # This requires inspecting function signature or p_spec defining mapping
+            # Combine available data sources: input data + already computed outputs
+            # Note: This allows chaining if primitives are ordered topologically in rule
+            current_context = {**data, **outputs}
             
-            # Simple auto-mapping based on data keys + params
-            # This is "risky" but works if primitive args match data columns
-            # Ideally DSL defines 'inputs: {spread: spread_ratio}'
+            mapped_inputs = {}
+            for arg, src in p_spec.inputs.items():
+                if src in current_context:
+                    mapped_inputs[arg] = current_context[src]
+                elif "." in src:
+                    # Resolve alias.key from outputs
+                    alias, key = src.split(".", 1)
+                    if alias in outputs and isinstance(outputs[alias], dict):
+                        val = outputs[alias].get(key)
+                        if val is not None:
+                            mapped_inputs[arg] = val
             
-            # Merging data and params
-            # Note: In a real system, we'd use inspect.signature(func) to bind arguments
-            # Here we pass what we have; python functions will error if args missing.
-            # We catch TypeError to be safe? No, let it crash for now to debug.
-            
-            # Try to pass only what's needed? 
-            # We pass **data and **params. Collisions favors params.
-            
-            # Optimization: only pass args that function accepts? 
-            # For this Phase implementation, we'll assume primitive signatures match specific column names
-            # or we need a robust binder. Use explicit mapping if available.
-            
-            # Hardcoded fix for common mismatches if necessary
-            
-            # Merge context
-            call_kwargs = {**data, **p_spec.params}
+            # Combine mapped inputs, unmapped params, and remaining data (opportunistic)
+            effective_kwargs = {**data, **mapped_inputs, **p_spec.params}
             
             try:
-                # Filter call_kwargs to only valid arguments? 
-                # Or primitives accept **kwargs?
-                # Canonical primitives usually have specific args. 
-                # We'll trust the caller provided correct data names or use a binder helper
-                # For `bands.py`, args are `close`, `window`, etc. 
-                
-                # Check dsl definition for inputs mapping. 
-                # `PrimitiveSpec` has `inputs` dict.
-                # If inputs={'spread': 'spread_ratio'}, we map data['spread_ratio'] to 'spread' arg.
-                
-                mapped_inputs = {}
-                for arg, src in p_spec.inputs.items():
-                    if src in data:
-                        mapped_inputs[arg] = data[src]
-                    else:
-                        # Literal or failure
-                        pass
-                
-                # Combine mapped inputs, unmapped params, and remaining data (opportunistic)
-                # Primitives might need 'close', 'high' which are standard in data
-                
-                # Effective kwargs = params + mapped_inputs + data (for matching names)
-                effective_kwargs = {**data, **mapped_inputs, **p_spec.params}
-                
                 # We need to filter this to valid args only to avoid TypeError
                 import inspect
                 sig = inspect.signature(func)
