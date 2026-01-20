@@ -155,9 +155,15 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
     # Settings
     SEQ_LEN = 256
     capital = 100_000.0
-    position = 0 # 0=None, 1=Long, -1=Short
+    position = 0 # 0=None, 1=Long Iron Condor
     equity_curve = []
     trades = []
+    
+    # Trade state tracking (for expiration)
+    trade_entry_bar = None
+    trade_dte = None  # Days to expiration
+    BARS_PER_DAY = 390  # 1-min bars per trading day (6.5 hours)
+    DEFAULT_DTE = 14  # Default 14 DTE if model output is invalid
     
     model.eval()
     
@@ -259,16 +265,21 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
                     print(trade_msg)
                     log_file.write(trade_msg + "\n")
                     
+                    # Set DTE for expiration tracking
+                    trade_entry_bar = i
+                    trade_dte = te_suggested if te_suggested > 0 else DEFAULT_DTE
+                    
                     trades.append({
                         'idx': i, 
                         'type': 'IRON_CONDOR', 
+                        'action': 'OPEN',
                         'spot': spot,
                         'short_call': short_call_strike,
                         'long_call': long_call_strike,
                         'short_put': short_put_strike,
                         'long_put': long_put_strike,
                         'width': width,
-                        'dte': te_suggested,
+                        'dte': trade_dte,
                         'conf': float(confidence), 
                         'prob': float(prob_profit),
                         'rules': float(net_rule_signal)
@@ -280,27 +291,55 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
                 rejection_reason = f"LOW_CONFIDENCE (conf={confidence:.4f}, prob={prob_profit:.4f})"
         
         elif position == 1:
-            # Exit logic
-            if confidence < 0.3 or net_rule_signal < 0:
+            # Calculate remaining DTE
+            bars_held = i - trade_entry_bar if trade_entry_bar else 0
+            days_held = bars_held / BARS_PER_DAY
+            remaining_dte = trade_dte - days_held if trade_dte else 0
+            
+            # Exit conditions: 1) Expiration, 2) Low confidence, 3) Bearish rules
+            exit_reason = None
+            if remaining_dte <= 0:
+                exit_reason = f"EXPIRATION (DTE={remaining_dte:.1f})"
+            elif confidence < 0.3:
+                exit_reason = f"Low Confidence ({confidence:.4f})"
+            elif net_rule_signal < 0:
+                exit_reason = f"Bearish Rules ({net_rule_signal:.2f})"
+            
+            if exit_reason:
                 action = -1
                 spot = df['close'].iloc[i]
-                exit_reason = "Low Confidence" if confidence < 0.3 else "Bearish Rules"
+                
+                # Calculate simple P&L (spot change proxy)
+                entry_spot = trades[-1]['spot'] if trades and 'spot' in trades[-1] else spot
+                pnl_pct = (spot - entry_spot) / entry_spot * 100
                 
                 # EXIT STATS - Print immediately
                 exit_msg = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║ 🔔 TRADE EXIT: Close LONG @ Bar {i}
+║ 🔔 IRON CONDOR EXIT @ Bar {i}
 ╠══════════════════════════════════════════════════════════════════════════════╣
-║ Spot Price:    ${spot:.2f}
+║ Spot Price:    ${spot:.2f} (Entry: ${entry_spot:.2f})
 ║ Exit Reason:   {exit_reason}
+║ Days Held:     {days_held:.1f}
+║ Spot Change:   {pnl_pct:+.2f}%
 ║ Confidence:    {confidence:.4f}
 ║ Rule Signal:   {net_rule_signal:.2f}
 ╚══════════════════════════════════════════════════════════════════════════════╝"""
                 print(exit_msg)
                 log_file.write(exit_msg + "\n")
                 
-                trades.append({'idx': i, 'type': 'EXIT_LONG', 'price': spot, 'pnl': 0}) 
+                trades.append({
+                    'idx': i, 
+                    'type': 'IRON_CONDOR',
+                    'action': 'CLOSE',
+                    'spot': spot,
+                    'reason': exit_reason,
+                    'days_held': days_held,
+                    'pnl_pct': pnl_pct
+                }) 
                 position = 0
+                trade_entry_bar = None
+                trade_dte = None
         
         # LOG: ALL bars to file, first N to console
         spot = df['close'].iloc[i]
