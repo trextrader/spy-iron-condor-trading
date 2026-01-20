@@ -222,10 +222,27 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
             if conf_check or prob_check:
                 if rule_check:
                     action = 1
+                    spot = df['close'].iloc[i]
+                    trade_num = len(trades) + 1
+                    
+                    # TRADE STATS - Print immediately
+                    trade_msg = f"""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║ 🔔 TRADE #{trade_num}: ENTER LONG @ Bar {i}
+╠══════════════════════════════════════════════════════════════════════════════╣
+║ Spot Price:    ${spot:.2f}
+║ Confidence:    {confidence:.4f}  (threshold: 0.3)
+║ Prob Profit:   {prob_profit:.4f}  (threshold: 0.3)
+║ Rule Signal:   {net_rule_signal:.2f}  (must be >= 0)
+║ All Pol Out:   {[f'{x:.4f}' for x in pol[:8]]}
+╚══════════════════════════════════════════════════════════════════════════════╝"""
+                    print(trade_msg)
+                    log_file.write(trade_msg + "\n")
+                    
                     trades.append({
                         'idx': i, 
                         'type': 'LONG', 
-                        'price': df['close'].iloc[i], 
+                        'price': spot, 
                         'conf': float(confidence), 
                         'prob': float(prob_profit),
                         'rules': float(net_rule_signal)
@@ -240,7 +257,23 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
             # Exit logic
             if confidence < 0.3 or net_rule_signal < 0:
                 action = -1
-                trades.append({'idx': i, 'type': 'EXIT_LONG', 'price': df['close'].iloc[i], 'pnl': 0}) 
+                spot = df['close'].iloc[i]
+                exit_reason = "Low Confidence" if confidence < 0.3 else "Bearish Rules"
+                
+                # EXIT STATS - Print immediately
+                exit_msg = f"""
+╔══════════════════════════════════════════════════════════════════════════════╗
+║ 🔔 TRADE EXIT: Close LONG @ Bar {i}
+╠══════════════════════════════════════════════════════════════════════════════╣
+║ Spot Price:    ${spot:.2f}
+║ Exit Reason:   {exit_reason}
+║ Confidence:    {confidence:.4f}
+║ Rule Signal:   {net_rule_signal:.2f}
+╚══════════════════════════════════════════════════════════════════════════════╝"""
+                print(exit_msg)
+                log_file.write(exit_msg + "\n")
+                
+                trades.append({'idx': i, 'type': 'EXIT_LONG', 'price': spot, 'pnl': 0}) 
                 position = 0
         
         # LOG: ALL bars to file, first N to console
