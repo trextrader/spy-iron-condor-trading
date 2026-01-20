@@ -81,8 +81,13 @@ def run_rule_engine(df, ruleset_path):
             print(f"⚠️ Warning: Ruleset not found at {ruleset_path}. Skipping rules.")
             return df, None
             
-    parser = RuleDSLParser()
-    ruleset = parser.parse_ruleset(ruleset_path)
+    parser = RuleDSLParser(ruleset_path)
+    try:
+        ruleset = parser.load()
+    except Exception as e:
+        print(f"❌ Error loading ruleset: {e}")
+        return df, None
+        
     engine = RuleExecutionEngine(ruleset)
     
     print("Executing Rules Vectorized...")
