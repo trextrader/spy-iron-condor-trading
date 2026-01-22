@@ -149,9 +149,9 @@ def compute_gap_event_signal(
 
 
 def compute_chaos_dampening_signal(
-    chaos_membership: pd.Series,
-    position_size_multiplier: pd.Series,
-    chaos_warn: float,
+    chaos_membership: pd.Series = None,
+    position_size_multiplier: pd.Series = None,
+    chaos_warn: float = 0.8,
 ) -> dict:
     """
     S007 – Chaos Dampening Signal (E3)
@@ -162,8 +162,11 @@ def compute_chaos_dampening_signal(
             "size_mult": float Series,
         }
     """
+    if chaos_membership is None:
+        # Default: no chaos detected
+        return {"chaos_warn": pd.Series([False]), "size_mult": pd.Series([1.0])}
     cm = chaos_membership.fillna(0.0)
-    psm = position_size_multiplier.fillna(1.0)
+    psm = position_size_multiplier.fillna(1.0) if position_size_multiplier is not None else pd.Series([1.0] * len(cm))
     warn = cm >= chaos_warn
     return {"chaos_warn": warn, "size_mult": psm}
 

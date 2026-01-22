@@ -26,8 +26,8 @@ def compute_trend_strength_gate(
 
 
 def compute_reversion_fuzzy_gate(
-    fuzzy_reversion_11: pd.Series,
     threshold: float,
+    fuzzy_reversion_11: pd.Series = None,
 ) -> dict:
     """
     G004 – Fuzzy Reversion Gate (B1)
@@ -37,6 +37,9 @@ def compute_reversion_fuzzy_gate(
             "reversion_ok": bool Series
         }
     """
+    if fuzzy_reversion_11 is None:
+        # Default: neutral gate (always passes at 0.5 threshold)
+        return {"reversion_ok": pd.Series([True])}
     mu = fuzzy_reversion_11.fillna(0.5)
     reversion_ok = (mu >= threshold)
     return {"reversion_ok": reversion_ok}
@@ -130,8 +133,8 @@ def compute_gap_override_gate(
 
 
 def compute_position_size_gate(
-    position_size_multiplier: pd.Series,
-    min_mult: float,
+    position_size_multiplier: pd.Series = None,
+    min_mult: float = 0.1,
 ) -> dict:
     """
     G010 – Position Size Gate (Chaos dampening)
@@ -141,6 +144,8 @@ def compute_position_size_gate(
             "size_mult": float Series
         }
     """
+    if position_size_multiplier is None:
+        return {"size_mult": pd.Series([1.0])}
     psm = position_size_multiplier.fillna(1.0)
     psm = psm.clip(min_mult, 1.0)
     return {"size_mult": psm}

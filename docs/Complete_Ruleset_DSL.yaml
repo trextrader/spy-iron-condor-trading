@@ -1,21 +1,21 @@
 # ======================================================================
-# Complete Ruleset for CondorBrain/AntiGrav (All 13 Rules Encoded)
+# Complete Ruleset for CondorBrain/AntiGrav (All 14 Rules Encoded)
 # ======================================================================
 # Version: 2.5
-# Last Updated: 2026-01-19
-# Total Rules: 13 (6 perfect, 5 minor updates, 2 major updates)
+# Last Updated: 2026-01-20
+# Total Rules: 14 (6 perfect, 5 minor updates, 2 major updates, 1 new)
 # ======================================================================
 
 ruleset_metadata:
   version: "2.5"
-  total_rules: 13
+  total_rules: 14
   categories:
     trend_following: 3  # A1, A2, A3
     mean_reversion: 3  # B1, B2, PSAR Reversion
     breakout: 2  # C1, C2
     momentum: 2  # D1, D2
     volatility: 2  # E2, E3
-    execution_filter: 1  # E1
+    execution_filter: 2  # E1, SPREAD
 
   alignment:
     deep_mamba: "v2.5"
@@ -492,6 +492,94 @@ RULE_E3:
     feature_output: true
     auxiliary_target: true  # Train chaos classifier
     constraint_layer: true  # Fuzzy dampening layer
+
+RULE_SPREAD:
+  id: "RULE_SPREAD"
+  name: "Execution Friction Gate with Tail Gap Override"
+  version: "1.0"
+  status: "perfect"
+  category: "execution_filter"
+  strategy_type: "gating"
+  
+  description: |
+    Institutional execution filter that prevents trades when spread exceeds
+    realized price range. Includes dynamic threshold adjustment and tail gap
+    override for risk management.
+  
+  requires:
+    primitives: ["P001", "P007", "G001", "G002", "G010"]
+    features: ["spread_ratio", "avg_range", "vol_ewma", "bw_percentile", "volume_ratio"]
+    timeframes: ["1m"]
+  
+  primitives:
+    - id: "P001"
+      alias: "bb"
+      
+    - id: "P007"
+      alias: "vol"
+      params:
+        lookback: 20
+        
+    - id: "G001"
+      alias: "friction"
+      params:
+        n_bars: 20  # AvgRange window
+      outputs:
+        friction_ratio: "Spread / AvgRange(n)"
+        
+    - id: "G002"
+      alias: "gap_risk"
+      outputs:
+        gap_score: "Gap risk score [0,1]"
+        
+    - id: "G010"
+      alias: "dynamic_threshold"
+      params:
+        theta_base: 1.0
+        theta_min: 0.5
+        theta_max: 2.0
+      outputs:
+        theta: "Dynamic threshold θ(t)"
+  
+  signals:
+    entry:
+      long:
+        logic: "friction.friction_ratio < dynamic_threshold.theta"
+        min_confidence: 0.5
+      short:
+        logic: "friction.friction_ratio < dynamic_threshold.theta"
+        min_confidence: 0.5
+    
+    exit:
+      logic: "OR(friction.friction_ratio >= dynamic_threshold.theta, gap_risk.gap_score >= 0.8)"
+  
+  gates:
+    - id: "G001"
+      type: "BLOCK"
+      action: "block"
+      params:
+        threshold: 1.0  # Block if friction_ratio >= 1.0
+        
+    - id: "G002"
+      type: "OVERRIDE"
+      action: "force_exit"
+      params:
+        g_crit: 0.8  # Force exit if gap_risk >= 0.8
+  
+  sizing:
+    method: "fixed"
+    base_size: 1
+  
+  risk:
+    # Tail gap override supersedes execution gating
+    gap_override:
+      enabled: true
+      threshold: 0.8
+      action: "force_exit"
+  
+  model_integration:
+    feature_output: true
+    auxiliary_target: true  # Train exec_allow and gap_risk predictors
 
 # ======================================================================
 # RULE COMBINATION STRATEGIES

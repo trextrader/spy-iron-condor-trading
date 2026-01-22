@@ -16,8 +16,10 @@ import os
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
+import time
 from typing import Tuple, Optional
 from dataclasses import dataclass
+from tqdm import tqdm
 
 # Add project root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -314,11 +316,11 @@ def generate_condor_targets(
     df['realized_max_loss'] = realized_max_loss
     df['confidence_target'] = confidence_target
     
-    # Regime labeling based on IVR
+    # Regime labeling based on IVR (0-1 range)
     if 'ivr' in df.columns:
         df['regime_label'] = pd.cut(
             df['ivr'], 
-            bins=[-0.1, 30, 70, 101], 
+            bins=[-0.1, 0.3, 0.7, 1.1], 
             labels=[0, 1, 2]
         ).astype(int)
     else:
@@ -352,18 +354,68 @@ def main():
     print("CONDORBRAIN TARGET GENERATOR")
     print("="*60)
     
-    # Load data
-    print(f"Loading {args.input}...")
-    if args.max_rows > 0:
-        df = pd.read_csv(args.input, nrows=args.max_rows)
-    else:
-        df = pd.read_csv(args.input)
+    # Load only required columns for simulation + keep all for merge
+    # Actually, it's safer to load only essentials, compute targets, and merge back
+    cols_to_load = ['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'ivr']
+    # Check if 'dt' or 'timestamp' is used
+    t0 = time.time()
+    print(f"Loading essentials from {args.input}...")
     
-    print(f"Loaded {len(df):,} rows")
+    # Peek for columns
+    peek = pd.read_csv(args.input, nrows=0)
+    actual_cols = [c for c in cols_to_load if c in peek.columns]
+    if 'dt' in peek.columns and 'dt' not in actual_cols:
+        actual_cols.append('dt')
+    
+    df_small = pd.read_csv(args.input, usecols=actual_cols)
+    print(f"Loaded {len(df_small):,} rows (essentials only) in {time.time()-t0:.1f}s")
+    
+    # Rename dt if needed
+    if 'timestamp' in df_small.columns and 'dt' not in df_small.columns:
+        df_small['dt'] = df_small['timestamp']
     
     # Generate targets
     output = args.output or args.input.replace('.csv', '_targets.csv')
-    df = generate_condor_targets(df, output_path=output, sample_rate=args.sample_rate)
+    df_targets = generate_condor_targets(df_small, sample_rate=args.sample_rate)
+    
+    # Now merge target columns back to the ORIGINAL file without loading it all at once?
+    # Or just save the targets-only file for now?
+    # User wants "correct columns and data filled in", so we should overwrite or merge.
+    
+    print(f"Merging targets back to {args.input}...")
+    # We'll do this in chunks to save RAM
+    temp_out = args.input + ".tmp"
+    target_cols = [
+        'target_call_offset', 'target_put_offset', 'target_wing_width', 'target_dte',
+        'was_profitable', 'realized_roi', 'realized_max_loss', 'confidence_target', 'regime_label'
+    ]
+    
+    # Create a lookup for targets
+    # Convert index to string to match CSV reading (which returns strings for dates)
+    # We use a consistent format for the mapping
+    dt_targets = df_targets.drop_duplicates('dt').copy()
+    dt_targets['dt_str'] = dt_targets['dt'].dt.strftime("%Y-%m-%d %H:%M:%S%z")
+    dt_targets_map = dt_targets.set_index('dt_str')[target_cols]
+    
+    first_chunk = True
+    with pd.read_csv(args.input, chunksize=500000) as reader:
+        for chunk in tqdm(reader, desc="Merging chunks"):
+            if 'timestamp' in chunk.columns and 'dt' not in chunk.columns:
+                chunk['dt'] = chunk['timestamp']
+            
+            # Use string mapping
+            for col in target_cols:
+                chunk[col] = chunk['dt'].map(dt_targets_map[col])
+            
+            # Write
+            if first_chunk:
+                chunk.to_csv(temp_out, index=False, mode='w')
+                first_chunk = False
+            else:
+                chunk.to_csv(temp_out, index=False, mode='a', header=False)
+    
+    # Swap
+    os.replace(temp_out, args.input)
     
     print("="*60)
     print("TARGET GENERATION COMPLETE")

@@ -485,7 +485,7 @@ def compute_all_dynamic_features(
         # Default if missing (e.g. OHLCV only)
         df["spread_ratio"] = 0.0001 # 1bp default
     
-    print(f"   ✅ Added dynamic features + spread_ratio")
+    print(f"   [OK] Added dynamic features + spread_ratio")
     
     return df
 

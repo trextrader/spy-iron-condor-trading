@@ -34,7 +34,17 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 import os
-from torch.utils.tensorboard import SummaryWriter
+try:
+    from torch.utils.tensorboard import SummaryWriter
+    HAS_TENSORBOARD = True
+except ImportError:
+    HAS_TENSORBOARD = False
+    print("⚠️ TensorBoard not found. Logging disabled.")
+    class SummaryWriter:
+        def __init__(self, log_dir=None): pass
+        def add_scalar(self, tag, scalar_value, global_step=None): pass
+        def close(self): pass
+
 from intelligence.condor_brain import CondorBrain
 from intelligence.canonical_feature_registry import (
     FEATURE_COLS_V22, INPUT_DIM_V22, VERSION_V22,
@@ -72,12 +82,55 @@ import matplotlib.pyplot as plt
 ROWS_TO_LOAD = 500_000    # 🧪 TEST RUN (Medium) 🧪
 EPOCHS = 3                # Test: 3 epochs
 
+# --- ARGPARSE CONFIGURATION (for dual-model experiment) ---
+import argparse
+parser = argparse.ArgumentParser(description="CondorBrain Training V2.2")
+parser.add_argument("--start-date", type=str, default=None, help="Start date filter (YYYY-MM-DD)")
+parser.add_argument("--end-date", type=str, default=None, help="End date filter (YYYY-MM-DD)")
+parser.add_argument("--model-suffix", type=str, default="", help="Model filename suffix (e.g., '_2024')")
+parser.add_argument("--epochs", type=int, default=None, help="Override EPOCHS config")
+parser.add_argument("--use-precomputed-v21", action="store_true", help="Use V21 precomputed features (skip dynamic feature computation)")
+parser.add_argument("--use-diffusion", action="store_true", help="Enable diffusion from epoch 0")
+parser.add_argument("--rows", type=int, default=None, help="Override ROWS_TO_LOAD")
+parser.add_argument("--input", type=str, default=None, help="Override input dataset path")
+
+# Parse args (handle Jupyter/Colab gracefully)
+try:
+    args, unknown = parser.parse_known_args()
+except:
+    args = argparse.Namespace(
+        start_date=None, end_date=None, model_suffix="",
+        epochs=None, use_precomputed_v21=False, use_diffusion=False, rows=None,
+        input=None
+    )
+
+# Apply argument overrides
+if args.epochs:
+    EPOCHS = args.epochs
+if args.rows:
+    ROWS_TO_LOAD = args.rows
+if args.use_diffusion:
+    DIFFUSION_WARMUP_EPOCHS = 0  # Enable diffusion from epoch 0
+
+MODEL_SUFFIX = args.model_suffix
+USE_PRECOMPUTED_V21 = args.use_precomputed_v21
+DATE_FILTER_START = args.start_date
+DATE_FILTER_END = args.end_date
+
+if DATE_FILTER_START or DATE_FILTER_END:
+    print(f"📅 Date Filter: {DATE_FILTER_START or 'start'} → {DATE_FILTER_END or 'end'}")
+if MODEL_SUFFIX:
+    print(f"📛 Model Suffix: {MODEL_SUFFIX}")
+if USE_PRECOMPUTED_V21:
+    print(f"⚡ Using Precomputed V21 Features (skipping dynamic computation)")
+
 # Derived estimate
 estimated_spots = max(ROWS_TO_LOAD // 100, 100)  # ~100 options per spot bar
 print(f"📊 Config: {ROWS_TO_LOAD:,} rows, {EPOCHS} epochs")
 
 BATCH_SIZE = 128
 LR = 1e-4  # Lowered from 5e-4 for stability
+
 SEQ_LEN = 256
 PREDICT_HORIZON = 32
 
@@ -85,10 +138,16 @@ PREDICT_HORIZON = 32
 DIFFUSION_WARMUP_EPOCHS = 2  # Skip diffusion for first 2 epochs (0, 1)
 DIFFUSION_STEPS_TRAIN = 50
 
-device = torch.device('cuda')
-n_gpus = torch.cuda.device_count()
-USE_DATAPARALLEL = (n_gpus > 1)  # Auto-detect: Kaggle dual T4 vs Colab single T4
-print(f"   GPU: {torch.cuda.get_device_name(0)} x{n_gpus} (DataParallel={'ON' if USE_DATAPARALLEL else 'OFF'})")
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+    n_gpus = torch.cuda.device_count()
+    USE_DATAPARALLEL = (n_gpus > 1)
+    print(f"   GPU: {torch.cuda.get_device_name(0)} x{n_gpus} (DataParallel={'ON' if USE_DATAPARALLEL else 'OFF'})")
+else:
+    device = torch.device('cpu')
+    n_gpus = 0
+    USE_DATAPARALLEL = False
+    print("   ⚠️ CUDA not available. Running on CPU (this will be slow).")
 
 from typing import List, Tuple
 def _isfinite_np(x: np.ndarray) -> bool:
@@ -161,6 +220,15 @@ except Exception as e:
 print(f"\n[1/4] Loading & Processing {ROWS_TO_LOAD:,} Rows...")
 
 # Auto-detect environment: Kaggle vs Colab vs Local
+# V21 precomputed paths (prioritized when USE_PRECOMPUTED_V21 is True)
+V21_PATHS = [
+    "/kaggle/input/spy-options-data/mamba_institutional_1m_v21.csv",
+    "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m_v21.csv",
+    "/content/spy-iron-condor-trading/data/mamba_institutional_1m_v21.csv",
+    "data/processed/mamba_institutional_1m_v21.csv",
+    "data/mamba_institutional_1m_v21.csv",
+]
+
 POSSIBLE_PATHS = [
     "/kaggle/input/spy-options-data/mamba_institutional_1m.csv",
     "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m.csv",
@@ -173,18 +241,34 @@ POSSIBLE_PATHS = [
     "mamba_institutional_1m_500k.csv"
 ]
 
-for p in POSSIBLE_PATHS:
+# Prioritize User Input, then V21, then Standard
+if args.input:
+    search_paths = [args.input]
+    print(f"🎯 Using User Specified Input: {args.input}")
+elif USE_PRECOMPUTED_V21:
+    search_paths = V21_PATHS + POSSIBLE_PATHS
+else:
+    search_paths = POSSIBLE_PATHS
+
+DATA_PATH = None
+for p in search_paths:
     if os.path.exists(p):
         DATA_PATH = p
         break
-else:
+
+if DATA_PATH is None:
     # Debug: List what IS there
     print(f"DEBUG: CWD Files: {os.listdir('.')}")
     if os.path.exists('data'):
         print(f"DEBUG: data/ Files: {os.listdir('data')}")
     if os.path.exists('data/processed'):
         print(f"DEBUG: data/processed Files: {os.listdir('data/processed')}")
-    raise FileNotFoundError(f"Data file not found! Checked: {POSSIBLE_PATHS}")
+    raise FileNotFoundError(f"Data file not found! Checked: {search_paths}")
+
+# Check if using V21 precomputed data
+IS_V21_DATA = 'v21' in DATA_PATH.lower()
+if IS_V21_DATA:
+    print(f"   ✅ Using V21 Precomputed Data")
 
 ROWS_TO_LOAD = 3_000_000  # ⚡ PRODUCTION RUN ⚡
 SLICE_MODE = "FIRST"      # Load full dataset (usually starts from beginning)
@@ -200,7 +284,40 @@ else:
     # Load first N (Standard behavior)
     df = pd.read_csv(DATA_PATH, nrows=ROWS_TO_LOAD)
 
-print(f"   Shape: {df.shape} ({SLICE_MODE} rows)")
+print(f"   Loaded Shape: {df.shape}")
+
+# --- DATE FILTERING (for dual-model experiment) ---
+if DATE_FILTER_START or DATE_FILTER_END:
+    # Detect datetime column
+    dt_col = None
+    for col in ['dt', 'timestamp', 'datetime', 'date']:
+        if col in df.columns:
+            dt_col = col
+            break
+    
+    if dt_col:
+        # Parse datetime
+        df[dt_col] = pd.to_datetime(df[dt_col], errors='coerce')
+        
+        original_len = len(df)
+        if DATE_FILTER_START:
+            start_dt = pd.to_datetime(DATE_FILTER_START)
+            df = df[df[dt_col] >= start_dt]
+        if DATE_FILTER_END:
+            end_dt = pd.to_datetime(DATE_FILTER_END)
+            df = df[df[dt_col] < end_dt]
+        
+        filtered_len = len(df)
+        print(f"   📅 Date filter applied: {original_len:,} → {filtered_len:,} rows")
+        print(f"      Date range: {df[dt_col].min()} → {df[dt_col].max()}")
+        
+        # Reset index after filtering
+        df = df.reset_index(drop=True)
+    else:
+        print(f"   ⚠️ No datetime column found for date filtering, skipping...")
+
+print(f"   Final Shape: {df.shape} ({SLICE_MODE} rows)")
+
 
 # V2.2 FEATURE SCHEMA (52 features: 32 V2.1 + 20 primitives)
 FEATURE_COLS = FEATURE_COLS_V22
@@ -240,61 +357,72 @@ Y_feat_np = np.clip(Y_feat_np, -10.0, 10.0)
 # =========================================================================
 # CRITICAL: Compute dynamic features on UNIQUE SPOT bars, then merge back.
 # (Options data has ~100 rows per timestamp with same OHLCV)
+# For V21 precomputed data: SKIP computation, features already exist!
 # =========================================================================
-print("   Extracting unique spot bars...")
-ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
-spot_key_cols = ['symbol', 'dt'] if 'dt' in df.columns else ['symbol']
-if 'dt' not in df.columns and 'timestamp' in df.columns:
-    spot_key_cols = ['symbol', 'timestamp']
 
-# Find actual datetime column
-dt_col = None
-for c in ['dt', 'timestamp', 'datetime', 'date']:
-    if c in df.columns:
-        dt_col = c
-        spot_key_cols = ['symbol', c] if 'symbol' in df.columns else [c]
-        break
+# Check if V21 precomputed features already exist
+v21_required_cols = ['rsi_dyn', 'adx_adaptive', 'psar_adaptive', 'bb_lower_dyn', 'bb_upper_dyn', 'stoch_k_dyn']
+v21_cols_present = all(c in df.columns for c in v21_required_cols)
 
-if dt_col is None:
-    # No datetime column - use row order (rare case)
-    print("   ⚠️ No datetime column found, computing on all rows...")
-    df = compute_all_dynamic_features(df, close_col="close", high_col="high", low_col="low")
+if (IS_V21_DATA or USE_PRECOMPUTED_V21) and v21_cols_present:
+    print("   ⚡ V21 precomputed features detected - SKIPPING dynamic feature computation")
+    print(f"      Precomputed columns present: {len([c for c in FEATURE_COLS if c in df.columns])}/{len(FEATURE_COLS)}")
+    # No need to compute, features already in df
 else:
-    # Extract unique spots
-    # Retain auxiliary columns needed for Primitives if they exist
-    aux_cols = []
-    for c in ["spread_ratio", "lag_minutes"]:
+    print("   Extracting unique spot bars...")
+    ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
+    spot_key_cols = ['symbol', 'dt'] if 'dt' in df.columns else ['symbol']
+    if 'dt' not in df.columns and 'timestamp' in df.columns:
+        spot_key_cols = ['symbol', 'timestamp']
+
+    # Find actual datetime column
+    dt_col = None
+    for c in ['dt', 'timestamp', 'datetime', 'date']:
         if c in df.columns:
-            aux_cols.append(c)
-    
-    spot_df = df.drop_duplicates(subset=spot_key_cols)[spot_key_cols + ohlcv_cols + aux_cols].copy()
-    spot_df = spot_df.sort_values(spot_key_cols).reset_index(drop=True)
-    n_unique = len(spot_df)
-    print(f"   Unique spot bars: {n_unique:,} (from {len(df):,} options rows)")
-    if n_unique > 0:
-        rows_per_bar = len(df) / float(n_unique)
-        print(f"   Rows per spot bar (avg): {rows_per_bar:.2f}")
-    
-    # Compute dynamic features on spots only (V2.1 base)
-    print("   Computing dynamic features on spot bars...")
-    spot_df = compute_all_dynamic_features(spot_df, close_col="close", high_col="high", low_col="low")
-    
-    # Compute V2.2 primitive features
-    print("   Computing V2.2 primitive features...")
-    spot_df = compute_all_primitive_features_v22(
-        spot_df,
-        close_col="close", high_col="high", low_col="low",
-        volume_col="volume",
-        spread_col="spread_ratio" if "spread_ratio" in spot_df.columns else "close",
-    )
-    
-    # Get dynamic columns and merge back
-    # Exclude aux_cols (like spread_ratio) if they were already in df to prevent collision/suffixes
-    exclude_cols = spot_key_cols + ohlcv_cols + aux_cols
-    dynamic_cols = [c for c in spot_df.columns if c not in exclude_cols]
-    print(f"   Dynamic columns: {len(dynamic_cols)}")
-    merge_cols = spot_key_cols + dynamic_cols
-    df = df.merge(spot_df[merge_cols], on=spot_key_cols, how='left')
+            dt_col = c
+            spot_key_cols = ['symbol', c] if 'symbol' in df.columns else [c]
+            break
+
+    if dt_col is None:
+        # No datetime column - use row order (rare case)
+        print("   ⚠️ No datetime column found, computing on all rows...")
+        df = compute_all_dynamic_features(df, close_col="close", high_col="high", low_col="low")
+    else:
+        # Extract unique spots
+        # Retain auxiliary columns needed for Primitives if they exist
+        aux_cols = []
+        for c in ["spread_ratio", "lag_minutes"]:
+            if c in df.columns:
+                aux_cols.append(c)
+        
+        spot_df = df.drop_duplicates(subset=spot_key_cols)[spot_key_cols + ohlcv_cols + aux_cols].copy()
+        spot_df = spot_df.sort_values(spot_key_cols).reset_index(drop=True)
+        n_unique = len(spot_df)
+        print(f"   Unique spot bars: {n_unique:,} (from {len(df):,} options rows)")
+        if n_unique > 0:
+            rows_per_bar = len(df) / float(n_unique)
+            print(f"   Rows per spot bar (avg): {rows_per_bar:.2f}")
+        
+        # Compute dynamic features on spots only (V2.1 base)
+        print("   Computing dynamic features on spot bars...")
+        spot_df = compute_all_dynamic_features(spot_df, close_col="close", high_col="high", low_col="low")
+        
+        # Compute V2.2 primitive features
+        print("   Computing V2.2 primitive features...")
+        spot_df = compute_all_primitive_features_v22(
+            spot_df,
+            close_col="close", high_col="high", low_col="low",
+            volume_col="volume",
+            spread_col="spread_ratio" if "spread_ratio" in spot_df.columns else "close",
+        )
+        
+        # Get dynamic columns and merge back
+        # Exclude aux_cols (like spread_ratio) if they were already in df to prevent collision/suffixes
+        exclude_cols = spot_key_cols + ohlcv_cols + aux_cols
+        dynamic_cols = [c for c in spot_df.columns if c not in exclude_cols]
+        print(f"   Dynamic columns: {len(dynamic_cols)}")
+        merge_cols = spot_key_cols + dynamic_cols
+        df = df.merge(spot_df[merge_cols], on=spot_key_cols, how='left')
 
 # X features (schema-driven columns)
 X_np = df[FEATURE_COLS].values.astype(np.float32)
@@ -484,16 +612,22 @@ if torch.isnan(x_sample).any():
 
 # --- 3. TRAINING LOOP ---
 print("\n[3/4] Retraining Loop (Balanced Loss)...")
-scaler = torch.amp.GradScaler('cuda')
+enable_amp = (device.type == 'cuda')
+scaler = torch.amp.GradScaler('cuda', enabled=enable_amp)
 
+# Initialize TensorBoard Writer
+tb_logdir = "runs/condor_brain"
 # Initialize TensorBoard Writer
 tb_logdir = "runs/condor_brain"
 writer = SummaryWriter(log_dir=tb_logdir)
 
 print("📊 Launching TensorBoard inline...")
-if not "_TB_STARTED" in globals():
-    _maybe_launch_tensorboard_inline(tb_logdir, port=6006)
-    _TB_STARTED = True
+if HAS_TENSORBOARD and not "_TB_STARTED" in globals():
+    try:
+        _maybe_launch_tensorboard_inline(tb_logdir, port=6006)
+        _TB_STARTED = True
+    except:
+        pass
 
 for epoch in range(EPOCHS):
     model.train()
@@ -534,7 +668,7 @@ for epoch in range(EPOCHS):
         
         optimizer.zero_grad(set_to_none=True)
         
-        with torch.amp.autocast('cuda'):
+        with torch.amp.autocast(device.type, enabled=enable_amp):
             # Only pass diffusion target if we are past warmup
             traj_target = y_traj if use_diffusion else None
             
@@ -757,7 +891,7 @@ for epoch in range(EPOCHS):
             print(f"[TensorBoard] Image logging error: {e}")
 
     # Save Checkpoint with Metadata
-    save_path = f"condor_brain_retrain_e{epoch+1}.pth"
+    save_path = f"condor_brain_retrain{MODEL_SUFFIX}_e{epoch+1}.pth"
     
     state_dict = model.module.state_dict() if isinstance(model, nn.DataParallel) else model.state_dict()
     

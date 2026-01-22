@@ -1,0 +1,292 @@
+digraph CondorBrainPortraitWhite {
+    rankdir=TB;
+    ratio=compress;
+    size="8.5,14!";
+    dpi=300;
+    splines=curved;
+    center=true;
+    ranksep=0.6;
+    nodesep=0.4;
+    bgcolor="white"; // WHITE BACKGROUND
+    fontname="Helvetica";
+    fontsize=12;
+    labelloc="t";
+    label="Quantor‑MTFuzz™ — CondorBrain™ V2.2 + V2.5 Architecture (Portrait Enterprise Style, White Background)";
+
+    // GLOBAL NODE STYLE — enterprise clean
+    node [
+        shape=box,
+        style="rounded,filled",
+        fontname="Helvetica",
+        fontsize=11,
+        penwidth=1.5,
+        fillcolor="white",
+        color="#333333"
+    ];
+
+    // GLOBAL EDGE STYLE — HIGH CONTRAST FOR WHITE BACKGROUND
+    edge [
+        color="#444444",
+        penwidth=1.6,
+        arrowsize=0.8
+    ];
+
+    // =========================
+    // DATA INGESTION LAYER
+    // =========================
+    subgraph cluster_ingest {
+        label="DATA INGESTION LAYER";
+        style=filled;
+        color="#4a6cff"; // pastel blue
+        fontcolor="white";
+
+        spot_csv     [label="Spot Bars CSV\n(1m / 5m)"];
+        options_csv  [label="Options Chain CSV\n(multi-strike / expiry)"];
+        aux_csv      [label="Aux Feeds\n(ADR, Beta, Gaps)"];
+
+        ingest_providers [label="Providers:\nSpotBarProvider\nOptionChainProvider\nAuxFeedsProvider"];
+    }
+
+    // =========================
+    // PREPROCESSING LAYER
+    // =========================
+    subgraph cluster_preprocess {
+        label="PREPROCESSING LAYER";
+        style=filled;
+        color="#ff6b6b"; // pastel red
+        fontcolor="white";
+
+        aligner        [label="Time Alignment\nMulti‑TF Joiner"];
+        cleaner        [label="NaN Fill\nLag Filters\nSanity Checks"];
+        preproc_stream [label="Preprocessed Stream\n(Aligned Spot + Options)"];
+    }
+
+    // =========================
+    // FEATURE ENGINEERING LAYER
+    // =========================
+    subgraph cluster_features {
+        label="FEATURE ENGINEERING LAYER";
+        style=filled;
+        color="#6bdcff"; // pastel cyan
+        fontcolor="black";
+
+        dyn_entry   [label="compute_all_dynamic_features(df)"];
+
+        dyn_f1      [label="log_return"];
+        dyn_f2      [label="vol_ewma"];
+        dyn_f3      [label="ret_z"];
+        dyn_f4      [label="atr_pct"];
+        dyn_f5      [label="kappa_proxy"];
+        dyn_f6      [label="vol_energy"];
+        dyn_f7      [label="rsi_dyn"];
+        dyn_f8      [label="adx_adaptive"];
+        dyn_f9      [label="psar_adaptive"];
+        dyn_f10     [label="bb_mu_dyn"];
+        dyn_f11     [label="bb_sigma_dyn"];
+        dyn_f12     [label="bb_lower_dyn"];
+        dyn_f13     [label="bb_upper_dyn"];
+        dyn_f14     [label="stoch_k_dyn"];
+        dyn_f15     [label="consolidation_score"];
+        dyn_f16     [label="breakout_score"];
+
+        dyn_outputs [label="V2.1 Dynamic Feature Set\n(32 features incl. market/options)"];
+
+        prim_entry  [label="compute_all_primitive_features_v22(df)"];
+
+        prim_p1     [label="bandwidth"];
+        prim_p2     [label="bb_percentile"];
+        prim_p3     [label="bw_expansion_rate"];
+        prim_p4     [label="volume_ratio"];
+        prim_p5     [label="friction_ratio"];
+        prim_p6     [label="exec_allow"];
+        prim_p7     [label="gap_risk_score"];
+        prim_p8     [label="risk_override"];
+        prim_p9     [label="iv_confidence"];
+        prim_p10    [label="mtf_consensus"];
+        prim_p11    [label="macd_norm"];
+        prim_p12    [label="macd_signal_norm"];
+        prim_p13    [label="minus_di"];
+        prim_p14    [label="psar_trend"];
+        prim_p15    [label="beta1_norm_stub"];
+        prim_p16    [label="chaos_membership"];
+        prim_p17    [label="position_size_mult"];
+        prim_p18    [label="fuzzy_reversion_11"];
+
+        feature_vector [label="Final Feature Vector\n(58 columns\nOHLCV + Greeks + V2.1 + V2.2)"];
+    }
+
+    // =========================
+    // PRIMITIVES + RULE ENGINE LAYER
+    // =========================
+    subgraph cluster_rules {
+        label="PRIMITIVES + RULE ENGINE LAYER";
+        style=filled;
+        color="#b266ff"; // pastel purple
+        fontcolor="white";
+
+        primitives [label="Canonical Primitives\n(P/M/T/F/G/S)\n(bands, momentum, topology,\nfuzzy, gates, signals)"];
+
+        dsl_yaml   [label="Complete_Ruleset_DSL.yaml\n(14 Institutional Rules)"];
+        dsl_parser [label="DSL Parser\n(YAML → RuleSpec, GateSpec,\nSignalSpec)"];
+
+        logic_eval   [label="LogicEvaluator\n(AND, OR, NOT, >, <, >=, <=)"];
+        gate_stack   [label="Gate Stack\n(friction, chaos,\nliquidity, overrides)"];
+        sizing_logic [label="Sizing Logic\n(position_size_mult,\nKelly-style scaling)"];
+        phases       [label="6‑Phase Execution Loop\n1) Primitives\n2) Signals\n3) Gates\n4) Sizing\n5) Risk Filters\n6) Trade Intents"];
+        rule_outputs [label="Rule Outputs\n(entry/exit flags,\nsize suggestions,\noverride reasons)"];
+    }
+
+    // =========================
+    // MODEL TRAINING LAYER
+    // =========================
+    subgraph cluster_training {
+        label="MODEL TRAINING LAYER";
+        style=filled;
+        color="#7dffb0"; // pastel green
+        fontcolor="black";
+
+        train_loader   [label="Training Dataset\n(mamba_institutional_1m.csv)\n8.5M rows, 58 cols"];
+        train_pipeline [label="Feature Construction\n(ensure schema=58)\nScaling (median/MAD)\nrobust_z + clipping"];
+        condorbrain    [label="CondorBrain™ Model\nDeepMamba2\n(input_dim=58,\nsequence modeling)"];
+        loss_heads     [label="Loss Heads:\n• Policy MSE (8-dim)\n• Feature Huber\n• Diffusion Loss\n(multi-task)"];
+        training_loop  [label="Training Loop\nSequenceDataset\nOneCycleLR\nGradScaler + clipping\nCheckpointing\n(VERSION_V22)"];
+    }
+
+    // =========================
+    // INFERENCE + EXECUTION LAYER
+    // =========================
+    subgraph cluster_infer {
+        label="INFERENCE + EXECUTION LAYER";
+        style=filled;
+        color="#ffd27f"; // pastel orange
+        fontcolor="black";
+
+        infer_pipeline  [label="Online Feature Pipeline\n(identical 58-col schema)\nrobust_z using\nsaved median/MAD"];
+        infer_model     [label="CondorBrain Inference\n(policy + feature +\ndiffusion heads)"];
+        infer_rules     [label="Rule Engine Online\n(14 rules, gates,\nfuzzy + chaos)"];
+        decision_logic  [label="Decision Logic\nCross-check model vs rules\nFuzzy reversion\nChaos gating\nRisk overrides"];
+        order_router    [label="Order Router\n(simulation / OMS)\nSPY Iron-Condor\nentry/exit orders"];
+    }
+
+    // =========================
+    // OUTPUT LAYER
+    // =========================
+    subgraph cluster_outputs {
+        label="OUTPUT LAYER";
+        style=filled;
+        color="#b3b3b3"; // pastel gray
+        fontcolor="black";
+
+        trade_log    [label="Trade Log\n(PnL, fills,\nper-trade metadata)"];
+        perf_metrics [label="Performance Metrics\n(Sharpe, Max DD,\nWin rate, Expectancy)"];
+        diagnostics  [label="Diagnostics\n(expected vs realized\nvol/returns, lag,\nrule vs model alignment)"];
+    }
+
+    // =========================
+    // FLOW CONNECTIONS — HIGH CONTRAST COLORS FOR WHITE BACKGROUND
+    // =========================
+
+    // Ingestion (blue)
+    spot_csv    -> ingest_providers [color="#1f3fff"];
+    options_csv -> ingest_providers [color="#1f3fff"];
+    aux_csv     -> ingest_providers [color="#1f3fff"];
+
+    // Preprocessing (red)
+    ingest_providers -> aligner        [color="#cc0000"];
+    aligner          -> cleaner        [color="#cc0000"];
+    cleaner          -> preproc_stream [color="#cc0000"];
+
+    // Feature Engineering (cyan)
+    preproc_stream -> dyn_entry   [color="#0099cc"];
+    dyn_entry      -> dyn_f1      [color="#0099cc"];
+    dyn_entry      -> dyn_f2      [color="#0099cc"];
+    dyn_entry      -> dyn_f3      [color="#0099cc"];
+    dyn_entry      -> dyn_f4      [color="#0099cc"];
+    dyn_entry      -> dyn_f5      [color="#0099cc"];
+    dyn_entry      -> dyn_f6      [color="#0099cc"];
+    dyn_entry      -> dyn_f7      [color="#0099cc"];
+    dyn_entry      -> dyn_f8      [color="#0099cc"];
+    dyn_entry      -> dyn_f9      [color="#0099cc"];
+    dyn_entry      -> dyn_f10     [color="#0099cc"];
+    dyn_entry      -> dyn_f11     [color="#0099cc"];
+    dyn_entry      -> dyn_f12     [color="#0099cc"];
+    dyn_entry      -> dyn_f13     [color="#0099cc"];
+    dyn_entry      -> dyn_f14     [color="#0099cc"];
+    dyn_entry      -> dyn_f15     [color="#0099cc"];
+    dyn_entry      -> dyn_f16     [color="#0099cc"];
+    dyn_entry      -> dyn_outputs [color="#0099cc"];
+
+    dyn_outputs -> prim_entry [color="#0099cc"];
+
+    prim_entry  -> prim_p1  [color="#0099cc"];
+    prim_entry  -> prim_p2  [color="#0099cc"];
+    prim_entry  -> prim_p3  [color="#0099cc"];
+    prim_entry  -> prim_p4  [color="#0099cc"];
+    prim_entry  -> prim_p5  [color="#0099cc"];
+    prim_entry  -> prim_p6  [color="#0099cc"];
+    prim_entry  -> prim_p7  [color="#0099cc"];
+    prim_entry  -> prim_p8  [color="#0099cc"];
+    prim_entry  -> prim_p9  [color="#0099cc"];
+    prim_entry  -> prim_p10 [color="#0099cc"];
+    prim_entry  -> prim_p11 [color="#0099cc"];
+    prim_entry  -> prim_p12 [color="#0099cc"];
+    prim_entry  -> prim_p13 [color="#0099cc"];
+    prim_entry  -> prim_p14 [color="#0099cc"];
+    prim_entry  -> prim_p15 [color="#0099cc"];
+    prim_entry  -> prim_p16 [color="#0099cc"];
+    prim_entry  -> prim_p17 [color="#0099cc"];
+    prim_entry  -> prim_p18 [color="#0099cc"];
+
+    prim_entry  -> feature_vector [color="#0099cc"];
+
+    // Rule Engine (purple)
+    feature_vector -> primitives   [color="#7a00cc"];
+    primitives     -> dsl_parser   [color="#7a00cc"];
+    dsl_yaml       -> dsl_parser   [color="#7a00cc"];
+    dsl_parser     -> logic_eval   [color="#7a00cc"];
+    logic_eval     -> gate_stack   [color="#7a00cc"];
+    gate_stack     -> sizing_logic [color="#7a00cc"];
+    sizing_logic   -> phases       [color="#7a00cc"];
+    phases         -> rule_outputs [color="#7a00cc"];
+
+    // Training (green)
+    feature_vector  -> train_pipeline [color="#00994d"];
+    train_pipeline  -> condorbrain    [color="#00994d"];
+    condorbrain     -> loss_heads     [color="#00994d"];
+    loss_heads      -> training_loop  [color="#00994d"];
+
+    // Inference (orange)
+    feature_vector -> infer_pipeline  [color="#cc8800"];
+    infer_pipeline -> infer_model     [color="#cc8800"];
+    infer_pipeline -> infer_rules     [color="#cc8800"];
+    infer_model    -> decision_logic  [color="#cc8800"];
+    infer_rules    -> decision_logic  [color="#cc8800"];
+    decision_logic -> order_router    [color="#cc8800"];
+
+    // Outputs (gray)
+    order_router -> trade_log    [color="#666666"];
+    order_router -> perf_metrics [color="#666666"];
+    order_router -> diagnostics  [color="#666666"];
+
+    // =========================
+    // LEGEND
+    // =========================
+    subgraph cluster_legend {
+        label="Legend";
+        style=filled;
+        color="#444444";
+        fontcolor="white";
+
+        legend [shape=plaintext, fontcolor="white", label=<
+            <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+                <TR><TD BGCOLOR="#4a6cff"><FONT COLOR="white">Data Ingestion</FONT></TD></TR>
+                <TR><TD BGCOLOR="#ff6b6b"><FONT COLOR="white">Preprocessing</FONT></TD></TR>
+                <TR><TD BGCOLOR="#6bdcff"><FONT COLOR="black">Feature Engineering</FONT></TD></TR>
+                <TR><TD BGCOLOR="#b266ff"><FONT COLOR="white">Primitives + Rules</FONT></TD></TR>
+                <TR><TD BGCOLOR="#7dffb0"><FONT COLOR="black">Model Training</FONT></TD></TR>
+                <TR><TD BGCOLOR="#ffd27f"><FONT COLOR="black">Inference + Execution</FONT></TD></TR>
+                <TR><TD BGCOLOR="#b3b3b3"><FONT COLOR="black">Outputs</FONT></TD></TR>
+            </TABLE>
+        >];
+    }
+}

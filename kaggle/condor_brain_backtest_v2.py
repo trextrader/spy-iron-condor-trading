@@ -554,15 +554,77 @@ def main():
         # 5. Report
         print(f"Final Capital: ${equity[-1]:,.2f}")
         print(f"Trades: {len(trades)}")
-        plt.figure(figsize=(12, 6))
-        plt.plot(equity)
-        plt.title(f"Equity Curve (Iron Condor V2.2) - {len(trades)} Trades")
-        plt.xlabel("Bars")
-        plt.ylabel("Capital ($)")
-        plt.grid(True)
+        
+        # Calculate metrics for enhanced chart
+        equity_arr = np.array(equity)
+        starting_balance = equity_arr[0]
+        
+        # Calculate running max and drawdown
+        running_max = np.maximum.accumulate(equity_arr)
+        drawdown = (equity_arr - running_max) / running_max * 100  # Percentage
+        max_drawdown = np.min(drawdown)
+        
+        # Calculate total return
+        total_return = (equity_arr[-1] - starting_balance) / starting_balance * 100
+        
+        # Create figure with 3 subplots
+        fig, axes = plt.subplots(3, 1, figsize=(14, 10), gridspec_kw={'height_ratios': [3, 1, 1]})
+        fig.suptitle(f"Iron Condor V2.2 Backtest Results - {len(trades)} Trades", fontsize=14, fontweight='bold')
+        
+        # --- Subplot 1: Equity Curve with Balance Reference ---
+        ax1 = axes[0]
+        ax1.plot(equity_arr, label='Equity', color='#2E86AB', linewidth=1.5)
+        ax1.axhline(y=starting_balance, color='#E94F37', linestyle='--', linewidth=1, label=f'Starting Balance (${starting_balance:,.0f})')
+        ax1.fill_between(range(len(equity_arr)), starting_balance, equity_arr, 
+                         where=equity_arr >= starting_balance, alpha=0.3, color='green', label='Profit Zone')
+        ax1.fill_between(range(len(equity_arr)), starting_balance, equity_arr, 
+                         where=equity_arr < starting_balance, alpha=0.3, color='red', label='Loss Zone')
+        ax1.set_ylabel('Capital ($)', fontsize=10)
+        ax1.set_title(f'Equity Curve | Final: ${equity_arr[-1]:,.2f} | Return: {total_return:+.2f}%', fontsize=11)
+        ax1.legend(loc='upper left', fontsize=8)
+        ax1.grid(True, alpha=0.3)
+        ax1.set_xlim(0, len(equity_arr))
+        
+        # --- Subplot 2: Drawdown ---
+        ax2 = axes[1]
+        ax2.fill_between(range(len(drawdown)), 0, drawdown, color='#E94F37', alpha=0.7)
+        ax2.axhline(y=max_drawdown, color='darkred', linestyle='--', linewidth=1, label=f'Max DD: {max_drawdown:.2f}%')
+        ax2.set_ylabel('Drawdown (%)', fontsize=10)
+        ax2.set_title(f'Drawdown | Max: {max_drawdown:.2f}%', fontsize=11)
+        ax2.legend(loc='lower left', fontsize=8)
+        ax2.grid(True, alpha=0.3)
+        ax2.set_xlim(0, len(equity_arr))
+        ax2.set_ylim(min(drawdown) * 1.1, 5)
+        
+        # --- Subplot 3: Trade P&L Markers ---
+        ax3 = axes[2]
+        # Mark trade points and P&L
+        closes = [t for t in trades if t.get('action') == 'CLOSE']
+        trade_bars = []
+        trade_pnls = []
+        for t in closes:
+            pnl_pct = t.get('pnl_pct', 0)
+            if pnl_pct != 0:
+                trade_bars.append(t.get('idx', 0))
+                trade_pnls.append(pnl_pct)
+        
+        colors = ['green' if p > 0 else 'red' for p in trade_pnls]
+        ax3.bar(trade_bars, trade_pnls, color=colors, alpha=0.7, width=max(1, len(equity_arr)//200))
+        ax3.axhline(y=0, color='black', linewidth=0.5)
+        ax3.set_ylabel('Trade P&L (%)', fontsize=10)
+        ax3.set_xlabel('Bar Index', fontsize=10)
+        win_count = sum(1 for p in trade_pnls if p > 0)
+        total_count = len(trade_pnls)
+        win_rate = win_count / total_count * 100 if total_count > 0 else 0
+        ax3.set_title(f'Individual Trade P&L | Win Rate: {win_rate:.1f}% ({win_count}/{total_count})', fontsize=11)
+        ax3.grid(True, alpha=0.3)
+        ax3.set_xlim(0, len(equity_arr))
+        
+        plt.tight_layout()
         plot_path = os.path.join(REPORTS_DIR, "backtest_v2_result.png")
-        plt.savefig(plot_path)
-        print(f"Saved plot to {plot_path}")
+        plt.savefig(plot_path, dpi=150)
+        plt.close()
+        print(f"Saved enhanced plot to {plot_path}")
         
         # Save Trades CSV
         if trades:
