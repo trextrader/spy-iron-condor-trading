@@ -696,7 +696,7 @@ def compute_all_primitive_features_v22(
         w_adx=0.05, w_sma=0.05, w_psar=0.10, w_bb=0.05, w_bbsqueeze=0.03, w_vol=0.02,
     ).astype(np.float32)
     
-    print(f"   ✅ Added 20 V2.2 primitive features")
+    print(f"   [OK] Added 20 V2.2 primitive features")
     
     return df
 

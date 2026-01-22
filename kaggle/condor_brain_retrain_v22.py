@@ -79,14 +79,14 @@ import matplotlib.pyplot as plt
 #   3M rows ≈ 30K unique spot bars (~5 min compute)
 #   Full dataset: ~10M rows ≈ 100K unique spot bars
 
-ROWS_TO_LOAD = 500_000    # 🧪 TEST RUN (Medium) 🧪
-EPOCHS = 3                # Test: 3 epochs
+ROWS_TO_LOAD = 100_000    # 🧪 TEST RUN (100k) 🧪
+EPOCHS = 3                # Test: 3 epochs (2 warmup, 1 diffusion)
 
 # --- ARGPARSE CONFIGURATION (for dual-model experiment) ---
 import argparse
 parser = argparse.ArgumentParser(description="CondorBrain Training V2.2")
-parser.add_argument("--start-date", type=str, default=None, help="Start date filter (YYYY-MM-DD)")
-parser.add_argument("--end-date", type=str, default=None, help="End date filter (YYYY-MM-DD)")
+parser.add_argument("--start-date", type=str, default="2024-12-27", help="Start date filter (YYYY-MM-DD)")
+parser.add_argument("--end-date", type=str, default="2025-01-01", help="End date filter (YYYY-MM-DD)")
 parser.add_argument("--model-suffix", type=str, default="", help="Model filename suffix (e.g., '_2024')")
 parser.add_argument("--epochs", type=int, default=None, help="Override EPOCHS config")
 parser.add_argument("--use-precomputed-v21", action="store_true", help="Use V21 precomputed features (skip dynamic feature computation)")
@@ -238,7 +238,9 @@ POSSIBLE_PATHS = [
     "data/processed/mamba_institutional_1m_500k.csv",
     "data/mamba_institutional_1m_500k.csv", # User specific local
     "mamba_institutional_1m.csv",
-    "mamba_institutional_1m_500k.csv"
+    "mamba_institutional_1m_500k.csv",
+    "mamba_institutional_2024_1m_last 100k.csv",
+    "data/processed/mamba_institutional_2024_1m_last 100k.csv",
 ]
 
 # Prioritize User Input, then V21, then Standard

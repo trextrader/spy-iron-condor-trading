@@ -304,7 +304,7 @@ def main() -> int:
 
     t3 = time.time()
     elapsed = t3 - t0
-    print(f"[Precompute] ✅ Done in {elapsed:.1f}s")
+    print(f"[Precompute] [OK] Done in {elapsed:.1f}s")
     if os.path.exists(out):
         size_mb = os.path.getsize(out) / (1024 * 1024)
         print(f"             Output size: {size_mb:,.1f} MB")
