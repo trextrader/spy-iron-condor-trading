@@ -423,9 +423,17 @@ else:
         
         # Get dynamic columns and merge back
         # Exclude aux_cols (like spread_ratio) if they were already in df to prevent collision/suffixes
+        # Exclude aux_cols (like spread_ratio) if they were already in df to prevent collision/suffixes
         exclude_cols = spot_key_cols + ohlcv_cols + aux_cols
         dynamic_cols = [c for c in spot_df.columns if c not in exclude_cols]
         print(f"   Dynamic columns: {len(dynamic_cols)}")
+        
+        # ⚠️ CRITICAL: Drop existing dynamic columns from df to prevent _x/_y suffixes
+        cols_to_drop = [c for c in dynamic_cols if c in df.columns]
+        if cols_to_drop:
+            print(f"   Dropping {len(cols_to_drop)} existing columns to avoid merge conflicts...")
+            df.drop(columns=cols_to_drop, inplace=True)
+            
         merge_cols = spot_key_cols + dynamic_cols
         df = df.merge(spot_df[merge_cols], on=spot_key_cols, how='left')
 
