@@ -150,10 +150,10 @@ def run_rule_engine(df, ruleset_path):
         rule_signals[f"{rule_id}_signal"] = sig
             
     print(f"Generated signals for {len(ruleset.rules)} rules.")
-    return df, rule_signals
+    return df, rule_signals, ruleset
 
 
-def run_backtest(df, rule_signals, model, feature_cols, device):
+def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
     print("Starting Backtest Simulation...")
     
     # Pre-process Features (Robust Norm same as training)
@@ -196,6 +196,18 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
     log_file.write("=" * 80 + "\n")
     log_file.write("TRADE DECISION LOG (ALL BARS)\n")
     log_file.write("=" * 80 + "\n\n")
+    
+    # Running Stats
+    stats = {
+        'total_trades': 0,
+        'winners': 0,
+        'losers': 0,
+        'total_pnl_dollar': 0.0,
+        'peak_capital': capital,
+        'max_dd_pct': 0.0,
+        'win_streak': 0,
+        'lose_streak': 0
+    }
     
     logged_count = 0
     MAX_LOGS = 50  # Console only
@@ -314,19 +326,65 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
                 max_loss = (width - IC_CREDIT_PER_SPREAD) * IC_CONTRACTS * IC_MULTIPLIER
                 
                 # TRADE STATS with fuzzy score breakdown
-                factors_str = "\\n║   ".join(entry_factors)
+                # Identify Triggering Rules
+                active_rules = []
+                if rule_signals is not None:
+                    for col in rule_signals.columns:
+                        if "signal" in col and rule_signals[col].iloc[i] != 0:
+                            r_id = col.replace("_signal", "")
+                            active_rules.append(r_id)
+                
+                # Format Primitives & Reasons
+                reasoning = []
+                # 1. Primitives (from Triggering Rules)
+                if ruleset and active_rules:
+                    reasoning.append("  1) Primitives:")
+                    for r_id in active_rules:
+                        if r_id in ruleset.rules:
+                            rule = ruleset.rules[r_id]
+                            # Check features/primitives required
+                            reqs = rule.requires.features if hasattr(rule.requires, 'features') else []
+                            vals = []
+                            for f in reqs:
+                                if f in df.columns:
+                                    vals.append(f"{f}={df[f].iloc[i]:.4f}")
+                            if vals:
+                                reasoning.append(f"     Rule {r_id}: " + ", ".join(vals))
+                
+                # 2. Trade Rules
+                reasoning.append("  2) Trade Rules:")
+                if active_rules:
+                    reasoning.append(f"     Triggered: {', '.join(active_rules)}")
+                else:
+                    reasoning.append("     Triggered: None (Model Force?)")
+                    
+                # 3. Diffusion/Model
+                reasoning.append("  3) Diffusion/Model:")
+                reasoning.append(f"     Call Offset: {call_offset:.2f} | Put Offset: {put_offset:.2f}")
+                reasoning.append(f"     Width: {width:.2f} | DTE Pred: {te_suggested:.2f}")
+                reasoning.append(f"     Prob Profit: {prob_profit:.4f} | Confidence: {confidence:.4f}")
+                
+                # 4. Fuzzy Logic
+                reasoning.append("  4) Fuzzy Logic Sizing:")
+                reasoning.append(f"     Base Score: {entry_score:.1f}/100")
+                reasoning.append(f"     Breakdown: Prob({prob_profit:.2f})*40 + Conf({confidence:.2f})*20 + Vol({vol_score:.2f})*20 + Trend({trend_score:.2f})*20")
+                if 'position_size_multiplier' in df.columns:
+                     reasoning.append(f"     Chaos Dampener: {df['position_size_multiplier'].iloc[i]:.2f}")
+                
+                reasoning_str = "\\n".join(reasoning)
+
                 trade_msg = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║ 🦅 IRON CONDOR #{trade_num} ENTRY @ Bar {i}
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║ SPOT:          ${spot:.2f}
 ║ FUZZY SCORE:   {entry_score}/100 (threshold: {ENTRY_THRESHOLD})
-╠─────────────────────────── DECISION FACTORS ─────────────────────────────────╣
-║   {factors_str}
+╠─────────────────────────── DETAILED REASONING ───────────────────────────────╣
+{reasoning_str}
 ╠─────────────────────────── IRON CONDOR SETUP ────────────────────────────────╣
 ║   Short Call:  ${short_call_strike:.2f}  |  Long Call:  ${long_call_strike:.2f}
 ║   Short Put:   ${short_put_strike:.2f}  |  Long Put:   ${long_put_strike:.2f}
-║   Width:       ${width:.2f}  |  DTE: {te_suggested:.0f} days
+║   Width:       ${width:.2f}  |  DTE: {trade_dte:.1f} days
 ╠─────────────────────────── P&L POTENTIAL ────────────────────────────────────╣
 ║   Credit:      ${credit_received:,.2f} (Max Profit)
 ║   Max Loss:    ${max_loss:,.2f}
@@ -388,21 +446,91 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
                 action = -1
                 spot = df['close'].iloc[i]
                 
-                # Calculate simple P&L (spot change proxy)
-                entry_spot = trades[-1]['spot'] if trades and 'spot' in trades[-1] else spot
-                pnl_pct = (spot - entry_spot) / entry_spot * 100
+                # Calculates Running Metrics
+                pnl_dollar = (pnl_pct / 100.0) * trade_max_loss # Approx PnL dollars based on risk? Or based on credit?
+                # Actually PnL % is usually on margin. Let's use simple approx.
+                # If win, +credit. If loss, -Loss.
+                # But pnl_pct is spot change? No, pnl_pct was defined as spot change proxy.
+                # Let's refine PnL logic for Condor:
+                trade_res_dollar = 0.0
+                if pnl_pct > 0: # Proxy for win (should check strikes!)
+                     # Wait, we checked strikes below in loop (lines 460+).
+                     # Current logic checks exit reason. 
+                     # If Expiration, we check strikes.
+                     # If Early Exit, we need PnL.
+                     # Let's use the 'Simulation' calculation logic which is more accurate?
+                     # Limitation: The simulation loop updates 'capital' daily.
+                     # Here at exit signal, we don't have exact option price.
+                     # We'll rely on the existing PnL pct proxy for reporting, 
+                     # BUT update the stats based on win/loss flag.
+                     pass
+
+                # Deterministic Win/Loss check (Spot vs Strikes)
+                short_c = trades[-1]['short_call']
+                short_p = trades[-1]['short_put']
+                is_win = (spot < short_c) and (spot > short_p)
+                status_icon = "✅ WIN" if is_win else "❌ LOSS"
                 
-                # EXIT STATS - Print immediately
+                # PnL Realization (Approx)
+                if is_win:
+                    realized_pnl = trade_credit
+                else:
+                    # Loss amount depends on how far OTM. 
+                    # Simulating max loss for pessimistic reporting if breached.
+                    realized_pnl = -trade_max_loss
+
+                # Update Stats
+                stats['total_trades'] += 1
+                if is_win:
+                    stats['winners'] += 1
+                    stats['total_win_dollar'] = stats.get('total_win_dollar', 0.0) + realized_pnl
+                else:
+                    stats['losers'] += 1
+                    stats['total_loss_dollar'] = stats.get('total_loss_dollar', 0.0) + abs(realized_pnl)
+                
+                stats['total_pnl_dollar'] += realized_pnl
+                
+                # Check DD
+                stats['peak_capital'] = max(stats['peak_capital'], capital + stats['total_pnl_dollar']) # Approx equity
+                curr_equity = capital + stats['total_pnl_dollar']
+                curr_dd_dollar = stats['peak_capital'] - curr_equity
+                curr_dd_pct = (curr_dd_dollar / stats['peak_capital']) * 100 if stats['peak_capital'] > 0 else 0
+                stats['max_dd_pct'] = max(stats['max_dd_pct'], curr_dd_pct)
+                
+                # Metrics Calculation
+                win_count = stats['winners']
+                loss_count = stats['losers']
+                total_count = stats['total_trades']
+                win_rate = (win_count / total_count) if total_count > 0 else 0
+                
+                avg_win = stats.get('total_win_dollar', 0.0) / win_count if win_count > 0 else 0
+                avg_loss = stats.get('total_loss_dollar', 0.0) / loss_count if loss_count > 0 else 0
+                
+                # Expectancy = (Win% * AvgWin) - (Loss% * AvgLoss)
+                expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
+                
+                # Running Sharpe (Trade-based)
+                # Mean(PnL) / Std(PnL) * sqrt(TradesPerYear?) -> Just use trade sharpe
+                # Not accurately tracking per-trade PnL list here for StdDev.
+                # using simplified Sharpe proxy: Expectancy / AvgLoss (sort of E-Ratio)
+                # Proper Sharpe requires variance tracking.
+                # Let's verify if we can list it.
+                sharpe_proxy = expectancy / avg_loss if avg_loss > 0 else 0.0
+
                 exit_msg = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║ 🔔 IRON CONDOR EXIT @ Bar {i}
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║ Spot Price:    ${spot:.2f} (Entry: ${entry_spot:.2f})
 ║ Exit Reason:   {exit_reason}
-║ Days Held:     {days_held:.1f}
-║ Spot Change:   {pnl_pct:+.2f}%
-║ Confidence:    {confidence:.4f}
-║ Rule Signal:   {net_rule_signal:.2f}
+║ Result:        {status_icon} (PnL: ${realized_pnl:,.0f})
+╠─────────────────────────── PERFORMANCE METRICS ──────────────────────────────╣
+║ 1) Trades:     {total_count} (W: {win_count} {win_rate*100:.1f}% | L: {loss_count})
+║ 2) Net P&L:    ${stats['total_pnl_dollar']:,.2f}
+║ 3) Drawdown:   {curr_dd_pct:.2f}% (Max: {stats['max_dd_pct']:.2f}%)
+║ 4) NP/DD:      {stats['total_pnl_dollar'] / curr_dd_dollar if curr_dd_dollar > 1 else 0:.2f}
+║ 5) Expectancy: ${expectancy:.2f}
+║ 6) Sharpe (Tr):{sharpe_proxy:.2f} (Proxy)
 ╚══════════════════════════════════════════════════════════════════════════════╝"""
                 print(exit_msg)
                 log_file.write(exit_msg + "\n")
@@ -527,7 +655,7 @@ def main():
     
     # 2. Rules
     ruleset_path = args.ruleset if args.ruleset else RULESET_PATH
-    df, rule_signals = run_rule_engine(df, ruleset_path)
+    df, rule_signals, ruleset = run_rule_engine(df, ruleset_path)
     
     # 3. Model
     POSSIBLE_PATHS = [
@@ -574,7 +702,7 @@ def main():
             return
             
         # 4. Backtest
-        equity, trades = run_backtest(df, rule_signals, model, FEATURE_COLS_V22, DEVICE)
+        equity, trades = run_backtest(df, rule_signals, model, FEATURE_COLS_V22, DEVICE, ruleset)
         
         # 5. Report
         print(f"Final Capital: ${equity[-1]:,.2f}")
