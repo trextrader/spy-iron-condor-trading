@@ -87,20 +87,31 @@ def load_data_and_features(data_path, rows=None):
     if rows is not None:
         df = df.iloc[-rows:].reset_index(drop=True)
     
+    
     # 1. Base Features (V2.1)
-    print("Computing V2.1 Dynamic Features...")
-    df = compute_all_dynamic_features(df, close_col="close", high_col="high", low_col="low")
+    # CHECK if features already exist (from pre-compute pipeline)
+    # V2.1 adds: 'rsi', 'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k'
+    expected_v21 = ['rsi', 'atr', 'adx', 'stoch_k']
+    if all(col in df.columns for col in expected_v21):
+        print("✅ V2.1 Features already present. Skipping computation.")
+    else:
+        print("Computing V2.1 Dynamic Features...")
+        df = compute_all_dynamic_features(df, close_col="close", high_col="high", low_col="low")
     
     # 2. Primitive Features (V2.2)
-    print("Computing V2.2 Primitive Features...")
-    # Ensure Spread/Lag cols exist (or fallback handled in script)
-    df = compute_all_primitive_features_v22(
-        df,
-        close_col="close", high_col="high", low_col="low",
-        volume_col="volume",
-        spread_col="spread_ratio" if "spread_ratio" in df.columns else "close",
-        inplace=True
-    )
+    # V2.2 adds: 'sma', 'psar', 'psar_mark' etc.
+    expected_v22 = ['sma', 'psar', 'psar_mark']
+    if all(col in df.columns for col in expected_v22):
+         print("✅ V2.2 Features already present. Skipping computation.")
+    else:
+        print("Computing V2.2 Primitive Features...")
+        df = compute_all_primitive_features_v22(
+            df,
+            close_col="close", high_col="high", low_col="low",
+            volume_col="volume",
+            spread_col="spread_ratio" if "spread_ratio" in df.columns else "close",
+            inplace=True
+        )
     
     return df
 
