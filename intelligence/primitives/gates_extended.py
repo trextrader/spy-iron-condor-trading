@@ -9,7 +9,7 @@ import pandas as pd
 
 
 def compute_trend_strength_gate(
-    adx_norm: pd.Series,
+    adx_adaptive: pd.Series,
     threshold: float,
 ) -> dict:
     """
@@ -20,8 +20,8 @@ def compute_trend_strength_gate(
             "trend_ok": bool Series
         }
     """
-    adx_norm = adx_norm.fillna(0.0)
-    trend_ok = (adx_norm >= threshold)
+    adx_adaptive = adx_adaptive.fillna(0.0)
+    trend_ok = (adx_adaptive >= threshold)
     return {"trend_ok": trend_ok}
 
 

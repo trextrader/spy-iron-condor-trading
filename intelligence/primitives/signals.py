@@ -333,3 +333,30 @@ def compute_bandwidth_expansion_signal(
         "signal": is_expanding
     }
 
+
+def compute_psar_flip_membership(
+    psar_trend: pd.Series,
+    psar_reversion_mu: pd.Series = None,
+) -> dict:
+    """
+    S0xx – PSAR Flip Membership (Reversion Logic)
+    
+    Returns:
+        {
+            "psar_bull": bool Series,
+            "psar_bear": bool Series,
+            "reversion_score": float Series
+        }
+    """
+    pt = psar_trend.fillna(0.0)
+    mu = psar_reversion_mu.fillna(0.5) if psar_reversion_mu is not None else pd.Series(0.5, index=pt.index)
+    
+    # 1.0 = Bullish trend, -1.0 = Bearish trend
+    psar_bull = (pt > 0)
+    psar_bear = (pt < 0)
+    
+    return {
+        "psar_bull": psar_bull,
+        "psar_bear": psar_bear,
+        "reversion_score": mu
+    }
