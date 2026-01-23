@@ -489,8 +489,16 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
     return equity_curve, trades
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="CondorBrain Backtest V2.2")
+    parser.add_argument("--input", type=str, default=None, help="Path to input CSV data")
+    parser.add_argument("--model", type=str, default=None, help="Path to model checkpoint (.pth)")
+    parser.add_argument("--ruleset", type=str, default=None, help="Path to ruleset YAML")
+    args = parser.parse_args()
+
     # 0. Data Path Detection
     possible_data_paths = [
+        args.input, # CLI override first
         MODEL_PATH, # Kaggle default config (Line 42 might be overwritten)
         "/kaggle/input/spy-options-data/mamba_institutional_1m.csv",
         "/content/spy-iron-condor-trading/data/processed/mamba_institutional_2024_1m_last 500k.csv",
@@ -504,7 +512,7 @@ def main():
     ]
     use_data_path = DATA_PATH
     for p in possible_data_paths:
-        if os.path.exists(p):
+        if p and os.path.exists(p):
             use_data_path = p
             print(f"Found data at: {use_data_path}")
             break
@@ -514,10 +522,12 @@ def main():
     df = load_data_and_features(use_data_path)  # Load ALL rows
     
     # 2. Rules
-    df, rule_signals = run_rule_engine(df, RULESET_PATH)
+    ruleset_path = args.ruleset if args.ruleset else RULESET_PATH
+    df, rule_signals = run_rule_engine(df, ruleset_path)
     
     # 3. Model
     POSSIBLE_PATHS = [
+        args.model, # CLI override first
         # Colab 500K trained models (E3 first)
         "/content/spy-iron-condor-trading/condor_brain_retrain_e3+500k.pth",  # 🚀 E3 500K
         "/content/spy-iron-condor-trading/condor_brain_retrain_e2_500k.pth",
@@ -535,7 +545,7 @@ def main():
     ]
     model_path = MODEL_PATH
     for p in POSSIBLE_PATHS:
-        if os.path.exists(p):
+        if p and os.path.exists(p):
             model_path = p
             break
             
