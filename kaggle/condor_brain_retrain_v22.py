@@ -288,31 +288,28 @@ else:
 
 print(f"   Loaded Shape: {df.shape}")
 
+# --- STANDARDIZE DATE COLUMN ---
+if 'dt' not in df.columns and 'timestamp' in df.columns:
+    print("   ⚠️ Standardizing 'timestamp' -> 'dt'...")
+    df.rename(columns={'timestamp': 'dt'}, inplace=True)
+
+if 'dt' in df.columns:
+    # Ensure UTC standard
+    df['dt'] = pd.to_datetime(df['dt'], utc=True)
+
+
 # --- DATE FILTERING (for dual-model experiment) ---
 if DATE_FILTER_START or DATE_FILTER_END:
-    # Detect datetime column
-    dt_col = None
-    for col in ['dt', 'timestamp', 'datetime', 'date']:
-        if col in df.columns:
-            dt_col = col
-            break
-    
-    if dt_col:
-        # Parse datetime
-        df[dt_col] = pd.to_datetime(df[dt_col], errors='coerce')
-        
+    dt_col = 'dt'
+    if dt_col in df.columns:
         original_len = len(df)
         if DATE_FILTER_START:
             # Force UTC for comparison
             start_dt = pd.to_datetime(DATE_FILTER_START).tz_localize('UTC')
-            if df[dt_col].dt.tz is None:
-                df[dt_col] = df[dt_col].dt.tz_localize('UTC')
             df = df[df[dt_col] >= start_dt]
         if DATE_FILTER_END:
             # Force UTC for comparison
             end_dt = pd.to_datetime(DATE_FILTER_END).tz_localize('UTC')
-            if df[dt_col].dt.tz is None:
-                df[dt_col] = df[dt_col].dt.tz_localize('UTC')
             df = df[df[dt_col] < end_dt]
         
         filtered_len = len(df)
@@ -322,7 +319,7 @@ if DATE_FILTER_START or DATE_FILTER_END:
         # Reset index after filtering
         df = df.reset_index(drop=True)
     else:
-        print(f"   ⚠️ No datetime column found for date filtering, skipping...")
+        print(f"   ⚠️ No 'dt' column found for date filtering, skipping...")
 
 print(f"   Final Shape: {df.shape} ({SLICE_MODE} rows)")
 
