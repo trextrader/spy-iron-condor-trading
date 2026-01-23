@@ -43,6 +43,7 @@ from intelligence.features.dynamic_features import (
 )
 from intelligence.rule_engine.dsl_parser import RuleDSLParser
 from intelligence.rule_engine.executor import RuleExecutionEngine
+from torch.utils.tensorboard import SummaryWriter # Added for TB support
 
 # --- CONFIG ---
 MODEL_PATH = "condor_brain_retrain_v22_e3.pth" # Default
@@ -196,6 +197,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
     log_file.write("=" * 80 + "\n")
     log_file.write("TRADE DECISION LOG (ALL BARS)\n")
     log_file.write("=" * 80 + "\n\n")
+
+    # TensorBoard Writer
+    tb_writer = SummaryWriter(log_dir=os.path.join(REPORTS_DIR, "tensorboard"))
     
     # Running Stats
     stats = {
@@ -447,6 +451,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 spot = df['close'].iloc[i]
                 
                 # Calculates Running Metrics
+                entry_spot = trades[-1]['spot'] if trades else spot
+                pnl_pct = (spot - entry_spot) / entry_spot * 100
+                
                 pnl_dollar = (pnl_pct / 100.0) * trade_max_loss # Approx PnL dollars based on risk? Or based on credit?
                 # Actually PnL % is usually on margin. Let's use simple approx.
                 # If win, +credit. If loss, -Loss.
@@ -516,6 +523,15 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 # Proper Sharpe requires variance tracking.
                 # Let's verify if we can list it.
                 sharpe_proxy = expectancy / avg_loss if avg_loss > 0 else 0.0
+
+                # --- TENSORBOARD LOGGING ---
+                step_idx = stats['total_trades']
+                tb_writer.add_scalar("Performance/Equity", curr_equity, step_idx)
+                tb_writer.add_scalar("Performance/Drawdown_Pct", curr_dd_pct, step_idx)
+                tb_writer.add_scalar("Performance/Win_Rate", win_rate, step_idx)
+                tb_writer.add_scalar("Trades/PnL_Dollar", realized_pnl, step_idx)
+                tb_writer.add_scalar("Trades/Expectancy", expectancy, step_idx)
+                tb_writer.add_scalar("Debug/Entry_Conf", trades[-1]['conf'], step_idx)
 
                 exit_msg = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -616,6 +632,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
     print("=" * 80)
     print(f"LOG END. Total Trades: {len(trades)}")
     print(f"Full log saved to: trade_decisions.log")
+    if 'tb_writer' in locals():
+        tb_writer.close()
+        print(f"TensorBoard logs saved to: {os.path.join(REPORTS_DIR, 'tensorboard')}")
     print("=" * 80)
         
     return equity_curve, trades
