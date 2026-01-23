@@ -303,10 +303,16 @@ if DATE_FILTER_START or DATE_FILTER_END:
         
         original_len = len(df)
         if DATE_FILTER_START:
-            start_dt = pd.to_datetime(DATE_FILTER_START)
+            # Force UTC for comparison
+            start_dt = pd.to_datetime(DATE_FILTER_START).tz_localize('UTC')
+            if df[dt_col].dt.tz is None:
+                df[dt_col] = df[dt_col].dt.tz_localize('UTC')
             df = df[df[dt_col] >= start_dt]
         if DATE_FILTER_END:
-            end_dt = pd.to_datetime(DATE_FILTER_END)
+            # Force UTC for comparison
+            end_dt = pd.to_datetime(DATE_FILTER_END).tz_localize('UTC')
+            if df[dt_col].dt.tz is None:
+                df[dt_col] = df[dt_col].dt.tz_localize('UTC')
             df = df[df[dt_col] < end_dt]
         
         filtered_len = len(df)
