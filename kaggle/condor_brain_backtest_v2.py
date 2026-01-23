@@ -628,6 +628,19 @@ def main():
     parser.add_argument("--ruleset", type=str, default=None, help="Path to ruleset YAML")
     args = parser.parse_args()
 
+    # --- GPU CHECK ---
+    print("="*60)
+    print("HARDWARE STATUS CHECK")
+    print("="*60)
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+        print(f"✅ GPU DETECTED: {gpu_name} ({gpu_mem:.1f} GB)")
+        print(f"   CUDA Version: {torch.version.cuda}")
+    else:
+        print("⚠️ GPU NOT DETECTED! Running on CPU (Will be slow).")
+    print("="*60)
+
     # 0. Data Path Detection
     possible_data_paths = [
         args.input, # CLI override first
