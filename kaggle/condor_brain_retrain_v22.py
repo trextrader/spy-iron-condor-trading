@@ -11,6 +11,9 @@ print("✅ Repo synced")
 '''
 import sys
 import os
+import warnings
+# Suppress mamba-ssm / torch.amp deprecation warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="mamba_ssm")
 
 # 1. Add Repo Root to Path (Robust for Colab/Kaggle/Local)
 # Assumes script is in <root>/kaggle/
