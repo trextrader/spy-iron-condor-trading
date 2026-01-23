@@ -79,8 +79,9 @@ import matplotlib.pyplot as plt
 #   3M rows ≈ 30K unique spot bars (~5 min compute)
 #   Full dataset: ~10M rows ≈ 100K unique spot bars
 
-ROWS_TO_LOAD = 100_000    # 🧪 TEST RUN (100k) 🧪
-EPOCHS = 3                # Test: 3 epochs (2 warmup, 1 diffusion)
+ROWS_TO_LOAD = 500_000    # User Request: 500k Dataset
+EPOCHS = 5                # User Request: 5 Epochs
+DIFFUSION_WARMUP_EPOCHS = 2 # User Request: 2 No-Diff, 3 With-Diff
 
 # --- ARGPARSE CONFIGURATION (for dual-model experiment) ---
 import argparse
@@ -230,6 +231,7 @@ V21_PATHS = [
 ]
 
 POSSIBLE_PATHS = [
+    "data/processed/mamba_institutional_2024_1m_last 500k.csv", # User Target
     "/kaggle/input/spy-options-data/mamba_institutional_1m.csv",
     "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m.csv",
     "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m_500k.csv",
