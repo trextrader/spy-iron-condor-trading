@@ -166,6 +166,36 @@ def run_rule_engine(df, ruleset_path):
     return df, rule_signals, ruleset
 
 
+# --- P&L ESTIMATION ---
+def estimate_condor_pnl(spot, short_call, long_call, short_put, long_put, credit_received, max_loss, days_held, total_dte):
+    """
+    Estimate P&L for Iron Condor based on Linear Theta Decay and Intrinsic Value.
+    """
+    # 1. Theta Decay (Profit)
+    time_frac = min(max(days_held / total_dte, 0.0), 1.0) if total_dte > 0 else 1.0
+    
+    # 2. Intrinsic Value (Loss)
+    call_spread_width = long_call - short_call
+    intrinsic_call = max(0, spot - short_call)
+    real_call_loss = min(intrinsic_call, call_spread_width)
+    
+    put_spread_width = short_put - long_put
+    intrinsic_put = max(0, short_put - spot)
+    real_put_loss = min(intrinsic_put, put_spread_width)
+    
+    total_intrinsic_loss = (real_call_loss + real_put_loss) * 100 * IC_CONTRACTS
+    credit_dollar = credit_received * 100 * IC_CONTRACTS
+    
+    potential_profit = credit_dollar * time_frac
+    net_pnl = potential_profit - total_intrinsic_loss
+    
+    # Cap
+    actual_max_loss = -max_loss 
+    net_pnl = max(net_pnl, actual_max_loss)
+    net_pnl = min(net_pnl, credit_dollar)
+    
+    return net_pnl
+
 def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
     print("Starting Backtest Simulation...")
     
@@ -479,15 +509,35 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 spot = df['close'].iloc[i]
                 
                 # Calculates Running Metrics
-                entry_spot = trades[-1]['spot'] if trades else spot
-                pnl_pct = (spot - entry_spot) / entry_spot * 100
+                entry = trades[-1]
+                entry_date = df['date'].iloc[trade_entry_bar] # Assuming date col exists, or use bar index
                 
-                pnl_dollar = (pnl_pct / 100.0) * trade_max_loss # Approx PnL dollars based on risk? Or based on credit?
-                # Actually PnL % is usually on margin. Let's use simple approx.
-                # If win, +credit. If loss, -Loss.
-                # But pnl_pct is spot change? No, pnl_pct was defined as spot change proxy.
-                # Let's refine PnL logic for Condor:
-                trade_res_dollar = 0.0
+                # Estimate P&L using Option Logic
+                days_elapsed = (i - trade_entry_bar) / BARS_PER_DAY
+                
+                pnl_dollar = estimate_condor_pnl(
+                    spot=spot,
+                    short_call=entry['short_call'],
+                    long_call=entry['long_call'],
+                    short_put=entry['short_put'],
+                    long_put=entry['long_put'],
+                    credit_received=entry['credit'],
+                    max_loss=entry['max_loss'],
+                    days_held=days_elapsed,
+                    total_dte=entry['dte']
+                )
+                
+                realized_pnl = pnl_dollar # for exit logic below
+                
+                # Update status based on PnL
+                if pnl_dollar > 0:
+                    status_icon = "✅ WIN"
+                    stats['winners'] += 1
+                    stats['total_win_dollar'] = stats.get('total_win_dollar', 0) + pnl_dollar
+                else:
+                    status_icon = "❌ LOSS"
+                    stats['losers'] += 1
+                    stats['total_loss_dollar'] = stats.get('total_loss_dollar', 0) + abs(pnl_dollar)
                 if pnl_pct > 0: # Proxy for win (should check strikes!)
                      # Wait, we checked strikes below in loop (lines 460+).
                      # Current logic checks exit reason. 
@@ -501,18 +551,19 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                      pass
 
                 # Deterministic Win/Loss check (Spot vs Strikes)
-                short_c = trades[-1]['short_call']
-                short_p = trades[-1]['short_put']
-                is_win = (spot < short_c) and (spot > short_p)
-                status_icon = "✅ WIN" if is_win else "❌ LOSS"
+                realized_pnl = estimate_condor_pnl(
+                    spot=spot,
+                    short_call=trades[-1]['short_call'],
+                    long_call=trades[-1]['long_call'],
+                    short_put=trades[-1]['short_put'],
+                    long_put=trades[-1]['long_put'],
+                    credit_received=trades[-1]['credit'],
+                    max_loss=trades[-1]['max_loss'],
+                    days_held=trades[-1]['dte'], # Full Expiration
+                    total_dte=trades[-1]['dte']
+                )
                 
-                # PnL Realization (Approx)
-                if is_win:
-                    realized_pnl = trade_credit
-                else:
-                    # Loss amount depends on how far OTM. 
-                    # Simulating max loss for pessimistic reporting if breached.
-                    realized_pnl = -trade_max_loss
+                status_icon = "✅ WIN" if realized_pnl > 0 else "❌ LOSS"
 
                 # Update Stats
                 stats['total_trades'] += 1
