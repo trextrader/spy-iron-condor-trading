@@ -79,14 +79,14 @@ import matplotlib.pyplot as plt
 #   3M rows ≈ 30K unique spot bars (~5 min compute)
 #   Full dataset: ~10M rows ≈ 100K unique spot bars
 
-ROWS_TO_LOAD = 500_000    # User Request: 500k Dataset
-EPOCHS = 5                # User Request: 5 Epochs
-DIFFUSION_WARMUP_EPOCHS = 2 # User Request: 2 No-Diff, 3 With-Diff
+ROWS_TO_LOAD = 1_000_000  # User Request: 1M Dataset
+EPOCHS = 6                # User Request: 6 Epochs
+DIFFUSION_WARMUP_EPOCHS = 2 # User Request: 2 No-Diff, 4 With-Diff
 
 # --- ARGPARSE CONFIGURATION (for dual-model experiment) ---
 import argparse
 parser = argparse.ArgumentParser(description="CondorBrain Training V2.2")
-parser.add_argument("--start-date", type=str, default="2024-12-27", help="Start date filter (YYYY-MM-DD)")
+parser.add_argument("--start-date", type=str, default="2024-01-01", help="Start date filter (YYYY-MM-DD)")
 parser.add_argument("--end-date", type=str, default="2025-01-01", help="End date filter (YYYY-MM-DD)")
 parser.add_argument("--model-suffix", type=str, default="", help="Model filename suffix (e.g., '_2024')")
 parser.add_argument("--epochs", type=int, default=None, help="Override EPOCHS config")
@@ -231,7 +231,8 @@ V21_PATHS = [
 ]
 
 POSSIBLE_PATHS = [
-    "data/processed/mamba_institutional_2024_1m_last 500k.csv", # User Target
+    "data/processed/mamba_institutional_2024_1m_last 1mil.csv", # User Target 1M
+    "data/processed/mamba_institutional_2024_1m_last 500k.csv",
     "/kaggle/input/spy-options-data/mamba_institutional_1m.csv",
     "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m.csv",
     "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m_500k.csv",
