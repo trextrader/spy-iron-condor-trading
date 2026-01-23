@@ -576,17 +576,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                     status_icon = "❌ LOSS"
                     stats['losers'] += 1
                     stats['total_loss_dollar'] = stats.get('total_loss_dollar', 0) + abs(pnl_dollar)
-                if pnl_pct > 0: # Proxy for win (should check strikes!)
-                     # Wait, we checked strikes below in loop (lines 460+).
-                     # Current logic checks exit reason. 
-                     # If Expiration, we check strikes.
-                     # If Early Exit, we need PnL.
-                     # Let's use the 'Simulation' calculation logic which is more accurate?
-                     # Limitation: The simulation loop updates 'capital' daily.
-                     # Here at exit signal, we don't have exact option price.
-                     # We'll rely on the existing PnL pct proxy for reporting, 
-                     # BUT update the stats based on win/loss flag.
-                     pass
+                # Define Return on Risk (ROI)
+                pnl_pct = (realized_pnl / entry['max_loss']) * 100 if entry['max_loss'] > 0 else 0.0
 
                 # Deterministic Win/Loss check (Spot vs Strikes)
                 realized_pnl = estimate_condor_pnl(
@@ -602,6 +593,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 )
                 
                 status_icon = "✅ WIN" if realized_pnl > 0 else "❌ LOSS"
+
+                # Define Return on Risk (ROI) for Expiration
+                pnl_pct = (realized_pnl / entry['max_loss']) * 100 if entry['max_loss'] > 0 else 0.0
 
                 # Update Stats
                 stats['total_trades'] += 1
