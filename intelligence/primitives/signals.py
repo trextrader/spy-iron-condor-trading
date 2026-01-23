@@ -35,11 +35,14 @@ def compute_macd_trend_signal(
 
 
 def compute_band_squeeze_breakout_signal(
-    bw_percentile: pd.Series,
-    expansion_rate: pd.Series,
+    bw_percentile: pd.Series = None,
+    expansion_rate: pd.Series = None,
     breakout_score: pd.Series = None,
     pct_thresh: float = 0.05,
     expansion_thresh: float = 2.0,
+    # Aliases
+    bb_percentile: pd.Series = None,
+    bw_expansion_rate: pd.Series = None,
 ) -> dict:
     """
     S002 – Squeeze → Breakout Signal (C1/E2)
@@ -51,9 +54,20 @@ def compute_band_squeeze_breakout_signal(
             "breakout_short": bool Series,
         }
     """
-    pct = bw_percentile.fillna(50.0)
-    exp = expansion_rate.fillna(0.0)
-    br = breakout_score if breakout_score is not None else pd.Series(0, index=pct.index)
+    pct = bw_percentile if bw_percentile is not None else bb_percentile
+    if pct is None: pct = pd.Series(50.0) # Fallback
+
+    exp = expansion_rate if expansion_rate is not None else bw_expansion_rate
+    if exp is None: exp = pd.Series(0.0) # Fallback
+    
+    # Try to infer index from whatever we have
+    if hasattr(pct, 'index'):
+        br = breakout_score if breakout_score is not None else pd.Series(0, index=pct.index)
+    else:
+        br = pd.Series(0) # Scalar fallback
+        
+    pct = pct.fillna(50.0)
+    exp = exp.fillna(0.0)
 
     squeeze = pct <= pct_thresh
     expanding = exp > expansion_thresh
@@ -335,7 +349,8 @@ def compute_bandwidth_expansion_signal(
 
 
 def compute_psar_flip_membership(
-    psar: pd.Series,
+    psar: pd.Series = None,
+    psar_trend: pd.Series = None,
     psar_reversion_mu: pd.Series = None,
 ) -> dict:
     """
@@ -348,7 +363,15 @@ def compute_psar_flip_membership(
             "reversion_score": float Series
         }
     """
-    pt = psar.fillna(0.0)
+    pt = psar if psar is not None else psar_trend
+    if pt is None:
+        return {
+            "psar_bull": pd.Series([False]),
+            "psar_bear": pd.Series([False]),
+            "reversion_score": pd.Series([0.5])
+        }
+        
+    pt = pt.fillna(0.0)
     mu = psar_reversion_mu.fillna(0.5) if psar_reversion_mu is not None else pd.Series(0.5, index=pt.index)
     
     # 1.0 = Bullish trend, -1.0 = Bearish trend

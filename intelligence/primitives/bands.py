@@ -230,20 +230,31 @@ def compute_iv_confidence(
 
 
 def compute_mtf_consensus(
-    signal_1m: pd.Series,
-    signal_5m: pd.Series,
-    signal_15m: pd.Series,
-    w_1m: float,
-    w_5m: float,
-    w_15m: float,
+    signal_1m: pd.Series = None,
+    signal_5m: pd.Series = None,
+    signal_15m: pd.Series = None,
+    w_1m: float = 1.0,
+    w_5m: float = 1.0,
+    w_15m: float = 1.0,
 ) -> pd.Series:
     """
     P007 - Multi-Timeframe Consensus (Rules A1, C1, E2)
 
     Returns Series: mtf_consensus in [-1, 1]
     """
-    s1 = signal_1m.fillna(0.0)
-    s5 = signal_5m.fillna(0.0)
-    s15 = signal_15m.fillna(0.0)
+    if signal_1m is not None:
+        idx = signal_1m.index
+    elif signal_5m is not None:
+        idx = signal_5m.index
+    elif signal_15m is not None:
+        idx = signal_15m.index
+    else:
+        # Fallback if all are None
+        return pd.Series([0.0])
+
+    s1 = signal_1m.fillna(0.0) if signal_1m is not None else pd.Series(0.0, index=idx)
+    s5 = signal_5m.fillna(0.0) if signal_5m is not None else pd.Series(0.0, index=idx)
+    s15 = signal_15m.fillna(0.0) if signal_15m is not None else pd.Series(0.0, index=idx)
+    
     consensus = (w_1m * s1 + w_5m * s5 + w_15m * s15) / (w_1m + w_5m + w_15m)
     return consensus.clip(-1.0, 1.0)
