@@ -45,6 +45,18 @@ from intelligence.rule_engine.dsl_parser import RuleDSLParser
 from intelligence.rule_engine.executor import RuleExecutionEngine
 from torch.utils.tensorboard import SummaryWriter # Added for TB support
 
+# --- SCALING HELPERS (Matched to training) ---
+def robust_zscore_fit(X):
+    median = np.nanmedian(X, axis=0)
+    diff = np.abs(X - median)
+    mad = np.nanmedian(diff, axis=0)
+    return median, mad
+
+def robust_zscore_transform(X, median, mad, clip_val=10.0):
+    mad = np.where(mad < 1e-6, 1.0, mad) # Avoid div0
+    z = (X - median) / (mad * 1.4826)
+    return np.clip(z, -clip_val, clip_val)
+
 # --- CONFIG ---
 MODEL_PATH = "condor_brain_retrain_v22_e3.pth" # Default
 DATA_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
@@ -161,6 +173,16 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
     X_np = df[feature_cols].values.astype(np.float32)
     X_np = np.nan_to_num(X_np, nan=0.0)
     
+    # MATCH TRAINING: Log-transform Volume (Index 4)
+    # Assuming 'volume' is index 4 in FEATURE_COLS_V22. 
+    # Let's check column name to be safe.
+    try:
+        vol_idx = feature_cols.index('volume')
+        print(f"Applying Log1p to Volume at index {vol_idx}...")
+        X_np[:, vol_idx] = np.log1p(np.clip(X_np[:, vol_idx], 0.0, 1e9))
+    except ValueError:
+        print("Warning: 'volume' column not found in feature_cols. Skipping log transform.")
+
     # Normalize (approximate robust norm)
     mu = np.median(X_np, axis=0) if len(X_np) > 0 else 0
     mad = np.median(np.abs(X_np - mu), axis=0)
@@ -168,6 +190,10 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
     
     X_norm = (X_np - mu) / (1.4826 * mad)
     X_norm = np.clip(X_norm, -10.0, 10.0)
+    
+    print(f"Feature Statistics check: Mean={np.mean(X_norm):.4f}, Std={np.std(X_norm):.4f}")
+    if np.abs(np.mean(X_norm)) > 1.0:
+        print("⚠️ WARNING: Features are not centered near 0. Model inputs might be drifted.")
     
     X_tensor = torch.tensor(X_norm, device=device)
     
