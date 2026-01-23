@@ -367,7 +367,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 # 4. Fuzzy Logic
                 reasoning.append("  4) Fuzzy Logic Sizing:")
                 reasoning.append(f"     Base Score: {entry_score:.1f}/100")
-                reasoning.append(f"     Breakdown: Prob({prob_profit:.2f})*40 + Conf({confidence:.2f})*20 + Vol({vol_score:.2f})*20 + Trend({trend_score:.2f})*20")
+                reasoning.append(f"     Breakdown: Conf({confidence:.2f}) [0-30] + Prob({prob_profit:.2f}) [0-30] + Rules({net_rule_signal:.2f}) [0-30] + Dir({direction:.2f}) [0-10]")
                 if 'position_size_multiplier' in df.columns:
                      reasoning.append(f"     Chaos Dampener: {df['position_size_multiplier'].iloc[i]:.2f}")
                 
