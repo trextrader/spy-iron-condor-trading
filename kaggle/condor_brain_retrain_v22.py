@@ -56,6 +56,10 @@ from intelligence.features.dynamic_features import (
     compute_all_primitive_features_v22,
 )
 
+# Rule Engine Integration
+from intelligence.rule_engine.dsl_parser import RuleDSLParser
+from intelligence.rule_engine.executor import RuleExecutionEngine
+
 # 🔄 FIX STALE IMPORTS (Colab/Jupyter specific)
 import sys
 import importlib
@@ -134,6 +138,10 @@ LR = 1e-4  # Lowered from 5e-4 for stability
 
 SEQ_LEN = 256
 PREDICT_HORIZON = 32
+
+# Rule Integration Config
+RULESET_PATH = "docs/Complete_Ruleset_DSL.yaml"
+RULE_FEATURES = ["rule_long_consensus", "rule_short_consensus", "rule_exit_consensus", "rule_block_any"]
 
 # Optimization Flags
 DIFFUSION_WARMUP_EPOCHS = 2  # Skip diffusion for first 2 epochs (0, 1)
@@ -328,9 +336,10 @@ print(f"   Final Shape: {df.shape} ({SLICE_MODE} rows)")
 
 
 # V2.2 FEATURE SCHEMA (52 features: 32 V2.1 + 20 primitives)
-FEATURE_COLS = FEATURE_COLS_V22
-INPUT_DIM = INPUT_DIM_V22
-print(f"   Using V2.2 Schema: {len(FEATURE_COLS)} features (32 V2.1 + 20 primitives)")
+# +4 Rule Consensus Features = 56
+FEATURE_COLS = FEATURE_COLS_V22 + RULE_FEATURES
+INPUT_DIM = INPUT_DIM_V22 + len(RULE_FEATURES)
+print(f"   Using Rule-Integrated Schema: {len(FEATURE_COLS)} features (52 Base + 4 Rules)")
 assert len(FEATURE_COLS) == INPUT_DIM, (
     f"Schema mismatch: len(FEATURE_COLS)={len(FEATURE_COLS)} != INPUT_DIM={INPUT_DIM}"
 )
@@ -423,6 +432,41 @@ else:
             volume_col="volume",
             spread_col="spread_ratio" if "spread_ratio" in spot_df.columns else "close",
         )
+        
+        # --- NEW: Rule Engine Integration ---
+        print(f"   🚀 Executing Rule Engine ({RULESET_PATH})...")
+        try:
+            parser = RuleDSLParser(RULESET_PATH)
+            ruleset = parser.load()
+            engine = RuleExecutionEngine(ruleset)
+            
+            # Prepare data for rule engine (requires dict of Series)
+            rule_data = {col: spot_df[col] for col in spot_df.columns}
+            rule_results = engine.execute(rule_data) # Dict[rule_id, DataFrame]
+            
+            # Aggregated Signals
+            longs = []
+            shorts = []
+            exits = []
+            blocks = []
+            
+            for rid, res in rule_results.items():
+                longs.append(res["signal_long"].astype(float))
+                shorts.append(res["signal_short"].astype(float))
+                exits.append(res["signal_exit"].astype(float))
+                blocks.append(res["blocked"].astype(float))
+                
+            # Compute Mean Consensus (0.0 to 1.0)
+            spot_df["rule_long_consensus"] = np.mean(longs, axis=0) if longs else 0.0
+            spot_df["rule_short_consensus"] = np.mean(shorts, axis=0) if shorts else 0.0
+            spot_df["rule_exit_consensus"] = np.mean(exits, axis=0) if exits else 0.0
+            spot_df["rule_block_any"] = np.max(blocks, axis=0) if blocks else 0.0
+            
+            print(f"      [OK] Rule signals computed for {len(rule_results)} rules.")
+        except Exception as e:
+            print(f"      ⚠️ Rule Engine error: {e}. Filling with zeros.")
+            for col in RULE_FEATURES:
+                spot_df[col] = 0.0
         
         # Get dynamic columns and merge back
         # Exclude aux_cols (like spread_ratio) if they were already in df to prevent collision/suffixes
@@ -610,8 +654,12 @@ scheduler = torch.optim.lr_scheduler.OneCycleLR(
     epochs=EPOCHS,
     pct_start=0.1
 )
+from intelligence.condor_loss import CompositeCondorLoss
 
-criterion_policy = nn.MSELoss()
+# --- LOSS FUNCTIONS ---
+# (pred, sharpe, drawdown, turnover, rule_consistency)
+lambdas = (1.0, 0.5, 0.1, 0.1, 1.0) 
+criterion_composite = CompositeCondorLoss(lambdas=lambdas)
 criterion_forecast = nn.HuberLoss()
 
 # --- ASSERT DATA SANITY ---
@@ -657,6 +705,7 @@ for epoch in range(EPOCHS):
     
     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS} [Diff={'ON' if use_diffusion else 'OFF'}]")
     skipped_batches = 0
+    total_rule_loss = 0
     
     for batch_idx, (x_seq, y_pol, y_next, y_traj) in enumerate(pbar):
         x_seq = x_seq.to(device, non_blocking=True)
@@ -719,10 +768,19 @@ for epoch in range(EPOCHS):
                 optimizer.zero_grad(set_to_none=True)
                 continue
             
-            # 1. Policy Loss
-            loss_pol = criterion_policy(outputs, y_pol)
+            # --- LOSS CALCULATION ---
+            # Extract rule signals from the current bar (last timestep of history)
+            # Indices -4: are rule consensus features
+            rule_signals = x_seq[:, -1, -4:] # (B, 4)
             
-            # 2. Feature Loss (Next Step)
+            # 1. Composite Policy & Rule Loss
+            loss_dict = criterion_composite.forward_decomposed(
+                y_pred=outputs,
+                y_true=y_pol,
+                rule_signals=rule_signals
+            )
+            loss_composite = loss_dict['total']
+            
             # 2. Feature Loss (Next Step)
             # Reduced scale from 1000.0 to 100.0 for stability
             loss_feat = criterion_forecast(feat_pred, y_next) * 100.0
@@ -730,17 +788,16 @@ for epoch in range(EPOCHS):
             # 3. Diffusion Loss
             loss_diff = torch.tensor(0.0, device=device)
             if diff_loss_scalar is not None:
-                # Handle DataParallel: If gathered loss is a vector (one per GPU), take mean
                 if diff_loss_scalar.dim() > 0:
                     diff_loss_scalar = diff_loss_scalar.mean()
                 loss_diff = diff_loss_scalar * 10.0 # Scale diffusion loss
 
-                # ⚠️ SHOCK THERAPY: Clamp Diffusion Impact for first 50 batches of active diffusion
+                # ⚠️ SHOCK THERAPY: Clamp Diffusion Impact
                 if use_diffusion and batch_idx < 50:
                     loss_diff = torch.clamp(loss_diff, 0.0, 10.0)
             
             # Total Loss
-            loss = (loss_pol * 2.0) + loss_feat + loss_diff 
+            loss = loss_composite + loss_feat + loss_diff 
         
         # Stability check
         if not torch.isfinite(loss):
@@ -757,24 +814,24 @@ for epoch in range(EPOCHS):
         scheduler.step()
         
         total_loss += loss.item()
-        total_pol_loss += loss_pol.item()
+        total_pol_loss += loss_dict['pred'].item()
+        total_rule_loss += loss_dict['rule'].item()
         total_feat_loss += loss_feat.item()
         total_diff_loss += loss_diff.item()
         
-        pbar.set_postfix({
-            'L_pol': f"{loss_pol.item():.4f}", 
-            'L_feat': f"{loss_feat.item():.4f}",
-            'L_diff': f"{loss_diff.item():.4f}"
-        })
-        
-        # Periodic Logging (every 100 batches)
-        if batch_idx % 100 == 0:
-            pbar.write(f"   [Batch {batch_idx}] L_All={loss.item():.4f} | Pol={loss_pol.item():.4f} | Diff={loss_diff.item():.4f}")
+        if (batch_idx + 1) % 10 == 0:
+            pbar.set_postfix({
+                'L_pol': f"{loss_dict['pred'].item():.4f}", 
+                'L_rule': f"{loss_dict['rule'].item():.4f}",
+                'L_feat': f"{loss_feat.item():.4f}", 
+                'L_diff': f"{loss_diff.item():.4f}"
+            })
             
         # TensorBoard Logging (every batch)
         global_step = epoch * len(train_loader) + batch_idx
         writer.add_scalar('Loss/Total', loss.item(), global_step)
-        writer.add_scalar('Loss/Policy', loss_pol.item(), global_step)
+        writer.add_scalar('Loss/Policy', loss_dict['pred'].item(), global_step)
+        writer.add_scalar('Loss/RuleConsistency', loss_dict['rule'].item(), global_step)
         writer.add_scalar('Loss/Feature', loss_feat.item(), global_step)
         writer.add_scalar('Loss/Diffusion', loss_diff.item(), global_step)
         writer.add_scalar('LR', scheduler.get_last_lr()[0], global_step)
@@ -783,13 +840,15 @@ for epoch in range(EPOCHS):
         print(f"   ⚠️ Epoch {epoch+1}: skipped {skipped_batches} batches due to non-finite data/outputs.")
     
     avg_pol = total_pol_loss / len(train_loader)
+    avg_rule = total_rule_loss / len(train_loader)
     avg_feat = total_feat_loss / len(train_loader)
     avg_diff = total_diff_loss / len(train_loader)
     
-    print(f"   Epoch {epoch+1} Train: Policy={avg_pol:.4f} | Feat={avg_feat:.4f} | Diff={avg_diff:.4f}")
+    print(f"   Epoch {epoch+1} Train: Policy={avg_pol:.4f} | Rule={avg_rule:.4f} | Feat={avg_feat:.4f} | Diff={avg_diff:.4f}")
     
     # TensorBoard Epoch Averages
     writer.add_scalar('Epoch/Policy_Loss', avg_pol, epoch+1)
+    writer.add_scalar('Epoch/Rule_Loss', avg_rule, epoch+1)
     writer.add_scalar('Epoch/Feature_Loss', avg_feat, epoch+1)
     writer.add_scalar('Epoch/Diffusion_Loss', avg_diff, epoch+1)
     
@@ -922,7 +981,7 @@ for epoch in range(EPOCHS):
         "state_dict": state_dict,
         "version": VERSION_V22,  # V2.2 with primitives
         "feature_cols": FEATURE_COLS,
-        "input_dim": INPUT_DIM,  # 52
+        "input_dim": INPUT_DIM,  # 56
         "median": median.astype(np.float32),
         "mad": mad.astype(np.float32),
         "seq_len": SEQ_LEN,
