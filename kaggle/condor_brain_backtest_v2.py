@@ -418,18 +418,40 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 else:
                     reasoning.append("     Triggered: None (Model Force?)")
                     
-                # 3. Diffusion/Model
-                reasoning.append("  3) Diffusion/Model:")
-                reasoning.append(f"     Call Offset: {call_offset:.2f} | Put Offset: {put_offset:.2f}")
-                reasoning.append(f"     Width: {width:.2f} | DTE Pred: {te_suggested:.2f}")
-                reasoning.append(f"     Prob Profit: {prob_profit:.4f} | Confidence: {confidence:.4f}")
+                # 3. Diffusion/Model (360 Degree View)
+                # Helper for interpretation
+                def interpret(val, low, high):
+                    return "Bullish" if val > high else ("Bearish" if val < low else "Neutral")
                 
-                # 4. Fuzzy Logic
-                reasoning.append("  4) Fuzzy Logic Sizing:")
-                reasoning.append(f"     Base Score: {entry_score:.1f}/100")
-                reasoning.append(f"     Breakdown: Conf({confidence:.2f}) [0-30] + Prob({prob_profit:.2f}) [0-30] + Rules({net_rule_signal:.2f}) [0-30] + Dir({direction:.2f}) [0-10]")
+                # Sequence Info
+                seq_start_time = df['date'].iloc[i-SEQ_LEN] if 'date' in df.columns else "N/A"
+                seq_end_time = df['date'].iloc[i] if 'date' in df.columns else "N/A"
+
+                reasoning.append(f"  3) 360° PREDICTOR VIEW (Model Output):")
+                reasoning.append(f"     {'Predictor':<15} | {'Value':<10} | {'Interpretation'}")
+                reasoning.append(f"     {'-'*15}-+-{'-'*10}-+-{'-'*20}")
+                reasoning.append(f"     {'Confidence':<15} | {confidence:<10.4f} | {interpret(confidence, 0.3, 0.7)} (Threshold > 0.4)")
+                reasoning.append(f"     {'Prob Profit':<15} | {prob_profit:<10.4f} | {interpret(prob_profit, 0.3, 0.6)} (Threshold > 0.4)")
+                reasoning.append(f"     {'Direction':<15} | {direction:<10.4f} | {interpret(direction, -0.5, 0.5)} (Prefers Neutral)")
+                reasoning.append(f"     {'TE (DTE)':<15} | {te_suggested:<10.4f} | {'Short Term' if te_suggested < 7 else 'Standard'}")
+                reasoning.append(f"     {'Width':<15} | {width:<10.4f} | {'Wide' if width > 5 else 'Narrow'}")
+                reasoning.append(f"     {'Call Offset':<15} | {call_offset:<10.4f} | {call_offset:.1f}% OTM")
+                reasoning.append(f"     {'Put Offset':<15} | {put_offset:<10.4f} | {put_offset:.1f}% OTM")
+                
+                # 4. Fuzzy Logic & Sizing
+                reasoning.append(f"  4) DECISION LOGIC:")
+                reasoning.append(f"     Base Score:      {entry_score:.1f}/100 (Need {ENTRY_THRESHOLD})")
+                
+                # Position Sizing
+                pos_size_pct = 100.0
                 if 'position_size_multiplier' in df.columns:
-                     reasoning.append(f"     Chaos Dampener: {df['position_size_multiplier'].iloc[i]:.2f}")
+                    dampener = df['position_size_multiplier'].iloc[i]
+                    pos_size_pct = dampener * 100
+                    reasoning.append(f"     Chaos Dampener:  {dampener:.4f} (Adjusts Size)")
+                else:
+                    reasoning.append(f"     Chaos Dampener:  1.00 (No Adjustment)")
+                
+                reasoning.append(f"     Final Sizing:    {pos_size_pct:.1f}% of Max Allocation")
                 
                 reasoning_str = "\\n".join(reasoning)
 
@@ -442,8 +464,10 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 trade_msg = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║ 🦅 IRON CONDOR #{trade_num} ENTRY @ Bar {i}
+║ Time:          {seq_end_time}
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║ SPOT:          ${spot:.2f}
+║ SEQUENCE:      {seq_start_time} -> {seq_end_time} ({SEQ_LEN} bars)
 ║ FUZZY SCORE:   {entry_score}/100 (threshold: {ENTRY_THRESHOLD})
 ╠─────────────────────────── DETAILED REASONING ───────────────────────────────╣
 {reasoning_str}
