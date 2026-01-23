@@ -8,7 +8,6 @@ FILES_TO_CHECK = [
 ]
 
 def fix_csv_headers():
-def fix_csv_headers():
     for input_file in FILES_TO_CHECK:
         print(f"--- Processing {input_file} ---")
         if not os.path.exists(input_file):
