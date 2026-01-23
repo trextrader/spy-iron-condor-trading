@@ -62,6 +62,15 @@ IC_MULTIPLIER = 100  # Options multiplier
 def load_data_and_features(data_path, rows=None):
     print(f"Loading data from {data_path}...")
     df = pd.read_csv(data_path)
+    
+    # --- STANDARDIZE DATE COLUMN ---
+    if 'dt' not in df.columns and 'timestamp' in df.columns:
+        print("   ⚠️ Standardizing 'timestamp' -> 'dt'...")
+        df.rename(columns={'timestamp': 'dt'}, inplace=True)
+
+    if 'dt' in df.columns:
+        # Ensure UTC standard
+        df['dt'] = pd.to_datetime(df['dt'], utc=True)
     if rows is not None:
         df = df.iloc[-rows:].reset_index(drop=True)
     
@@ -484,6 +493,8 @@ def main():
     possible_data_paths = [
         MODEL_PATH, # Kaggle default config (Line 42 might be overwritten)
         "/kaggle/input/spy-options-data/mamba_institutional_1m.csv",
+        "/content/spy-iron-condor-trading/data/processed/mamba_institutional_2024_1m_last 500k.csv",
+        "data/processed/mamba_institutional_2024_1m_last 500k.csv",
         "/content/spy-iron-condor-trading/data/processed/mamba_institutional_1m.csv",
         "/content/spy-iron-condor-trading/data/mamba_institutional_1m_500k.csv",
         "data/processed/mamba_institutional_1m.csv",
