@@ -435,8 +435,10 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                     return "Bullish" if val > high else ("Bearish" if val < low else "Neutral")
                 
                 # Sequence Info
-                seq_start_time = df['date'].iloc[i-SEQ_LEN] if 'date' in df.columns else "N/A"
-                seq_end_time = df['date'].iloc[i] if 'date' in df.columns else "N/A"
+                # STANDARDIZED: use 'dt' (or 'timestamp' fallback)
+                time_col = 'dt' if 'dt' in df.columns else 'timestamp'
+                seq_start_time = df[time_col].iloc[i-SEQ_LEN] if time_col in df.columns else "N/A"
+                seq_end_time = df[time_col].iloc[i] if time_col in df.columns else "N/A"
 
                 reasoning.append(f"  3) 360° PREDICTOR VIEW (Model Output):")
                 reasoning.append(f"     {'Predictor':<15} | {'Value':<10} | {'Interpretation'}")
@@ -545,7 +547,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 
                 # Calculates Running Metrics
                 entry = trades[-1]
-                entry_date = df['date'].iloc[trade_entry_bar] # Assuming date col exists, or use bar index
+                time_col = 'dt' if 'dt' in df.columns else 'timestamp'
+                entry_date = df[time_col].iloc[trade_entry_bar] if time_col in df.columns else "N/A"
                 
                 # Estimate P&L using Option Logic
                 days_elapsed = (i - trade_entry_bar) / BARS_PER_DAY
