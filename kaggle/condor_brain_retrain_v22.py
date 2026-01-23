@@ -848,8 +848,13 @@ for epoch in range(EPOCHS):
             # A. Predicted vs Actual Scatter Plots
             for i, head_name in enumerate(MAIN_HEADS):
                 fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-                p = samples['preds'][:, i]
-                t = samples['targets'][:, i]
+                
+                # Detach and move to CPU
+                p_tensor = samples['preds'][:, i]
+                t_tensor = samples['targets'][:, i]
+                
+                p = p_tensor.detach().cpu().numpy()
+                t = t_tensor.detach().cpu().numpy()
                 
                 ax.scatter(t, p, alpha=0.6, s=50, c='blue', edgecolors='black')
                 vmin, vmax = min(p.min(), t.min()), max(p.max(), t.max())
@@ -876,7 +881,9 @@ for epoch in range(EPOCHS):
             
             # B. Horizon Trajectory (45-Day Forecast)
             if samples.get('forecast_data') is not None:
-                forecast = samples['forecast_data'][0]  # Sample 0
+                forecast_tensor = samples['forecast_data'][0]  # Sample 0
+                forecast = forecast_tensor.detach().cpu().numpy()
+                
                 num_days = forecast.shape[0]
                 days = np.arange(num_days)
                 
