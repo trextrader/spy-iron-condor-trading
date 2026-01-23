@@ -384,7 +384,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
 ╠─────────────────────────── IRON CONDOR SETUP ────────────────────────────────╣
 ║   Short Call:  ${short_call_strike:.2f}  |  Long Call:  ${long_call_strike:.2f}
 ║   Short Put:   ${short_put_strike:.2f}  |  Long Put:   ${long_put_strike:.2f}
-║   Width:       ${width:.2f}  |  DTE: {trade_dte:.1f} days
+║   Width:       ${width:.2f}  |  DTE: {te_suggested:.1f} days
 ╠─────────────────────────── P&L POTENTIAL ────────────────────────────────────╣
 ║   Credit:      ${credit_received:,.2f} (Max Profit)
 ║   Max Loss:    ${max_loss:,.2f}
