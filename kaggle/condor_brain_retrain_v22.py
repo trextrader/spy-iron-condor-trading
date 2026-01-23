@@ -837,7 +837,7 @@ for epoch in range(EPOCHS):
             # Get sample predictions
             samples = sample_predictions(
                 model=model,
-                get_batch_fn=lambda bi: next(iter(val_loader)),
+                get_batch_fn=lambda bi: (lambda b: (b[0], b[1], torch.zeros(b[0].size(0), dtype=torch.long, device=device)))(next(iter(val_loader))),
                 device=device,
                 amp_dtype=torch.float16,
                 n_samples=32
