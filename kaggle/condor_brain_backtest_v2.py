@@ -377,6 +377,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 
                 reasoning_str = "\\n".join(reasoning)
 
+                # Fix: Model trained with TE=0 target predicts ~0. Enforce min DTE.
+                DEFAULT_DTE = 14 # Hardcode default if not in config
+                if te_suggested < 1.0:
+                    te_suggested = DEFAULT_DTE
+                trade_dte = float(te_suggested)
+
                 trade_msg = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║ 🦅 IRON CONDOR #{trade_num} ENTRY @ Bar {i}
@@ -388,7 +394,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
 ╠─────────────────────────── IRON CONDOR SETUP ────────────────────────────────╣
 ║   Short Call:  ${short_call_strike:.2f}  |  Long Call:  ${long_call_strike:.2f}
 ║   Short Put:   ${short_put_strike:.2f}  |  Long Put:   ${long_put_strike:.2f}
-║   Width:       ${width:.2f}  |  DTE: {te_suggested:.1f} days
+║   Width:       ${width:.2f}  |  DTE: {trade_dte:.1f} days
 ╠─────────────────────────── P&L POTENTIAL ────────────────────────────────────╣
 ║   Credit:      ${credit_received:,.2f} (Max Profit)
 ║   Max Loss:    ${max_loss:,.2f}
@@ -399,10 +405,6 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 
                 # Set DTE for expiration tracking
                 trade_entry_bar = i
-                # Fix: Model trained with TE=0 target predicts ~0. Enforce min DTE.
-                if te_suggested < 1.0:
-                    te_suggested = DEFAULT_DTE
-                trade_dte = float(te_suggested)
 
                 trade_credit = credit_received  # Store for P&L calc
                 trade_max_loss = max_loss
@@ -522,7 +524,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 # using simplified Sharpe proxy: Expectancy / AvgLoss (sort of E-Ratio)
                 # Proper Sharpe requires variance tracking.
                 # Let's verify if we can list it.
-                sharpe_proxy = expectancy / avg_loss if avg_loss > 0 else 0.0
+                if avg_loss > 0:
+                    sharpe_proxy = expectancy / avg_loss 
+                    sharpe_str = f"{sharpe_proxy:.2f}"
+                else:
+                    sharpe_proxy = 99.99
+                    sharpe_str = "Inf"
 
                 # --- TENSORBOARD LOGGING ---
                 step_idx = stats['total_trades']
@@ -546,7 +553,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
 ║ 3) Drawdown:   {curr_dd_pct:.2f}% (Max: {stats['max_dd_pct']:.2f}%)
 ║ 4) NP/DD:      {stats['total_pnl_dollar'] / curr_dd_dollar if curr_dd_dollar > 1 else 0:.2f}
 ║ 5) Expectancy: ${expectancy:.2f}
-║ 6) Sharpe (Tr):{sharpe_proxy:.2f} (Proxy)
+║ 6) Sharpe (Tr):{sharpe_str:>5} (Proxy)
 ╚══════════════════════════════════════════════════════════════════════════════╝"""
                 print(exit_msg)
                 log_file.write(exit_msg + "\n")
