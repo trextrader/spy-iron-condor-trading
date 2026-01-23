@@ -337,7 +337,11 @@ def run_backtest(df, rule_signals, model, feature_cols, device):
                 
                 # Set DTE for expiration tracking
                 trade_entry_bar = i
-                trade_dte = te_suggested if te_suggested > 0 else DEFAULT_DTE
+                # Fix: Model trained with TE=0 target predicts ~0. Enforce min DTE.
+                if te_suggested < 1.0:
+                    te_suggested = DEFAULT_DTE
+                trade_dte = float(te_suggested)
+
                 trade_credit = credit_received  # Store for P&L calc
                 trade_max_loss = max_loss
                 
