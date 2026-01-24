@@ -31,7 +31,11 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from intelligence.condor_brain import CondorBrain, CondorLoss, HAS_MAMBA
 from intelligence.condor_loss import CompositeCondorLoss
-from intelligence.canonical_feature_registry import FEATURE_COLS_V22, select_feature_frame
+from intelligence.canonical_feature_registry import (
+    FEATURE_COLS_V22,
+    VERSION_V22,
+    select_feature_frame,
+)
 from intelligence.training_monitor import (
     TrainingMonitor, compute_val_head_losses, MAIN_HEADS,
     sample_predictions, display_predictions_inline
@@ -1023,7 +1027,33 @@ def train_condor_brain(args):
             os.makedirs(os.path.dirname(args.output) or 'models', exist_ok=True)
             print(f"  [Saving] Writing model to {args.output}...")
             save_start = time.time()
-            torch.save(model.state_dict(), args.output)
+            ckpt = {
+                "state_dict": model.state_dict(),
+                "feature_cols": list(FEATURE_COLS),
+                "input_dim": int(len(FEATURE_COLS)),
+                "seq_len": int(args.lookback),
+                "version": VERSION_V22,
+                "model_config": {
+                    "d_model": int(args.d_model),
+                    "n_layers": int(args.layers),
+                    "d_state": 32,
+                    "d_conv": 4,
+                    "expand": 2,
+                    "use_vol_gated_attn": bool(args.vol_gated_attn),
+                    "use_topk_moe": bool(args.topk_moe),
+                    "moe_n_experts": int(args.moe_experts),
+                    "moe_k": int(args.moe_k),
+                },
+                "training_config": {
+                    "epochs": int(args.epochs),
+                    "batch_size": int(args.batch_size),
+                    "lr": float(args.lr),
+                    "lookback": int(args.lookback),
+                    "composite_loss": bool(args.composite_loss),
+                    "loss_lambdas": tuple(args.loss_lambdas_tuple),
+                },
+            }
+            torch.save(ckpt, args.output)
             save_time = time.time() - save_start
             loss_type = "val_loss" if run_val else "train_loss"
             print(f"  ✓ Saved best model ({loss_type}={save_loss:.4f}) in {save_time:.1f}s")

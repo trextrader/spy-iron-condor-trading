@@ -1108,3 +1108,28 @@ Minimum protocol for defensible claims:
 ---
 
 **End of Extended Audit**
+
+---
+
+## Model Profile Alignment (Addendum)
+
+This repo uses multiple runtime profiles (training, inference, backtest). To avoid drift, all checkpoints must store **model_config**, **feature_cols**, **input_dim**, **seq_len**, and **version** metadata. Inference must prefer checkpoint metadata over defaults.
+
+Minimum required checkpoint keys:
+- `state_dict`
+- `feature_cols`
+- `input_dim`
+- `seq_len`
+- `version`
+- `model_config`
+- `training_config`
+
+Recommended profiles (documented, not hardcoded):
+
+| Profile | d_model | n_layers | input_dim | seq_len | Notes |
+|---|---:|---:|---:|---:|---|
+| Train-Research | 1024 | 32 | 52 | 240 | Max capacity, H100/A100 |
+| Train-Prod | 512 | 12–24 | 52 | 240 | Balanced throughput |
+| Inference-Prod | 512 | 12 | 52 | 240 | Low-latency |
+
+All docs must reflect deployed checkpoint metadata. If there is a mismatch, **checkpoint metadata is authoritative**.
