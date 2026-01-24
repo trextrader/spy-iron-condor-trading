@@ -395,6 +395,11 @@ def compute_val_head_losses(
         for bi in range(n_batches):
             batch_x, batch_y, batch_r = get_batch_fn(bi)
             
+            # Move to device
+            batch_x = batch_x.to(device, non_blocking=True)
+            batch_y = batch_y.to(device, non_blocking=True)
+            batch_r = batch_r.to(device, non_blocking=True)
+            
             with autocast('cuda', dtype=amp_dtype):
                 res = model(batch_x, return_regime=True, forecast_days=0)
                 # Handle simplified V2.1 tuple return (outputs, regime, etc...)
@@ -446,6 +451,11 @@ def sample_predictions(
     
     with torch.no_grad():
         batch_x, batch_y, batch_r = get_batch_fn(0)  # Get first batch
+        
+        # Move to device
+        batch_x = batch_x.to(device, non_blocking=True)
+        batch_y = batch_y.to(device, non_blocking=True)
+        batch_r = batch_r.to(device, non_blocking=True)
         
         with autocast('cuda', dtype=amp_dtype):
             # Request all outputs: regime, experts, and 45-day forecast
