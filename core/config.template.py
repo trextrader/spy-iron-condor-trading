@@ -228,7 +228,13 @@ class RunConfig:
     # === Simulation Settings ===
     starting_cash: float = 25000.0
     slippage_pct: float = 0.01
+    slippage_per_contract: float = 0.02
     commission_per_contract: float = 0.65
+
+    # === Execution Cost Model ===
+    use_execution_cost_model: bool = True
+    exec_cost_min_half_spread: float = 0.01
+    exec_cost_impact_coeff: float = 0.10
     
     # === Stage 2: Strategy Depth ===
     use_skew_penalty: bool = True

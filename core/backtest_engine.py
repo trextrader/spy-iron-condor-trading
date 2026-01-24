@@ -37,6 +37,7 @@ from intelligence.fuzzy_engine import (
     calculate_psar_membership,
     calculate_atr_stop_multiplier
 )
+from intelligence.execution.cost_model import estimate_entry_cost
 from qtmf.models import TradeIntent
 from qtmf.facade import benchmark_and_size
 
@@ -908,14 +909,28 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     return
                 
                 # === Apply Market Realism (Stage 1) ===
-                slippage_rate = getattr(self.r_cfg, 'slippage_per_contract', 0.02)
-                commission_rate = getattr(self.r_cfg, 'commission_per_contract', 0.65)
-                
-                # Slippage on entry (4 legs * qty contracts)
-                entry_slippage = slippage_rate * quantity * 4
-                # Commission on entry
-                entry_commission = commission_rate * quantity * 4
-                
+                use_exec_cost = getattr(self.r_cfg, "use_execution_cost_model", False)
+                slippage_rate = getattr(self.r_cfg, "slippage_per_contract", 0.02)
+                commission_rate = getattr(self.r_cfg, "commission_per_contract", 0.65)
+
+                if use_exec_cost:
+                    cost_result = estimate_entry_cost(
+                        condor,
+                        quantity,
+                        self.r_cfg,
+                        min_half_spread=getattr(self.r_cfg, "exec_cost_min_half_spread", 0.01),
+                        impact_coeff=getattr(self.r_cfg, "exec_cost_impact_coeff", 0.10),
+                    )
+                    entry_slippage = cost_result.entry_slippage
+                    entry_commission = cost_result.entry_commission
+                    exec_cost_details = cost_result.details
+                else:
+                    # Slippage on entry (4 legs * qty contracts)
+                    entry_slippage = slippage_rate * quantity * 4
+                    # Commission on entry
+                    entry_commission = commission_rate * quantity * 4
+                    exec_cost_details = {}
+
                 # Net credit after slippage (we receive less due to adverse fills)
                 net_credit = credit - entry_slippage
                 
@@ -952,7 +967,9 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                     "entry_slippage": entry_slippage,
                     "entry_commission": entry_commission,
                     "slippage_rate": slippage_rate,
-                    "commission_rate": commission_rate
+                    "commission_rate": commission_rate,
+                    "use_execution_cost_model": use_exec_cost,
+                    "exec_cost_details": exec_cost_details
                 }
 
     # === Run Backtest ===
