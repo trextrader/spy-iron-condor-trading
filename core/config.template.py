@@ -88,6 +88,14 @@ class StrategyConfig:
     rsi_neutral_min:  float = 30
     rsi_neutral_max:  float = 60
 
+    # === Fuzzy Routing (Primary/Secondary Paths) ===
+    # Primary sizing path: "qtmf10" (default), optional: "f001", "fis_legacy"
+    fuzzy_mode: str = "qtmf10"
+    # Allow legacy 3-factor FIS sizing (compatibility only)
+    allow_fis_legacy: bool = False
+    # Allow blending F001 (11-factor) with QTMF sizing
+    allow_f001_augment: bool = False
+
     # ADX (Average Directional Index) Settings
     use_adx_filter: bool = True
     adx_period: int = 14
