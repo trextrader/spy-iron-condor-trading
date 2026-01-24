@@ -454,7 +454,20 @@ class CondorBrain(nn.Module):
                     'selected_indices': moe_indices
                 }
             else:
-                outputs = self.moe_head(last_hidden)  # (B, 8)
+                outputs = self.moe_head(last_hidden)  # (B, 8) raw
+            
+            # --- NEW: Apply activations to MoE raw output ---
+            # Replicates CondorExpertHead logic for the MoE path
+            raw = outputs
+            outputs = torch.zeros_like(raw)
+            outputs[:, 0] = torch.sigmoid(raw[:, 0]) * 5.0    # short_call_offset: 0-5%
+            outputs[:, 1] = torch.sigmoid(raw[:, 1]) * 5.0    # short_put_offset: 0-5%
+            outputs[:, 2] = torch.sigmoid(raw[:, 2]) * 10.0   # wing_width: 0-$10
+            outputs[:, 3] = 2 + torch.sigmoid(raw[:, 3]) * 43  # dte: 2-45 days
+            outputs[:, 4] = torch.sigmoid(raw[:, 4])          # prob_profit: 0-1
+            outputs[:, 5] = torch.tanh(raw[:, 5]) * 0.5       # expected_roi: -50% to +50%
+            outputs[:, 6] = torch.sigmoid(raw[:, 6])          # max_loss_pct: 0-1
+            outputs[:, 7] = torch.sigmoid(raw[:, 7])          # confidence: 0-1
         else:
             # Traditional 3-expert weighted MoE
             out_low = self.expert_low(last_hidden)       # (B, 8)
