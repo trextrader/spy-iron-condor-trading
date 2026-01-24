@@ -121,6 +121,18 @@ def benchmark_and_size(
         "gaussian_confidence": ti.gaussian_confidence,
     }
 
+    # --- Fuzzy routing flags ---
+    fuzzy_mode = str(extras.get("fuzzy_mode", "qtmf10")).lower()
+    allow_fis_legacy = bool(extras.get("allow_fis_legacy", False))
+    allow_f001_augment = bool(extras.get("allow_f001_augment", False))
+    diagnostics.update(
+        {
+            "fuzzy_mode": fuzzy_mode,
+            "allow_fis_legacy": allow_fis_legacy,
+            "allow_f001_augment": allow_f001_augment,
+        }
+    )
+
     # Hard approval gates (caller can tune via extras)
     min_gaussian_conf = float(extras.get("min_gaussian_confidence", 0.55))
     if ti.gaussian_confidence < min_gaussian_conf:
@@ -232,6 +244,36 @@ def benchmark_and_size(
     }  # Total: 0.18+0.14+0.11+0.10+0.10+0.09+0.08+0.07+0.06+0.07 = 1.00
 
     Ft = compute_fuzzy_confidence(memberships, weights)
+
+    # Optional F001 augmentation or fallback routing
+    f001_score = extras.get("f001_score", extras.get("fuzzy_reversion_11"))
+    if f001_score is not None:
+        try:
+            f001_score = float(f001_score)
+        except Exception:
+            f001_score = None
+
+    # Enforce routing policy
+    if fuzzy_mode == "fis_legacy" and not allow_fis_legacy:
+        diagnostics["fuzzy_mode_forced"] = "qtmf10"
+        fuzzy_mode = "qtmf10"
+    if fuzzy_mode == "f001" and not allow_f001_augment:
+        diagnostics["fuzzy_mode_forced"] = "qtmf10"
+        fuzzy_mode = "qtmf10"
+
+    if fuzzy_mode == "f001":
+        if f001_score is not None:
+            Ft = max(0.0, min(1.0, f001_score))
+            diagnostics["f001_used"] = True
+        else:
+            diagnostics["f001_used"] = False
+            diagnostics["fuzzy_mode_forced"] = "qtmf10"
+    elif allow_f001_augment and f001_score is not None:
+        alpha = float(extras.get("f001_alpha", 0.25))
+        alpha = max(0.0, min(1.0, alpha))
+        Ft = (1.0 - alpha) * Ft + alpha * max(0.0, min(1.0, f001_score))
+        diagnostics["f001_alpha"] = alpha
+        diagnostics["f001_used"] = True
 
     realized_vol = float(ti.realized_vol) if ti.realized_vol is not None else float(extras.get("realized_vol", 0.0))
     low_vol = float(extras.get("low_vol", 10.0))

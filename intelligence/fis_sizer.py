@@ -32,6 +32,8 @@ class FISSizer:
         Phase 4: Defuzzification (Volatility Scaling)
         Phase 5: Final Sizing
         """
+        if not getattr(self.cfg, "allow_fis_legacy", False):
+            return self._reject(decision, "fis_legacy_disabled")
         
         # --- Stage 1: Hard Constraints ---
         # "Never bet more than X% of equity on max loss"
