@@ -33,3 +33,13 @@ This directory contains the visual specifications for the CondorBrain system. Be
 
 ---
 **© 2026 by Dr. T. Jerry Mahabub, Ph.D — All rights reserved.**
+
+---
+
+## Addendum (2026-01-24): Schema Drift Warning
+
+Several diagrams in this folder reference a 24-feature input manifold and 24-layer model. The repo has V2.1 (32) and V2.2 (52) feature schemas, and production configs vary by profile. To avoid drift:
+
+- Treat `intelligence/canonical_feature_registry.py` as SSOT for input schema.
+- Enforce explicit feature selection by name (not CSV order).
+- Update diagram captions when model configs change.
