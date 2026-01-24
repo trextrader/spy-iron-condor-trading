@@ -114,6 +114,9 @@ class CompositeCondorLoss(nn.Module):
         # rule_signals indices: 0=long, 1=short, 2=exit, 3=block
         # pred index 7 is 'confidence'
         if rule_signals is not None and len(self.lambdas) > 4 and self.lambdas[4] > 0:
+            # SAFETY: Clamp rule signals to [0, 1] to prevent explosion if normalization drifts
+            rule_signals = torch.clamp(rule_signals, 0.0, 1.0)
+            
             # Rule block flag (B,)
             block_flag = rule_signals[:, 3]
             # Model's predicted confidence (B,) - Index 7 in CondorExpertHead
@@ -184,6 +187,9 @@ class CompositeCondorLoss(nn.Module):
             l_turn = (weights - last_weights).abs().mean()
 
         if rule_signals is not None and len(self.lambdas) > 4 and self.lambdas[4] > 0:
+            # SAFETY: Clamp rule signals to [0, 1] for logging consistency
+            rule_signals = torch.clamp(rule_signals, 0.0, 1.0)
+            
             block_flag = rule_signals[:, 3]
             confidence = y_pred[:, 7]
             l_block = (block_flag * confidence).mean()

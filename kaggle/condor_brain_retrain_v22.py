@@ -523,6 +523,16 @@ mad = np.median(np.abs(X_train_np - median), axis=0, keepdims=True).astype(np.fl
 # Clamp MAD to avoid division blowups and avoid NaNs from 0/0 on sparse features
 mad = np.maximum(mad, 1e-6).astype(np.float32)
 
+# --- FIX: Rule Features Normalization ---
+# Rule features (last 4) are consensus [0, 1]. Robust norm blows them up 
+# because they are sparse. We force them to stay in [0, 1] range.
+# (x - 0) / (1.4826 * (1/1.4826)) = x
+rule_indices = range(len(FEATURE_COLS) - len(RULE_FEATURES), len(FEATURE_COLS))
+for i in rule_indices:
+    median[0, i] = 0.0
+    mad[0, i] = 1.0 / 1.4826 
+print(f"   🛡️ Normalization protected for {len(RULE_FEATURES)} rule features.")
+
 # If any stats are non-finite, something upstream is still broken; repair safely
 if not np.isfinite(median).all() or not np.isfinite(mad).all():
     print("   ⚠️ Non-finite median/MAD detected; coercing stats to safe defaults")
