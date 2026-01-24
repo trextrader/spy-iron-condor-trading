@@ -794,8 +794,8 @@ for epoch in range(EPOCHS):
             loss_composite = loss_dict['total']
             
             # 2. Feature Loss (Next Step)
-            # Increased scale from 100.0 to 1000.0 for visibility
-            loss_feat = criterion_forecast(feat_pred, y_next) * 1000.0
+            # Increased scale further (1000.0 -> 10000.0) for better signal strength
+            loss_feat = criterion_forecast(feat_pred, y_next) * 10000.0
 
             # 3. Diffusion Loss
             loss_diff = torch.tensor(0.0, device=device)
