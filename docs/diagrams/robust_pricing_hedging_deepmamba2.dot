@@ -1,0 +1,207 @@
+digraph RobustPricingHedging {
+    rankdir=TB;
+    bgcolor="#0a0a0a";
+    fontname="Helvetica";
+    fontcolor="#e0e0e0";
+    node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
+    edge [fontname="Helvetica", fontcolor="#b0b0b0", color="#606060"];
+
+    label=<<b>Robust Pricing-Hedging Duality &amp; DeepMamba2 Integration</b><br/>Pathwise Superhedging Framework for SPY Iron Condor Trading>;
+    labelloc="t";
+    fontsize=20;
+
+    // ========== LAYER 1: Mathematical Foundations ==========
+    subgraph cluster_math {
+        label=<<b>Mathematical Foundations (Hou-Obloj 2015)</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        path_space [label=<<b>Path Space &#937;</b><br/>All price trajectories<br/>&#969;: [0,T] &#8594; &#8477;<SUP>+</SUP>>, shape=box, fillcolor="#3498db", fontsize=11];
+        prediction [label=<<b>Prediction Set I</b><br/>I &#8834; &#937; (constraints)<br/>Volatility bounds>, shape=box, fillcolor="#9b59b6", fontsize=11];
+        martingale [label=<<b>Martingale Measures</b><br/>M<SUP>I</SUP> = {&#8473;: &#8473;(I)=1}<br/>Risk-neutral pricing>, shape=box, fillcolor="#e74c3c", fontsize=11];
+        superhedge [label=<<b>Superhedging Set P</b><br/>P(G) = inf{x: &#8707;&#916;...}<br/>Model-free bound>, shape=box, fillcolor="#27ae60", fontsize=11];
+    }
+
+    // Duality Theorem
+    duality [label=<<b>Duality Theorem</b><br/><i>V(G) = P(G)</i><br/>Robust price = Superhedge cost>, shape=doubleoctagon, fillcolor="#f39c12", fontsize=12];
+
+    // ========== LAYER 2: 58-Dimensional Feature Set ==========
+    subgraph cluster_features {
+        label=<<b>58-Dimensional Institutional Feature Set</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        market_state [label=<<b>Market State (16D)</b><br/>Price, Vol, Greeks<br/>Term structure>, shape=box, fillcolor="#3498db", fontsize=11];
+        dynamic_feat [label=<<b>Dynamic Features (18D)</b><br/>Momentum, Mean-rev<br/>Regime indicators>, shape=box, fillcolor="#e67e22", fontsize=11];
+        primitive_feat [label=<<b>Primitive Features (24D)</b><br/>Technical signals<br/>MTF consensus>, shape=box, fillcolor="#16a085", fontsize=11];
+    }
+
+    feature_concat [label=<<b>Feature Concatenation</b><br/>X<SUB>t</SUB> &#8712; &#8477;<SUP>58</SUP><br/>Normalized input>, shape=component, fillcolor="#5dade2", fontsize=12];
+
+    // ========== LAYER 3: 7 Diffusion Predictors ==========
+    subgraph cluster_diffusion {
+        label=<<b>7 Diffusion-Based Forward Predictors</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        gbm [label=<<b>GBM</b><br/>dS = &#956;Sdt + &#963;SdW>, shape=box, fillcolor="#9b59b6", fontsize=10];
+        heston [label=<<b>Heston</b><br/>Stochastic vol<br/>dv = &#954;(&#952;-v)dt + &#958;&#8730;vdZ>, shape=box, fillcolor="#e74c3c", fontsize=10];
+        sabr [label=<<b>SABR</b><br/>dF = &#963;F<SUP>&#946;</SUP>dW<br/>Vol smile>, shape=box, fillcolor="#3498db", fontsize=10];
+        vg [label=<<b>Variance Gamma</b><br/>Levy process<br/>Jump diffusion>, shape=box, fillcolor="#27ae60", fontsize=10];
+        merton [label=<<b>Merton Jump</b><br/>dS/S = &#956;dt + &#963;dW + dJ>, shape=box, fillcolor="#f39c12", fontsize=10];
+        cgmy [label=<<b>CGMY</b><br/>Pure jump<br/>Infinite activity>, shape=box, fillcolor="#e67e22", fontsize=10];
+        nig [label=<<b>NIG</b><br/>Normal Inverse<br/>Gaussian>, shape=box, fillcolor="#16a085", fontsize=10];
+    }
+
+    diffusion_ensemble [label=<<b>Ensemble Aggregation</b><br/>Weighted model avg<br/>Forward price bounds>, shape=component, fillcolor="#5dade2", fontsize=12];
+
+    // ========== LAYER 4: DeepMamba2 Architecture ==========
+    subgraph cluster_mamba {
+        label=<<b>DeepMamba2 Architecture (24-32 Layers)</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        input_proj [label=<<b>Input Projection</b><br/>Linear(58 &#8594; 512)<br/>Expand dim>, shape=trapezium, fillcolor="#3498db", fontsize=11];
+        ssm_stack [label=<<b>SSM Block Stack</b><br/>24-32 Mamba layers<br/>Selective scan>, shape=box3d, fillcolor="#9b59b6", fontsize=11];
+        vol_attn [label=<<b>VolGatedAttn</b><br/>Volatility-gated<br/>attention heads>, shape=box, fillcolor="#e74c3c", fontsize=11];
+        rms_norm [label=<<b>RMSNorm</b><br/>Root mean square<br/>normalization>, shape=box, fillcolor="#27ae60", fontsize=11];
+    }
+
+    // ========== LAYER 5: TopK Mixture of Experts ==========
+    subgraph cluster_moe {
+        label=<<b>TopKMoE (n=3, k=1)</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        router [label=<<b>Gating Router</b><br/>softmax(W<SUB>g</SUB>x)<br/>Expert selection>, shape=diamond, fillcolor="#f39c12", fontsize=11];
+        expert_low [label=<<b>Expert: Low Vol</b><br/>Wider condors<br/>Higher premium>, shape=box, fillcolor="#27ae60", fontsize=10];
+        expert_norm [label=<<b>Expert: Normal</b><br/>Balanced strikes<br/>Standard width>, shape=box, fillcolor="#3498db", fontsize=10];
+        expert_high [label=<<b>Expert: High Vol</b><br/>Narrow condors<br/>Defensive>, shape=box, fillcolor="#e74c3c", fontsize=10];
+    }
+
+    expert_out [label=<<b>Expert Output</b><br/>y = &#931; g<SUB>i</SUB>E<SUB>i</SUB>(x)<br/>Weighted blend>, shape=component, fillcolor="#5dade2", fontsize=12];
+
+    // ========== LAYER 6: Output Heads & Loss ==========
+    subgraph cluster_heads {
+        label=<<b>Multi-Head Output &amp; Composite Loss</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        price_head [label=<<b>Price Head</b><br/>Forward prediction<br/>MSE loss>, shape=box, fillcolor="#3498db", fontsize=11];
+        vol_head [label=<<b>Volatility Head</b><br/>&#963; forecast<br/>Vol scaling>, shape=box, fillcolor="#9b59b6", fontsize=11];
+        direction_head [label=<<b>Direction Head</b><br/>Sign prediction<br/>BCE loss>, shape=box, fillcolor="#e67e22", fontsize=11];
+    }
+
+    loss_total [label=<<b>Composite Loss</b><br/>L = &#955;<SUB>1</SUB>L<SUB>pred</SUB> + &#955;<SUB>2</SUB>L<SUB>dir</SUB> + &#955;<SUB>3</SUB>L<SUB>Sharpe</SUB><br/>+ &#955;<SUB>4</SUB>L<SUB>DD</SUB> + &#955;<SUB>5</SUB>L<SUB>turn</SUB>>, shape=doubleoctagon, fillcolor="#c0392b", fontsize=11];
+
+    // ========== LAYER 7: Production Integration ==========
+    subgraph cluster_production {
+        label=<<b>Production Integration</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        mamba_signal [label=<<b>Mamba Signal</b><br/>&#966;<SUB>mamba</SUB> &#8712; [0,1]<br/>Neural confidence>, shape=ellipse, fillcolor="#9b59b6", fontsize=11];
+        fuzzy_signal [label=<<b>Fuzzy Signal</b><br/>&#956;<SUB>fuzzy</SUB> &#8712; [0,1]<br/>10-factor score>, shape=ellipse, fillcolor="#27ae60", fontsize=11];
+        risk_factor [label=<<b>Risk Factor</b><br/>Account/Vol adj<br/>Position limits>, shape=box, fillcolor="#e74c3c", fontsize=11];
+    }
+
+    final_size [label=<<b>Final Position Size</b><br/><i>S = S<SUB>max</SUB> &#215; (w<SUB>1</SUB>&#956; + w<SUB>2</SUB>&#966;) &#215; RF</i><br/>Contracts to trade>, shape=doubleoctagon, fillcolor="#16a085", fontsize=13];
+
+    // ========== LAYER 8: System Integration ==========
+    subgraph cluster_system {
+        label=<<b>CondorBrain System Integration</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        mamba_engine [label=<<b>mamba_engine.py</b><br/>Neural inference<br/>State management>, shape=folder, fillcolor="#34495e", fontsize=11];
+        fuzzy_engine [label=<<b>fuzzy_engine.py</b><br/>Fuzzy membership<br/>10-factor calc>, shape=folder, fillcolor="#34495e", fontsize=11];
+        backtest_eng [label=<<b>backtest_engine.py</b><br/>Strategy execution<br/>P&amp;L tracking>, shape=folder, fillcolor="#34495e", fontsize=11];
+    }
+
+    // ========== CONNECTIONS ==========
+    // Math foundations
+    path_space -> duality [label="bound", fontsize=9];
+    prediction -> duality [label="constrain", fontsize=9];
+    martingale -> duality [label="price", fontsize=9];
+    superhedge -> duality [label="hedge", fontsize=9];
+
+    // Features
+    duality -> market_state [label="bounds", fontcolor="#f39c12"];
+    market_state -> feature_concat;
+    dynamic_feat -> feature_concat;
+    primitive_feat -> feature_concat;
+
+    // Diffusion
+    feature_concat -> gbm;
+    feature_concat -> heston;
+    feature_concat -> sabr;
+    feature_concat -> vg;
+    feature_concat -> merton;
+    feature_concat -> cgmy;
+    feature_concat -> nig;
+
+    gbm -> diffusion_ensemble;
+    heston -> diffusion_ensemble;
+    sabr -> diffusion_ensemble;
+    vg -> diffusion_ensemble;
+    merton -> diffusion_ensemble;
+    cgmy -> diffusion_ensemble;
+    nig -> diffusion_ensemble;
+
+    // Mamba
+    diffusion_ensemble -> input_proj [label="X", fontcolor="#5dade2"];
+    input_proj -> ssm_stack;
+    ssm_stack -> vol_attn;
+    vol_attn -> rms_norm;
+
+    // MoE
+    rms_norm -> router;
+    router -> expert_low [label="g1", fontsize=9];
+    router -> expert_norm [label="g2", fontsize=9];
+    router -> expert_high [label="g3", fontsize=9];
+    expert_low -> expert_out;
+    expert_norm -> expert_out;
+    expert_high -> expert_out;
+
+    // Heads
+    expert_out -> price_head;
+    expert_out -> vol_head;
+    expert_out -> direction_head;
+    price_head -> loss_total;
+    vol_head -> loss_total;
+    direction_head -> loss_total;
+
+    // Production
+    loss_total -> mamba_signal [label="inference", fontcolor="#9b59b6", style=dashed];
+    mamba_signal -> final_size [label="w2*phi", fontcolor="#9b59b6"];
+    fuzzy_signal -> final_size [label="w1*mu", fontcolor="#27ae60"];
+    risk_factor -> final_size [label="*RF", fontcolor="#e74c3c"];
+
+    // System
+    mamba_signal -> mamba_engine [style=dashed, color="#85c1e9"];
+    fuzzy_signal -> fuzzy_engine [style=dashed, color="#85c1e9"];
+    final_size -> backtest_eng [label="execute", fontcolor="#16a085", penwidth=2];
+
+    // Key formulas table
+    formulas [label=<<table border="0" cellborder="1" cellspacing="0">
+        <tr><td bgcolor="#0a0a0a" colspan="2"><b>Key Formulas</b></td></tr>
+        <tr><td align="left">Duality</td><td align="left">V(G) = P(G) = sup E<SUP>P</SUP>[G]</td></tr>
+        <tr><td align="left">SSM Recurrence</td><td align="left">h<SUB>t</SUB> = Ah<SUB>t-1</SUB> + Bx<SUB>t</SUB></td></tr>
+        <tr><td align="left">MoE Output</td><td align="left">y = &#931;<SUB>i</SUB> g<SUB>i</SUB>E<SUB>i</SUB>(x)</td></tr>
+        <tr><td align="left">Position Size</td><td align="left">S = S<SUB>max</SUB>(w<SUB>1</SUB>&#956; + w<SUB>2</SUB>&#966;)RF</td></tr>
+        <tr><td align="left">Composite Loss</td><td align="left">L = &#931;&#955;<SUB>i</SUB>L<SUB>i</SUB></td></tr>
+    </table>>, shape=plaintext];
+
+    final_size -> formulas [style=dashed, color="#85c1e9", label="reference"];
+
+    // Mathematical footnote
+    note [label="Architecture Summary:\n- 58D features -> 7 diffusion models\n- DeepMamba2: 24-32 SSM layers\n- TopKMoE: 3 experts, top-1 routing\n- 5-component composite loss\n- Neuro-fuzzy position sizing", shape=note, fillcolor="#2c3e50", fontcolor="#ecf0f1"];
+
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="(c) 2026 by Dr. T. Jerry Mahabub, Ph.D\nAll rights reserved."];
+    }
+}

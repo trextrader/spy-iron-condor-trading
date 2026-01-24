@@ -1,0 +1,235 @@
+digraph PasseriniVazquezHJB {
+    rankdir=TB;
+    bgcolor="#0a0a0a";
+    fontname="Helvetica";
+    fontcolor="#e0e0e0";
+    node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
+    edge [fontname="Helvetica", fontcolor="#b0b0b0", color="#606060"];
+
+    label=<<b>Passerini-Vazquez HJB Framework for SPY Options Trading</b><br/>Hamilton-Jacobi-Bellman Optimal Control with Alpha Predictors>;
+    labelloc="t";
+    fontsize=20;
+
+    // ========== LAYER 1: Stochastic Price Dynamics ==========
+    subgraph cluster_dynamics {
+        label=<<b>Stochastic Price Dynamics</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        price_sde [label=<<b>Price SDE</b><br/>dP<SUB>t</SUB> = &#956;<SUB>t</SUB>dt + &#963;dW<SUB>t</SUB><br/>SPY/Options Price>, shape=box, fillcolor="#3498db", fontsize=11];
+        drift_decomp [label=<<b>Drift Decomposition</b><br/>&#956;<SUB>t</SUB> = &#956; + x<SUB>t</SUB><br/>Daily + Intraday>, shape=box, fillcolor="#9b59b6", fontsize=11];
+        ou_process [label=<<b>OU Process</b><br/>dx<SUB>t</SUB> = -&#954;x<SUB>t</SUB>dt + &#951;dZ<SUB>t</SUB><br/>Mean-reverting alpha>, shape=box, fillcolor="#e67e22", fontsize=11];
+        position_sde [label=<<b>Position Dynamics</b><br/>dq<SUB>t</SUB> = u<SUB>t</SUB>dt<br/>Trading rate control>, shape=box, fillcolor="#16a085", fontsize=11];
+    }
+
+    // ========== LAYER 2: HJB Equation ==========
+    subgraph cluster_hjb {
+        label=<<b>Hamilton-Jacobi-Bellman Equation</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        linear_cost [label=<<b>Linear Cost</b><br/>C|u<SUB>t</SUB>|<br/>Half-spread>, shape=box, fillcolor="#e74c3c", fontsize=11];
+        impact_cost [label=<<b>Impact Cost</b><br/>Ku<SUB>t</SUB><SUP>2</SUP><br/>Temp impact>, shape=box, fillcolor="#c0392b", fontsize=11];
+        alpha_gain [label=<<b>Alpha Capture</b><br/>-&#8747;(&#956;+x)qds<br/>Expected gain>, shape=box, fillcolor="#27ae60", fontsize=11];
+        risk_penalty [label=<<b>Risk Penalty</b><br/>(&#955;/2)&#8747;q<SUP>2</SUP>ds<br/>Variance cost>, shape=box, fillcolor="#f39c12", fontsize=11];
+    }
+
+    value_func [label=<<b>Value Function</b><br/><i>V(t, x, q) = min<SUB>u</SUB> E[Cost]</i><br/>Optimal control problem>, shape=doubleoctagon, fillcolor="#f39c12", fontsize=12];
+
+    hjb_pde [label=<<b>HJB PDE</b><br/>&#8706;<SUB>t</SUB>V + (&#955;/2)(q-q*)<SUP>2</SUP> + min<SUB>u</SUB>[...] = 0<br/>Dynamic programming>, shape=component, fillcolor="#5dade2", fontsize=12];
+
+    // ========== LAYER 3: No-Trade Zone ==========
+    subgraph cluster_nt {
+        label=<<b>No-Trade Zone (NT) Derivation</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        markowitz [label=<<b>Markowitz Target</b><br/>q* = &#956;/&#955;<br/>Optimal position>, shape=box, fillcolor="#3498db", fontsize=11];
+        gain_func [label=<<b>Gain Function</b><br/>g(t,x) = E[&#8747;x<SUB>s</SUB>ds]<br/>Expected alpha>, shape=box, fillcolor="#9b59b6", fontsize=11];
+        nt_bounds [label=<<b>NT Boundaries</b><br/>b<SUB>&#177;</SUB> = q* &#177; (g-C)/(2T-t)<br/>Upper/Lower bounds>, shape=box, fillcolor="#e67e22", fontsize=11];
+    }
+
+    nt_zone [label=<<b>No-Trade Zone</b><br/><i>[b<SUB>-</SUB>, b<SUB>+</SUB>]</i><br/>Inaction region>, shape=ellipse, fillcolor="#f39c12", fontsize=12];
+
+    // ========== LAYER 4: Five Trading Regions ==========
+    subgraph cluster_regions {
+        label=<<b>Five Trading Regions</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        buy_market [label=<<b>1. BUY MKT</b><br/>q &lt;&lt; b<SUB>-</SUB><br/>Urgent buy>, shape=box, fillcolor="#27ae60", fontsize=10];
+        buy_limit [label=<<b>2. BUY LMT</b><br/>q &lt; b<SUB>-</SUB><br/>Patient buy>, shape=box, fillcolor="#2ecc71", fontsize=10];
+        market_making [label=<<b>3. MM/NT</b><br/>q &#8712; [b<SUB>-</SUB>,b<SUB>+</SUB>]<br/>Hold/Provide>, shape=box, fillcolor="#f39c12", fontsize=10];
+        sell_limit [label=<<b>4. SELL LMT</b><br/>q &gt; b<SUB>+</SUB><br/>Patient sell>, shape=box, fillcolor="#e67e22", fontsize=10];
+        sell_market [label=<<b>5. SELL MKT</b><br/>q &gt;&gt; b<SUB>+</SUB><br/>Urgent sell>, shape=box, fillcolor="#e74c3c", fontsize=10];
+    }
+
+    region_selector [label=<<b>Region Selector</b><br/>Order type decision<br/>Mkt vs Limit>, shape=diamond, fillcolor="#9b59b6", fontsize=11];
+
+    // ========== LAYER 5: Alpha Engine ==========
+    subgraph cluster_alpha {
+        label=<<b>Alpha Engine (Statistical + ML)</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        macro_factors [label=<<b>Macro Factors</b><br/>SPX, VIX, Rates<br/>Daily alpha &#956;>, shape=box, fillcolor="#3498db", fontsize=11];
+        order_flow [label=<<b>Order Flow</b><br/>Bid-Ask imbalance<br/>Intraday signal>, shape=box, fillcolor="#16a085", fontsize=11];
+        iv_skew [label=<<b>IV Skew</b><br/>Options sentiment<br/>Vol surface>, shape=box, fillcolor="#9b59b6", fontsize=11];
+        gamma_exp [label=<<b>Gamma Exposure</b><br/>Dealer hedging<br/>Price magnets>, shape=box, fillcolor="#e67e22", fontsize=11];
+    }
+
+    ou_calibration [label=<<b>OU Calibration</b><br/>(&#954;, &#951;) estimation<br/>Rolling window>, shape=component, fillcolor="#5dade2", fontsize=12];
+
+    alpha_output [label=<<b>Alpha State Vector</b><br/>(&#956;<SUB>t</SUB>, x<SUB>t</SUB>, &#954;, &#951;)<br/>To HJB solver>, shape=parallelogram, fillcolor="#f39c12", fontsize=12];
+
+    // ========== LAYER 6: Fill Probability & Execution ==========
+    subgraph cluster_fill {
+        label=<<b>Fill Probability &amp; Execution</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        order_book [label=<<b>Order Book</b><br/>Depth, Spread<br/>Microstructure>, shape=box, fillcolor="#34495e", fontsize=11];
+        recent_fills [label=<<b>Recent Fills</b><br/>Fill history<br/>Queue position>, shape=box, fillcolor="#34495e", fontsize=11];
+        rnn_fill [label=<<b>RNN/Survival</b><br/>Fill model<br/>P<SUP>&#177;</SUP>(features)>, shape=box, fillcolor="#3498db", fontsize=11];
+    }
+
+    fill_prob [label=<<b>Fill Probability</b><br/>P<SUP>+</SUP>, P<SUP>-</SUP><br/>Buy/Sell fill rates>, shape=ellipse, fillcolor="#16a085", fontsize=11];
+
+    extended_bounds [label=<<b>Extended Bounds</b><br/>b&#771;<SUB>&#177;</SUB> = q* &#177; (g-C)/[(2T-t)(1&#177;P)]<br/>Fill-adjusted>, shape=component, fillcolor="#5dade2", fontsize=12];
+
+    // ========== LAYER 7: Order Management ==========
+    subgraph cluster_oms {
+        label=<<b>Order Management &amp; Risk</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        order_type [label=<<b>Order Type</b><br/>Mkt/Lmt/Cancel<br/>From region>, shape=box, fillcolor="#3498db", fontsize=11];
+        order_size [label=<<b>Order Size</b><br/>|q - b<SUB>&#177;</SUB>|<br/>To boundary>, shape=box, fillcolor="#9b59b6", fontsize=11];
+        limit_price [label=<<b>Limit Price</b><br/>Optimization<br/>Fill vs. cost>, shape=box, fillcolor="#e67e22", fontsize=11];
+    }
+
+    execution_output [label=<<b>Trade Order</b><br/>TradeOrder(type, size, price)<br/>To OMS>, shape=parallelogram, fillcolor="#f1c40f", fontsize=12];
+
+    // ========== LAYER 8: Greeks & Risk ==========
+    subgraph cluster_risk {
+        label=<<b>Greeks Monitoring &amp; Risk Limits</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        delta_mon [label=<<b>Delta &#916;</b><br/>Direction<br/>Hedge ratio>, shape=box, fillcolor="#e74c3c", fontsize=10];
+        gamma_mon [label=<<b>Gamma &#915;</b><br/>Convexity<br/>Curvature>, shape=box, fillcolor="#c0392b", fontsize=10];
+        vega_mon [label=<<b>Vega &#957;</b><br/>Vol exposure<br/>Sensitivity>, shape=box, fillcolor="#9b59b6", fontsize=10];
+        theta_mon [label=<<b>Theta &#920;</b><br/>Time decay<br/>Daily bleed>, shape=box, fillcolor="#8e44ad", fontsize=10];
+    }
+
+    risk_adj [label=<<b>Risk Adjustment</b><br/>&#955; scaling<br/>HJB risk parameter>, shape=component, fillcolor="#c0392b", fontsize=11];
+
+    // ========== LAYER 9: System Integration ==========
+    subgraph cluster_system {
+        label=<<b>CondorBrain System Integration</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        hjb_solver [label=<<b>hjb_solver.py</b><br/>HJB numerical<br/>solver>, shape=folder, fillcolor="#2980b9", fontsize=11];
+        alpha_engine_mod [label=<<b>alpha_engine.py</b><br/>Alpha predictor<br/>OU calibration>, shape=folder, fillcolor="#2980b9", fontsize=11];
+        fill_predictor [label=<<b>fill_predictor.py</b><br/>Fill probability<br/>ML model>, shape=folder, fillcolor="#2980b9", fontsize=11];
+        options_strategy [label=<<b>options_strategy.py</b><br/>Iron Condor<br/>construction>, shape=folder, fillcolor="#34495e", fontsize=11];
+    }
+
+    integration_facade [label=<<b>HJB-CondorBrain Facade</b><br/>Unified control interface<br/>Real-time execution>, shape=doubleoctagon, fillcolor="#16a085", fontsize=13];
+
+    // ========== CONNECTIONS ==========
+    // Dynamics
+    price_sde -> drift_decomp [label="decompose", fontsize=9];
+    drift_decomp -> ou_process [label="intraday", fontsize=9];
+    ou_process -> position_sde [label="control", fontsize=9];
+
+    // HJB
+    linear_cost -> value_func;
+    impact_cost -> value_func;
+    alpha_gain -> value_func;
+    risk_penalty -> value_func;
+    value_func -> hjb_pde [label="optimize", fontcolor="#f39c12", penwidth=2];
+
+    // NT Zone
+    hjb_pde -> markowitz [label="q*", fontcolor="#5dade2"];
+    hjb_pde -> gain_func [label="g(t,x)", fontcolor="#5dade2"];
+    markowitz -> nt_bounds;
+    gain_func -> nt_bounds;
+    nt_bounds -> nt_zone [label="compute", fontcolor="#f39c12", penwidth=2];
+
+    // Five Regions
+    nt_zone -> buy_market [label="q<<b-", fontsize=8];
+    nt_zone -> buy_limit [label="q<b-", fontsize=8];
+    nt_zone -> market_making [label="in NT", fontsize=8];
+    nt_zone -> sell_limit [label="q>b+", fontsize=8];
+    nt_zone -> sell_market [label="q>>b+", fontsize=8];
+    buy_market -> region_selector;
+    buy_limit -> region_selector;
+    market_making -> region_selector;
+    sell_limit -> region_selector;
+    sell_market -> region_selector;
+
+    // Alpha
+    macro_factors -> ou_calibration;
+    order_flow -> ou_calibration;
+    iv_skew -> ou_calibration;
+    gamma_exp -> ou_calibration;
+    ou_calibration -> alpha_output [label="state", fontcolor="#5dade2"];
+    alpha_output -> gain_func [label="feed", fontcolor="#f39c12", style=dashed];
+
+    // Fill
+    order_book -> rnn_fill;
+    recent_fills -> rnn_fill;
+    rnn_fill -> fill_prob [label="predict", fontcolor="#16a085"];
+    fill_prob -> extended_bounds [label="adjust", fontcolor="#16a085"];
+    extended_bounds -> nt_bounds [label="refine", fontcolor="#5dade2", style=dashed];
+
+    // OMS
+    region_selector -> order_type [label="type", fontcolor="#9b59b6"];
+    nt_bounds -> order_size [label="target", fontcolor="#9b59b6"];
+    order_type -> execution_output;
+    order_size -> execution_output;
+    limit_price -> execution_output;
+    fill_prob -> limit_price [label="optimize", fontsize=9, style=dashed];
+
+    // Risk
+    delta_mon -> risk_adj;
+    gamma_mon -> risk_adj;
+    vega_mon -> risk_adj;
+    theta_mon -> risk_adj;
+    risk_adj -> hjb_pde [label="lambda", fontcolor="#c0392b", style=dashed];
+
+    // System Integration
+    hjb_pde -> hjb_solver [style=dashed, color="#85c1e9"];
+    alpha_output -> alpha_engine_mod [style=dashed, color="#85c1e9"];
+    fill_prob -> fill_predictor [style=dashed, color="#85c1e9"];
+    hjb_solver -> integration_facade [label="solver", fontcolor="#16a085"];
+    alpha_engine_mod -> integration_facade [label="alpha", fontcolor="#16a085"];
+    fill_predictor -> integration_facade [label="fill", fontcolor="#16a085"];
+    integration_facade -> options_strategy [label="execute", fontcolor="#16a085", penwidth=2];
+    execution_output -> integration_facade [label="order", fontcolor="#f1c40f"];
+
+    // Key formulas table
+    formulas [label=<<table border="0" cellborder="1" cellspacing="0">
+        <tr><td bgcolor="#0a0a0a" colspan="2"><b>Key Formulas</b></td></tr>
+        <tr><td align="left">Price SDE</td><td align="left">dP<SUB>t</SUB> = (&#956; + x<SUB>t</SUB>)dt + &#963;dW<SUB>t</SUB></td></tr>
+        <tr><td align="left">OU Process</td><td align="left">dx<SUB>t</SUB> = -&#954;x<SUB>t</SUB>dt + &#951;dZ<SUB>t</SUB></td></tr>
+        <tr><td align="left">NT Bounds</td><td align="left">b<SUB>&#177;</SUB> = q* &#177; (g-C)/(2T-t)</td></tr>
+        <tr><td align="left">Markowitz</td><td align="left">q* = &#956;/&#955;</td></tr>
+        <tr><td align="left">Gain Function</td><td align="left">g = x(2T-t) + (1-e<SUP>-&#954;(2T-t)</SUP>)/&#954;</td></tr>
+    </table>>, shape=plaintext];
+
+    integration_facade -> formulas [style=dashed, color="#85c1e9", label="reference"];
+
+    // Mathematical footnote
+    note [label="Framework Summary:\n- HJB optimal control for execution\n- OU mean-reverting alpha model\n- No-Trade zone for transaction costs\n- 5 trading regions (Mkt/Lmt)\n- Fill probability adjustment\n- Greeks-based risk scaling", shape=note, fillcolor="#2c3e50", fontcolor="#ecf0f1"];
+
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="(c) 2026 by Dr. T. Jerry Mahabub, Ph.D\nAll rights reserved."];
+    }
+}

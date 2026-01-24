@@ -15,7 +15,10 @@
       "Bash(pip install:*)",
       "Bash(python:*)",
       "Bash(dir \"C:\\\\SPYOptionTrader_test\\\\docs\\\\trading_rules\" /b)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Bash(dot:*)",
+      "Bash(dir:*)",
+      "Bash(powershell \"Get-ChildItem *.png | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize\")"
     ]
   }
 }
