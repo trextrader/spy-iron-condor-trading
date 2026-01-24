@@ -63,14 +63,8 @@ PRIMITIVE_REGISTRY = {
     "G010": prim.compute_position_size_gate,
     
     # Signals (S001-S015)
-    "S001": prim.compute_band_squeeze_breakout_signal, # Check YAML!
-    # Update: YAML S001 is "breakout" or "band_break". 
-    # My signals.py S001 is "macd_trend". 
-    # Mismatch risk here too. 
-    # I will verify S-series IDs below based on standard set or leave as is if verification passes.
-    # The user YAML uses S001 for "breakout". My S002 is "band_squeeze_breakout". 
-    # I will enable dual mapping or fix YAML later. For now, best effort mapping.
-    "S001": prim.compute_band_squeeze_breakout_signal, 
+    # NOTE: DSL uses S001 as breakout/band-squeeze signal; map directly.
+    "S001": prim.compute_band_squeeze_breakout_signal,
     "S002": prim.compute_rsi_reversion_signal,
     "S003": prim.compute_macd_trend_signal, # YAML Rule A2 uses S003 alias macd_cross
     "S004": prim.compute_vol_normalized_adx, # Placeholder? YAML Rule A3 uses S004 alias trend
