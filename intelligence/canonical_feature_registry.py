@@ -227,8 +227,49 @@ FEATURE_REGISTRY_V21: Dict[str, Any] = {
 # =============================================================================
 
 def validate_feature_cols(cols: List[str]) -> bool:
-    """Check if provided columns match the canonical schema."""
+    """Check if provided columns match the canonical V2.1 schema."""
     return cols == FEATURE_COLS_V21
+
+
+def validate_feature_cols_v22(cols: List[str]) -> bool:
+    """Check if provided columns match the canonical V2.2 schema."""
+    return cols == FEATURE_COLS_V22
+
+
+def get_missing_features_for_cols(feature_cols: List[str], df_cols: List[str]) -> List[str]:
+    """Return list of features missing from df_cols given a feature_cols schema."""
+    return [f for f in feature_cols if f not in df_cols]
+
+
+def get_extra_features_for_cols(feature_cols: List[str], df_cols: List[str]) -> List[str]:
+    """Return list of extra columns not in the schema (informational only)."""
+    return [c for c in df_cols if c not in feature_cols]
+
+
+def assert_schema_match_cols(df_cols: List[str], feature_cols: List[str], strict: bool = True) -> None:
+    """Raise error if DataFrame doesn't have required columns for the given schema."""
+    missing = get_missing_features_for_cols(feature_cols, df_cols)
+    if missing:
+        msg = f"Missing {len(missing)} features for schema: {missing[:5]}..."
+        if strict:
+            raise ValueError(msg)
+        else:
+            print(f"WARNING: {msg}")
+
+
+def select_feature_frame(
+    df: "pd.DataFrame",
+    feature_cols: List[str],
+    *,
+    strict: bool = True,
+) -> "pd.DataFrame":
+    """
+    Select and order features by name. Fails fast if required columns are missing.
+    Extra columns are ignored.
+    """
+    df_cols = list(df.columns)
+    assert_schema_match_cols(df_cols, feature_cols, strict=strict)
+    return df[feature_cols]
 
 
 def get_missing_features(df_cols: List[str]) -> List[str]:

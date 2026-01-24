@@ -31,6 +31,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from intelligence.condor_brain import CondorBrain, CondorLoss, HAS_MAMBA
 from intelligence.condor_loss import CompositeCondorLoss
+from intelligence.canonical_feature_registry import FEATURE_COLS_V22, select_feature_frame
 from intelligence.training_monitor import (
     TrainingMonitor, compute_val_head_losses, MAIN_HEADS,
     sample_predictions, display_predictions_inline
@@ -122,11 +123,7 @@ DEFAULT_CONFIG = {
     'model_path': 'models/condor_brain.pth'
 }
 
-FEATURE_COLS = [
-    'open', 'high', 'low', 'close', 'volume', 
-    'strike', 'cp_num', 'delta', 'gamma', 'vega', 'theta', 'iv', 'ivr', 'spread_ratio', 'te',
-    'rsi', 'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 'psar', 'psar_mark'
-]
+FEATURE_COLS = FEATURE_COLS_V22
 
 # ============================================================================
 # DATA PREPARATION (Fast In-Memory)
@@ -170,7 +167,7 @@ def prepare_features(df: pd.DataFrame) -> tuple:
         'was_profitable', 'realized_roi', 'realized_max_loss', 'confidence_target'
     ]
     
-    X = df[FEATURE_COLS].values.astype(np.float32)
+    X = select_feature_frame(df, FEATURE_COLS, strict=True).values.astype(np.float32)
     y = df[target_cols].values.astype(np.float32)
     regime = df['regime_label'].values.astype(np.int64)
     
