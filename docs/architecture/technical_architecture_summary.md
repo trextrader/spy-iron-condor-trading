@@ -48,3 +48,9 @@ Key alignment requirements:
 3. Model config metadata (layers/heads/input_dim) must match deployed checkpoints.
 
 If this document conflicts with the master spec, the master spec governs implementation.
+
+---
+
+## Model Profile Alignment (Addendum)
+
+This summary references a 24-feature input manifold in places; production and training may use V2.2 (52) features. The authoritative schema is defined in `intelligence/canonical_feature_registry.py`, and checkpoints must embed their own `feature_cols` and `input_dim` metadata.

@@ -86,3 +86,16 @@ Key alignment requirements:
 3. Model config metadata (layers/heads/input_dim) must match deployed checkpoints.
 
 If this document conflicts with the master spec, the master spec governs implementation.
+
+---
+
+## Model Profile Alignment (Addendum)
+
+This document describes the *conceptual* architecture. Deployed configurations may differ by profile. The authoritative model metadata comes from checkpoint fields:
+
+- `feature_cols`
+- `input_dim`
+- `seq_len`
+- `model_config`
+
+Always prefer checkpoint metadata over static defaults in docs or code.
