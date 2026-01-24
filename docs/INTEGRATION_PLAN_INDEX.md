@@ -194,3 +194,20 @@ Key alignment requirements (must be enforced in code):
 3. Model config metadata (layers/heads/input_dim) must be consistent across docs, checkpoints, and inference engines.
 
 Use this index to navigate. The master spec is now the single source of truth for integration flow and validation.
+
+
+---
+
+## Repository Sync Addendum (2026-01-24)
+
+This document is part of the synchronized documentation set. The authoritative engineering spec and audit references are:
+
+- `docs/INTEGRATION_PLAN_MASTER.md`
+- `docs/INTERFACE_CATALOG.md`
+
+Key alignment requirements:
+1. Feature schema selection by **name** (V2.2) only; no CSV order dependence.
+2. Dataset column order differs across years; schema validation must be strict.
+3. Model config metadata (layers/heads/input_dim) must match deployed checkpoints.
+
+If this document conflicts with the master spec, the master spec governs implementation.

@@ -68,3 +68,20 @@ This is a private repository. To contribute, you must be invited as a **Collabor
 
 ## ⚖️ Security Notice
 Never commit API keys or secrets to the repository. Ensure all sensitive information is kept in `core/config.py` or passed via environment variables.
+
+
+---
+
+## Repository Sync Addendum (2026-01-24)
+
+This document is part of the synchronized documentation set. The authoritative engineering spec and audit references are:
+
+- `docs/INTEGRATION_PLAN_MASTER.md`
+- `docs/INTERFACE_CATALOG.md`
+
+Key alignment requirements:
+1. Feature schema selection by **name** (V2.2) only; no CSV order dependence.
+2. Dataset column order differs across years; schema validation must be strict.
+3. Model config metadata (layers/heads/input_dim) must match deployed checkpoints.
+
+If this document conflicts with the master spec, the master spec governs implementation.

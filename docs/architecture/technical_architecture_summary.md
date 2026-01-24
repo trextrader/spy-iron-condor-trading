@@ -31,3 +31,20 @@ The model is optimized via **CondorLoss**, a Lagrangian-based composite objectiv
 The final layer bridges the gap between neural forecasts and capital preservation:
 - **Fuzzy Engine:** An 11-factor inference system (membership tiers) that validates Mamba predictions against deterministic rules.
 - **Money Management:** A dynamic sizing algorithm that scales trade exposure based on the **Predictive Alignment** of all 23 heads. If the Horizon Forecaster aligns with the Policy Branch under a stable Regime, exposure scales to $100\%$ of risk; any divergence triggers defensive scaling.
+
+
+---
+
+## Repository Sync Addendum (2026-01-24)
+
+This document is part of the synchronized documentation set. The authoritative engineering spec and audit references are:
+
+- `docs/INTEGRATION_PLAN_MASTER.md`
+- `docs/INTERFACE_CATALOG.md`
+
+Key alignment requirements:
+1. Feature schema selection by **name** (V2.2) only; no CSV order dependence.
+2. Dataset column order differs across years; schema validation must be strict.
+3. Model config metadata (layers/heads/input_dim) must match deployed checkpoints.
+
+If this document conflicts with the master spec, the master spec governs implementation.

@@ -34,3 +34,20 @@ This week marked a significant pivot from legacy architectures to a state-of-the
 
 ## 🚀 Impact Assessment
 The system has moved from a "model training script" to a **comprehensive institutional-grade trading platform**. Convergence on the A100 is now stable (Loss < 0.4), throughput is maximized, and the visual evidence of policy alignment provides a high degree of confidence for live deployment.
+
+
+---
+
+## Repository Sync Addendum (2026-01-24)
+
+This document is part of the synchronized documentation set. The authoritative engineering spec and audit references are:
+
+- `docs/INTEGRATION_PLAN_MASTER.md`
+- `docs/INTERFACE_CATALOG.md`
+
+Key alignment requirements:
+1. Feature schema selection by **name** (V2.2) only; no CSV order dependence.
+2. Dataset column order differs across years; schema validation must be strict.
+3. Model config metadata (layers/heads/input_dim) must match deployed checkpoints.
+
+If this document conflicts with the master spec, the master spec governs implementation.
