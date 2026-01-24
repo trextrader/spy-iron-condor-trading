@@ -98,6 +98,69 @@ def compute_vol_normalized_adx(
     return adx_norm
 
 
+def compute_adx_trend_metrics(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    period: int = 14,
+    beta: float = 1.0,
+    volatility_energy: pd.Series = None,
+) -> dict:
+    """
+    P004 - ADX Trend Metrics (Rules A3/A1)
+
+    Returns dict with:
+        ['value', 'trend_bullish', 'trend_bearish', 'rising', 'declining']
+    """
+    if volatility_energy is None:
+        volatility_energy = pd.Series(0, index=close.index)
+
+    prev_close = close.shift(1)
+    tr = pd.concat(
+        [
+            high - low,
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+
+    up_move = high.diff()
+    down_move = -low.diff()
+
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+
+    plus_dm = pd.Series(plus_dm, index=high.index)
+    minus_dm = pd.Series(minus_dm, index=high.index)
+
+    tr_smooth = tr.rolling(period).sum()
+    plus_dm_smooth = plus_dm.rolling(period).sum()
+    minus_dm_smooth = minus_dm.rolling(period).sum()
+
+    plus_di = 100 * plus_dm_smooth / tr_smooth.replace(0, np.nan)
+    minus_di = 100 * minus_dm_smooth / tr_smooth.replace(0, np.nan)
+
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    adx = dx.rolling(period).mean()
+
+    vol_energy = volatility_energy.fillna(0.0)
+    adx_norm = adx / (1.0 + beta * vol_energy)
+
+    rising = adx_norm > adx_norm.shift(1)
+    declining = adx_norm < adx_norm.shift(1)
+    trend_bullish = plus_di > minus_di
+    trend_bearish = minus_di > plus_di
+
+    return {
+        "value": adx_norm,
+        "trend_bullish": trend_bullish.fillna(False),
+        "trend_bearish": trend_bearish.fillna(False),
+        "rising": rising.fillna(False),
+        "declining": declining.fillna(False),
+    }
+
+
 def compute_dynamic_rsi(
     close: pd.Series,
     period: int = 14,

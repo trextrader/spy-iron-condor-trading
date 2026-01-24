@@ -102,3 +102,19 @@ def compute_chaos_membership(
             "position_size_multiplier": position_size_multiplier,
         }
     )
+
+
+def compute_curvature_proxy(
+    curvature_proxy: pd.Series = None,
+    curvature: pd.Series = None,
+) -> pd.Series:
+    """
+    P010 - Curvature Proxy (Rule E3 v2.5)
+
+    Returns Series: curvature_proxy
+    """
+    if curvature_proxy is not None:
+        return curvature_proxy.fillna(0.0)
+    if curvature is not None:
+        return curvature.fillna(0.0)
+    return pd.Series([0.0])

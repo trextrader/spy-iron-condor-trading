@@ -13,12 +13,13 @@ def compute_macd_trend_signal(
     threshold: float = 0.0,
 ) -> dict:
     """
-    S001 – MACD Trend Signal (A2)
+    S003 - MACD Crossover Signal (A2)
 
     Returns:
         {
             "trend_up": bool Series,
             "trend_down": bool Series,
+            "reverse": bool Series,
         }
     """
     macd = macd_norm.fillna(0.0)
@@ -26,11 +27,14 @@ def compute_macd_trend_signal(
     diff = macd - sig
     trend_up = diff > threshold
     trend_down = diff < -threshold
+    prev_diff = diff.shift(1)
+    reverse = (diff * prev_diff) < 0
     return {
-        "trend_up": trend_up, 
+        "trend_up": trend_up,
         "trend_down": trend_down,
         "bullish": trend_up,
-        "bearish": trend_down
+        "bearish": trend_down,
+        "reverse": reverse.fillna(False),
     }
 
 
@@ -82,6 +86,64 @@ def compute_band_squeeze_breakout_signal(
     }
 
 
+def compute_bb_breakout_signal(
+    close: pd.Series,
+    upper_band: pd.Series,
+    lower_band: pd.Series,
+    breakout_score: pd.Series = None,
+    threshold: float = 0.0,
+) -> dict:
+    """
+    S001 - BB Breakout Signal (C1/D2)
+
+    Returns:
+        {
+            "bullish": bool Series,
+            "bearish": bool Series,
+        }
+    """
+    if breakout_score is not None:
+        score = breakout_score.fillna(0.0)
+        bullish = score > threshold
+        bearish = score < -threshold
+    else:
+        bullish = close > upper_band
+        bearish = close < lower_band
+    return {
+        "bullish": bullish,
+        "bearish": bearish,
+        "breakout_long": bullish,
+        "breakout_short": bearish,
+    }
+
+
+def compute_bb_reversion_signal(
+    close: pd.Series,
+    upper_band: pd.Series,
+    lower_band: pd.Series,
+    buffer: float = 0.0,
+) -> dict:
+    """
+    S002 - BB Reversion Signal (B2)
+
+    Returns:
+        {
+            "bullish": bool Series,
+            "bearish": bool Series,
+        }
+    """
+    lower = lower_band * (1.0 + buffer)
+    upper = upper_band * (1.0 - buffer)
+    bullish = close <= lower
+    bearish = close >= upper
+    return {
+        "bullish": bullish,
+        "bearish": bearish,
+        "reversion_long": bullish,
+        "reversion_short": bearish,
+    }
+
+
 def compute_rsi_reversion_signal(
     rsi_dynamic: pd.Series,
     lower: float = 30.0,
@@ -102,12 +164,38 @@ def compute_rsi_reversion_signal(
     return {"reversion_long": reversion_long, "reversion_short": reversion_short}
 
 
+def compute_rsi_divergence_signal(
+    close: pd.Series,
+    rsi_dynamic: pd.Series,
+    lookback: int = 5,
+) -> dict:
+    """
+    S005 - RSI Divergence Signal (B2)
+
+    Returns:
+        {
+            "bullish": bool Series,
+            "bearish": bool Series,
+        }
+    """
+    price_slope = close - close.shift(lookback)
+    rsi_slope = rsi_dynamic - rsi_dynamic.shift(lookback)
+    bullish = (price_slope < 0) & (rsi_slope > 0)
+    bearish = (price_slope > 0) & (rsi_slope < 0)
+    return {
+        "bullish": bullish.fillna(False),
+        "bearish": bearish.fillna(False),
+        "divergence_long": bullish.fillna(False),
+        "divergence_short": bearish.fillna(False),
+    }
+
+
 def compute_mtf_alignment_signal(
     mtf_consensus: pd.Series,
     min_abs: float = 0.5,
 ) -> dict:
     """
-    S004 – Multi-Timeframe Alignment Signal (C1/E2)
+    S013 - Multi-Timeframe Alignment Signal (C1/E2)
 
     Returns:
         {
@@ -118,7 +206,15 @@ def compute_mtf_alignment_signal(
     c = mtf_consensus.fillna(0.0)
     aligned_long = (c >= min_abs)
     aligned_short = (c <= -min_abs)
-    return {"aligned_long": aligned_long, "aligned_short": aligned_short}
+    prev = c.shift(1)
+    reverses = (c * prev) < 0
+    return {
+        "aligned_long": aligned_long,
+        "aligned_short": aligned_short,
+        "aligned_bullish": aligned_long,
+        "aligned_bearish": aligned_short,
+        "reverses": reverses.fillna(False),
+    }
 
 
 def compute_fuzzy_reversion_signal(
@@ -185,6 +281,23 @@ def compute_chaos_dampening_signal(
     return {"chaos_warn": warn, "size_mult": psm}
 
 
+def compute_chaos_detection_signal(
+    chaos_membership: pd.Series,
+    chaos_threshold: float = 0.8,
+) -> dict:
+    """
+    S012 - Chaos Detection Signal (E3)
+
+    Returns:
+        {
+            "chaos": bool Series
+        }
+    """
+    cm = chaos_membership.fillna(0.0)
+    chaos = cm >= chaos_threshold
+    return {"chaos": chaos, "signal": chaos}
+
+
 def compute_regime_shift_signal(
     regime_score: pd.Series,
     threshold_high: float,
@@ -203,6 +316,40 @@ def compute_regime_shift_signal(
     regime_bull = rs >= threshold_high
     regime_bear = rs <= threshold_low
     return {"regime_bull": regime_bull, "regime_bear": regime_bear}
+
+
+def compute_bb_squeeze_signal(
+    bw_percentile: pd.Series,
+    threshold: float = 0.05,
+) -> dict:
+    """
+    S006 - BB Squeeze Signal (C1)
+
+    Returns:
+        {
+            "squeeze": bool Series
+        }
+    """
+    bw = bw_percentile.fillna(50.0)
+    squeeze = bw <= threshold
+    return {"squeeze": squeeze, "signal": squeeze}
+
+
+def compute_volume_spike_signal(
+    volume_ratio: pd.Series,
+    threshold: float = 1.5,
+) -> dict:
+    """
+    S008 - Volume Spike Signal (C1/D2)
+
+    Returns:
+        {
+            "vol_spike": bool Series
+        }
+    """
+    vr = volume_ratio.fillna(1.0)
+    spike = vr >= threshold
+    return {"vol_spike": spike, "signal": spike}
 
 
 def compute_liquidity_exec_signal(
@@ -290,6 +437,30 @@ def compute_gap_exit_signal(
     return {"exit_due_to_gap": fe}
 
 
+def compute_swing_high_low_signal(
+    high: pd.Series,
+    low: pd.Series,
+    window: int = 5,
+) -> dict:
+    """
+    S014 - Swing High/Low Detection (B2)
+
+    Returns:
+        {
+            "new_high": bool Series,
+            "new_low": bool Series,
+        }
+    """
+    rolling_high = high.rolling(window).max()
+    rolling_low = low.rolling(window).min()
+    new_high = high >= rolling_high
+    new_low = low <= rolling_low
+    return {
+        "new_high": new_high.fillna(False),
+        "new_low": new_low.fillna(False),
+    }
+
+
 def compute_size_adjustment_signal(
     size_mult: pd.Series,
 ) -> dict:
@@ -325,6 +496,7 @@ def compute_final_execution_signal(
 
     allow_open = ce & (~sb) & (~gfe)
     force_exit = gfe
+    return {"allow_open": allow_open, "force_exit": force_exit}
 
 
 def compute_bandwidth_expansion_signal(

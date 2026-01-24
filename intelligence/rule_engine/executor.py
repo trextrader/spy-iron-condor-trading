@@ -28,7 +28,7 @@ PRIMITIVE_REGISTRY = {
     "P002": prim.compute_bandwidth_percentile_and_expansion,
     # Momentum (mapped to P IDs in YAML)
     "P003": prim.compute_vol_normalized_macd, # YAML P003
-    "P004": prim.compute_vol_normalized_adx, # YAML P004
+    "P004": prim.compute_adx_trend_metrics, # YAML P004
     "P005": prim.compute_dynamic_rsi, # YAML P005
     "P006": prim.compute_psar_flip_membership, # YAML P006
     
@@ -38,7 +38,7 @@ PRIMITIVE_REGISTRY = {
     
     # Topology
     "P009": prim.compute_beta1_regime_score, # YAML P009
-    "P010": prim.compute_chaos_membership, # YAML P010 (Map Curvature/Chaos to this if Curvature missing)
+    "P010": prim.compute_curvature_proxy, # YAML P010 (Curvature proxy)
     "P011": prim.compute_mtf_consensus, # YAML P011
     
     # Legacy / Other Mappings if needed
@@ -63,21 +63,20 @@ PRIMITIVE_REGISTRY = {
     "G010": prim.compute_position_size_gate,
     
     # Signals (S001-S015)
-    # NOTE: DSL uses S001 as breakout/band-squeeze signal; map directly.
-    "S001": prim.compute_band_squeeze_breakout_signal,
-    "S002": prim.compute_rsi_reversion_signal,
-    "S003": prim.compute_macd_trend_signal, # YAML Rule A2 uses S003 alias macd_cross
-    "S004": prim.compute_vol_normalized_adx, # Placeholder? YAML Rule A3 uses S004 alias trend
-    "S005": prim.compute_rsi_reversion_signal, # Rule B2 uses S005 divergence
-    "S006": prim.compute_band_squeeze_breakout_signal, # Rule C1 uses S006 squeeze
-    "S007": prim.compute_bandwidth_expansion_signal, # Rule A2 uses S007 bb_expansion (Boolean signal)
-    "S008": prim.compute_volume_ratio, # Rule C1 uses S008 vol_spike
-    "S009": prim.compute_psar_flip_membership, 
+    "S001": prim.compute_bb_breakout_signal,
+    "S002": prim.compute_bb_reversion_signal,
+    "S003": prim.compute_macd_trend_signal,
+    "S004": prim.compute_vol_normalized_adx, # Legacy S004 trend proxy (Series)
+    "S005": prim.compute_rsi_divergence_signal,
+    "S006": prim.compute_bb_squeeze_signal,
+    "S007": prim.compute_bandwidth_expansion_signal,
+    "S008": prim.compute_volume_spike_signal,
+    "S009": prim.compute_psar_flip_membership,
     "S010": prim.compute_trend_follow_entry_signal,
-    "S011": prim.compute_reversion_vs_trend_conflict_signal, # Rule E3 uses S011
-    "S012": prim.compute_chaos_dampening_signal, # Rule E3 uses S012 chaos
-    "S013": prim.compute_mtf_consensus, # Rule C1 mtf
-    "S014": prim.compute_rsi_reversion_signal, # Rule B2 swing
+    "S011": prim.compute_reversion_vs_trend_conflict_signal,
+    "S012": prim.compute_chaos_detection_signal,
+    "S013": prim.compute_mtf_alignment_signal,
+    "S014": prim.compute_swing_high_low_signal,
     "S015": prim.compute_final_execution_signal,
 }
 
