@@ -1133,3 +1133,23 @@ Recommended profiles (documented, not hardcoded):
 | Inference-Prod | 512 | 12 | 52 | 240 | Low-latency |
 
 All docs must reflect deployed checkpoint metadata. If there is a mismatch, **checkpoint metadata is authoritative**.
+
+---
+
+## Dataset Pruning (Zero Excess Fat)
+
+Use `scripts/utils/prune_dataset_to_schema.py` to produce **schema-minimal datasets**:
+
+- Keeps V2.2 feature columns by name
+- Optional keep: `timestamp`, `symbol`
+- Optional extra keep list via `--extra-keep`
+
+Example:
+```bash
+python scripts/utils/prune_dataset_to_schema.py \
+  --input data/processed/mamba_institutional_2024_1m.csv \
+  --output data/processed/mamba_institutional_2024_1m_v22_pruned.csv \
+  --keep-timestamp --keep-symbol
+```
+
+This ensures training and backtests ingest only the required columns and eliminates excess metadata fat.
