@@ -87,11 +87,14 @@ def compute_band_squeeze_breakout_signal(
 
 
 def compute_bb_breakout_signal(
-    close: pd.Series,
-    upper_band: pd.Series,
-    lower_band: pd.Series,
+    close: pd.Series = None,
+    upper_band: pd.Series = None,
+    lower_band: pd.Series = None,
     breakout_score: pd.Series = None,
     threshold: float = 0.0,
+    # Aliases
+    bb_upper: pd.Series = None,
+    bb_lower: pd.Series = None,
 ) -> dict:
     """
     S001 - BB Breakout Signal (C1/D2)
@@ -107,8 +110,15 @@ def compute_bb_breakout_signal(
         bullish = score > threshold
         bearish = score < -threshold
     else:
-        bullish = close > upper_band
-        bearish = close < lower_band
+        u = upper_band if upper_band is not None else bb_upper
+        l = lower_band if lower_band is not None else bb_lower
+        if close is None or u is None or l is None:
+            # Safe fallback: no breakout without required bands
+            bullish = pd.Series([False])
+            bearish = pd.Series([False])
+        else:
+            bullish = close > u
+            bearish = close < l
     return {
         "bullish": bullish,
         "bearish": bearish,
