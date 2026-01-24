@@ -36,7 +36,7 @@ def test_estimate_entry_cost_uses_spread():
     assert result.entry_slippage > 0.0
     assert result.entry_commission == 0.65 * 2 * 4
     assert len(result.per_leg) == 4
-    assert result.per_leg[0]["half_spread"] >= 0.10
+    assert result.per_leg[0]["half_spread"] >= 0.10 - 1e-12
 
 
 def test_estimate_entry_cost_fallbacks_when_no_spread():
