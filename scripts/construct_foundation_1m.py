@@ -3,6 +3,11 @@ import numpy as np
 import pandas_ta as ta
 import os
 from scipy.stats import norm
+from intelligence.indicators.manifold_volatility import (
+    curvature_proxy_from_returns,
+    volatility_energy_from_curvature,
+    dynamic_rsi,
+)
 
 # --- Vectorized Black-Scholes Engine ---
 def black_scholes_vec(S, K, T, r, sigma, option_type='C'):
@@ -44,7 +49,10 @@ def construct_foundation_1m():
     
     # Pre-compute indicators on spot (before duplication)
     print("Computing 1m Indicators (Pd 12)...")
-    df_spot['rsi'] = ta.rsi(df_spot['close'], length=12)
+    log_ret = np.log(df_spot['close']).diff()
+    curvature = curvature_proxy_from_returns(log_ret, span=64)
+    vol_energy = volatility_energy_from_curvature(curvature)
+    df_spot['rsi'] = dynamic_rsi(df_spot['close'], window=12, vol_energy=vol_energy)
     df_spot['atr'] = ta.atr(df_spot['high'], df_spot['low'], df_spot['close'], length=12)
     adx_df = ta.adx(df_spot['high'], df_spot['low'], df_spot['close'], length=12)
     df_spot['adx'] = adx_df.iloc[:, 0] if adx_df is not None else np.nan

@@ -17,6 +17,12 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from intelligence.indicators.manifold_volatility import (
+    curvature_proxy_from_returns,
+    volatility_energy_from_curvature,
+    dynamic_rsi as dynamic_rsi_raw,
+)
+
 
 def rsi_wilder(close: pd.Series, period: int = 14) -> pd.Series:
     """
@@ -45,6 +51,20 @@ def rsi_wilder(close: pd.Series, period: int = 14) -> pd.Series:
 
     rs = avg_gain / avg_loss.replace(0.0, np.nan)
     rsi = 100.0 - (100.0 / (1.0 + rs))
+    return rsi.fillna(method="bfill").clip(0.0, 100.0)
+
+
+def dynamic_rsi_series(close: pd.Series, period: int = 14, span: int = 64) -> pd.Series:
+    """
+    Dynamic RSI using curvature-derived volatility energy.
+
+    Returns:
+        pd.Series in [0, 100]
+    """
+    log_ret = np.log(close).diff()
+    curvature = curvature_proxy_from_returns(log_ret, span=span)
+    vol_energy = volatility_energy_from_curvature(curvature)
+    rsi = dynamic_rsi_raw(close, window=period, vol_energy=vol_energy)
     return rsi.fillna(method="bfill").clip(0.0, 100.0)
 
 
@@ -146,7 +166,7 @@ class IndicatorPack:
         iv_rank_window: int = 78 * 60,  # ~60 trading days of 5-min bars
     ) -> "IndicatorPack":
         adx_series = adx_wilder(bars["high"], bars["low"], bars["close"], period=adx_period)
-        rsi_series = rsi_wilder(bars["close"], period=rsi_period)
+        rsi_series = dynamic_rsi_series(bars["close"], period=rsi_period)
         ivrank_series = iv_rank(iv_atm_series, window=iv_rank_window)
 
         return IndicatorPack(

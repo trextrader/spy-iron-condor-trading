@@ -2,6 +2,11 @@ import pandas as pd
 import numpy as np
 import pandas_ta as ta
 import os
+from intelligence.indicators.manifold_volatility import (
+    curvature_proxy_from_returns,
+    volatility_energy_from_curvature,
+    dynamic_rsi,
+)
 
 def extract_cp(symbol):
     # Robust extraction of C or P from symbol
@@ -86,8 +91,11 @@ def construct_foundation():
     print("Computing Raw Technical Indicators on the 15m Foundation...")
     main_close, main_open, main_high, main_low, main_vol = 'close', 'open', 'high', 'low', 'volume'
     
-    # 1. RSI (12)
-    df_final['rsi'] = ta.rsi(df_final[main_close], length=12)
+    # 1. Dynamic RSI (12)
+    log_ret = np.log(df_final[main_close]).diff()
+    curvature = curvature_proxy_from_returns(log_ret, span=64)
+    vol_energy = volatility_energy_from_curvature(curvature)
+    df_final['rsi'] = dynamic_rsi(df_final[main_close], window=12, vol_energy=vol_energy)
     # 2. ATR (12)
     df_final['atr'] = ta.atr(df_final[main_high], df_final[main_low], df_final[main_close], length=12)
     # 3. ADX (12)

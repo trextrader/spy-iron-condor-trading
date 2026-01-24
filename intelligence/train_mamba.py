@@ -14,6 +14,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from intelligence.indicators.manifold_volatility import (
+    curvature_proxy_from_returns,
+    volatility_energy_from_curvature,
+    dynamic_rsi,
+)
+
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -185,6 +191,11 @@ def prepare_features(df, options_df=None, use_qqq=True):
         print("[Core] Mapping Institutional 1m features...")
         # Numeric Mapping for Strategy Selector
         df['cp_num'] = df['call_put'].map({'C': 1.0, 'P': -1.0}).fillna(0)
+
+        log_ret = np.log(df['close']).diff()
+        curvature = curvature_proxy_from_returns(log_ret, span=64)
+        vol_energy = volatility_energy_from_curvature(curvature)
+        df['rsi'] = dynamic_rsi(df['close'], window=12, vol_energy=vol_energy)
         
         feature_cols = [
             'open', 'high', 'low', 'close', 'volume', 
@@ -204,7 +215,10 @@ def prepare_features(df, options_df=None, use_qqq=True):
         main_vol = 'SPY_volume' if 'SPY_volume' in df.columns else 'volume'
 
         # Indicators ...
-        df['rsi'] = ta.rsi(df[main_close], length=12)
+        log_ret = np.log(df[main_close]).diff()
+        curvature = curvature_proxy_from_returns(log_ret, span=64)
+        vol_energy = volatility_energy_from_curvature(curvature)
+        df['rsi'] = dynamic_rsi(df[main_close], window=12, vol_energy=vol_energy)
         df['atr'] = ta.atr(df[main_high], df[main_low], df[main_close], length=12)
         df['vol_raw'] = df[main_vol]
         adx_df = ta.adx(df[main_high], df[main_low], df[main_close], length=12)

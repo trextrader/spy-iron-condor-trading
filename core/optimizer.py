@@ -8,6 +8,11 @@ import datetime
 from core.backtest_engine import run_backtest_headless
 from core.config import StrategyConfig, RunConfig
 from tabulate import tabulate
+from intelligence.indicators.manifold_volatility import (
+    curvature_proxy_from_returns,
+    volatility_energy_from_curvature,
+    dynamic_rsi,
+)
 
 # ==========================================================
 # OPTIMIZATION SEGMENTS
@@ -452,7 +457,10 @@ def run_optimization(base_s_cfg: StrategyConfig, run_cfg: RunConfig, auto_confir
             import pandas_ta as ta
             # Pre-calculate indicators on full_df (once)
             if 'rsi_14' not in full_df.columns:
-                full_df['rsi_14'] = ta.rsi(full_df['close'], length=14)
+                log_ret = np.log(full_df['close']).diff()
+                curvature = curvature_proxy_from_returns(log_ret, span=64)
+                vol_energy = volatility_energy_from_curvature(curvature)
+                full_df['rsi_14'] = dynamic_rsi(full_df['close'], window=14, vol_energy=vol_energy)
             if 'atr_pct' not in full_df.columns:
                 atr = ta.atr(full_df['high'], full_df['low'], full_df['close'], length=14)
                 full_df['atr_pct'] = atr / full_df['close']

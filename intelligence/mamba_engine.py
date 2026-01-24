@@ -7,6 +7,11 @@ import pandas as pd
 import pandas_ta as ta
 import logging
 
+from intelligence.indicators.manifold_volatility import (
+    curvature_proxy_from_returns,
+    volatility_energy_from_curvature,
+    dynamic_rsi,
+)
 # Ensure project root is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -121,7 +126,10 @@ class MambaForecastEngine:
         main_vol = 'SPY_volume' if 'SPY_volume' in window.columns else 'volume'
 
         # Indicators
-        window['rsi'] = ta.rsi(window[main_close], length=12)
+        log_ret = np.log(window[main_close]).diff()
+        curvature = curvature_proxy_from_returns(log_ret, span=64)
+        vol_energy = volatility_energy_from_curvature(curvature)
+        window['rsi'] = dynamic_rsi(window[main_close], window=12, vol_energy=vol_energy)
         window['atr'] = ta.atr(window[main_high], window[main_low], window[main_close], length=12)
         adx_df = ta.adx(window[main_high], window[main_low], window[main_close], length=12)
         window['adx'] = adx_df.iloc[:, 0] if adx_df is not None else np.nan

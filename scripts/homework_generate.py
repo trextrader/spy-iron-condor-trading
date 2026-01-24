@@ -2,6 +2,11 @@ import pandas as pd
 import numpy as np
 import pandas_ta as ta
 import os
+from intelligence.indicators.manifold_volatility import (
+    curvature_proxy_from_returns,
+    volatility_energy_from_curvature,
+    dynamic_rsi,
+)
 
 def generate_mamba_table(spot_file, options_file, output_file):
     print(f"Loading Spot Data: {spot_file}")
@@ -23,8 +28,11 @@ def generate_mamba_table(spot_file, options_file, output_file):
 
     print("Computing Raw Technical Indicators (via pandas-ta)...")
     
-    # 1. RSI (Native 0-100)
-    df['rsi'] = ta.rsi(df[main_close], length=12)
+    # 1. Dynamic RSI (0-100)
+    log_ret = np.log(df[main_close]).diff()
+    curvature = curvature_proxy_from_returns(log_ret, span=64)
+    vol_energy = volatility_energy_from_curvature(curvature)
+    df['rsi'] = dynamic_rsi(df[main_close], window=12, vol_energy=vol_energy)
     
     # 2. ATR (Native Price Range)
     df['atr'] = ta.atr(df[main_high], df[main_low], df[main_close], length=12)

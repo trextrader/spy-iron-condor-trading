@@ -21,6 +21,12 @@ from torch.utils.data import DataLoader, Dataset
 from torch.amp import autocast, GradScaler
 from tqdm import tqdm
 
+from intelligence.indicators.manifold_volatility import (
+    curvature_proxy_from_returns,
+    volatility_energy_from_curvature,
+    dynamic_rsi,
+)
+
 # Add project root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -88,6 +94,13 @@ def load_and_prep_data(csv_path, max_rows=0):
     print("[Data] Processing features...")
     if 'call_put' in df.columns and 'cp_num' not in df.columns:
         df['cp_num'] = df['call_put'].map({'C': 1.0, 'P': -1.0}).fillna(0)
+
+    if 'close' in df.columns:
+        log_ret = np.log(df['close']).diff()
+        curvature = curvature_proxy_from_returns(log_ret, span=64)
+        vol_energy = volatility_energy_from_curvature(curvature)
+        df['rsi_dyn'] = dynamic_rsi(df['close'], window=14, vol_energy=vol_energy)
+        df['rsi'] = df['rsi_dyn']
         
     # Synthetic Targets (if missing)
     defaults = {

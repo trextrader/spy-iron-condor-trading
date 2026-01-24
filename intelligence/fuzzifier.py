@@ -12,7 +12,7 @@ import pandas as pd
 
 from core.config import StrategyConfig
 from core.dto import MarketSnapshot
-from analytics.indicators import adx_wilder, rsi_wilder, iv_rank
+from analytics.indicators import adx_wilder, dynamic_rsi_series, iv_rank
 
 
 @dataclass
@@ -37,7 +37,7 @@ class Fuzzifier:
 
         # ADX/RSI from 5m bars
         adx_series = adx_wilder(bars["high"], bars["low"], bars["close"], period=14)
-        rsi_series = rsi_wilder(bars["close"], period=14)
+        rsi_series = dynamic_rsi_series(bars["close"], period=14)
 
         adx_val = float(adx_series.iloc[-1])
         rsi_val = float(rsi_series.iloc[-1])

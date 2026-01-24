@@ -3,6 +3,12 @@ import pandas as pd
 import numpy as np
 import os
 
+from intelligence.indicators.manifold_volatility import (
+    curvature_proxy_from_returns,
+    volatility_energy_from_curvature,
+    dynamic_rsi as dynamic_rsi_raw,
+)
+
 # Try to import pandas-ta, fall back to manual calculations if not available
 try:
     import pandas_ta as ta
@@ -25,11 +31,15 @@ class MTFSyncEngine:
         """
         df = df.copy()
         
+        log_ret = np.log(df['close']).diff()
+        curvature = curvature_proxy_from_returns(log_ret, span=64)
+        vol_energy = volatility_energy_from_curvature(curvature)
+
         if HAS_PANDAS_TA:
             # === MOMENTUM INDICATORS ===
             
-            # RSI: Relative Strength Index (14-period)
-            df['rsi_14'] = ta.rsi(df['close'], length=14)
+            # Dynamic RSI (14-period)
+            df['rsi_14'] = dynamic_rsi_raw(df['close'], window=14, vol_energy=vol_energy)
             
             # Stochastic: %K and %D lines
             stoch = ta.stoch(df['high'], df['low'], df['close'], k=14, d=3, smooth_k=3)
@@ -90,12 +100,8 @@ class MTFSyncEngine:
             # === VOLUME INDICATORS ===
             df['volume_ma_20'] = ta.sma(df['volume'], length=20)
         else:
-            # Fallback: Manual RSI calculation
-            delta = df['close'].diff()
-            gain = delta.where(delta > 0, 0).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss.replace(0, np.nan)
-            df['rsi_14'] = 100 - (100 / (1 + rs))
+            # Fallback: Dynamic RSI calculation
+            df['rsi_14'] = dynamic_rsi_raw(df['close'], window=14, vol_energy=vol_energy)
             
             # Fallback: Manual SMA
             df['sma_20'] = df['close'].rolling(window=20).mean()
