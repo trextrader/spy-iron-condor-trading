@@ -669,9 +669,8 @@ scheduler = torch.optim.lr_scheduler.OneCycleLR(
 )
 from intelligence.condor_loss import CompositeCondorLoss
 
-# --- LOSS FUNCTIONS ---
 # (pred, sharpe, drawdown, turnover, rule_consistency)
-lambdas = (1.0, 0.5, 0.1, 0.1, 1.0) 
+lambdas = (1.0, 0.5, 0.1, 0.1, 0.2) # Reduced Rule lambda 1.0 -> 0.2 to prevent 'cowardly' zero confidence
 criterion_composite = CompositeCondorLoss(lambdas=lambdas)
 criterion_forecast = nn.HuberLoss()
 
@@ -795,8 +794,8 @@ for epoch in range(EPOCHS):
             loss_composite = loss_dict['total']
             
             # 2. Feature Loss (Next Step)
-            # Reduced scale from 1000.0 to 100.0 for stability
-            loss_feat = criterion_forecast(feat_pred, y_next) * 100.0
+            # Increased scale from 100.0 to 1000.0 for visibility
+            loss_feat = criterion_forecast(feat_pred, y_next) * 1000.0
 
             # 3. Diffusion Loss
             loss_diff = torch.tensor(0.0, device=device)
@@ -912,7 +911,7 @@ for epoch in range(EPOCHS):
             # Get sample predictions
             samples = sample_predictions(
                 model=model,
-                get_batch_fn=lambda bi: (lambda b: (b[0], b[1], torch.zeros(b[0].size(0), dtype=torch.long, device=device)))(next(iter(val_loader))),
+                get_batch_fn=val_batch_wrapper, # Use wrapper which handles device movement safely
                 device=device,
                 amp_dtype=torch.float16,
                 n_samples=32
