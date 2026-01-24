@@ -162,3 +162,9 @@ Key alignment requirements:
 3. Model config metadata (layers/heads/input_dim) must match deployed checkpoints.
 
 If this document conflicts with the master spec, the master spec governs implementation.
+
+---
+
+## Deferred / Side Burner
+
+- Dataset pruning to V2.2 schema (remove excess columns). Use `scripts/utils/prune_dataset_to_schema.py` when ready.
