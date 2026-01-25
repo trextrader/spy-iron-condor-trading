@@ -468,7 +468,8 @@ def main(
 ):
     ensure_out_dir()
 
-    model = load_model(model_path)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = load_model(model_path).to(device)
     model.eval()
 
     X, meta = load_dataset(dataset_path, model_path, sample_n=sample_n)
@@ -496,7 +497,7 @@ def main(
     }
     save_json(os.path.join(OUT_DIR, "inputs_schema.json"), inputs_schema)
 
-    xt = torch.tensor(Xs, dtype=torch.float32)
+    xt = torch.tensor(Xs, dtype=torch.float32, device=device)
     out = model_forward(model, xt)
 
     entry_prob = torch.sigmoid(out["entry_logit"].view(-1)).cpu().numpy()
@@ -549,7 +550,7 @@ def main(
             f"Surrogate R^2~{size_score:.3f}\n\n{size_rules}\n",
         )
 
-    baseline_t = torch.tensor(baseline, dtype=torch.float32)
+    baseline_t = torch.tensor(baseline, dtype=torch.float32, device=device)
     ig_entry = integrated_gradients(model, "entry_logit", xt, baseline_t, steps=ig_steps).cpu().numpy()
     ig_exit = integrated_gradients(model, "exit_logit", xt, baseline_t, steps=ig_steps).cpu().numpy()
     ig_size = integrated_gradients(model, "size_score", xt, baseline_t, steps=ig_steps).cpu().numpy()
