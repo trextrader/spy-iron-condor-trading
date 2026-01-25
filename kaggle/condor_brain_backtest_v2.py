@@ -80,6 +80,7 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 REPORTS_DIR = "reports"
 os.makedirs(REPORTS_DIR, exist_ok=True)
 DECISION_TRACE_PATH = os.path.join(REPORTS_DIR, "decision_trace.jsonl")
+BAR_TRACE_PATH = os.path.join(REPORTS_DIR, "bar_trace.jsonl")
 
 # Iron Condor P&L Config
 IC_CREDIT_PER_SPREAD = 1.50  # $1.50 credit per spread (typical)
@@ -90,6 +91,8 @@ RULE_FEATURES = ["rule_long_consensus", "rule_short_consensus", "rule_exit_conse
 # Trace + outcome labeling config
 TRACE_PER_BAR = True
 TOP_N_FEATURES = 20
+BAR_TRACE_ENABLED = True
+BAR_TRACE_INCLUDE_ROW = True
 ENTRY_ALPHA_R = 0.25
 ENTRY_BETA_R = 0.25
 EXIT_EVAL_HOLD_BARS = 30
@@ -115,6 +118,22 @@ def _git_commit():
         return out.decode("utf-8").strip()
     except Exception:
         return "unknown"
+
+def _append_jsonl(path, record):
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=True) + "\n")
+
+def _json_safe(val):
+    if isinstance(val, (np.floating, np.integer)):
+        return val.item()
+    if isinstance(val, (np.ndarray,)):
+        return val.tolist()
+    if isinstance(val, (pd.Timestamp,)):
+        return str(val)
+    return val
+
+def _json_safe_dict(d):
+    return {k: _json_safe(v) for k, v in d.items()}
 
 def load_data_and_features(data_path, rows=None):
     print(f"Loading data from {data_path}...")
@@ -450,6 +469,11 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             dataset_path=data_path,
         )
         trace_logger = DecisionTraceLogger(trace_cfg)
+
+    # Bar-level trace file
+    if BAR_TRACE_ENABLED:
+        with open(BAR_TRACE_PATH, "w", encoding="utf-8") as f:
+            f.write("")
 
     def _feature_snapshot(x_seq_tensor, top_n=TOP_N_FEATURES):
         vals = x_seq_tensor[0, -1, :].detach().cpu().numpy()
@@ -1303,6 +1327,58 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             for line in log_lines:
                 print(line)
             logged_count += 1
+
+        # Full bar trace (JSONL)
+        if BAR_TRACE_ENABLED:
+            time_col = 'dt' if 'dt' in df.columns else ('timestamp' if 'timestamp' in df.columns else None)
+            bar_ts = str(df[time_col].iloc[i]) if time_col else None
+            row_data = _json_safe_dict(df.iloc[i].to_dict()) if BAR_TRACE_INCLUDE_ROW else {}
+            legs = []
+            if position == 1 and open_trade:
+                legs = [
+                    {"right": "C", "side": "SELL", "strike": float(open_trade.get('short_call', 0.0)), "qty": int(IC_CONTRACTS)},
+                    {"right": "C", "side": "BUY", "strike": float(open_trade.get('long_call', 0.0)), "qty": int(IC_CONTRACTS)},
+                    {"right": "P", "side": "SELL", "strike": float(open_trade.get('short_put', 0.0)), "qty": int(IC_CONTRACTS)},
+                    {"right": "P", "side": "BUY", "strike": float(open_trade.get('long_put', 0.0)), "qty": int(IC_CONTRACTS)}
+                ]
+            bar_record = {
+                "schema_version": "1.0",
+                "idx": int(i),
+                "ts": bar_ts,
+                "spot": float(spot),
+                "position": int(position),
+                "action": "ENTER" if action == 1 else ("EXIT" if action == -1 else "HOLD"),
+                "rejection_reason": rejection_reason or "",
+                "gate_reasons": gate_reasons if position == 0 else [],
+                "entry_score": float(entry_score) if position == 0 else (open_trade.get("entry_score") if open_trade else None),
+                "entry_factors": entry_factors if position == 0 else [],
+                "model_outputs": {
+                    "call_off": float(all_outputs['call_off'] or 0.0),
+                    "put_off": float(all_outputs['put_off'] or 0.0),
+                    "width": float(all_outputs['width'] or 0.0),
+                    "te": float(all_outputs['te'] or 0.0),
+                    "prob_profit": float(prob_profit),
+                    "expected_roi": float(all_outputs['expected_roi'] or 0.0),
+                    "max_loss_pct": float(all_outputs['max_loss_pct'] or 0.0),
+                    "confidence": float(confidence),
+                },
+                "rule_signals": {
+                    "net_rule_signal": float(net_rule_signal),
+                    "rule_long_consensus": float(rule_long),
+                    "rule_short_consensus": float(rule_short),
+                    "rule_exit_consensus": float(rule_exit),
+                    "rule_block_any": float(rule_block),
+                    "active_rules": active_rules,
+                },
+                "options_legs": legs,
+                "feature_snapshot": _feature_snapshot(x_seq),
+                "row": row_data,
+                "learned_conditions": {
+                    "surrogate_rules": None,
+                    "attribution_method": "NOT_AVAILABLE_IN_BACKTEST",
+                },
+            }
+            _append_jsonl(BAR_TRACE_PATH, bar_record)
 
         # Decision trace for every bar
         if trace_logger is not None and TRACE_PER_BAR:
