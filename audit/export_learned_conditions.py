@@ -505,6 +505,8 @@ def main(
     total = Xs.shape[0]
     for start in range(0, total, batch_size):
         end = min(start + batch_size, total)
+        if start % (batch_size * 10) == 0:
+            print(f"[Forward] batch {start//batch_size + 1} / {int(np.ceil(total / batch_size))}")
         xb = torch.tensor(Xs[start:end], dtype=torch.float32, device=device)
         with torch.no_grad():
             out = model_forward(model, xb)
@@ -576,6 +578,8 @@ def main(
 
     for start in range(0, total, ig_batch_size):
         end = min(start + ig_batch_size, total)
+        if start % (ig_batch_size * 10) == 0:
+            print(f"[IG] batch {start//ig_batch_size + 1} / {int(np.ceil(total / ig_batch_size))}")
         xb = torch.tensor(Xs[start:end], dtype=torch.float32, device=device)
         baseline_b = torch.tensor(baseline[start:end], dtype=torch.float32, device=device)
         ig_entry = integrated_gradients(model, "entry_logit", xb, baseline_b, steps=ig_steps).cpu().numpy()
