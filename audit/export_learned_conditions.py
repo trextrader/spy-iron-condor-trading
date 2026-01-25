@@ -465,6 +465,8 @@ def main(
     ig_steps: int = 32,
     surrogate_depth: int = 4,
     sample_n: int = 4096,
+    batch_size: int = 64,
+    ig_batch_size: int = 8,
 ):
     ensure_out_dir()
 
@@ -497,21 +499,37 @@ def main(
     }
     save_json(os.path.join(OUT_DIR, "inputs_schema.json"), inputs_schema)
 
-    xt = torch.tensor(Xs, dtype=torch.float32, device=device)
-    out = model_forward(model, xt)
+    # Batched forward to avoid GPU OOM
+    entry_logits = []
+    exit_logits = []
+    size_scores = []
+    total = Xs.shape[0]
+    for start in range(0, total, batch_size):
+        end = min(start + batch_size, total)
+        xb = torch.tensor(Xs[start:end], dtype=torch.float32, device=device)
+        out = model_forward(model, xb)
+        entry_logits.append(out["entry_logit"].detach().cpu())
+        exit_logits.append(out["exit_logit"].detach().cpu())
+        size_scores.append(out["size_score"].detach().cpu())
+        del xb, out
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
-    entry_prob = torch.sigmoid(out["entry_logit"].view(-1)).cpu().numpy()
-    exit_prob = torch.sigmoid(out["exit_logit"].view(-1)).cpu().numpy()
+    entry_logit = torch.cat(entry_logits, dim=0).view(-1)
+    exit_logit = torch.cat(exit_logits, dim=0).view(-1)
+    size_raw = torch.cat(size_scores, dim=0)
+
+    entry_prob = torch.sigmoid(entry_logit).numpy()
+    exit_prob = torch.sigmoid(exit_logit).numpy()
 
     entry_y = (entry_prob >= 0.5).astype(np.int32)
     exit_y = (exit_prob >= 0.5).astype(np.int32)
 
-    size_raw = out["size_score"].detach().cpu().numpy()
     if size_raw.ndim == 2:
-        size_y = np.argmax(size_raw, axis=1).astype(np.int32)
+        size_y = np.argmax(size_raw.numpy(), axis=1).astype(np.int32)
         size_is_classification = True
     else:
-        size_y = size_raw.reshape(-1).astype(np.float32)
+        size_y = size_raw.numpy().reshape(-1).astype(np.float32)
         size_is_classification = False
 
     Xflat = Xs[:, -1, :]
@@ -550,14 +568,35 @@ def main(
             f"Surrogate R^2~{size_score:.3f}\n\n{size_rules}\n",
         )
 
-    baseline_t = torch.tensor(baseline, dtype=torch.float32, device=device)
-    ig_entry = integrated_gradients(model, "entry_logit", xt, baseline_t, steps=ig_steps).cpu().numpy()
-    ig_exit = integrated_gradients(model, "exit_logit", xt, baseline_t, steps=ig_steps).cpu().numpy()
-    ig_size = integrated_gradients(model, "size_score", xt, baseline_t, steps=ig_steps).cpu().numpy()
+    # Integrated gradients in small batches; stream aggregation to avoid OOM
+    sum_abs_entry = np.zeros(len(feature_names), dtype=np.float64)
+    sum_abs_exit = np.zeros(len(feature_names), dtype=np.float64)
+    sum_abs_size = np.zeros(len(feature_names), dtype=np.float64)
+    count = 0
 
-    df_entry = summarize_attribution(ig_entry, feature_names, agg="mean_abs")
-    df_exit = summarize_attribution(ig_exit, feature_names, agg="mean_abs")
-    df_size = summarize_attribution(ig_size, feature_names, agg="mean_abs")
+    for start in range(0, total, ig_batch_size):
+        end = min(start + ig_batch_size, total)
+        xb = torch.tensor(Xs[start:end], dtype=torch.float32, device=device)
+        baseline_b = torch.tensor(baseline[start:end], dtype=torch.float32, device=device)
+        ig_entry = integrated_gradients(model, "entry_logit", xb, baseline_b, steps=ig_steps).cpu().numpy()
+        ig_exit = integrated_gradients(model, "exit_logit", xb, baseline_b, steps=ig_steps).cpu().numpy()
+        ig_size = integrated_gradients(model, "size_score", xb, baseline_b, steps=ig_steps).cpu().numpy()
+        sum_abs_entry += np.sum(np.abs(ig_entry), axis=(0, 1))
+        sum_abs_exit += np.sum(np.abs(ig_exit), axis=(0, 1))
+        sum_abs_size += np.sum(np.abs(ig_size), axis=(0, 1))
+        count += ig_entry.shape[0] * ig_entry.shape[1]
+        del xb, baseline_b, ig_entry, ig_exit, ig_size
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
+    def _summarize(sum_abs):
+        imp = (sum_abs / max(count, 1)).astype(np.float64)
+        df = pd.DataFrame({"feature": feature_names, "importance": imp})
+        return df.sort_values("importance", ascending=False).reset_index(drop=True)
+
+    df_entry = _summarize(sum_abs_entry)
+    df_exit = _summarize(sum_abs_exit)
+    df_size = _summarize(sum_abs_size)
 
     df_entry.to_csv(os.path.join(OUT_DIR, "attribution_entry.csv"), index=False)
     df_exit.to_csv(os.path.join(OUT_DIR, "attribution_exit.csv"), index=False)
@@ -580,6 +619,8 @@ if __name__ == "__main__":
     ap.add_argument("--ig-steps", type=int, default=32)
     ap.add_argument("--surrogate-depth", type=int, default=4)
     ap.add_argument("--sample-n", type=int, default=4096)
+    ap.add_argument("--batch-size", type=int, default=64)
+    ap.add_argument("--ig-batch-size", type=int, default=8)
     args = ap.parse_args()
 
     main(
@@ -589,4 +630,6 @@ if __name__ == "__main__":
         ig_steps=args.ig_steps,
         surrogate_depth=args.surrogate_depth,
         sample_n=args.sample_n,
+        batch_size=args.batch_size,
+        ig_batch_size=args.ig_batch_size,
     )
