@@ -1,0 +1,134 @@
+digraph DueDiligence {
+  rankdir=LR;
+  graph [fontname="Helvetica", fontsize=10, labelloc="t",
+         label="Decision Provenance & Outcome Attribution - Due Diligence DAG"];
+  node  [fontname="Helvetica", fontsize=9, shape=box, style="rounded"];
+  edge  [fontname="Helvetica", fontsize=8];
+
+  subgraph cluster_data {
+    label="A) Data & Provenance";
+    style="rounded";
+    d1 [label="Ingest Market Data\n(OHLCV, Options, Greeks, IV)"];
+    d2 [label="Normalize / Align\n(Timeframes, Timestamps)"];
+    d3 [label="Dataset Hashing\n(dataset_id, sha256)"];
+    d4 [label="Retention & Lineage Log\n(source, vendor, timezone)"];
+    d1 -> d2 -> d3 -> d4;
+  }
+
+  subgraph cluster_features {
+    label="B) Feature & Rule Layer";
+    style="rounded";
+    f1 [label="Feature Engineering\n(returns, zscores, microstructure)"];
+    f2 [label="Indicators Subset\n(RSI, ATR, BB, etc.)"];
+    f3 [label="Hard Gates / Trade Rules\n(risk + policy constraints)"];
+    f4 [label="Fuzzy System\n(memberships, rules, defuzz)"];
+    f1 -> f2;
+    f1 -> f3;
+    f3 -> f4;
+  }
+
+  subgraph cluster_model {
+    label="C) Model Build & Validation";
+    style="rounded";
+    m1 [label="Train DeepMamba2 / SSM\n(run_id, model_hash)"];
+    m2 [label="Validation Suite\n(metrics, backtests)"];
+    m3 [label="Model Card + Limits\n(known failure modes)"];
+    m4 [label="Run Manifest\n(code_commit, env lock)"];
+    m1 -> m2 -> m3;
+    m1 -> m4;
+  }
+
+  subgraph cluster_inference {
+    label="D) Inference & Decisions";
+    style="rounded";
+    i1 [label="Online Inference\n(entry/exit/sizing heads)"];
+    i2 [label="Decision Assembly\n(rules + fuzzy + diffusion)"];
+    i3 [label="Order Intent\n(requested action)"];
+    i4 [label="Execution\n(fills, slippage, fees)"];
+    i1 -> i2 -> i3 -> i4;
+  }
+
+  subgraph cluster_logging {
+    label="E) Evidence Logging (Immutable)";
+    style="rounded";
+    l1 [label="decision_trace.jsonl\n(per decision event)"];
+    l2 [label="Artifact Store\n(inputs_schema.json, fuzzy_system.json)"];
+    l3 [label="Repro Evidence\n(model_hash, dataset_hash, commit)"];
+    i2 -> l1;
+    f1 -> l2;
+    f4 -> l2;
+    m4 -> l3;
+    d3 -> l3;
+    i4 -> l1;
+    l1 -> l3;
+  }
+
+  subgraph cluster_explain {
+    label="F) Explainability & Learned Conditions Export";
+    style="rounded";
+    e1 [label="Attribution Export\n(IG / GXInput / Occlusion)"];
+    e2 [label="Surrogate Rules\n(entry_rules.md, exit_rules.md, sizing_rules.md)"];
+    e3 [label="Learned Condition Bundle\n(learned_conditions/*)"];
+    l1 -> e1 -> e3;
+    l1 -> e2 -> e3;
+    l2 -> e3;
+  }
+
+  subgraph cluster_label {
+    label="G) Outcome Labeling (Win/Loss by Scope)";
+    style="rounded";
+    o1 [label="ENTRY Win/Loss\n(first-passage alphaR vs betaR)"];
+    o2 [label="EXIT Win/Loss\n(risk-adjusted hold delta)"];
+    o3 [label="SIZING Win/Loss\n(utility vs baseline size)"];
+    o4 [label="Attach Outcomes\n(to decision_trace.jsonl)"];
+    o1 -> o4;
+    o2 -> o4;
+    o3 -> o4;
+    l1 -> o4;
+  }
+
+  subgraph cluster_agg {
+    label="H) Aggregation & Attribution Metrics";
+    style="rounded";
+    a1 [label="Join: factors x outcomes\n(scope-aware)"];
+    a2 [label="Compute Metrics\n(wins, losses, lift, CI)"];
+    a3 [label="decision_factor_attribution.csv"];
+    o4 -> a1 -> a2 -> a3;
+    e1 -> a1;
+  }
+
+  subgraph cluster_governance {
+    label="I) Governance Review";
+    style="rounded";
+    g1 [label="Risk Gate Review\n(limit breaches, overrides)"];
+    g2 [label="Exception Log\n(manual overrides)"];
+    g3 [label="Sign-offs\n(model owner, risk owner, DevOps)"];
+    l1 -> g1;
+    l1 -> g2;
+    a3 -> g1;
+    g1 -> g3;
+    g2 -> g3;
+  }
+
+  subgraph cluster_reporting {
+    label="J) Audit Packet & Deliverables";
+    style="rounded";
+    r1 [label="Generate Audit Packet PDF\n(Accountability template + evidence)"];
+    r2 [label="Render DAG PDF\n(dot -Tpdf)"];
+    r3 [label="Package Evidence Bundle\n(zip + checksums)"];
+    e3 -> r1;
+    a3 -> r1;
+    g3 -> r1;
+    r2 -> r1;
+    r1 -> r3;
+  }
+
+  d4 -> f1;
+  f4 -> i2;
+  m3 -> i1;
+  m1 -> i1;
+  d3 -> m1;
+  f1 -> m1;
+  f2 -> m1;
+  f3 -> i2;
+}

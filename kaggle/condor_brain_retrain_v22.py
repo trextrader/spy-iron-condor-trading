@@ -11,6 +11,9 @@ print("✅ Repo synced")
 '''
 import sys
 import os
+import json
+import random
+import signal
 import warnings
 # Suppress mamba-ssm / torch.amp deprecation warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="mamba_ssm")
@@ -101,6 +104,9 @@ parser.add_argument("--use-precomputed-v21", action="store_true", help="Use V21 
 parser.add_argument("--use-diffusion", action="store_true", help="Enable diffusion from epoch 0")
 parser.add_argument("--rows", type=int, default=None, help="Override ROWS_TO_LOAD")
 parser.add_argument("--input", type=str, default=None, help="Override input dataset path")
+parser.add_argument("--resume", type=str, default=None, help="Resume from checkpoint path")
+parser.add_argument("--resume-auto", action="store_true", help="Auto-resume from latest checkpoint")
+parser.add_argument("--artifact-dir", type=str, default="artifacts/epochs", help="Epoch artifact output directory")
 
 # Parse args (handle Jupyter/Colab gracefully)
 try:
@@ -109,7 +115,7 @@ except:
     args = argparse.Namespace(
         start_date=None, end_date=None, model_suffix="",
         epochs=None, use_precomputed_v21=False, use_diffusion=False, rows=None,
-        input=None
+        input=None, resume=None, resume_auto=False, artifact_dir="artifacts/epochs"
     )
 
 # Apply argument overrides
@@ -124,6 +130,9 @@ MODEL_SUFFIX = args.model_suffix
 USE_PRECOMPUTED_V21 = args.use_precomputed_v21
 DATE_FILTER_START = args.start_date
 DATE_FILTER_END = args.end_date
+RESUME_PATH = args.resume
+RESUME_AUTO = args.resume_auto
+ARTIFACT_DIR = args.artifact_dir
 
 if DATE_FILTER_START or DATE_FILTER_END:
     print(f"📅 Date Filter: {DATE_FILTER_START or 'start'} → {DATE_FILTER_END or 'end'}")
@@ -173,6 +182,48 @@ def _sanitize_np_to_nan(x: np.ndarray) -> np.ndarray:
         x = x.copy()
         x[~np.isfinite(x)] = np.nan
     return x
+
+def _artifact_epoch_dir(epoch_idx: int) -> str:
+    return os.path.join(ARTIFACT_DIR, f"epoch_{epoch_idx:03d}")
+
+def _save_json(path: str, payload: dict) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+def _append_jsonl(path: str, payload: dict) -> None:
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+
+def _get_rng_state() -> dict:
+    state = {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch": torch.get_rng_state().cpu().numpy().tolist(),
+    }
+    if torch.cuda.is_available():
+        state["cuda"] = [s.cpu().numpy().tolist() for s in torch.cuda.get_rng_state_all()]
+    return state
+
+def _set_rng_state(state: dict) -> None:
+    if not state:
+        return
+    if "python" in state:
+        random.setstate(state["python"])
+    if "numpy" in state:
+        np.random.set_state(tuple(state["numpy"]))
+    if "torch" in state:
+        torch.set_rng_state(torch.tensor(state["torch"], dtype=torch.uint8))
+    if "cuda" in state and torch.cuda.is_available():
+        cuda_states = [torch.tensor(s, dtype=torch.uint8) for s in state["cuda"]]
+        torch.cuda.set_rng_state_all(cuda_states)
+
+def _latest_checkpoint_path() -> str:
+    latest_path = os.path.join(ARTIFACT_DIR, "latest.json")
+    if os.path.exists(latest_path):
+        with open(latest_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data.get("checkpoint_path", "")
+    return ""
 
 def _check_finite_t(name: str, t: torch.Tensor) -> Tuple[bool, str]:
     """
@@ -692,6 +743,103 @@ print("\n[3/4] Retraining Loop (Balanced Loss)...")
 enable_amp = (device.type == 'cuda')
 scaler = torch.amp.GradScaler('cuda', enabled=enable_amp)
 
+# --- ARTIFACT + RESUME SUPPORT ---
+os.makedirs(ARTIFACT_DIR, exist_ok=True)
+
+def _save_epoch_artifacts(epoch_num: int, metrics: dict, global_step: int) -> None:
+    epoch_dir = _artifact_epoch_dir(epoch_num)
+    os.makedirs(epoch_dir, exist_ok=True)
+
+    ckpt_path = os.path.join(epoch_dir, f"checkpoint_e{epoch_num}.pth")
+    opt_path = os.path.join(epoch_dir, f"optimizer_e{epoch_num}.pt")
+    scaler_path = os.path.join(epoch_dir, f"scaler_e{epoch_num}.pt")
+    metrics_path = os.path.join(epoch_dir, f"metrics_e{epoch_num}.json")
+
+    state_dict = model.module.state_dict() if isinstance(model, nn.DataParallel) else model.state_dict()
+    checkpoint = {
+        "state_dict": state_dict,
+        "optimizer_state": optimizer.state_dict(),
+        "scheduler_state": scheduler.state_dict(),
+        "scaler_state": scaler.state_dict() if scaler is not None else None,
+        "rng_state": _get_rng_state(),
+        "epoch_completed": epoch_num,
+        "global_step": global_step,
+        "version": VERSION_V22,
+        "feature_cols": FEATURE_COLS,
+        "input_dim": INPUT_DIM,
+        "median": median.astype(np.float32),
+        "mad": mad.astype(np.float32),
+        "seq_len": SEQ_LEN,
+        "use_diffusion": True,
+        "diffusion_steps": DIFFUSION_STEPS_TRAIN,
+        "primitive_integration": True,
+    }
+
+    torch.save(checkpoint, ckpt_path)
+    torch.save(optimizer.state_dict(), opt_path)
+    torch.save(scaler.state_dict(), scaler_path)
+    _save_json(metrics_path, metrics)
+
+    manifest = {
+        "epoch": epoch_num,
+        "checkpoint_path": ckpt_path,
+        "optimizer_path": opt_path,
+        "scaler_path": scaler_path,
+        "metrics_path": metrics_path,
+        "files": [ckpt_path, opt_path, scaler_path, metrics_path],
+    }
+    _append_jsonl(os.path.join(ARTIFACT_DIR, "manifest.jsonl"), manifest)
+    _save_json(os.path.join(ARTIFACT_DIR, "latest.json"), {"epoch": epoch_num, "checkpoint_path": ckpt_path})
+
+    missing = [p for p in manifest["files"] if not os.path.exists(p)]
+    if missing:
+        print(f"   [WARN] Missing epoch artifacts: {missing}")
+
+
+def _save_interrupt_artifacts(epoch_idx: int, global_step: int, reason: str) -> None:
+    interrupt_dir = os.path.join(ARTIFACT_DIR, "interrupt")
+    os.makedirs(interrupt_dir, exist_ok=True)
+    ckpt_path = os.path.join(interrupt_dir, "interrupt_checkpoint.pth")
+    opt_path = os.path.join(interrupt_dir, "interrupt_optimizer.pt")
+    scaler_path = os.path.join(interrupt_dir, "interrupt_scaler.pt")
+    metrics_path = os.path.join(interrupt_dir, "interrupt_metrics.json")
+
+    state_dict = model.module.state_dict() if isinstance(model, nn.DataParallel) else model.state_dict()
+    checkpoint = {
+        "state_dict": state_dict,
+        "optimizer_state": optimizer.state_dict(),
+        "scheduler_state": scheduler.state_dict(),
+        "scaler_state": scaler.state_dict() if scaler is not None else None,
+        "rng_state": _get_rng_state(),
+        "epoch_completed": epoch_idx,
+        "global_step": global_step,
+        "interrupted": True,
+        "reason": reason,
+    }
+    torch.save(checkpoint, ckpt_path)
+    torch.save(optimizer.state_dict(), opt_path)
+    torch.save(scaler.state_dict(), scaler_path)
+    _save_json(metrics_path, {"epoch": epoch_idx, "global_step": global_step, "reason": reason})
+
+
+def _resume_from_checkpoint(path: str) -> Tuple[int, int]:
+    if not path or not os.path.exists(path):
+        return 0, 0
+    ckpt = torch.load(path, map_location=device)
+    state = ckpt.get("state_dict", {})
+    model.load_state_dict(state, strict=False)
+    if "optimizer_state" in ckpt:
+        optimizer.load_state_dict(ckpt["optimizer_state"])
+    if "scheduler_state" in ckpt:
+        scheduler.load_state_dict(ckpt["scheduler_state"])
+    if "scaler_state" in ckpt and scaler is not None:
+        scaler.load_state_dict(ckpt["scaler_state"])
+    _set_rng_state(ckpt.get("rng_state", {}))
+    start_epoch = int(ckpt.get("epoch_completed", 0))
+    global_step = int(ckpt.get("global_step", 0))
+    print(f"   Resuming from checkpoint: {path} (next epoch={start_epoch+1})")
+    return start_epoch, global_step
+
 # Initialize TensorBoard Writer
 tb_logdir = "runs/condor_brain"
 # Initialize TensorBoard Writer
@@ -706,7 +854,29 @@ if HAS_TENSORBOARD and not "_TB_STARTED" in globals():
     except:
         pass
 
-for epoch in range(EPOCHS):
+resume_candidate = RESUME_PATH
+if not resume_candidate and RESUME_AUTO:
+    resume_candidate = _latest_checkpoint_path()
+
+start_epoch = 0
+resume_global_step = 0
+if resume_candidate:
+    start_epoch, resume_global_step = _resume_from_checkpoint(resume_candidate)
+global_step_offset = resume_global_step
+last_global_step = global_step_offset
+
+interrupt_state = {"raised": False, "reason": ""}
+def _handle_sigint(sig, frame):
+    interrupt_state["raised"] = True
+    interrupt_state["reason"] = "SIGINT"
+    print("   [WARN] Interrupt requested. Stopping after current batch.")
+
+try:
+    signal.signal(signal.SIGINT, _handle_sigint)
+except Exception:
+    pass
+
+for epoch in range(start_epoch, EPOCHS):
     model.train()
     total_loss = 0
     total_pol_loss = 0
@@ -814,9 +984,14 @@ for epoch in range(EPOCHS):
         
         # Stability check
         if not torch.isfinite(loss):
-             pbar.write(f"⚠️  Non-finite loss at batch {batch_idx}: P={loss_pol.item():.4f}, F={loss_feat.item():.4f}, D={loss_diff.item():.4f}")
-             optimizer.zero_grad(set_to_none=True)
-             continue
+            pbar.write(
+                f"⚠️  Non-finite loss at batch {batch_idx}: "
+                f"P={loss_dict['pred'].item():.4f}, "
+                f"F={loss_feat.item():.4f}, "
+                f"D={loss_diff.item():.4f}"
+            )
+            optimizer.zero_grad(set_to_none=True)
+            continue
 
         scaler.scale(loss).backward()
         # 5. Optimize with Gradient Clipping
@@ -828,7 +1003,7 @@ for epoch in range(EPOCHS):
         
         total_loss += loss.item()
         total_pol_loss += loss_dict['pred'].item()
-            total_rule_loss += (loss_dict['rule'].item() * RULE_LOSS_SCALE)
+        total_rule_loss += (loss_dict['rule'].item() * RULE_LOSS_SCALE)
         total_feat_loss += loss_feat.item()
         total_diff_loss += loss_diff.item()
         
@@ -841,16 +1016,26 @@ for epoch in range(EPOCHS):
             })
             
         # TensorBoard Logging (every batch)
-        global_step = epoch * len(train_loader) + batch_idx
+        global_step = global_step_offset + (epoch - start_epoch) * len(train_loader) + batch_idx
+        last_global_step = global_step
         writer.add_scalar('Loss/Total', loss.item(), global_step)
         writer.add_scalar('Loss/Policy', loss_dict['pred'].item(), global_step)
         writer.add_scalar('Loss/RuleConsistency', loss_dict['rule'].item() * RULE_LOSS_SCALE, global_step)
         writer.add_scalar('Loss/Feature', loss_feat.item(), global_step)
         writer.add_scalar('Loss/Diffusion', loss_diff.item(), global_step)
         writer.add_scalar('LR', scheduler.get_last_lr()[0], global_step)
+
+        if interrupt_state["raised"]:
+            pbar.write("   [WARN] Interrupt flag set. Ending epoch early.")
+            break
     
     if skipped_batches:
         print(f"   ⚠️ Epoch {epoch+1}: skipped {skipped_batches} batches due to non-finite data/outputs.")
+
+    if interrupt_state["raised"]:
+        _save_interrupt_artifacts(epoch, last_global_step, interrupt_state["reason"])
+        print("   [WARN] Training interrupted. Saved interrupt checkpoint.")
+        break
     
     avg_pol = total_pol_loss / len(train_loader)
     avg_rule = total_rule_loss / len(train_loader)
@@ -985,32 +1170,26 @@ for epoch in range(EPOCHS):
         except Exception as e:
             print(f"[TensorBoard] Image logging error: {e}")
 
-    # Save Checkpoint with Metadata
-    save_path = f"condor_brain_retrain{MODEL_SUFFIX}_e{epoch+1}.pth"
-    
-    state_dict = model.module.state_dict() if isinstance(model, nn.DataParallel) else model.state_dict()
-    
-    checkpoint = {
-        "state_dict": state_dict,
-        "version": VERSION_V22,  # V2.2 with primitives
-        "feature_cols": FEATURE_COLS,
-        "input_dim": INPUT_DIM,  # 56
-        "median": median.astype(np.float32),
-        "mad": mad.astype(np.float32),
-        "seq_len": SEQ_LEN,
-        "use_diffusion": True,
-        "diffusion_steps": 50,
-        "primitive_integration": True,  # V2.2 marker
+    epoch_num = epoch + 1
+    metrics = {
+        "epoch": epoch_num,
+        "avg_policy_loss": float(avg_pol),
+        "avg_rule_loss": float(avg_rule),
+        "avg_feature_loss": float(avg_feat),
+        "avg_diffusion_loss": float(avg_diff),
+        "skipped_batches": int(skipped_batches),
+        "use_diffusion": bool(use_diffusion),
+        "global_step": int(last_global_step),
     }
-    
-    torch.save(checkpoint, save_path)
-    print(f"      💾 Saved: {save_path}")
-    
-    # ⬇️ Auto-download for Colab User (Safety Net)
+    _save_epoch_artifacts(epoch_num, metrics, int(last_global_step))
+    save_path = os.path.join(_artifact_epoch_dir(epoch_num), f"checkpoint_e{epoch_num}.pth")
+    print(f"      Saved: {save_path}")
+
+    # Auto-download for Colab User (Safety Net)
     try:
         from google.colab import files
         files.download(save_path)
-        print(f"      ⬇️ Auto-downloading {save_path}...")
+        print(f"      Auto-downloading {save_path}...")
     except:
         pass
 

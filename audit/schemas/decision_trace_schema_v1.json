@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "decision_trace_schema_v1.json",
+  "title": "decision_trace.jsonl schema v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "event_id",
+    "ts_utc",
+    "instrument",
+    "decision",
+    "state",
+    "inputs",
+    "model",
+    "decision_factors",
+    "action",
+    "outcome",
+    "governance"
+  ],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "event_id": { "type": "string" },
+    "ts_utc": { "type": "string", "format": "date-time" },
+    "instrument": {
+      "type": "object",
+      "required": ["symbol", "venue", "asset_class", "contract"],
+      "properties": {
+        "symbol": { "type": "string" },
+        "venue": { "type": "string" },
+        "asset_class": { "type": "string" },
+        "contract": {
+          "type": "object",
+          "required": ["expiry", "right", "strike", "multiplier"],
+          "properties": {
+            "occ": { "type": "string" },
+            "expiry": { "type": "string" },
+            "right": { "type": "string" },
+            "strike": { "type": "number" },
+            "multiplier": { "type": "number" }
+          }
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": ["trade_id", "decision_id", "scope", "decision_type", "intent", "timeframe", "horizon_bars"],
+      "properties": {
+        "trade_id": { "type": "string" },
+        "decision_id": { "type": "string" },
+        "scope": { "type": "string", "enum": ["ENTRY", "EXIT", "SIZING"] },
+        "decision_type": { "type": "string" },
+        "intent": { "type": "string" },
+        "timeframe": { "type": "string" },
+        "horizon_bars": { "type": "number" }
+      }
+    },
+    "state": { "type": "object" },
+    "inputs": { "type": "object" },
+    "model": { "type": "object" },
+    "decision_factors": { "type": "object" },
+    "action": { "type": "object" },
+    "outcome": { "type": "object" },
+    "governance": { "type": "object" }
+  }
+}
