@@ -1119,6 +1119,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                         reason_text="sizing_eval"
                     )
 
+                entry_spot = entry.get('spot', 0.0)
                 exit_msg = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║ 🔔 IRON CONDOR EXIT @ Bar {i}
