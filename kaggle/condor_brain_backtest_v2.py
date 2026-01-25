@@ -12,6 +12,10 @@ Usage:
 
 import os
 import sys
+import json
+import uuid
+import hashlib
+import subprocess
 import torch
 import pandas as pd
 import numpy as np
@@ -44,6 +48,11 @@ from intelligence.features.dynamic_features import (
 from intelligence.rule_engine.dsl_parser import RuleDSLParser
 from intelligence.rule_engine.executor import RuleExecutionEngine
 from torch.utils.tensorboard import SummaryWriter # Added for TB support
+try:
+    from audit.decision_trace_logger import DecisionTraceLogger, TraceConfig
+    HAS_TRACE_LOGGER = True
+except Exception:
+    HAS_TRACE_LOGGER = False
 
 # --- SCALING HELPERS (Matched to training) ---
 def robust_zscore_fit(X):
@@ -66,11 +75,28 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # Output directory
 REPORTS_DIR = "reports"
 os.makedirs(REPORTS_DIR, exist_ok=True)
+DECISION_TRACE_PATH = os.path.join(REPORTS_DIR, "decision_trace.jsonl")
 
 # Iron Condor P&L Config
 IC_CREDIT_PER_SPREAD = 1.50  # $1.50 credit per spread (typical)
 IC_CONTRACTS = 10  # Number of contracts per trade
 IC_MULTIPLIER = 100  # Options multiplier
+
+def _sha256_file(path):
+    if not path or not os.path.exists(path):
+        return None
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+def _git_commit():
+    try:
+        out = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL)
+        return out.decode("utf-8").strip()
+    except Exception:
+        return "unknown"
 
 def load_data_and_features(data_path, rows=None):
     print(f"Loading data from {data_path}...")
@@ -207,7 +233,7 @@ def estimate_condor_pnl(spot, short_call, long_call, short_put, long_put, credit
     
     return net_pnl
 
-def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
+def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None):
     print("Starting Backtest Simulation...")
     
     # Pre-process Features (Robust Norm same as training)
@@ -268,6 +294,212 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
 
     # TensorBoard Writer
     tb_writer = SummaryWriter(log_dir=os.path.join(REPORTS_DIR, "tensorboard"))
+
+    # Decision trace logger
+    trace_logger = None
+    if HAS_TRACE_LOGGER:
+        trace_cfg = TraceConfig(
+            output_path=DECISION_TRACE_PATH,
+            model_id="CondorBrain",
+            model_version=VERSION_V22,
+            model_hash=_sha256_file(model_path) if model_path else "unknown",
+            code_commit=_git_commit(),
+            run_id=str(uuid.uuid4()),
+            dataset_id=os.path.basename(data_path) if data_path else "unknown",
+            dataset_path=data_path,
+        )
+        trace_logger = DecisionTraceLogger(trace_cfg)
+
+    def _feature_snapshot(x_seq_tensor):
+        vals = x_seq_tensor[0, -1, :].detach().cpu().numpy().tolist()
+        return {feature_cols[j]: float(vals[j]) for j in range(len(feature_cols))}
+
+    def _build_rule_factors(active_rules_list, net_rule_signal_val):
+        rule_items = []
+        for r_id in active_rules_list:
+            rule_items.append({
+                "rule_id": f"RULE:{r_id}",
+                "rule_type": "SOFT_RULE",
+                "passed": True,
+                "value": 1.0,
+                "threshold": 0.0,
+                "weight": 1.0,
+                "notes": ""
+            })
+        if not active_rules_list:
+            rule_items.append({
+                "rule_id": "RULE:NET_SIGNAL",
+                "rule_type": "SOFT_RULE",
+                "passed": bool(net_rule_signal_val >= 0),
+                "value": float(net_rule_signal_val),
+                "threshold": 0.0,
+                "weight": 1.0,
+                "notes": "Aggregated rule signal."
+            })
+        return rule_items
+
+    def _emit_trace_event(
+        scope,
+        decision_type,
+        intent,
+        trade_id,
+        spot_val,
+        legs,
+        entry_score_val=None,
+        prob_val=None,
+        conf_val=None,
+        net_rule_signal_val=0.0,
+        dte_entry_val=None,
+        dte_remaining_val=None,
+        pnl_val=None,
+        max_loss_val=None,
+        pos_size_pct_val=None,
+        active_rules_list=None,
+        feature_map=None,
+        reason_text="",
+    ):
+        if trace_logger is None:
+            return
+        if active_rules_list is None:
+            active_rules_list = []
+        if feature_map is None:
+            feature_map = {}
+        r_mult = None
+        if pnl_val is not None and max_loss_val:
+            r_mult = float(pnl_val / max_loss_val) if max_loss_val > 0 else 0.0
+        record = {
+            "schema_version": "1.0",
+            "event_id": str(uuid.uuid4()),
+            "instrument": {
+                "symbol": "SPY",
+                "venue": "SIM",
+                "asset_class": "OPTION",
+                "contract": {
+                    "expiry": "",
+                    "right": "MULTI",
+                    "strike": 0.0,
+                    "multiplier": IC_MULTIPLIER
+                }
+            },
+            "decision": {
+                "trade_id": trade_id,
+                "decision_id": str(uuid.uuid4()),
+                "scope": scope,
+                "decision_type": decision_type,
+                "intent": intent,
+                "timeframe": "1m",
+                "horizon_bars": 0
+            },
+            "state": {
+                "position": {
+                    "side": "SHORT" if position == 1 else "FLAT",
+                    "qty": float(IC_CONTRACTS) if position == 1 else 0.0,
+                    "contracts": int(IC_CONTRACTS) if position == 1 else 0,
+                    "avg_price": 0.0,
+                    "greeks": {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0},
+                    "margin_used": 0.0,
+                    "risk_unit_R": float(max_loss_val) if max_loss_val is not None else 0.0
+                },
+                "market": {
+                    "mid": float(spot_val),
+                    "bid": 0.0,
+                    "ask": 0.0,
+                    "spread": 0.0,
+                    "iv": 0.0,
+                    "ivr": 0.0,
+                    "volume": float(df["volume"].iloc[i]) if "volume" in df.columns else 0.0,
+                    "liquidity_flags": []
+                }
+            },
+            "inputs": {
+                "feature_vector": {
+                    "feature_schema_id": VERSION_V22,
+                    "T": int(SEQ_LEN),
+                    "D": int(len(feature_cols)),
+                    "aggregation": "LAST",
+                    "values": feature_map
+                },
+                "indicators": {},
+                "engineered": {}
+            },
+            "model": {
+                "outputs": {
+                    "entry_logit": float(entry_score_val) if entry_score_val is not None else 0.0,
+                    "exit_logit": float(net_rule_signal_val) if net_rule_signal_val is not None else 0.0,
+                    "size_score": float(pos_size_pct_val) if pos_size_pct_val is not None else 0.0,
+                    "uncertainty": {"sigma": 0.0, "p10": 0.0, "p50": 0.0, "p90": 0.0}
+                }
+            },
+            "decision_factors": {
+                "rules": _build_rule_factors(active_rules_list, net_rule_signal_val),
+                "learned_patterns": [],
+                "attribution": [
+                    {
+                        "factor_id": f"FEAT:{k}",
+                        "factor_kind": "FEATURE",
+                        "value": float(v),
+                        "contribution": 0.0,
+                        "importance": 0.0,
+                        "method": "NOT_AVAILABLE"
+                    } for k, v in feature_map.items()
+                ],
+                "diffusion": {
+                    "enabled": False,
+                    "model_id": "",
+                    "summary": {"path_mean": 0.0, "path_var": 0.0, "tail_risk": 0.0}
+                },
+                "fuzzy": {
+                    "enabled": True,
+                    "system_id": "ENTRY_SCORE_V1",
+                    "memberships": {"score": float(entry_score_val) if entry_score_val is not None else 0.0},
+                    "rules_fired": [],
+                    "defuzz_output": {"size_multiplier": float(pos_size_pct_val) if pos_size_pct_val is not None else 0.0}
+                }
+            },
+            "action": {
+                "requested": {
+                    "order_type": "SIM",
+                    "side": "SELL" if decision_type == "OPEN" else "BUY",
+                    "qty": float(IC_CONTRACTS),
+                    "contracts": int(IC_CONTRACTS),
+                    "limit_price": 0.0,
+                    "tif": "DAY",
+                    "legs": legs
+                },
+                "executed": {
+                    "status": "FILLED",
+                    "fill_qty": float(IC_CONTRACTS),
+                    "fill_price": 0.0,
+                    "slippage": 0.0,
+                    "fees": 0.0,
+                    "latency_ms": 0
+                }
+            },
+            "outcome": {
+                "labeling_policy_id": "WINDEF:v1",
+                "evaluation_window_bars": 0,
+                "win": bool(pnl_val > 0) if pnl_val is not None else False,
+                "loss": bool(pnl_val < 0) if pnl_val is not None else False,
+                "neutral": pnl_val is None,
+                "r_multiple_final": float(r_mult) if r_mult is not None else 0.0,
+                "mfe_r": 0.0,
+                "mae_r": 0.0,
+                "notes": reason_text
+            },
+            "governance": {
+                "risk_gates": [],
+                "overrides": [],
+                "data_provenance": {
+                    "dataset_id": os.path.basename(data_path) if data_path else "unknown",
+                    "dataset_hash": _sha256_file(data_path) if data_path else None,
+                    "bar_source": "SIM",
+                    "timezone": "UTC"
+                }
+            }
+        }
+        record["state"]["position"]["dte_entry"] = float(dte_entry_val) if dte_entry_val is not None else None
+        record["state"]["position"]["dte_remaining"] = float(dte_remaining_val) if dte_remaining_val is not None else None
+        trace_logger.append(record)
     
     # Running Stats
     stats = {
@@ -316,6 +548,11 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
         net_rule_signal = 0
         if rule_signals is not None:
             net_rule_signal = rule_signals.iloc[i].sum()
+        active_rules = []
+        if rule_signals is not None:
+            for col in rule_signals.columns:
+                if "signal" in col and rule_signals[col].iloc[i] != 0:
+                    active_rules.append(col.replace("_signal", ""))
         
         # 4. FUZZY LOGIC Entry Decision
         # Score-based entry: accumulate evidence from multiple sources
@@ -398,13 +635,6 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 max_loss = (width - IC_CREDIT_PER_SPREAD) * IC_CONTRACTS * IC_MULTIPLIER
                 
                 # TRADE STATS with fuzzy score breakdown
-                # Identify Triggering Rules
-                active_rules = []
-                if rule_signals is not None:
-                    for col in rule_signals.columns:
-                        if "signal" in col and rule_signals[col].iloc[i] != 0:
-                            r_id = col.replace("_signal", "")
-                            active_rules.append(r_id)
                 
                 # Format Primitives & Reasons
                 reasoning = []
@@ -503,10 +733,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 trade_credit = credit_received  # Store for P&L calc
                 trade_max_loss = max_loss
                 
+                trade_id = f"IC-{trade_num}"
                 open_trade = {
                     'idx': i, 
                     'type': 'IRON_CONDOR', 
                     'action': 'OPEN',
+                    'trade_id': trade_id,
                     'spot': spot,
                     'short_call': short_call_strike,
                     'long_call': long_call_strike,
@@ -522,6 +754,53 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                     'rules': float(net_rule_signal)
                 }
                 trades.append(open_trade)
+                legs = [
+                    {"right": "C", "side": "SELL", "strike": float(short_call_strike), "qty": int(IC_CONTRACTS)},
+                    {"right": "C", "side": "BUY", "strike": float(long_call_strike), "qty": int(IC_CONTRACTS)},
+                    {"right": "P", "side": "SELL", "strike": float(short_put_strike), "qty": int(IC_CONTRACTS)},
+                    {"right": "P", "side": "BUY", "strike": float(long_put_strike), "qty": int(IC_CONTRACTS)},
+                ]
+                feature_map = _feature_snapshot(x_seq)
+                _emit_trace_event(
+                    scope="ENTRY",
+                    decision_type="OPEN",
+                    intent="OPEN_CONDOR",
+                    trade_id=trade_id,
+                    spot_val=spot,
+                    legs=legs,
+                    entry_score_val=entry_score,
+                    prob_val=prob_profit,
+                    conf_val=confidence,
+                    net_rule_signal_val=net_rule_signal,
+                    dte_entry_val=trade_dte,
+                    dte_remaining_val=trade_dte,
+                    pnl_val=None,
+                    max_loss_val=max_loss,
+                    pos_size_pct_val=pos_size_pct,
+                    active_rules_list=active_rules,
+                    feature_map=feature_map,
+                    reason_text="entry"
+                )
+                _emit_trace_event(
+                    scope="SIZING",
+                    decision_type="SIZE_ONLY",
+                    intent="SIZE_ONLY",
+                    trade_id=trade_id,
+                    spot_val=spot,
+                    legs=legs,
+                    entry_score_val=entry_score,
+                    prob_val=prob_profit,
+                    conf_val=confidence,
+                    net_rule_signal_val=net_rule_signal,
+                    dte_entry_val=trade_dte,
+                    dte_remaining_val=trade_dte,
+                    pnl_val=None,
+                    max_loss_val=max_loss,
+                    pos_size_pct_val=pos_size_pct,
+                    active_rules_list=active_rules,
+                    feature_map=feature_map,
+                    reason_text="sizing"
+                )
                 position = 1
             else:
                 # Rejection: entry score below threshold
@@ -595,7 +874,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                     total_dte=trades[-1]['dte']
                 )
                 
-                status_icon = "✅ WIN" if realized_pnl > 0 else "❌ LOSS"
+                is_win = realized_pnl > 0
+                status_icon = "✅ WIN" if is_win else "❌ LOSS"
 
                 # Define Return on Risk (ROI) for Expiration
                 pnl_pct = (realized_pnl / entry['max_loss']) * 100 if entry['max_loss'] > 0 else 0.0
@@ -651,6 +931,34 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 tb_writer.add_scalar("Trades/PnL_Dollar", realized_pnl, step_idx)
                 tb_writer.add_scalar("Trades/Expectancy", expectancy, step_idx)
                 tb_writer.add_scalar("Debug/Entry_Conf", trades[-1]['conf'], step_idx)
+
+                legs = [
+                    {"right": "C", "side": "BUY", "strike": float(entry.get('short_call', 0.0)), "qty": int(IC_CONTRACTS)},
+                    {"right": "C", "side": "SELL", "strike": float(entry.get('long_call', 0.0)), "qty": int(IC_CONTRACTS)},
+                    {"right": "P", "side": "BUY", "strike": float(entry.get('short_put', 0.0)), "qty": int(IC_CONTRACTS)},
+                    {"right": "P", "side": "SELL", "strike": float(entry.get('long_put', 0.0)), "qty": int(IC_CONTRACTS)}
+                ]
+                feature_map = _feature_snapshot(x_seq)
+                _emit_trace_event(
+                    scope="EXIT",
+                    decision_type="CLOSE",
+                    intent="CLOSE_CONDOR",
+                    trade_id=entry.get('trade_id', f"IC-{stats['total_trades']}"),
+                    spot_val=spot,
+                    legs=legs,
+                    entry_score_val=entry.get('entry_score', 0.0),
+                    prob_val=entry.get('prob', 0.0),
+                    conf_val=entry.get('conf', 0.0),
+                    net_rule_signal_val=net_rule_signal,
+                    dte_entry_val=entry.get('dte', None),
+                    dte_remaining_val=remaining_dte,
+                    pnl_val=realized_pnl,
+                    max_loss_val=entry.get('max_loss', None),
+                    pos_size_pct_val=None,
+                    active_rules_list=active_rules,
+                    feature_map=feature_map,
+                    reason_text=exit_reason
+                )
 
                 exit_msg = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -864,7 +1172,16 @@ def main():
             return
             
         # 4. Backtest
-        equity, trades = run_backtest(df, rule_signals, model, FEATURE_COLS_V22, DEVICE, ruleset)
+        equity, trades = run_backtest(
+            df,
+            rule_signals,
+            model,
+            FEATURE_COLS_V22,
+            DEVICE,
+            ruleset,
+            model_path=MODEL_PATH,
+            data_path=DATA_PATH,
+        )
         
         # 5. Report
         print(f"Final Capital: ${equity[-1]:,.2f}")
