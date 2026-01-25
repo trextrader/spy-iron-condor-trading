@@ -70,6 +70,12 @@ def generate_attribution_csv(trace_path: str, out_path: str) -> None:
     if not records:
         raise RuntimeError(f"No decision_trace records found at {trace_path}")
 
+    eval_scope_keys = set()
+    for rec in records:
+        decision = rec.get("decision", {})
+        if decision.get("decision_type") == "EVAL":
+            eval_scope_keys.add((decision.get("trade_id", ""), decision.get("scope", "")))
+
     asof_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     rows = []
 
@@ -95,7 +101,11 @@ def generate_attribution_csv(trace_path: str, out_path: str) -> None:
     })
 
     for rec in records:
-        scope = rec.get("decision", {}).get("scope", "UNKNOWN")
+        decision = rec.get("decision", {})
+        scope = decision.get("scope", "UNKNOWN")
+        trade_id = decision.get("trade_id", "")
+        if (trade_id, scope) in eval_scope_keys and decision.get("decision_type") != "EVAL":
+            continue
         outcome = rec.get("outcome", {})
         win = bool(outcome.get("win"))
         loss = bool(outcome.get("loss"))

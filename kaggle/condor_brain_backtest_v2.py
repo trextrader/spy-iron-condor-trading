@@ -82,6 +82,15 @@ IC_CREDIT_PER_SPREAD = 1.50  # $1.50 credit per spread (typical)
 IC_CONTRACTS = 10  # Number of contracts per trade
 IC_MULTIPLIER = 100  # Options multiplier
 
+# Trace + outcome labeling config
+TRACE_PER_BAR = True
+TOP_N_FEATURES = 20
+ENTRY_ALPHA_R = 0.25
+ENTRY_BETA_R = 0.25
+EXIT_EVAL_HOLD_BARS = 30
+EXIT_RISK_LAMBDA = 0.5
+SIZING_RISK_LAMBDA = 0.5
+
 def _sha256_file(path):
     if not path or not os.path.exists(path):
         return None
@@ -310,9 +319,14 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         )
         trace_logger = DecisionTraceLogger(trace_cfg)
 
-    def _feature_snapshot(x_seq_tensor):
-        vals = x_seq_tensor[0, -1, :].detach().cpu().numpy().tolist()
-        return {feature_cols[j]: float(vals[j]) for j in range(len(feature_cols))}
+    def _feature_snapshot(x_seq_tensor, top_n=TOP_N_FEATURES):
+        vals = x_seq_tensor[0, -1, :].detach().cpu().numpy()
+        if top_n is not None and top_n > 0:
+            idx = np.argsort(np.abs(vals))[-top_n:]
+        else:
+            idx = np.arange(len(vals))
+        snap = {feature_cols[j]: float(vals[j]) for j in idx}
+        return snap
 
     def _build_rule_factors(active_rules_list, net_rule_signal_val):
         rule_items = []
@@ -500,6 +514,41 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         record["state"]["position"]["dte_entry"] = float(dte_entry_val) if dte_entry_val is not None else None
         record["state"]["position"]["dte_remaining"] = float(dte_remaining_val) if dte_remaining_val is not None else None
         trace_logger.append(record)
+
+    def _entry_win_from_path(r_path, alpha_r=ENTRY_ALPHA_R, beta_r=ENTRY_BETA_R):
+        tau_pos = None
+        tau_neg = None
+        for idx, r_val in enumerate(r_path):
+            if tau_pos is None and r_val >= alpha_r:
+                tau_pos = idx
+            if tau_neg is None and r_val <= -beta_r:
+                tau_neg = idx
+            if tau_pos is not None and tau_neg is not None:
+                break
+        if tau_pos is None and tau_neg is None:
+            return None
+        if tau_pos is None:
+            return False
+        if tau_neg is None:
+            return True
+        return tau_pos < tau_neg
+
+    def _exit_win(r_exit, r_future, dd_future, lam=EXIT_RISK_LAMBDA):
+        if r_future is None:
+            return None
+        u_exit = r_exit
+        u_hold = r_future - lam * max(0.0, r_exit - dd_future)
+        return u_exit > u_hold
+
+    def _sizing_win(r_exit, min_r, size_mult, lam=SIZING_RISK_LAMBDA):
+        if size_mult is None:
+            return None
+        dd = max(0.0, -min_r)
+        u_size = r_exit * size_mult - lam * dd * size_mult
+        u_base = r_exit - lam * dd
+        if size_mult == 1.0:
+            return None
+        return u_size > u_base
     
     # Running Stats
     stats = {
@@ -751,7 +800,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                     'entry_score': entry_score,
                     'conf': float(confidence), 
                     'prob': float(prob_profit),
-                    'rules': float(net_rule_signal)
+                    'rules': float(net_rule_signal),
+                    'pos_size_pct': float(pos_size_pct),
+                    'r_path': []
                 }
                 trades.append(open_trade)
                 legs = [
@@ -939,6 +990,39 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                     {"right": "P", "side": "SELL", "strike": float(entry.get('long_put', 0.0)), "qty": int(IC_CONTRACTS)}
                 ]
                 feature_map = _feature_snapshot(x_seq)
+
+                # Outcome labeling (ENTRY/EXIT/SIZING)
+                r_path = entry.get('r_path', [])
+                r_exit = float(realized_pnl / entry['max_loss']) if entry.get('max_loss', 0) > 0 else 0.0
+                entry_win = _entry_win_from_path(r_path)
+
+                r_future = None
+                dd_future = None
+                if i + EXIT_EVAL_HOLD_BARS < len(df):
+                    r_future_vals = []
+                    for j in range(i, min(i + EXIT_EVAL_HOLD_BARS, len(df) - 1) + 1):
+                        days_elapsed_f = (j - trade_entry_bar) / BARS_PER_DAY
+                        pnl_f = estimate_condor_pnl(
+                            spot=df['close'].iloc[j],
+                            short_call=entry['short_call'],
+                            long_call=entry['long_call'],
+                            short_put=entry['short_put'],
+                            long_put=entry['long_put'],
+                            credit_received=entry['credit'],
+                            max_loss=entry['max_loss'],
+                            days_held=days_elapsed_f,
+                            total_dte=entry['dte']
+                        )
+                        r_f = pnl_f / entry['max_loss'] if entry['max_loss'] > 0 else 0.0
+                        r_future_vals.append(float(r_f))
+                    r_future = r_future_vals[-1] if r_future_vals else None
+                    dd_future = min(r_future_vals) if r_future_vals else None
+
+                exit_win = _exit_win(r_exit, r_future, dd_future)
+                size_mult = entry.get('pos_size_pct', 100.0) / 100.0
+                min_r = min(r_path) if r_path else 0.0
+                sizing_win = _sizing_win(r_exit, min_r, size_mult)
+
                 _emit_trace_event(
                     scope="EXIT",
                     decision_type="CLOSE",
@@ -959,6 +1043,51 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                     feature_map=feature_map,
                     reason_text=exit_reason
                 )
+
+                # Emit ENTRY/SIZING eval events with outcomes
+                trade_id = entry.get('trade_id', f"IC-{stats['total_trades']}")
+                if entry_win is not None:
+                    _emit_trace_event(
+                        scope="ENTRY",
+                        decision_type="EVAL",
+                        intent="ENTRY_OUTCOME",
+                        trade_id=trade_id,
+                        spot_val=spot,
+                        legs=legs,
+                        entry_score_val=entry.get('entry_score', 0.0),
+                        prob_val=entry.get('prob', 0.0),
+                        conf_val=entry.get('conf', 0.0),
+                        net_rule_signal_val=net_rule_signal,
+                        dte_entry_val=entry.get('dte', None),
+                        dte_remaining_val=remaining_dte,
+                        pnl_val=1.0 if entry_win else -1.0,
+                        max_loss_val=1.0,
+                        pos_size_pct_val=entry.get('pos_size_pct', None),
+                        active_rules_list=active_rules,
+                        feature_map=feature_map,
+                        reason_text="entry_eval"
+                    )
+                if sizing_win is not None:
+                    _emit_trace_event(
+                        scope="SIZING",
+                        decision_type="EVAL",
+                        intent="SIZING_OUTCOME",
+                        trade_id=trade_id,
+                        spot_val=spot,
+                        legs=legs,
+                        entry_score_val=entry.get('entry_score', 0.0),
+                        prob_val=entry.get('prob', 0.0),
+                        conf_val=entry.get('conf', 0.0),
+                        net_rule_signal_val=net_rule_signal,
+                        dte_entry_val=entry.get('dte', None),
+                        dte_remaining_val=remaining_dte,
+                        pnl_val=1.0 if sizing_win else -1.0,
+                        max_loss_val=1.0,
+                        pos_size_pct_val=entry.get('pos_size_pct', None),
+                        active_rules_list=active_rules,
+                        feature_map=feature_map,
+                        reason_text="sizing_eval"
+                    )
 
                 exit_msg = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -1028,6 +1157,52 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             for line in log_lines:
                 print(line)
             logged_count += 1
+
+        # Decision trace for every bar
+        if trace_logger is not None and TRACE_PER_BAR:
+            legs = []
+            trade_id = f"BAR-{i}"
+            dte_entry_val = None
+            dte_remaining_val = None
+            entry_score_val = None
+            pos_size_pct_val = None
+            if position == 1 and open_trade:
+                trade_id = open_trade.get('trade_id', trade_id)
+                legs = [
+                    {"right": "C", "side": "SELL", "strike": float(open_trade.get('short_call', 0.0)), "qty": int(IC_CONTRACTS)},
+                    {"right": "C", "side": "BUY", "strike": float(open_trade.get('long_call', 0.0)), "qty": int(IC_CONTRACTS)},
+                    {"right": "P", "side": "SELL", "strike": float(open_trade.get('short_put', 0.0)), "qty": int(IC_CONTRACTS)},
+                    {"right": "P", "side": "BUY", "strike": float(open_trade.get('long_put', 0.0)), "qty": int(IC_CONTRACTS)}
+                ]
+                dte_entry_val = open_trade.get('dte', None)
+                bars_held = i - trade_entry_bar if trade_entry_bar else 0
+                days_held = bars_held / BARS_PER_DAY
+                dte_remaining_val = dte_entry_val - days_held if dte_entry_val else None
+                entry_score_val = open_trade.get('entry_score', None)
+                pos_size_pct_val = open_trade.get('pos_size_pct', None)
+
+            scope = "EXIT" if position == 1 else "ENTRY"
+            feature_map = _feature_snapshot(x_seq)
+            _emit_trace_event(
+                scope=scope,
+                decision_type="HOLD",
+                intent="HOLD",
+                trade_id=trade_id,
+                spot_val=spot,
+                legs=legs,
+                entry_score_val=entry_score_val,
+                prob_val=prob_profit,
+                conf_val=confidence,
+                net_rule_signal_val=net_rule_signal,
+                dte_entry_val=dte_entry_val,
+                dte_remaining_val=dte_remaining_val,
+                pnl_val=None,
+                max_loss_val=open_trade.get('max_loss', None) if open_trade else None,
+                pos_size_pct_val=pos_size_pct_val,
+                active_rules_list=active_rules,
+                feature_map=feature_map,
+                reason_text="bar_trace"
+            )
             
         # 5. Iron Condor P&L Simulation
         # IC P&L: Collect theta (time decay) while in position, lose if breached
@@ -1058,6 +1233,22 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                         daily_pnl = 0
                 
                 capital += daily_pnl
+
+                # Update r_path for entry/exit/sizing outcomes
+                days_elapsed = (i - trade_entry_bar) / BARS_PER_DAY
+                mtm_pnl = estimate_condor_pnl(
+                    spot=spot,
+                    short_call=open_trade['short_call'],
+                    long_call=open_trade['long_call'],
+                    short_put=open_trade['short_put'],
+                    long_put=open_trade['long_put'],
+                    credit_received=open_trade['credit'],
+                    max_loss=open_trade['max_loss'],
+                    days_held=days_elapsed,
+                    total_dte=open_trade['dte']
+                )
+                r_val = mtm_pnl / open_trade['max_loss'] if open_trade['max_loss'] > 0 else 0.0
+                open_trade['r_path'].append(float(r_val))
         
         equity_curve.append(capital)
     
