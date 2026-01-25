@@ -244,6 +244,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
     position = 0 # 0=None, 1=Long Iron Condor
     equity_curve = []
     trades = []
+    open_trade = None
     
     # Trade state tracking (for expiration)
     trade_entry_bar = None
@@ -502,7 +503,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 trade_credit = credit_received  # Store for P&L calc
                 trade_max_loss = max_loss
                 
-                trades.append({
+                open_trade = {
                     'idx': i, 
                     'type': 'IRON_CONDOR', 
                     'action': 'OPEN',
@@ -519,7 +520,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                     'conf': float(confidence), 
                     'prob': float(prob_profit),
                     'rules': float(net_rule_signal)
-                })
+                }
+                trades.append(open_trade)
                 position = 1
             else:
                 # Rejection: entry score below threshold
@@ -530,7 +532,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
             # Calculate remaining DTE
             bars_held = i - trade_entry_bar if trade_entry_bar else 0
             days_held = bars_held / BARS_PER_DAY
-            remaining_dte = trade_dte - days_held if trade_dte else 0
+            entry_dte = open_trade.get('dte') if open_trade else trade_dte
+            remaining_dte = entry_dte - days_held if entry_dte else 0
             
             # Exit conditions: 1) Expiration, 2) Low confidence, 3) Bearish rules
             exit_reason = None
@@ -546,7 +549,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 spot = df['close'].iloc[i]
                 
                 # Calculates Running Metrics
-                entry = trades[-1]
+                entry = open_trade if open_trade else trades[-1]
                 time_col = 'dt' if 'dt' in df.columns else 'timestamp'
                 entry_date = df[time_col].iloc[trade_entry_bar] if time_col in df.columns else "N/A"
                 
@@ -667,18 +670,29 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None):
                 print(exit_msg)
                 log_file.write(exit_msg + "\n")
                 
-                trades.append({
+                close_trade = {
                     'idx': i, 
                     'type': 'IRON_CONDOR',
                     'action': 'CLOSE',
                     'spot': spot,
                     'reason': exit_reason,
                     'days_held': days_held,
+                    'dte_entry': entry.get('dte', None),
+                    'dte_remaining': remaining_dte,
+                    'short_call': entry.get('short_call'),
+                    'long_call': entry.get('long_call'),
+                    'short_put': entry.get('short_put'),
+                    'long_put': entry.get('long_put'),
+                    'width': entry.get('width'),
+                    'credit': entry.get('credit'),
+                    'max_loss': entry.get('max_loss'),
                     'pnl_pct': pnl_pct
-                }) 
+                }
+                trades.append(close_trade)
                 position = 0
                 trade_entry_bar = None
                 trade_dte = None
+                open_trade = None
         
         # LOG: ALL bars to file, first N to console
         spot = df['close'].iloc[i]
@@ -963,7 +977,16 @@ def main():
                         'prob': open_t.get('prob', 0),
                         'rules': open_t.get('rules', 0),
                         'profitable': profitable,
-                        'reason': close_t.get('reason', 'Unknown')
+                        'reason': close_t.get('reason', 'Unknown'),
+                        'dte_entry': open_t.get('dte', None),
+                        'dte_remaining': close_t.get('dte_remaining', None),
+                        'short_call': open_t.get('short_call', None),
+                        'long_call': open_t.get('long_call', None),
+                        'short_put': open_t.get('short_put', None),
+                        'long_put': open_t.get('long_put', None),
+                        'width': open_t.get('width', None),
+                        'credit': open_t.get('credit', None),
+                        'max_loss': open_t.get('max_loss', None)
                     })
             
             if trade_results:
