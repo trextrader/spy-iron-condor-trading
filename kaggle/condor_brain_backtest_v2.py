@@ -91,6 +91,10 @@ ENTRY_BETA_R = 0.25
 EXIT_EVAL_HOLD_BARS = 30
 EXIT_RISK_LAMBDA = 0.5
 SIZING_RISK_LAMBDA = 0.5
+CONF_ENTRY_MIN = 0.4
+PROB_ENTRY_MIN = 0.45
+MIN_HOLD_BARS = 30
+MIN_BARS_BETWEEN_TRADES = 5
 
 def _sha256_file(path):
     if not path or not os.path.exists(path):
@@ -259,14 +263,15 @@ def estimate_condor_pnl(spot, short_call, long_call, short_put, long_put, credit
     intrinsic_put = max(0, short_put - spot)
     real_put_loss = min(intrinsic_put, put_spread_width)
     
-    total_intrinsic_loss = (real_call_loss + real_put_loss) * 100 * IC_CONTRACTS
-    credit_dollar = credit_received * 100 * IC_CONTRACTS
+    # credit_received and max_loss are total dollars for the full position
+    total_intrinsic_loss = (real_call_loss + real_put_loss) * IC_MULTIPLIER * IC_CONTRACTS
+    credit_dollar = credit_received
     
     potential_profit = credit_dollar * time_frac
     net_pnl = potential_profit - total_intrinsic_loss
     
-    # Cap
-    actual_max_loss = -max_loss 
+    # Cap to max loss / max profit
+    actual_max_loss = -max_loss
     net_pnl = max(net_pnl, actual_max_loss)
     net_pnl = min(net_pnl, credit_dollar)
     
@@ -306,10 +311,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     # Settings
     SEQ_LEN = 256
     capital = 100_000.0
+    starting_capital = capital
     position = 0 # 0=None, 1=Long Iron Condor
     equity_curve = []
     trades = []
     open_trade = None
+    last_exit_bar = None
     
     # Trade state tracking (for expiration)
     trade_entry_bar = None
@@ -691,7 +698,10 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             # Entry threshold: 40+ points (fuzzy, not all-or-nothing)
             ENTRY_THRESHOLD = 40
             
-            if entry_score >= ENTRY_THRESHOLD:
+            # Hard gates to avoid degenerate churn
+            blocked = df.get("rule_block_any", pd.Series(0, index=df.index)).iloc[i] > 0
+            recent_exit = last_exit_bar is not None and (i - last_exit_bar) < MIN_BARS_BETWEEN_TRADES
+            if entry_score >= ENTRY_THRESHOLD and confidence >= CONF_ENTRY_MIN and prob_profit >= PROB_ENTRY_MIN and not blocked and not recent_exit:
                 action = 1
                 spot = df['close'].iloc[i]
                 trade_num = len([t for t in trades if t.get('action') == 'OPEN']) + 1
@@ -709,7 +719,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 short_put_strike = spot - (put_offset * spot * 0.01)
                 long_put_strike = short_put_strike - width
                 
-                # Calculate Iron Condor credit (max profit)
+                # Calculate Iron Condor credit (total dollars for full position)
                 credit_received = IC_CREDIT_PER_SPREAD * IC_CONTRACTS * IC_MULTIPLIER
                 max_loss = (width - IC_CREDIT_PER_SPREAD) * IC_CONTRACTS * IC_MULTIPLIER
                 
@@ -776,7 +786,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 
                 reasoning.append(f"     Final Sizing:    {pos_size_pct:.1f}% of Max Allocation")
                 
-                reasoning_str = "\\n".join(reasoning)
+                reasoning_str = "\n".join(reasoning)
 
                 # Fix: Model trained with TE=0 target predicts ~0. Enforce min DTE.
                 DEFAULT_DTE = 14 # Hardcode default if not in config
@@ -899,6 +909,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             exit_reason = None
             if remaining_dte <= 0:
                 exit_reason = f"EXPIRATION (DTE={remaining_dte:.1f})"
+            elif bars_held < MIN_HOLD_BARS:
+                exit_reason = None
             elif confidence < 0.3:
                 exit_reason = f"Low Confidence ({confidence:.4f})"
             elif net_rule_signal < 0:
@@ -928,33 +940,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                     total_dte=entry['dte']
                 )
                 
-                realized_pnl = pnl_dollar # for exit logic below
-                
-                # Update status based on PnL
-                if pnl_dollar > 0:
-                    status_icon = "✅ WIN"
-                    stats['winners'] += 1
-                    stats['total_win_dollar'] = stats.get('total_win_dollar', 0) + pnl_dollar
-                else:
-                    status_icon = "❌ LOSS"
-                    stats['losers'] += 1
-                    stats['total_loss_dollar'] = stats.get('total_loss_dollar', 0) + abs(pnl_dollar)
-                # Define Return on Risk (ROI)
-                pnl_pct = (realized_pnl / entry['max_loss']) * 100 if entry['max_loss'] > 0 else 0.0
-
-                # Deterministic Win/Loss check (Spot vs Strikes)
-                realized_pnl = estimate_condor_pnl(
-                    spot=spot,
-                    short_call=trades[-1]['short_call'],
-                    long_call=trades[-1]['long_call'],
-                    short_put=trades[-1]['short_put'],
-                    long_put=trades[-1]['long_put'],
-                    credit_received=trades[-1]['credit'],
-                    max_loss=trades[-1]['max_loss'],
-                    days_held=trades[-1]['dte'], # Full Expiration
-                    total_dte=trades[-1]['dte']
-                )
-                
+                realized_pnl = pnl_dollar
                 is_win = realized_pnl > 0
                 status_icon = "✅ WIN" if is_win else "❌ LOSS"
 
@@ -970,11 +956,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                     stats['losers'] += 1
                     stats['total_loss_dollar'] = stats.get('total_loss_dollar', 0.0) + abs(realized_pnl)
                 
-                stats['total_pnl_dollar'] += realized_pnl
+                # Track realized PnL via equity (capital)
+                stats['total_pnl_dollar'] = capital - starting_capital
                 
                 # Check DD
-                stats['peak_capital'] = max(stats['peak_capital'], capital + stats['total_pnl_dollar']) # Approx equity
-                curr_equity = capital + stats['total_pnl_dollar']
+                stats['peak_capital'] = max(stats['peak_capital'], capital) # Approx equity
+                curr_equity = capital
                 curr_dd_dollar = stats['peak_capital'] - curr_equity
                 curr_dd_pct = (curr_dd_dollar / stats['peak_capital']) * 100 if stats['peak_capital'] > 0 else 0
                 stats['max_dd_pct'] = max(stats['max_dd_pct'], curr_dd_pct)
@@ -1161,6 +1148,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 trade_entry_bar = None
                 trade_dte = None
                 open_trade = None
+                last_exit_bar = i
         
         # LOG: ALL bars to file, first N to console
         spot = df['close'].iloc[i]
@@ -1281,6 +1269,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 r_val = mtm_pnl / open_trade['max_loss'] if open_trade['max_loss'] > 0 else 0.0
                 open_trade['r_path'].append(float(r_val))
         
+        stats['total_pnl_dollar'] = capital - starting_capital
         equity_curve.append(capital)
     
     # Close log file
