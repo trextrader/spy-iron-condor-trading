@@ -187,6 +187,33 @@ def save_text(path: str, txt: str):
     with open(path, "w", encoding="utf-8") as f:
         f.write(txt)
 
+def _check_checkpoint_feature_cols(model_path: str, feature_names: List[str]) -> None:
+    if not model_path or not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model checkpoint not found: {model_path}")
+    checkpoint = torch.load(model_path, map_location="cpu")
+    if not isinstance(checkpoint, dict) or "feature_cols" not in checkpoint:
+        raise ValueError("Checkpoint missing 'feature_cols'; cannot hard-check inputs.")
+    ckpt_cols = list(checkpoint["feature_cols"])
+    data_cols = list(feature_names)
+    if ckpt_cols == data_cols:
+        return
+    ckpt_set = set(ckpt_cols)
+    data_set = set(data_cols)
+    missing_in_data = sorted(ckpt_set - data_set)
+    extra_in_data = sorted(data_set - ckpt_set)
+    if missing_in_data or extra_in_data:
+        msg = (
+            "Feature columns mismatch between checkpoint and dataset.\n"
+            f"Missing in data: {missing_in_data}\n"
+            f"Extra in data: {extra_in_data}\n"
+        )
+        raise ValueError(msg)
+    # Same set, different order
+    raise ValueError(
+        "Feature column order mismatch between checkpoint and dataset. "
+        "Reorder dataset feature_names to match checkpoint feature_cols."
+    )
+
 
 def main(
     model_path: str,
@@ -203,6 +230,7 @@ def main(
 
     X, meta = load_dataset(dataset_path)
     feature_names = list(meta["feature_names"])
+    _check_checkpoint_feature_cols(model_path, feature_names)
 
     N = X.shape[0]
     idx = np.random.RandomState(42).choice(N, size=min(sample_n, N), replace=False)
