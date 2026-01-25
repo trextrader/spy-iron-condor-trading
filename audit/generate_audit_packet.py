@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import textwrap
+import subprocess
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional
@@ -85,7 +87,22 @@ def generate_pdf(
     decision_trace_path: str,
     attribution_csv_path: str,
     output_path: str,
+    auto_attrib: bool = False,
 ) -> None:
+    if auto_attrib or not os.path.exists(attribution_csv_path):
+        cmd = [
+            sys.executable,
+            os.path.join("audit", "generate_decision_factor_attribution.py"),
+            "--trace",
+            decision_trace_path,
+            "--out",
+            attribution_csv_path,
+        ]
+        try:
+            subprocess.check_call(cmd)
+        except Exception as exc:
+            print(f"[WARN] Attribution generation failed: {exc}")
+
     inputs_schema = _read_json(inputs_schema_path)
     records = _read_jsonl(decision_trace_path)
     attrib_df = pd.read_csv(attribution_csv_path) if os.path.exists(attribution_csv_path) else pd.DataFrame()
@@ -172,6 +189,7 @@ def main() -> None:
     ap.add_argument("--trace", required=True, help="decision_trace.jsonl path")
     ap.add_argument("--attrib", required=True, help="decision_factor_attribution.csv path")
     ap.add_argument("--out", required=True, help="output PDF path")
+    ap.add_argument("--auto-attrib", action="store_true", help="Generate attribution CSV if missing")
     args = ap.parse_args()
 
     generate_pdf(
@@ -179,6 +197,7 @@ def main() -> None:
         decision_trace_path=args.trace,
         attribution_csv_path=args.attrib,
         output_path=args.out,
+        auto_attrib=args.auto_attrib,
     )
 
 
