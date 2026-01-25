@@ -277,10 +277,13 @@ def estimate_condor_pnl(spot, short_call, long_call, short_put, long_put, credit
     
     return net_pnl
 
-def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None):
+def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None):
     print("Starting Backtest Simulation...")
     
     # Pre-process Features (Robust Norm same as training)
+    missing_cols = [c for c in feature_cols if c not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing feature columns: {missing_cols[:10]} (total {len(missing_cols)})")
     X_np = df[feature_cols].values.astype(np.float32)
     X_np = np.nan_to_num(X_np, nan=0.0)
     
@@ -294,9 +297,17 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     except ValueError:
         print("Warning: 'volume' column not found in feature_cols. Skipping log transform.")
 
-    # Normalize (approximate robust norm)
-    mu = np.median(X_np, axis=0) if len(X_np) > 0 else 0
-    mad = np.median(np.abs(X_np - mu), axis=0)
+    # Normalize (match training if stats available)
+    if norm_stats is not None and "median" in norm_stats and "mad" in norm_stats:
+        mu = np.asarray(norm_stats["median"], dtype=np.float32)
+        mad = np.asarray(norm_stats["mad"], dtype=np.float32)
+        if mu.shape[0] != X_np.shape[1] or mad.shape[0] != X_np.shape[1]:
+            print("⚠️ Norm stats shape mismatch; falling back to sample stats.")
+            mu = np.median(X_np, axis=0) if len(X_np) > 0 else 0
+            mad = np.median(np.abs(X_np - mu), axis=0)
+    else:
+        mu = np.median(X_np, axis=0) if len(X_np) > 0 else 0
+        mad = np.median(np.abs(X_np - mu), axis=0)
     mad = np.maximum(mad, 1e-6)
     
     X_norm = (X_np - mu) / (1.4826 * mad)
@@ -631,9 +642,15 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         confidence = all_outputs['confidence'] or 0
         
         # 3. Rule Signal Check
-        net_rule_signal = 0
-        if rule_signals is not None:
-            net_rule_signal = rule_signals.iloc[i].sum()
+        net_rule_signal = 0.0
+        rule_long = float(df["rule_long_consensus"].iloc[i]) if "rule_long_consensus" in df.columns else 0.0
+        rule_short = float(df["rule_short_consensus"].iloc[i]) if "rule_short_consensus" in df.columns else 0.0
+        rule_exit = float(df["rule_exit_consensus"].iloc[i]) if "rule_exit_consensus" in df.columns else 0.0
+        rule_block = float(df["rule_block_any"].iloc[i]) if "rule_block_any" in df.columns else 0.0
+        if rule_signals is not None and len(rule_signals.columns) > 0:
+            net_rule_signal = float(rule_signals.iloc[i].sum() / max(1, len(rule_signals.columns)))
+        else:
+            net_rule_signal = rule_long - rule_short
         active_rules = []
         if rule_signals is not None:
             for col in rule_signals.columns:
@@ -699,9 +716,21 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             ENTRY_THRESHOLD = 40
             
             # Hard gates to avoid degenerate churn
-            blocked = df.get("rule_block_any", pd.Series(0, index=df.index)).iloc[i] > 0
+            blocked = rule_block > 0
             recent_exit = last_exit_bar is not None and (i - last_exit_bar) < MIN_BARS_BETWEEN_TRADES
-            if entry_score >= ENTRY_THRESHOLD and confidence >= CONF_ENTRY_MIN and prob_profit >= PROB_ENTRY_MIN and not blocked and not recent_exit:
+            gate_reasons = []
+            if entry_score < ENTRY_THRESHOLD:
+                gate_reasons.append(f"SCORE_TOO_LOW ({entry_score}/{ENTRY_THRESHOLD})")
+            if confidence < CONF_ENTRY_MIN:
+                gate_reasons.append(f"LOW_CONF ({confidence:.4f})")
+            if prob_profit < PROB_ENTRY_MIN:
+                gate_reasons.append(f"LOW_PROB ({prob_profit:.4f})")
+            if blocked:
+                gate_reasons.append("RULE_BLOCK")
+            if recent_exit:
+                gate_reasons.append("RECENT_EXIT")
+
+            if not gate_reasons:
                 action = 1
                 spot = df['close'].iloc[i]
                 trade_num = len([t for t in trades if t.get('action') == 'OPEN']) + 1
@@ -894,8 +923,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 )
                 position = 1
             else:
-                # Rejection: entry score below threshold
-                rejection_reason = f"SCORE_TOO_LOW ({entry_score}/{ENTRY_THRESHOLD})"
+                # Rejection: record precise gate reasons
+                rejection_reason = " | ".join(gate_reasons)
                 rejection_factors = entry_factors
         
         elif position == 1:
@@ -905,12 +934,16 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             entry_dte = open_trade.get('dte') if open_trade else trade_dte
             remaining_dte = entry_dte - days_held if entry_dte else 0
             
-            # Exit conditions: 1) Expiration, 2) Low confidence, 3) Bearish rules
+            # Exit conditions: 1) Expiration, 2) Rule block/exit, 3) Low confidence, 4) Bearish rules
             exit_reason = None
             if remaining_dte <= 0:
                 exit_reason = f"EXPIRATION (DTE={remaining_dte:.1f})"
             elif bars_held < MIN_HOLD_BARS:
                 exit_reason = None
+            elif rule_block > 0.5:
+                exit_reason = "RULE_BLOCK"
+            elif rule_exit > 0.5:
+                exit_reason = f"Rule Exit ({rule_exit:.2f})"
             elif confidence < 0.3:
                 exit_reason = f"Low Confidence ({confidence:.4f})"
             elif net_rule_signal < 0:
@@ -956,7 +989,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                     stats['losers'] += 1
                     stats['total_loss_dollar'] = stats.get('total_loss_dollar', 0.0) + abs(realized_pnl)
                 
-                # Track realized PnL via equity (capital)
+                # Realize PnL into capital at exit
+                capital += realized_pnl
                 stats['total_pnl_dollar'] = capital - starting_capital
                 
                 # Check DD
@@ -1224,35 +1258,13 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             )
             
         # 5. Iron Condor P&L Simulation
-        # IC P&L: Collect theta (time decay) while in position, lose if breached
+        # IC P&L: track mark-to-market for diagnostics only
         spot = df['close'].iloc[i]
         
         if position == 1 and trade_entry_bar is not None:
             # Get open trade data
             open_trade = [t for t in trades if t.get('action') == 'OPEN'][-1] if trades else None
             if open_trade:
-                short_call = open_trade.get('short_call', spot + 10)
-                short_put = open_trade.get('short_put', spot - 10)
-                credit = open_trade.get('credit', IC_CREDIT_PER_SPREAD * IC_CONTRACTS * IC_MULTIPLIER)
-                max_loss = open_trade.get('max_loss', 5 * IC_CONTRACTS * IC_MULTIPLIER)
-                
-                # Check if breached (spot outside short strikes)
-                if spot >= short_call:
-                    # Call side breached - full loss on call spread
-                    daily_pnl = -max_loss / (trade_dte * BARS_PER_DAY) if trade_dte else 0
-                elif spot <= short_put:
-                    # Put side breached - full loss on put spread  
-                    daily_pnl = -max_loss / (trade_dte * BARS_PER_DAY) if trade_dte else 0
-                else:
-                    # Safe zone - collect theta (proportional time decay)
-                    bars_remaining = (trade_dte * BARS_PER_DAY) - (i - trade_entry_bar)
-                    if bars_remaining > 0:
-                        daily_pnl = credit / (trade_dte * BARS_PER_DAY)  # Steady theta collection
-                    else:
-                        daily_pnl = 0
-                
-                capital += daily_pnl
-
                 # Update r_path for entry/exit/sizing outcomes
                 days_elapsed = (i - trade_entry_bar) / BARS_PER_DAY
                 mtm_pnl = estimate_condor_pnl(
@@ -1270,7 +1282,22 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 open_trade['r_path'].append(float(r_val))
         
         stats['total_pnl_dollar'] = capital - starting_capital
-        equity_curve.append(capital)
+        mtm_equity = capital
+        if position == 1 and trade_entry_bar is not None and open_trade:
+            days_elapsed = (i - trade_entry_bar) / BARS_PER_DAY
+            mtm_pnl = estimate_condor_pnl(
+                spot=spot,
+                short_call=open_trade['short_call'],
+                long_call=open_trade['long_call'],
+                short_put=open_trade['short_put'],
+                long_put=open_trade['long_put'],
+                credit_received=open_trade['credit'],
+                max_loss=open_trade['max_loss'],
+                days_held=days_elapsed,
+                total_dte=open_trade['dte']
+            )
+            mtm_equity = capital + mtm_pnl
+        equity_curve.append(mtm_equity)
     
     # Close log file
     log_file.write("\n" + "=" * 80 + "\n")
@@ -1391,6 +1418,12 @@ def main():
             return
             
         # 4. Backtest
+        norm_stats = {}
+        if isinstance(checkpoint, dict):
+            if "median" in checkpoint and "mad" in checkpoint:
+                norm_stats["median"] = checkpoint["median"]
+                norm_stats["mad"] = checkpoint["mad"]
+
         equity, trades = run_backtest(
             df,
             rule_signals,
@@ -1400,6 +1433,7 @@ def main():
             ruleset,
             model_path=MODEL_PATH,
             data_path=DATA_PATH,
+            norm_stats=norm_stats,
         )
         
         # 5. Report
