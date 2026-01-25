@@ -670,7 +670,8 @@ scheduler = torch.optim.lr_scheduler.OneCycleLR(
 from intelligence.condor_loss import CompositeCondorLoss
 
 # (pred, sharpe, drawdown, turnover, rule_consistency)
-lambdas = (1.0, 0.5, 0.1, 0.1, 0.2) # Reduced Rule lambda 1.0 -> 0.2 to prevent 'cowardly' zero confidence
+RULE_LOSS_SCALE = 100.0
+lambdas = (1.0, 0.5, 0.1, 0.1, 0.2 * RULE_LOSS_SCALE)  # Scale rule loss by 100x
 criterion_composite = CompositeCondorLoss(lambdas=lambdas)
 criterion_forecast = nn.HuberLoss()
 
@@ -827,14 +828,14 @@ for epoch in range(EPOCHS):
         
         total_loss += loss.item()
         total_pol_loss += loss_dict['pred'].item()
-        total_rule_loss += loss_dict['rule'].item()
+            total_rule_loss += (loss_dict['rule'].item() * RULE_LOSS_SCALE)
         total_feat_loss += loss_feat.item()
         total_diff_loss += loss_diff.item()
         
         if (batch_idx + 1) % 10 == 0:
             pbar.set_postfix({
                 'L_pol': f"{loss_dict['pred'].item():.4f}", 
-                'L_rule': f"{loss_dict['rule'].item():.4f}",
+                'L_rule': f"{(loss_dict['rule'].item() * RULE_LOSS_SCALE):.4f}",
                 'L_feat': f"{loss_feat.item():.4f}", 
                 'L_diff': f"{loss_diff.item():.4f}"
             })
@@ -843,7 +844,7 @@ for epoch in range(EPOCHS):
         global_step = epoch * len(train_loader) + batch_idx
         writer.add_scalar('Loss/Total', loss.item(), global_step)
         writer.add_scalar('Loss/Policy', loss_dict['pred'].item(), global_step)
-        writer.add_scalar('Loss/RuleConsistency', loss_dict['rule'].item(), global_step)
+        writer.add_scalar('Loss/RuleConsistency', loss_dict['rule'].item() * RULE_LOSS_SCALE, global_step)
         writer.add_scalar('Loss/Feature', loss_feat.item(), global_step)
         writer.add_scalar('Loss/Diffusion', loss_diff.item(), global_step)
         writer.add_scalar('LR', scheduler.get_last_lr()[0], global_step)
