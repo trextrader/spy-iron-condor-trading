@@ -1374,15 +1374,21 @@ def main():
             model_path = p
             break
             
+    # Align feature schema with training (52 base + 4 rule consensus)
+    feature_cols = FEATURE_COLS_V22 + RULE_FEATURES
+
     print(f"Loading Model from {model_path}...")
     if os.path.exists(model_path):
         checkpoint = torch.load(model_path, map_location=DEVICE)
         state_dict = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
+        model_input_dim = checkpoint.get("input_dim", len(feature_cols)) if isinstance(checkpoint, dict) else len(feature_cols)
+        if model_input_dim != len(feature_cols):
+            print(f"⚠️ input_dim mismatch: checkpoint={model_input_dim} vs features={len(feature_cols)}; using checkpoint value.")
         
         # V2.2 Model
         model = CondorBrain(
             d_model=512, n_layers=12,
-            input_dim=INPUT_DIM_V22, # 52
+            input_dim=model_input_dim,
             use_vol_gated_attn=True, use_topk_moe=True, moe_n_experts=3, moe_k=1,
             use_diffusion=True
         ).to(DEVICE)
@@ -1395,7 +1401,6 @@ def main():
             return
             
         # 4. Backtest
-        feature_cols = FEATURE_COLS_V22 + RULE_FEATURES
         equity, trades = run_backtest(
             df,
             rule_signals,
