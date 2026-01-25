@@ -262,7 +262,6 @@ def load_dataset(
     return Xs, meta
 
 
-@torch.no_grad()
 def model_forward(model: nn.Module, x: torch.Tensor) -> Dict[str, torch.Tensor]:
     """
     TODO: Run forward pass and return dict with keys:
@@ -507,7 +506,8 @@ def main(
     for start in range(0, total, batch_size):
         end = min(start + batch_size, total)
         xb = torch.tensor(Xs[start:end], dtype=torch.float32, device=device)
-        out = model_forward(model, xb)
+        with torch.no_grad():
+            out = model_forward(model, xb)
         entry_logits.append(out["entry_logit"].detach().cpu())
         exit_logits.append(out["exit_logit"].detach().cpu())
         size_scores.append(out["size_score"].detach().cpu())
