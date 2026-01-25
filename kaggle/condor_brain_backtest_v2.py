@@ -81,6 +81,7 @@ DECISION_TRACE_PATH = os.path.join(REPORTS_DIR, "decision_trace.jsonl")
 IC_CREDIT_PER_SPREAD = 1.50  # $1.50 credit per spread (typical)
 IC_CONTRACTS = 10  # Number of contracts per trade
 IC_MULTIPLIER = 100  # Options multiplier
+RULE_FEATURES = ["rule_long_consensus", "rule_short_consensus", "rule_exit_consensus", "rule_block_any"]
 
 # Trace + outcome labeling config
 TRACE_PER_BAR = True
@@ -185,6 +186,10 @@ def run_rule_engine(df, ruleset_path):
     # results is Dict[rule_id, {'signals': Series, 'blocked': Series}]
     
     rule_signals = pd.DataFrame(index=df.index)
+    long_signals = []
+    short_signals = []
+    exit_signals = []
+    block_signals = []
     
     for rule_id, rule in ruleset.rules.items():
         r_res = results.get(rule_id)
@@ -194,6 +199,8 @@ def run_rule_engine(df, ruleset_path):
         # Entry Signal (1=Long, -1=Short, 0=None)
         long_s = r_res.get('entry_long', pd.Series(False, index=df.index))
         short_s = r_res.get('entry_short', pd.Series(False, index=df.index))
+        exit_s = r_res.get('exit', pd.Series(False, index=df.index))
+        block_s = r_res.get('blocked', pd.Series(False, index=df.index))
         
         if hasattr(long_s, 'fillna'):
             long_s = long_s.fillna(False).astype(int)
@@ -203,11 +210,34 @@ def run_rule_engine(df, ruleset_path):
             short_s = short_s.fillna(False).astype(int)
         else:
             short_s = pd.Series(0, index=df.index)
+        if hasattr(exit_s, 'fillna'):
+            exit_s = exit_s.fillna(False).astype(int)
+        else:
+            exit_s = pd.Series(0, index=df.index)
+        if hasattr(block_s, 'fillna'):
+            block_s = block_s.fillna(False).astype(int)
+        else:
+            block_s = pd.Series(0, index=df.index)
         
         # Combine: Long=1, Short=-1
         sig = long_s - short_s
         rule_signals[f"{rule_id}_signal"] = sig
+        long_signals.append(long_s.values)
+        short_signals.append(short_s.values)
+        exit_signals.append(exit_s.values)
+        block_signals.append(block_s.values)
             
+    if long_signals:
+        df["rule_long_consensus"] = np.mean(long_signals, axis=0)
+        df["rule_short_consensus"] = np.mean(short_signals, axis=0)
+        df["rule_exit_consensus"] = np.mean(exit_signals, axis=0)
+        df["rule_block_any"] = np.max(block_signals, axis=0)
+    else:
+        df["rule_long_consensus"] = 0.0
+        df["rule_short_consensus"] = 0.0
+        df["rule_exit_consensus"] = 0.0
+        df["rule_block_any"] = 0.0
+
     print(f"Generated signals for {len(ruleset.rules)} rules.")
     return df, rule_signals, ruleset
 
@@ -1365,11 +1395,12 @@ def main():
             return
             
         # 4. Backtest
+        feature_cols = FEATURE_COLS_V22 + RULE_FEATURES
         equity, trades = run_backtest(
             df,
             rule_signals,
             model,
-            FEATURE_COLS_V22,
+            feature_cols,
             DEVICE,
             ruleset,
             model_path=MODEL_PATH,
