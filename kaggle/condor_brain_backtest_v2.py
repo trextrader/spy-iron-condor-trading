@@ -1272,6 +1272,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser(description="CondorBrain Backtest V2.2")
     parser.add_argument("--input", type=str, default=None, help="Path to input CSV data")
+    parser.add_argument("--data", type=str, default=None, help="Alias for --input")
     parser.add_argument("--model", type=str, default=None, help="Path to model checkpoint (.pth)")
     parser.add_argument("--ruleset", type=str, default=None, help="Path to ruleset YAML")
     args = parser.parse_args()
@@ -1290,9 +1291,10 @@ def main():
     print("="*60)
 
     # 0. Data Path Detection
+    input_override = args.data or args.input
     possible_data_paths = [
-        args.input, # CLI override first
-        MODEL_PATH, # Kaggle default config (Line 42 might be overwritten)
+        input_override, # CLI override first
+        DATA_PATH,
         "/kaggle/input/spy-options-data/mamba_institutional_1m.csv",
         "/content/spy-iron-condor-trading/data/processed/mamba_institutional_2024_1m_last 500k.csv",
         "data/processed/mamba_institutional_2024_1m_last 500k.csv",
