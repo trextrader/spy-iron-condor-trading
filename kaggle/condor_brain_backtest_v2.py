@@ -39,7 +39,11 @@ sys.path.insert(0, os.getcwd())
 
 from intelligence.condor_brain import CondorBrain
 from intelligence.canonical_feature_registry import (
-    FEATURE_COLS_V22, INPUT_DIM_V22, VERSION_V22
+    FEATURE_COLS_V22,
+    INPUT_DIM_V22,
+    VERSION_V22,
+    apply_semantic_nan_fill,
+    get_neutral_fill_value_v22,
 )
 from intelligence.features.dynamic_features import (
     compute_all_dynamic_features,
@@ -127,24 +131,27 @@ def load_data_and_features(data_path, rows=None):
     if rows is not None:
         df = df.iloc[-rows:].reset_index(drop=True)
     
-    
-    # 1. Base Features (V2.1)
-    # CHECK if features already exist (from pre-compute pipeline)
-    # V2.1 adds: 'rsi', 'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k'
-    expected_v21 = ['rsi', 'atr', 'adx', 'stoch_k']
-    if all(col in df.columns for col in expected_v21):
-        print("✅ V2.1 Features already present. Skipping computation.")
-    else:
-        print("Computing V2.1 Dynamic Features...")
+    # Compute missing V2.2 features (dynamic + primitives) on unique spot bars, then merge back.
+    missing_v22 = [c for c in FEATURE_COLS_V22 if c not in df.columns]
+    if not missing_v22:
+        print("✅ V2.2 Features already present. Skipping dynamic/primitive computation.")
+        return df
+
+    print(f"⚠️ Missing {len(missing_v22)} V2.2 features; computing on spot bars...")
+
+    # Determine datetime column for spot keying
+    dt_col = None
+    for c in ['dt', 'timestamp', 'datetime', 'date']:
+        if c in df.columns:
+            dt_col = c
+            break
+
+    ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
+    aux_cols = [c for c in ["spread_ratio", "lag_minutes"] if c in df.columns]
+
+    if dt_col is None:
+        print("⚠️ No datetime column found; computing on full dataframe.")
         df = compute_all_dynamic_features(df, close_col="close", high_col="high", low_col="low")
-    
-    # 2. Primitive Features (V2.2)
-    # V2.2 adds: 'sma', 'psar', 'psar_mark' etc.
-    expected_v22 = ['sma', 'psar', 'psar_mark']
-    if all(col in df.columns for col in expected_v22):
-         print("✅ V2.2 Features already present. Skipping computation.")
-    else:
-        print("Computing V2.2 Primitive Features...")
         df = compute_all_primitive_features_v22(
             df,
             close_col="close", high_col="high", low_col="low",
@@ -152,6 +159,37 @@ def load_data_and_features(data_path, rows=None):
             spread_col="spread_ratio" if "spread_ratio" in df.columns else "close",
             inplace=True
         )
+        return df
+
+    spot_key_cols = ['symbol', dt_col] if 'symbol' in df.columns else [dt_col]
+    spot_df = df.drop_duplicates(subset=spot_key_cols)[spot_key_cols + ohlcv_cols + aux_cols].copy()
+    spot_df = spot_df.sort_values(spot_key_cols).reset_index(drop=True)
+
+    print("   Computing dynamic features on spot bars...")
+    spot_df = compute_all_dynamic_features(spot_df, close_col="close", high_col="high", low_col="low")
+
+    print("   Computing V2.2 primitive features on spot bars...")
+    spot_df = compute_all_primitive_features_v22(
+        spot_df,
+        close_col="close", high_col="high", low_col="low",
+        volume_col="volume",
+        spread_col="spread_ratio" if "spread_ratio" in spot_df.columns else "close",
+        inplace=True
+    )
+
+    # Merge computed columns back without clobbering existing values
+    exclude_cols = spot_key_cols + ohlcv_cols + aux_cols
+    computed_cols = [c for c in spot_df.columns if c not in exclude_cols]
+    merge_df = spot_df[spot_key_cols + computed_cols]
+    df = df.merge(merge_df, on=spot_key_cols, how='left', suffixes=('', '_calc'))
+    for col in computed_cols:
+        calc_col = f"{col}_calc"
+        if calc_col in df.columns:
+            if col in df.columns:
+                df[col] = df[col].fillna(df[calc_col])
+            else:
+                df[col] = df[calc_col]
+            df.drop(columns=[calc_col], inplace=True)
     
     return df
 
@@ -184,12 +222,25 @@ def run_rule_engine(df, ruleset_path):
     # To be safe, let's pass df (it has __getitem__).
     # Engine logic: self._compute_primitives(data) -> data[p_spec.inputs]
     
-    results = engine.execute(df)
+    # If options rows include duplicates per timestamp, execute rules on unique spot bars.
+    dt_col = None
+    for c in ['dt', 'timestamp', 'datetime', 'date']:
+        if c in df.columns:
+            dt_col = c
+            break
+    spot_key_cols = ['symbol', dt_col] if dt_col and 'symbol' in df.columns else ([dt_col] if dt_col else None)
+    if spot_key_cols and df.duplicated(subset=spot_key_cols).any():
+        use_spot_df = df.drop_duplicates(subset=spot_key_cols).copy()
+        use_spot_df = use_spot_df.sort_values(spot_key_cols).reset_index(drop=True)
+    else:
+        use_spot_df = df
+
+    results = engine.execute(use_spot_df)
     
     # Parse Results into DataFrame Columns
     # results is Dict[rule_id, {'signals': Series, 'blocked': Series}]
     
-    rule_signals = pd.DataFrame(index=df.index)
+    rule_signals = pd.DataFrame(index=use_spot_df.index)
     long_signals = []
     short_signals = []
     exit_signals = []
@@ -201,27 +252,27 @@ def run_rule_engine(df, ruleset_path):
             continue
         
         # Entry Signal (1=Long, -1=Short, 0=None)
-        long_s = r_res.get('entry_long', pd.Series(False, index=df.index))
-        short_s = r_res.get('entry_short', pd.Series(False, index=df.index))
-        exit_s = r_res.get('exit', pd.Series(False, index=df.index))
-        block_s = r_res.get('blocked', pd.Series(False, index=df.index))
+        long_s = r_res.get('signal_long', pd.Series(False, index=use_spot_df.index))
+        short_s = r_res.get('signal_short', pd.Series(False, index=use_spot_df.index))
+        exit_s = r_res.get('signal_exit', pd.Series(False, index=use_spot_df.index))
+        block_s = r_res.get('blocked', pd.Series(False, index=use_spot_df.index))
         
         if hasattr(long_s, 'fillna'):
             long_s = long_s.fillna(False).astype(int)
         else:
-            long_s = pd.Series(0, index=df.index)
+            long_s = pd.Series(0, index=use_spot_df.index)
         if hasattr(short_s, 'fillna'):
             short_s = short_s.fillna(False).astype(int)
         else:
-            short_s = pd.Series(0, index=df.index)
+            short_s = pd.Series(0, index=use_spot_df.index)
         if hasattr(exit_s, 'fillna'):
             exit_s = exit_s.fillna(False).astype(int)
         else:
-            exit_s = pd.Series(0, index=df.index)
+            exit_s = pd.Series(0, index=use_spot_df.index)
         if hasattr(block_s, 'fillna'):
             block_s = block_s.fillna(False).astype(int)
         else:
-            block_s = pd.Series(0, index=df.index)
+            block_s = pd.Series(0, index=use_spot_df.index)
         
         # Combine: Long=1, Short=-1
         sig = long_s - short_s
@@ -232,18 +283,40 @@ def run_rule_engine(df, ruleset_path):
         block_signals.append(block_s.values)
             
     if long_signals:
-        df["rule_long_consensus"] = np.mean(long_signals, axis=0)
-        df["rule_short_consensus"] = np.mean(short_signals, axis=0)
-        df["rule_exit_consensus"] = np.mean(exit_signals, axis=0)
-        df["rule_block_any"] = np.max(block_signals, axis=0)
+        spot_consensus = pd.DataFrame({
+            "rule_long_consensus": np.mean(long_signals, axis=0),
+            "rule_short_consensus": np.mean(short_signals, axis=0),
+            "rule_exit_consensus": np.mean(exit_signals, axis=0),
+            "rule_block_any": np.max(block_signals, axis=0),
+        }, index=use_spot_df.index)
     else:
-        df["rule_long_consensus"] = 0.0
-        df["rule_short_consensus"] = 0.0
-        df["rule_exit_consensus"] = 0.0
-        df["rule_block_any"] = 0.0
+        spot_consensus = pd.DataFrame({
+            "rule_long_consensus": 0.0,
+            "rule_short_consensus": 0.0,
+            "rule_exit_consensus": 0.0,
+            "rule_block_any": 0.0,
+        }, index=use_spot_df.index)
+
+    # If we used spot_df, merge signals back to full df
+    if spot_key_cols and len(use_spot_df) != len(df):
+        spot_join = use_spot_df[spot_key_cols].copy()
+        spot_join = spot_join.join(spot_consensus)
+        df = df.merge(spot_join, on=spot_key_cols, how='left')
+
+        rule_signals_full = use_spot_df[spot_key_cols].copy()
+        rule_signals_full = rule_signals_full.join(rule_signals)
+        rule_signals_full = df[spot_key_cols].merge(rule_signals_full, on=spot_key_cols, how='left')
+        rule_signals_full = rule_signals_full.drop(columns=spot_key_cols)
+        rule_signals_full.index = df.index
+    else:
+        df["rule_long_consensus"] = spot_consensus["rule_long_consensus"].values
+        df["rule_short_consensus"] = spot_consensus["rule_short_consensus"].values
+        df["rule_exit_consensus"] = spot_consensus["rule_exit_consensus"].values
+        df["rule_block_any"] = spot_consensus["rule_block_any"].values
+        rule_signals_full = rule_signals
 
     print(f"Generated signals for {len(ruleset.rules)} rules.")
-    return df, rule_signals, ruleset
+    return df, rule_signals_full, ruleset
 
 
 # --- P&L ESTIMATION ---
@@ -283,32 +356,43 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     # Pre-process Features (Robust Norm same as training)
     missing_cols = [c for c in feature_cols if c not in df.columns]
     if missing_cols:
-        raise ValueError(f"Missing feature columns: {missing_cols[:10]} (total {len(missing_cols)})")
+        print(f"⚠️ Missing {len(missing_cols)} feature columns; filling with neutral defaults.")
+        for col in missing_cols:
+            df[col] = get_neutral_fill_value_v22(col)
     X_np = df[feature_cols].values.astype(np.float32)
-    X_np = np.nan_to_num(X_np, nan=0.0)
-    
-    # MATCH TRAINING: Log-transform Volume (Index 4)
-    # Assuming 'volume' is index 4 in FEATURE_COLS_V22. 
-    # Let's check column name to be safe.
-    try:
-        vol_idx = feature_cols.index('volume')
-        print(f"Applying Log1p to Volume at index {vol_idx}...")
-        X_np[:, vol_idx] = np.log1p(np.clip(X_np[:, vol_idx], 0.0, 1e9))
-    except ValueError:
-        print("Warning: 'volume' column not found in feature_cols. Skipping log transform.")
+    # Sanitize inf/-inf before semantic fill
+    X_np = np.where(np.isfinite(X_np), X_np, np.nan)
+    X_np = apply_semantic_nan_fill(X_np, feature_cols)
 
     # Normalize (match training if stats available)
     if norm_stats is not None and "median" in norm_stats and "mad" in norm_stats:
         mu = np.asarray(norm_stats["median"], dtype=np.float32)
         mad = np.asarray(norm_stats["mad"], dtype=np.float32)
+        mu = np.squeeze(mu)
+        mad = np.squeeze(mad)
+        if mu.ndim != 1:
+            mu = mu.reshape(-1)
+        if mad.ndim != 1:
+            mad = mad.reshape(-1)
         if mu.shape[0] != X_np.shape[1] or mad.shape[0] != X_np.shape[1]:
-            print("⚠️ Norm stats shape mismatch; falling back to sample stats.")
+            print(
+                f"⚠️ Norm stats shape mismatch; "
+                f"median={mu.shape} mad={mad.shape} features={X_np.shape[1]} "
+                "-> falling back to sample stats."
+            )
             mu = np.median(X_np, axis=0) if len(X_np) > 0 else 0
             mad = np.median(np.abs(X_np - mu), axis=0)
     else:
         mu = np.median(X_np, axis=0) if len(X_np) > 0 else 0
         mad = np.median(np.abs(X_np - mu), axis=0)
     mad = np.maximum(mad, 1e-6)
+
+    # Protect rule features to match training normalization
+    rule_idx = [feature_cols.index(c) for c in RULE_FEATURES if c in feature_cols]
+    if rule_idx and hasattr(mu, "__len__") and len(mu) == X_np.shape[1]:
+        for idx in rule_idx:
+            mu[idx] = 0.0
+            mad[idx] = 1.0 / 1.4826
     
     X_norm = (X_np - mu) / (1.4826 * mad)
     X_norm = np.clip(X_norm, -10.0, 10.0)
@@ -626,20 +710,28 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         pol = outputs[0].cpu().numpy().flatten()
         
         # Extract ALL policy outputs for logging
-        # Policy head: [call_off, put_off, width, te, prob_profit, stop_mult, direction, confidence]
+        # Policy head: [call_off, put_off, width, te, prob_profit, expected_roi, max_loss_pct, confidence]
         all_outputs = {
             'call_off': pol[0] if len(pol) > 0 else None,
             'put_off': pol[1] if len(pol) > 1 else None,
             'width': pol[2] if len(pol) > 2 else None,
             'te': pol[3] if len(pol) > 3 else None,
             'prob_profit': pol[4] if len(pol) > 4 else None,
-            'stop_mult': pol[5] if len(pol) > 5 else None,
-            'direction': pol[6] if len(pol) > 6 else None,
+            'expected_roi': pol[5] if len(pol) > 5 else None,
+            'max_loss_pct': pol[6] if len(pol) > 6 else None,
             'confidence': pol[7] if len(pol) > 7 else None,
         }
         
-        prob_profit = all_outputs['prob_profit'] or 0
-        confidence = all_outputs['confidence'] or 0
+        def _sigmoid(v):
+            return 1.0 / (1.0 + np.exp(-v))
+
+        prob_profit = all_outputs['prob_profit'] or 0.0
+        confidence = all_outputs['confidence'] or 0.0
+        # If outputs are logits, map to (0,1)
+        if prob_profit < 0.0 or prob_profit > 1.0:
+            prob_profit = float(_sigmoid(prob_profit))
+        if confidence < 0.0 or confidence > 1.0:
+            confidence = float(_sigmoid(confidence))
         
         # 3. Rule Signal Check
         net_rule_signal = 0.0
@@ -705,12 +797,15 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 entry_factors.append(f"Rules BEARISH ({net_rule_signal:.2f}) +0")
             
             # Factor 4: Direction alignment (0-10 points)
-            direction = all_outputs['direction'] or 0
-            if abs(direction) < 0.5:  # Iron Condor likes neutral
+            max_loss_pct = all_outputs['max_loss_pct'] if all_outputs['max_loss_pct'] is not None else 1.0
+            if max_loss_pct <= 0.2:
                 entry_score += 10
-                entry_factors.append(f"Direction NEUTRAL ({direction:.2f}) +10")
+                entry_factors.append(f"MaxLoss LOW ({max_loss_pct:.2f}) +10")
+            elif max_loss_pct <= 0.35:
+                entry_score += 5
+                entry_factors.append(f"MaxLoss MED ({max_loss_pct:.2f}) +5")
             else:
-                entry_factors.append(f"Direction BIASED ({direction:.2f}) +0")
+                entry_factors.append(f"MaxLoss HIGH ({max_loss_pct:.2f}) +0")
             
             # Entry threshold: 40+ points (fuzzy, not all-or-nothing)
             ENTRY_THRESHOLD = 40
@@ -740,8 +835,6 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 put_offset = all_outputs['put_off'] or 0
                 width = all_outputs['width'] or 5
                 te_suggested = all_outputs['te'] or 30
-                direction = all_outputs['direction'] or 0
-                
                 # Compute suggested strikes (offset from ATM)
                 short_call_strike = spot + (call_offset * spot * 0.01)  # ~1% per unit
                 long_call_strike = short_call_strike + width
@@ -794,7 +887,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 reasoning.append(f"     {'-'*15}-+-{'-'*10}-+-{'-'*20}")
                 reasoning.append(f"     {'Confidence':<15} | {confidence:<10.4f} | {interpret(confidence, 0.3, 0.7)} (Threshold > 0.4)")
                 reasoning.append(f"     {'Prob Profit':<15} | {prob_profit:<10.4f} | {interpret(prob_profit, 0.3, 0.6)} (Threshold > 0.4)")
-                reasoning.append(f"     {'Direction':<15} | {direction:<10.4f} | {interpret(direction, -0.5, 0.5)} (Prefers Neutral)")
+                reasoning.append(f"     {'Max Loss %':<15} | {max_loss_pct:<10.4f} | {'Low' if max_loss_pct < 0.2 else 'High'}")
                 reasoning.append(f"     {'TE (DTE)':<15} | {te_suggested:<10.4f} | {'Short Term' if te_suggested < 7 else 'Standard'}")
                 reasoning.append(f"     {'Width':<15} | {width:<10.4f} | {'Wide' if width > 5 else 'Narrow'}")
                 reasoning.append(f"     {'Call Offset':<15} | {call_offset:<10.4f} | {call_offset:.1f}% OTM")
@@ -806,8 +899,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 
                 # Position Sizing
                 pos_size_pct = 100.0
-                if 'position_size_multiplier' in df.columns:
-                    dampener = df['position_size_multiplier'].iloc[i]
+                if 'position_size_mult' in df.columns:
+                    dampener = df['position_size_mult'].iloc[i]
                     pos_size_pct = dampener * 100
                     reasoning.append(f"     Chaos Dampener:  {dampener:.4f} (Adjusts Size)")
                 else:
@@ -1398,6 +1491,10 @@ def main():
     if os.path.exists(model_path):
         checkpoint = torch.load(model_path, map_location=DEVICE)
         state_dict = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
+        if isinstance(checkpoint, dict):
+            ckpt_feature_cols = checkpoint.get("feature_cols")
+            if ckpt_feature_cols:
+                feature_cols = list(ckpt_feature_cols)
         model_input_dim = checkpoint.get("input_dim", len(feature_cols)) if isinstance(checkpoint, dict) else len(feature_cols)
         if model_input_dim != len(feature_cols):
             print(f"⚠️ input_dim mismatch: checkpoint={model_input_dim} vs features={len(feature_cols)}; using checkpoint value.")
