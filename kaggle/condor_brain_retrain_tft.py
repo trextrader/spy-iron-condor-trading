@@ -330,7 +330,9 @@ def _ensure_base_extras(df: pd.DataFrame) -> None:
 
 if not HAS_TFT:
     raise SystemExit(
-        "pytorch_forecasting not installed. Install with:\n"
+        "pytorch_forecasting not installed or failed to import.\n"
+        f"Import error: {_tft_err}\n"
+        "Install with:\n"
         "pip install pytorch-forecasting pytorch-lightning"
     )
 
