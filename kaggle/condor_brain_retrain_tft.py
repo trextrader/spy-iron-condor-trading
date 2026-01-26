@@ -605,6 +605,44 @@ class TFTWithDiffusion(pl.LightningModule):
             return type(obj)(self._to_device(v, device) for v in obj)
         return obj
 
+    def _force_tft_batch_device(self, x):
+        if not isinstance(x, dict):
+            return x
+        keys = [
+            "encoder_cat",
+            "decoder_cat",
+            "encoder_cont",
+            "decoder_cont",
+            "encoder_time_idx",
+            "decoder_time_idx",
+            "encoder_lengths",
+            "decoder_lengths",
+            "target_scale",
+            "group_ids",
+            "groups",
+            "static_categoricals",
+            "static_cont",
+            "static_cat",
+        ]
+        for key in keys:
+            if key in x:
+                x[key] = self._to_device(x[key], self.device)
+        return x
+
+    def _find_cpu_tensors(self, obj, path="x", out=None):
+        if out is None:
+            out = []
+        if torch.is_tensor(obj):
+            if obj.device.type != self.device.type:
+                out.append(f"{path}: {obj.device} {tuple(obj.shape)} {obj.dtype}")
+        elif isinstance(obj, dict):
+            for k, v in obj.items():
+                self._find_cpu_tensors(v, f"{path}.{k}", out)
+        elif isinstance(obj, (list, tuple)):
+            for i, v in enumerate(obj):
+                self._find_cpu_tensors(v, f"{path}[{i}]", out)
+        return out
+
     def forward(self, x):
         return self.tft(x)
 
@@ -626,6 +664,11 @@ class TFTWithDiffusion(pl.LightningModule):
         x, y = batch
         x = self._to_device(x, self.device)
         y = self._to_device(y, self.device)
+        x = self._force_tft_batch_device(x)
+        if os.environ.get("TFT_DEBUG_DEVICE", "0") == "1":
+            mismatches = self._find_cpu_tensors(x, "x")
+            if mismatches:
+                raise RuntimeError("CPU tensors in batch after device move:\n" + "\n".join(mismatches[:20]))
         pred = self.tft(x)
         y_hat = pred["prediction"] if isinstance(pred, dict) else pred
         base_loss = self.tft.loss(y_hat, y)
@@ -644,6 +687,11 @@ class TFTWithDiffusion(pl.LightningModule):
         x, y = batch
         x = self._to_device(x, self.device)
         y = self._to_device(y, self.device)
+        x = self._force_tft_batch_device(x)
+        if os.environ.get("TFT_DEBUG_DEVICE", "0") == "1":
+            mismatches = self._find_cpu_tensors(x, "x")
+            if mismatches:
+                raise RuntimeError("CPU tensors in batch after device move:\n" + "\n".join(mismatches[:20]))
         pred = self.tft(x)
         y_hat = pred["prediction"] if isinstance(pred, dict) else pred
         base_loss = self.tft.loss(y_hat, y)
