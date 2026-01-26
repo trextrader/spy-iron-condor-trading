@@ -462,12 +462,27 @@ def sample_predictions(
         
         with autocast('cuda', dtype=amp_dtype):
             # Request all outputs: regime, experts, and 45-day forecast
-            outputs, regime_logits, horizon_forecast, experts = model(
+            model_out = model(
                 batch_x, 
                 return_regime=True, 
                 return_experts=True, 
                 forecast_days=45
             )
+            
+            # Unpack variable length tuple (depends on model flags like diffusion, features)
+            if isinstance(model_out, tuple):
+                outputs = model_out[0]
+                regime_logits = model_out[1] if len(model_out) > 1 else None
+                horizon_forecast = model_out[2] if len(model_out) > 2 else None
+                
+                # Handling for features (idx 3) and diffusion (idx 4) if present
+                # Experts is always last if return_experts=True
+                experts = model_out[-1] if len(model_out) > 3 and isinstance(model_out[-1], dict) else None
+            else:
+                outputs = model_out
+                regime_logits = None
+                horizon_forecast = None
+                experts = None
         
         # Take first n_samples
         preds = outputs[:n_samples].float().cpu().numpy()
