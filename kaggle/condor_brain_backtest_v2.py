@@ -57,6 +57,7 @@ try:
     HAS_TRACE_LOGGER = True
 except Exception:
     HAS_TRACE_LOGGER = False
+from audit.contract_snapshot import generate_contract_snapshot
 
 # --- SCALING HELPERS (Matched to training) ---
 def robust_zscore_fit(X):
@@ -1596,6 +1597,14 @@ def main():
             if "median" in checkpoint and "mad" in checkpoint:
                 norm_stats["median"] = checkpoint["median"]
                 norm_stats["mad"] = checkpoint["mad"]
+
+        generate_contract_snapshot(
+            os.path.join(REPORTS_DIR, "..", "audit", "contract_snapshot.json"),
+            repo_root if "repo_root" in globals() else os.getcwd(),
+            feature_cols=feature_cols,
+            checkpoint_path=model_path,
+            extra={"mode": "backtest", "data_path": DATA_PATH},
+        )
 
         equity, trades = run_backtest(
             df,

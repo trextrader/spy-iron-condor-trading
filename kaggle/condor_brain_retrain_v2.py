@@ -20,6 +20,7 @@ import numpy as np
 from tqdm import tqdm
 import os
 from torch.utils.tensorboard import SummaryWriter
+from audit.contract_snapshot import generate_contract_snapshot
 from intelligence.condor_brain import CondorBrain
 from intelligence.canonical_feature_registry import (
     FEATURE_COLS_V21, INPUT_DIM_V21, VERSION_V21,
@@ -27,6 +28,8 @@ from intelligence.canonical_feature_registry import (
     apply_semantic_nan_fill,
 )
 from intelligence.features.dynamic_features import compute_all_dynamic_features
+
+repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # 🔄 FIX STALE IMPORTS (Colab/Jupyter specific)
 import sys
@@ -716,6 +719,13 @@ for epoch in range(EPOCHS):
     
     torch.save(checkpoint, save_path)
     print(f"      💾 Saved: {save_path}")
+    generate_contract_snapshot(
+        os.path.join(repo_root, "artifacts", "audit", "contract_snapshot.json"),
+        repo_root,
+        feature_cols=FEATURE_COLS,
+        checkpoint_path=os.path.join(repo_root, save_path),
+        extra={"epoch": epoch + 1},
+    )
     
     # ⬇️ Auto-download for Colab User (Safety Net)
     try:

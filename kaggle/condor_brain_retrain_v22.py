@@ -40,6 +40,7 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 import os
+from audit.contract_snapshot import generate_contract_snapshot
 try:
     from torch.utils.tensorboard import SummaryWriter
     HAS_TENSORBOARD = True
@@ -794,6 +795,14 @@ def _save_epoch_artifacts(epoch_num: int, metrics: dict, global_step: int) -> No
     missing = [p for p in manifest["files"] if not os.path.exists(p)]
     if missing:
         print(f"   [WARN] Missing epoch artifacts: {missing}")
+    snapshot_root = repo_root if "repo_root" in globals() else os.getcwd()
+    generate_contract_snapshot(
+        os.path.join(ARTIFACT_DIR, "contract_snapshot.json"),
+        snapshot_root,
+        feature_cols=FEATURE_COLS,
+        checkpoint_path=ckpt_path,
+        extra={"epoch": epoch_num, "global_step": global_step},
+    )
 
 
 def _save_interrupt_artifacts(epoch_idx: int, global_step: int, reason: str) -> None:
@@ -820,6 +829,14 @@ def _save_interrupt_artifacts(epoch_idx: int, global_step: int, reason: str) -> 
     torch.save(optimizer.state_dict(), opt_path)
     torch.save(scaler.state_dict(), scaler_path)
     _save_json(metrics_path, {"epoch": epoch_idx, "global_step": global_step, "reason": reason})
+    snapshot_root = repo_root if "repo_root" in globals() else os.getcwd()
+    generate_contract_snapshot(
+        os.path.join(interrupt_dir, "contract_snapshot.json"),
+        snapshot_root,
+        feature_cols=FEATURE_COLS,
+        checkpoint_path=ckpt_path,
+        extra={"epoch": epoch_idx, "global_step": global_step, "reason": reason, "interrupted": True},
+    )
 
 
 def _resume_from_checkpoint(path: str) -> Tuple[int, int]:
