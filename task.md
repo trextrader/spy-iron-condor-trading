@@ -80,6 +80,17 @@
 - [ ] Integrate Meta-Forecaster into Backtest Engine (PAUSED: Sync with Training)
 - [x] Verify ensemble switching logic (Local Unit Test Passed)
 
+## Phase 11: Model/Checkpoint/Docs Audit (Workflow Integration)
+- [x] Add comprehensive test suite in `scripts/model_tests`
+- [x] Add learned-conditions export pipeline (`audit/export_learned_conditions.py`)
+- [ ] Add docs contract files: `docs/PIPELINE_CONTRACT.md` + `docs/PIPELINE_CONTRACT.json`
+- [ ] Add schema validators in `audit/schema/*`
+- [ ] Add CI gate to run smoke tests on PRs
+- [ ] Add run manifest generation (`artifacts/audit/run_manifest.json`)
+- [ ] Add audit packet generator (`artifacts/audit/Accountability_Audit_Packet.pdf`)
+- [ ] Implement backtest/live output contract match test
+- [ ] Integrate audit tools into training workflow
+
 ## Training Log (v2.2 Production)
 - **Epoch 1**:
     - Train: `L_pol=0.83`, `L_feat=574.2` (Converging).
