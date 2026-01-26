@@ -749,19 +749,42 @@ class LearnedConditionsCallback(pl.Callback):
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         if not ENABLE_LEARNED_EXPORT:
             return
-        x, _y = batch
+        if isinstance(batch, (list, tuple)) and len(batch) >= 1:
+            x = batch[0]
+        else:
+            x = batch
+        if isinstance(x, (list, tuple)) and len(x) >= 1 and isinstance(x[0], dict):
+            x = x[0]
         if (batch_idx + 1) % ATTR_EVERY_N == 0:
             try:
-                _export_attribution(trainer.current_epoch + 1, batch_idx + 1, pl_module, x, feature_cols, FEATURE_SCHEMA_ID)
+                if isinstance(x, dict) and "encoder_cont" in x:
+                    _export_attribution(
+                        trainer.current_epoch + 1,
+                        batch_idx + 1,
+                        pl_module,
+                        x,
+                        feature_cols,
+                        FEATURE_SCHEMA_ID,
+                    )
             except Exception as e:
                 print(f"⚠️ Attribution export failed: {e}")
         try:
+            if not (isinstance(x, dict) and "encoder_cont" in x):
+                return
             enc = x["encoder_cont"]
             pred = pl_module(x)
-            if isinstance(pred, dict):
-                y_hat = pred["prediction"][:, 0, :]
+            if isinstance(pred, dict) and "prediction" in pred:
+                y_hat = pred["prediction"]
+            elif hasattr(pred, "prediction"):
+                y_hat = pred.prediction
+            elif isinstance(pred, (list, tuple)):
+                y_hat = pred[0]
             else:
-                y_hat = pred[:, 0, :]
+                y_hat = pred
+            if torch.is_tensor(y_hat) and y_hat.ndim >= 3:
+                y_hat = y_hat[:, 0, :]
+            elif torch.is_tensor(y_hat) and y_hat.ndim == 2:
+                y_hat = y_hat
             x_last = enc[:, -1, :].detach().cpu().numpy()
             y_out = y_hat.detach().cpu().numpy()
             self.surrogate_seen = _surrogate_update(self.surrogate_x, self.surrogate_y, self.surrogate_seen, x_last, y_out)
