@@ -449,7 +449,7 @@ class CondorBrain(nn.Module):
         if use_topk_moe:
             self.moe_head = BatchedTopKMoE(
                 d_model=d_model,
-                output_dim=8,
+                output_dim=CondorExpertHead.NUM_OUTPUTS,  # 10 outputs (was hardcoded 8)
                 n_experts=moe_n_experts,
                 k=moe_k
             )
