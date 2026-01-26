@@ -48,6 +48,8 @@ from intelligence.features.dynamic_features import (
     compute_all_dynamic_features,
     compute_all_primitive_features_v22,
 )
+from intelligence.rule_engine.dsl_parser import RuleDSLParser
+from intelligence.rule_engine.executor import RuleExecutionEngine
 from audit.contract_snapshot import generate_contract_snapshot
 
 # ------------------------------
@@ -67,6 +69,7 @@ parser.add_argument("--input", type=str, default=None)
 parser.add_argument("--artifact-dir", type=str, default="artifacts/epochs_tft")
 parser.add_argument("--learned-export", dest="learned_export", action="store_true")
 parser.add_argument("--no-learned-export", dest="learned_export", action="store_false")
+parser.add_argument("--allow-missing-diffusion", action="store_true", help="Fill missing diffusion predictors with 0.0")
 parser.set_defaults(learned_export=True)
 
 try:
@@ -105,6 +108,18 @@ ATTR_HEAD_NAMES = [
     "expected_roi",
     "max_loss_pct",
     "confidence",
+]
+
+RULESET_PATH = "docs/Complete_Ruleset_DSL.yaml"
+BASE_EXTRA_FEATURES = ["bandwidth", "sma", "psar_mark"]
+DIFFUSION_FEATURE_COLS = [
+    "diff_forward_return",
+    "diff_forward_volatility",
+    "diff_high_low_envelope",
+    "diff_regime_shift",
+    "diff_liquidity_shock",
+    "diff_curvature_energy",
+    "diff_chaos_membership",
 ]
 
 
@@ -251,6 +266,58 @@ def _surrogate_update(buf_x: list, buf_y: list, seen: int, x_last: np.ndarray, y
     return seen
 
 
+def _rule_feature_name(rule_id: str) -> str:
+    name = rule_id.lower()
+    if name.startswith("rule_"):
+        name = name[5:]
+    return f"rule_{name}_signal"
+
+
+def _apply_rule_engine(spot_df: pd.DataFrame) -> list:
+    parser = RuleDSLParser(RULESET_PATH)
+    ruleset = parser.load()
+    engine = RuleExecutionEngine(ruleset)
+    rule_data = {col: spot_df[col] for col in spot_df.columns}
+    rule_results = engine.execute(rule_data)
+    rule_cols = []
+    for rid in sorted(rule_results.keys()):
+        res = rule_results[rid]
+        sig_long = res.get("signal_long", 0.0)
+        sig_short = res.get("signal_short", 0.0)
+        sig_exit = res.get("signal_exit", 0.0)
+        sig_block = res.get("blocked", 0.0)
+        if not hasattr(sig_long, "astype"):
+            sig_long = pd.Series(sig_long, index=spot_df.index)
+        if not hasattr(sig_short, "astype"):
+            sig_short = pd.Series(sig_short, index=spot_df.index)
+        if not hasattr(sig_exit, "astype"):
+            sig_exit = pd.Series(sig_exit, index=spot_df.index)
+        if not hasattr(sig_block, "astype"):
+            sig_block = pd.Series(sig_block, index=spot_df.index)
+        signal = sig_long.astype(float).fillna(0.0) - sig_short.astype(float).fillna(0.0)
+        signal = signal.where(~sig_exit.astype(bool), 2.0)
+        signal = signal.where(~sig_block.astype(bool), -2.0)
+        col = _rule_feature_name(rid)
+        spot_df[col] = signal.astype(np.float32)
+        rule_cols.append(col)
+    return rule_cols
+
+
+def _ensure_base_extras(df: pd.DataFrame) -> None:
+    if "sma" not in df.columns:
+        df["sma"] = df["close"].rolling(20, min_periods=1).mean().astype(np.float32)
+    if "psar_mark" not in df.columns:
+        if "psar_trend" in df.columns:
+            df["psar_mark"] = np.where(df["psar_trend"] >= 0, 1.0, -1.0).astype(np.float32)
+        else:
+            df["psar_mark"] = 0.0
+    if "bandwidth" not in df.columns:
+        if "bb_sigma_dyn" in df.columns:
+            df["bandwidth"] = df["bb_sigma_dyn"].astype(np.float32)
+        else:
+            df["bandwidth"] = 0.0
+
+
 if not HAS_TFT:
     raise SystemExit(
         "pytorch_forecasting not installed. Install with:\n"
@@ -284,10 +351,68 @@ if "dt" in df.columns:
         mask = (df["dt"] >= args.start_date) & (df["dt"] < args.end_date)
         df = df.loc[mask].copy()
 
-df = compute_all_dynamic_features(df)
-df = compute_all_primitive_features_v22(df)
+# Compute dynamic + primitive features on unique spot bars, then merge back
+ohlcv_cols = ["open", "high", "low", "close", "volume"]
+spot_key_cols = ["symbol", "dt"] if "dt" in df.columns and "symbol" in df.columns else ["dt"] if "dt" in df.columns else []
+if not spot_key_cols:
+    spot_key_cols = ["timestamp"] if "timestamp" in df.columns else ["index"]
+if "index" in spot_key_cols:
+    df = df.reset_index(drop=False).rename(columns={"index": "index"})
 
-feature_cols = FEATURE_COLS_V22
+aux_cols = [c for c in ["spread_ratio", "lag_minutes"] if c in df.columns]
+spot_df = df.drop_duplicates(subset=spot_key_cols)[spot_key_cols + ohlcv_cols + aux_cols].copy()
+spot_df = spot_df.sort_values(spot_key_cols).reset_index(drop=True)
+
+spot_df = compute_all_dynamic_features(spot_df, close_col="close", high_col="high", low_col="low")
+spot_df = compute_all_primitive_features_v22(
+    spot_df,
+    close_col="close",
+    high_col="high",
+    low_col="low",
+    spread_col="spread_ratio" if "spread_ratio" in spot_df.columns else "close",
+)
+
+try:
+    rule_feature_cols = _apply_rule_engine(spot_df)
+except Exception as e:
+    print(f"⚠️ Rule engine error: {e}. Filling rule features with zeros.")
+    try:
+        ruleset = RuleDSLParser(RULESET_PATH).load()
+        rule_ids = sorted(ruleset.rules.keys())
+    except Exception:
+        rule_ids = []
+    rule_feature_cols = []
+    for rid in rule_ids:
+        col = _rule_feature_name(rid)
+        spot_df[col] = 0.0
+        rule_feature_cols.append(col)
+_ensure_base_extras(spot_df)
+
+exclude_cols = spot_key_cols + ohlcv_cols + aux_cols
+dynamic_cols = [c for c in spot_df.columns if c not in exclude_cols]
+cols_to_drop = [c for c in dynamic_cols if c in df.columns]
+if cols_to_drop:
+    df.drop(columns=cols_to_drop, inplace=True)
+merge_cols = spot_key_cols + dynamic_cols
+df = df.merge(spot_df[merge_cols], on=spot_key_cols, how="left")
+
+_ensure_base_extras(df)
+
+base_feature_cols = FEATURE_COLS_V22 + BASE_EXTRA_FEATURES
+feature_cols = base_feature_cols + rule_feature_cols + DIFFUSION_FEATURE_COLS
+
+missing_diffusion = [c for c in DIFFUSION_FEATURE_COLS if c not in df.columns]
+if missing_diffusion:
+    if args.allow_missing_diffusion:
+        for c in missing_diffusion:
+            df[c] = 0.0
+    else:
+        raise SystemExit(f"Missing diffusion predictors: {missing_diffusion}. Use --allow-missing-diffusion to fill with zeros.")
+
+for col in feature_cols:
+    if col not in df.columns:
+        df[col] = 0.0
+
 X_np = df[feature_cols].values.astype(np.float32)
 X_np = apply_semantic_nan_fill(X_np, feature_cols)
 
@@ -337,6 +462,12 @@ df_targets["series_id"] = 0
 df_features = pd.DataFrame(X_np, columns=feature_cols)
 df_all = pd.concat([df_targets, df_features], axis=1)
 
+categorical_cols = []
+for col in ["symbol", "call_put"]:
+    if col in df.columns:
+        df_all[col] = df[col].astype(str).fillna("NA")
+        categorical_cols.append(col)
+
 FEATURE_SCHEMA_ID = hashlib.sha256(",".join(feature_cols).encode("utf-8")).hexdigest()
 if ENABLE_LEARNED_EXPORT:
     meta_path = os.path.join(LEARNED_COND_DIR, "live_attribution_meta.json")
@@ -346,6 +477,10 @@ if ENABLE_LEARNED_EXPORT:
                 "feature_schema_id": FEATURE_SCHEMA_ID,
                 "feature_count": len(feature_cols),
                 "feature_cols": feature_cols,
+                "base_feature_cols": base_feature_cols,
+                "rule_feature_cols": rule_feature_cols,
+                "diffusion_feature_cols": DIFFUSION_FEATURE_COLS,
+                "categorical_cols": categorical_cols,
                 "head_names": ATTR_HEAD_NAMES,
                 "attr_every_n_batches": ATTR_EVERY_N,
                 "attr_batch_size": ATTR_BATCH,
@@ -362,6 +497,7 @@ training = TimeSeriesDataSet(
     max_encoder_length=SEQ_LEN,
     max_prediction_length=1,
     time_varying_unknown_reals=feature_cols,
+    time_varying_known_categoricals=categorical_cols,
 )
 
 validation = TimeSeriesDataSet(
@@ -372,6 +508,7 @@ validation = TimeSeriesDataSet(
     max_encoder_length=SEQ_LEN,
     max_prediction_length=1,
     time_varying_unknown_reals=feature_cols,
+    time_varying_known_categoricals=categorical_cols,
 )
 
 train_loader = training.to_dataloader(train=True, batch_size=128, num_workers=0)
@@ -447,7 +584,16 @@ class LearnedConditionsCallback(pl.Callback):
             repo_root,
             feature_cols=feature_cols,
             checkpoint_path=save_path,
-            extra={"epoch": epoch_num, "arch": "tft"},
+            extra={
+                "epoch": epoch_num,
+                "arch": "tft",
+                "base_feature_cols": base_feature_cols,
+                "rule_feature_cols": rule_feature_cols,
+                "diffusion_feature_cols": DIFFUSION_FEATURE_COLS,
+                "categorical_cols": categorical_cols,
+                "ruleset_path": RULESET_PATH,
+                "allow_missing_diffusion": bool(args.allow_missing_diffusion),
+            },
         )
         print(f"      💾 Saved: {save_path}")
 
