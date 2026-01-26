@@ -58,6 +58,15 @@
     - **Diagnosis**: Posterior Collapse (Constant Output: Conf=0.584, all rows identical)
     - **Root Cause**: 1-epoch model is a "mean guesser" - insufficient training for sequence learning
 
+## Phase 8.1: Debugging Model Collapse (IVR Fix)
+- [x] **Diagnose Entry/Exit Collapse** (Result: constant 0.88 prob)
+- [x] **Audit Data Distribution** (Result: `ivr` constant 0.5)
+- [x] **Fix IVR Calculation** (Result: `precompute_features.py` patched with RVR proxy)
+- [x] **Make Training Robust** (Result: `train_condor_brain.py` handles 0-1 scale)
+- [x] **Regenerate Datasets** (Action: Run `precompute_features` on all 3 files)
+- [x] **Handle OOM on 16GB GPU** (Action: Enable `--grad-checkpoint`, reduce batch to 64)
+- [/] **Retrain & Verify** (Target: Diverse entry probs)
+
 ## Phase 8.5: Path to Live (V2.1 Dynamic Feature Pipeline)
 - [x] **Step 1A**: Create `intelligence/canonical_feature_registry.py`
 - [x] **Step 1B**: Create `intelligence/features/dynamic_features.py`

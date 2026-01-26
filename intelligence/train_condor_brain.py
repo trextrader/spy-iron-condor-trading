@@ -440,6 +440,8 @@ def parse_args():
                         help="Number of diffusion denoising steps (default: 50).")
     parser.add_argument("--feature-group-dropout", type=float, default=0.0,
                         help="Feature-group dropout probability (0.15 recommended, default: 0).")
+    parser.add_argument("--diffusion-warmup", type=int, default=0,
+                        help="Epochs to train WITHOUT diffusion before enabling it (default: 0).")
 
     args = parser.parse_args()
     
@@ -802,7 +804,11 @@ def train_condor_brain(args):
                 # Ideally this should be a specific slice (e.g. next 32 feature steps), 
                 # but batch_y is the closest available target tensor.
                 # Diffusion expects (B, Horizon, Features), so unsqueeze to (B, 1, Features) if 2D
-                if args.diffusion:
+                # Diffusion expects (B, Horizon, Features), so unsqueeze to (B, 1, Features) if 2D
+                # Warmup Logic: Disable diffusion during early epochs if requested
+                use_diffusion_now = args.diffusion and (epoch >= args.diffusion_warmup)
+                
+                if use_diffusion_now:
                     batch_y_diff = batch_y
                     if batch_y_diff.dim() == 2:
                         batch_y_diff = batch_y_diff.unsqueeze(1)
@@ -815,7 +821,7 @@ def train_condor_brain(args):
                     return_regime=True, 
                     forecast_days=0,
                     return_features=False, # We don't train features here yet
-                    diffusion_target=batch_y_diff if args.diffusion else None # Pass diffusion targets if enabled
+                    diffusion_target=batch_y_diff if use_diffusion_now else None # Pass diffusion targets if enabled
                 )
                 
                 # Robust unpacking
@@ -1317,8 +1323,38 @@ def train_condor_brain(args):
             if patience_counter >= args.patience:
                 print(f"\n🛑 EARLY STOPPING triggered at epoch {epoch+1}!")
                 print(f"   Best model was at epoch {best_epoch} with val_loss={best_loss:.4f}")
+                print(f"   Best model was at epoch {best_epoch} with val_loss={best_loss:.4f}")
                 break
         
+        # === PER-EPOCH CHECKPOINTING (Requested) ===
+        # Save a unique checkpoint for EVERY epoch, regardless of improvement
+        date_str = time.strftime("%m%d%Y")
+        epoch_model_name = f"epoch_{epoch+1}_{date_str}.pth"
+        epoch_path = os.path.join(os.path.dirname(args.output) or 'models', epoch_model_name)
+        
+        # We save the full checkpoint format for safety
+        ckpt_epoch = {
+            "state_dict": model.state_dict(),
+            "feature_cols": list(FEATURE_COLS),
+            "input_dim": int(len(FEATURE_COLS)),
+            "seq_len": int(args.lookback),
+            "version": VERSION_V22,
+            "epoch": epoch + 1,
+            "model_config": {
+                "d_model": int(args.d_model),
+                "n_layers": int(args.layers),
+                "use_diffusion": bool(args.diffusion),
+                "diffusion_steps": int(args.diffusion_steps),
+            },
+            "training_config": {
+                "epochs": int(args.epochs),
+                "batch_size": int(args.batch_size),
+                "diffusion_warmup": int(args.diffusion_warmup),
+            },
+        }
+        torch.save(ckpt_epoch, epoch_path)
+        print(f"  [Checkpoint] Saved epoch model: {epoch_path}")
+
         # Clear cache periodically
         if device.type == 'cuda' and epoch % 10 == 0:
             torch.cuda.empty_cache()
