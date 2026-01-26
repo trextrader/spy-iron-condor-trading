@@ -1,0 +1,125 @@
+{
+  "version": "1.1",
+  "date": "2026-01-26",
+  "status": "Draft",
+  "owner": "Engineering / Quant Research",
+  "contracts": [
+    {
+      "id": "C01",
+      "name": "Feature Vector Contract",
+      "description": "Deterministic feature ordering and schema hash; parity across training/backtest/live builders."
+    },
+    {
+      "id": "C02",
+      "name": "Target/Label Contract",
+      "description": "Target horizons and thresholds match documentation; no lookahead leakage."
+    },
+    {
+      "id": "C03",
+      "name": "Head Mapping Contract",
+      "description": "Output heads are versioned and keyed, not inferred by index."
+    },
+    {
+      "id": "C04",
+      "name": "Checkpoint Contract",
+      "description": "Checkpoint includes feature_cols, input_dim, scaler stats, version, and run metadata."
+    },
+    {
+      "id": "C05",
+      "name": "Interpretation Contract",
+      "description": "Backtest and live interpret outputs identically (thresholds, sizing, risk gates)."
+    },
+    {
+      "id": "C06",
+      "name": "Docs Contract",
+      "description": "Docs reflect code; CI fails on drift."
+    },
+    {
+      "id": "C07",
+      "name": "Time & Session Contract",
+      "description": "Session boundaries, DST, holidays, bar alignment, and options chain alignment are explicit."
+    },
+    {
+      "id": "C08",
+      "name": "Execution & PnL Accounting Contract",
+      "description": "Slippage, fees, fills, multipliers, and rounding are consistent across backtest/live or logged if parameterized."
+    },
+    {
+      "id": "C09",
+      "name": "Risk Gate Precedence Contract",
+      "description": "Gate order and override behavior are documented and enforced, including exit-only mode."
+    },
+    {
+      "id": "C10",
+      "name": "Determinism & Reproducibility Contract",
+      "description": "Seeds, library versions, and inference determinism are captured in run manifests."
+    },
+    {
+      "id": "C11",
+      "name": "Data Freshness & Staleness Contract",
+      "description": "Staleness thresholds enforced; stale data forces no-entry/exit-only behavior and logs gate failures."
+    },
+    {
+      "id": "C12",
+      "name": "Instrument & Contract Selection Contract",
+      "description": "OCC parsing, strike rounding, expiry selection, and DTE filters are explicit and tested."
+    },
+    {
+      "id": "C13",
+      "name": "Multi-leg Execution Integrity Contract",
+      "description": "Partial fills, leg imbalance, cancel/replace behavior are deterministic and safe."
+    },
+    {
+      "id": "C14",
+      "name": "Safety Controls / Kill Switch Contract",
+      "description": "Daily loss limits, consecutive-loss limits, anomaly halts, and staleness halts are enforced."
+    },
+    {
+      "id": "C15",
+      "name": "Backward Compatibility Contract",
+      "description": "Checkpoints declare compatibility with registry/head mapping/normalization versions and are rejected if incompatible."
+    }
+  ],
+  "gates": [
+    "feature_schema_id_parity",
+    "forward_output_contract_verified",
+    "backtest_live_parity_sim",
+    "time_session_alignment",
+    "execution_pnl_parity",
+    "staleness_gate_enforced",
+    "kill_switch_triggers",
+    "multileg_state_machine_safe",
+    "collapse_guards_pass",
+    "docs_contract_sync"
+  ],
+  "required_artifacts": [
+    "artifacts/audit/run_manifest.json",
+    "artifacts/audit/contract_snapshot.json",
+    "artifacts/learned_conditions/decision_trace.jsonl",
+    "artifacts/learned_conditions/decision_factor_attribution.csv",
+    "artifacts/audit/Accountability_Audit_Packet.pdf"
+  ],
+  "tests": [
+    "scripts/model_tests/01_checkpoint_inventory.py",
+    "scripts/model_tests/02_feature_schema_alignment.py",
+    "scripts/model_tests/03_norm_stats_sanity.py",
+    "scripts/model_tests/04_model_forward_contract.py",
+    "scripts/model_tests/05_output_distribution.py",
+    "scripts/model_tests/06_ruleset_execution_smoke.py",
+    "scripts/model_tests/07_feature_pipeline_parity.py",
+    "scripts/model_tests/08_live_trading_parity_sim.py",
+    "scripts/model_tests/09_checkpoint_diff_epochs.py",
+    "scripts/model_tests/10_decision_trace_schema_validate.py",
+    "scripts/model_tests/11_factor_attribution_aggregate.py",
+    "scripts/model_tests/12_docs_contract_sync_check.py",
+    "scripts/model_tests/test_time_alignment_and_session.py",
+    "scripts/model_tests/test_pnl_accounting_parity.py",
+    "scripts/model_tests/test_model_autodiscovery_selection.py",
+    "scripts/model_tests/test_data_staleness_gate.py",
+    "scripts/model_tests/test_occ_symbol_roundtrip.py",
+    "scripts/model_tests/test_expiry_calendar_and_dte.py",
+    "scripts/model_tests/test_multileg_fill_state_machine.py",
+    "scripts/model_tests/test_kill_switch_triggers.py",
+    "scripts/model_tests/test_checkpoint_version_compat.py"
+  ]
+}
