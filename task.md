@@ -90,6 +90,12 @@
 - [ ] Add audit packet generator (`artifacts/audit/Accountability_Audit_Packet.pdf`)
 - [ ] Implement backtest/live output contract match test
 - [ ] Integrate audit tools into training workflow
+- [ ] Add time/session alignment contract + tests
+- [ ] Add execution & PnL accounting parity tests
+- [ ] Add risk gate precedence matrix + docs
+- [ ] Add determinism/golden fixture bundle (`artifacts/audit/golden_fixtures`)
+- [ ] Add collapse guards to output distribution tests
+- [ ] Add model auto-discovery selection test
 
 ## Training Log (v2.2 Production)
 - **Epoch 1**:
