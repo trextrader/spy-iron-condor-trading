@@ -597,6 +597,8 @@ class TFTWithDiffusion(pl.LightningModule):
     def _to_device(self, obj, device):
         if torch.is_tensor(obj):
             return obj.to(device)
+        if isinstance(obj, np.ndarray):
+            return torch.from_numpy(obj).to(device)
         if isinstance(obj, dict):
             return {k: self._to_device(v, device) for k, v in obj.items()}
         if isinstance(obj, (list, tuple)):
