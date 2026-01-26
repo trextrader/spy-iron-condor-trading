@@ -1,7 +1,19 @@
 import pandas as pd
 import numpy as np
 
-path = r"data/processed/mamba_institutional_2024_1m_last 1mil.csv"
+import argparse
+import sys
+import os
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--data", default=r"data/processed/mamba_institutional_2024_1m_last 1mil.csv", help="Path to dataset")
+args = parser.parse_args()
+
+path = args.data
+if not os.path.exists(path):
+    print(f"[ERROR] File not found: {path}")
+    sys.exit(1)
+
 print(f"Loading {path}...")
 df = pd.read_csv(path)
 
