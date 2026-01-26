@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 
 try:
     import pytorch_lightning as pl
@@ -356,7 +357,18 @@ if MSE is None:
         """
 
         def loss(self, y_pred, target):
-            return (y_pred - target) ** 2
+            if isinstance(y_pred, dict) and "prediction" in y_pred:
+                y_pred = y_pred["prediction"]
+            if hasattr(y_pred, "prediction"):
+                y_pred = y_pred.prediction
+            if isinstance(y_pred, (list, tuple)):
+                y_pred = y_pred[0]
+            if isinstance(target, (list, tuple)):
+                target = target[0]
+            if torch.is_tensor(y_pred) and y_pred.ndim >= 1 and y_pred.shape[-1] in (3, 5, 7, 9):
+                q_mid = y_pred.shape[-1] // 2
+                y_pred = y_pred[..., q_mid]
+            return F.mse_loss(y_pred, target, reduction="none")
 
 # ------------------------------
 # DATA LOAD + FEATURES
