@@ -50,6 +50,7 @@ from intelligence.features.dynamic_features import (
 )
 from intelligence.rule_engine.dsl_parser import RuleDSLParser
 from intelligence.rule_engine.executor import RuleExecutionEngine
+from intelligence.generative.diffusion import ConditionalDiffusionHead
 from audit.contract_snapshot import generate_contract_snapshot
 
 # ------------------------------
@@ -59,6 +60,10 @@ ROWS_TO_LOAD = 500_000
 EPOCHS = 6
 SEQ_LEN = 256
 LR = 1e-4
+DIFFUSION_HORIZON = 32
+DIFFUSION_STEPS = 50
+DIFFUSION_LOSS_SCALE = 1.0
+DIFFUSION_WARMUP_EPOCHS = 1
 
 parser = argparse.ArgumentParser(description="CondorBrain TFT Training (V2.2)")
 parser.add_argument("--start-date", type=str, default="2024-01-01")
@@ -69,7 +74,8 @@ parser.add_argument("--input", type=str, default=None)
 parser.add_argument("--artifact-dir", type=str, default="artifacts/epochs_tft")
 parser.add_argument("--learned-export", dest="learned_export", action="store_true")
 parser.add_argument("--no-learned-export", dest="learned_export", action="store_false")
-parser.add_argument("--allow-missing-diffusion", action="store_true", help="Fill missing diffusion predictors with 0.0")
+parser.add_argument("--diffusion-warmup", type=int, default=None, help="Epochs to run without diffusion loss")
+parser.add_argument("--diffusion-steps", type=int, default=None, help="Diffusion steps for ConditionalDiffusionHead")
 parser.set_defaults(learned_export=True)
 
 try:
@@ -89,6 +95,10 @@ if args.epochs:
     EPOCHS = args.epochs
 if args.rows:
     ROWS_TO_LOAD = args.rows
+if args.diffusion_warmup is not None:
+    DIFFUSION_WARMUP_EPOCHS = int(args.diffusion_warmup)
+if args.diffusion_steps is not None:
+    DIFFUSION_STEPS = int(args.diffusion_steps)
 
 ARTIFACT_DIR = args.artifact_dir
 LEARNED_COND_DIR = os.path.join(ARTIFACT_DIR, "learned_conditions")
@@ -399,15 +409,7 @@ df = df.merge(spot_df[merge_cols], on=spot_key_cols, how="left")
 _ensure_base_extras(df)
 
 base_feature_cols = FEATURE_COLS_V22 + BASE_EXTRA_FEATURES
-feature_cols = base_feature_cols + rule_feature_cols + DIFFUSION_FEATURE_COLS
-
-missing_diffusion = [c for c in DIFFUSION_FEATURE_COLS if c not in df.columns]
-if missing_diffusion:
-    if args.allow_missing_diffusion:
-        for c in missing_diffusion:
-            df[c] = 0.0
-    else:
-        raise SystemExit(f"Missing diffusion predictors: {missing_diffusion}. Use --allow-missing-diffusion to fill with zeros.")
+feature_cols = base_feature_cols + rule_feature_cols
 
 for col in feature_cols:
     if col not in df.columns:
@@ -435,6 +437,25 @@ X_val_np = robust_norm(X_val_np)
 
 # Policy targets
 close = df["close"].values.astype(np.float32)
+highs = df["high"].values.astype(np.float32)
+lows = df["low"].values.astype(np.float32)
+opens = df["open"].values.astype(np.float32)
+volumes = df["volume"].values.astype(np.float32)
+eps = 1e-6
+log_c = np.log(close + eps)
+log_v = np.log(volumes + 1.0)
+
+r = np.zeros_like(close, dtype=np.float32)
+r[1:] = np.diff(log_c)
+rho = np.log((highs + eps) / (lows + eps)).astype(np.float32)
+d = np.log((close + eps) / (opens + eps)).astype(np.float32)
+v = np.zeros_like(volumes, dtype=np.float32)
+v[1:] = np.diff(log_v).astype(np.float32)
+
+Y_feat_np = np.stack([r, rho, d, v], axis=1).astype(np.float32)
+Y_feat_np = np.nan_to_num(Y_feat_np, nan=0.0, posinf=5.0, neginf=-5.0)
+Y_feat_np = np.clip(Y_feat_np, -10.0, 10.0)
+
 future_close = np.empty_like(close)
 future_close[:-60] = close[60:]
 future_close[-60:] = np.nan
@@ -480,6 +501,7 @@ if ENABLE_LEARNED_EXPORT:
                 "base_feature_cols": base_feature_cols,
                 "rule_feature_cols": rule_feature_cols,
                 "diffusion_feature_cols": DIFFUSION_FEATURE_COLS,
+                "diffusion_in_inputs": False,
                 "categorical_cols": categorical_cols,
                 "head_names": ATTR_HEAD_NAMES,
                 "attr_every_n_batches": ATTR_EVERY_N,
@@ -523,6 +545,74 @@ model = TemporalFusionTransformer.from_dataset(
     loss=MultiLoss([MSE()] * len(target_cols)),
     output_size=[1] * len(target_cols),
 )
+
+diff_targets_np = np.zeros((len(Y_feat_np), DIFFUSION_HORIZON, Y_feat_np.shape[1]), dtype=np.float32)
+max_i = len(Y_feat_np)
+for i in range(max_i):
+    end = min(i + DIFFUSION_HORIZON, max_i)
+    diff_targets_np[i, : end - i, :] = Y_feat_np[i:end]
+diff_targets_t = torch.from_numpy(diff_targets_np)
+
+
+class TFTWithDiffusion(pl.LightningModule):
+    def __init__(self, tft_model, diff_targets, feature_dim: int):
+        super().__init__()
+        self.tft = tft_model
+        self.diff_targets = diff_targets
+        self.diffusion_head = ConditionalDiffusionHead(
+            input_dim=diff_targets.shape[2],
+            cond_dim=feature_dim,
+            hidden_dim=256,
+            horizon=DIFFUSION_HORIZON,
+            n_steps=DIFFUSION_STEPS,
+        )
+
+    def forward(self, x):
+        return self.tft(x)
+
+    def _diffusion_target_for_batch(self, x):
+        t_idx = x.get("decoder_time_idx")
+        if t_idx is None:
+            return None
+        idx = t_idx[:, 0].long().detach().cpu()
+        tgt = self.diff_targets[idx].to(self.device)
+        return tgt
+
+    def _condition_from_batch(self, x):
+        enc = x.get("encoder_cont")
+        if enc is None:
+            return None
+        return enc.mean(dim=1)
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        pred = self.tft(x)
+        y_hat = pred["prediction"] if isinstance(pred, dict) else pred
+        base_loss = self.tft.loss(y_hat, y)
+        loss = base_loss
+        if self.current_epoch >= DIFFUSION_WARMUP_EPOCHS:
+            cond = self._condition_from_batch(x)
+            traj = self._diffusion_target_for_batch(x)
+            if cond is not None and traj is not None:
+                diff_loss = self.diffusion_head(traj, cond)
+                loss = loss + diff_loss * DIFFUSION_LOSS_SCALE
+                self.log("loss_diffusion", diff_loss, prog_bar=False, on_step=True, on_epoch=True)
+        self.log("loss_base", base_loss, prog_bar=False, on_step=True, on_epoch=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        pred = self.tft(x)
+        y_hat = pred["prediction"] if isinstance(pred, dict) else pred
+        base_loss = self.tft.loss(y_hat, y)
+        self.log("val_loss_base", base_loss, prog_bar=True, on_step=False, on_epoch=True)
+        return base_loss
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=LR)
+
+
+model = TFTWithDiffusion(model, diff_targets_t, feature_dim=len(feature_cols))
 
 class LearnedConditionsCallback(pl.Callback):
     def __init__(self):
@@ -569,11 +659,15 @@ class LearnedConditionsCallback(pl.Callback):
             "arch": "tft",
             "version": VERSION_V22,
             "feature_cols": feature_cols,
-            "input_dim": INPUT_DIM_V22,
+            "input_dim": len(feature_cols),
             "median": median.astype(np.float32),
             "mad": mad.astype(np.float32),
             "seq_len": SEQ_LEN,
             "head_names": ATTR_HEAD_NAMES,
+            "use_diffusion": True,
+            "diffusion_steps": DIFFUSION_STEPS,
+            "diffusion_horizon": DIFFUSION_HORIZON,
+            "diffusion_warmup_epochs": DIFFUSION_WARMUP_EPOCHS,
         }
         epoch_dir = os.path.join(ARTIFACT_DIR, f"epoch_{epoch_num:03d}")
         os.makedirs(epoch_dir, exist_ok=True)
@@ -590,9 +684,12 @@ class LearnedConditionsCallback(pl.Callback):
                 "base_feature_cols": base_feature_cols,
                 "rule_feature_cols": rule_feature_cols,
                 "diffusion_feature_cols": DIFFUSION_FEATURE_COLS,
+                "diffusion_in_inputs": False,
                 "categorical_cols": categorical_cols,
                 "ruleset_path": RULESET_PATH,
-                "allow_missing_diffusion": bool(args.allow_missing_diffusion),
+                "diffusion_steps": DIFFUSION_STEPS,
+                "diffusion_horizon": DIFFUSION_HORIZON,
+                "diffusion_warmup_epochs": DIFFUSION_WARMUP_EPOCHS,
             },
         )
         print(f"      💾 Saved: {save_path}")
