@@ -19,11 +19,19 @@ import torch
 try:
     import pytorch_lightning as pl
     from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer
-    from pytorch_forecasting.metrics import MultiLoss, MSE
+    from pytorch_forecasting.metrics import MultiLoss
     HAS_TFT = True
 except Exception as e:
     HAS_TFT = False
     _tft_err = e
+    MultiLoss = None
+    MSE = None
+
+if HAS_TFT:
+    try:
+        from pytorch_forecasting.metrics import MSE
+    except Exception:
+        MSE = None
 
 # Add repo root to path
 try:
@@ -335,6 +343,20 @@ if not HAS_TFT:
         "Install with:\n"
         "pip install pytorch-forecasting pytorch-lightning"
     )
+
+if MSE is None:
+    try:
+        from pytorch_forecasting.metrics import MultiLoss, MultiHorizonMetric
+    except Exception as e:
+        raise SystemExit(f"Failed to import pytorch_forecasting metrics: {e}")
+
+    class MSE(MultiHorizonMetric):
+        """
+        Fallback MSE metric for pytorch_forecasting versions without built-in MSE.
+        """
+
+        def loss(self, y_pred, target):
+            return (y_pred - target) ** 2
 
 # ------------------------------
 # DATA LOAD + FEATURES
