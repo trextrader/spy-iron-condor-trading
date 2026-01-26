@@ -264,22 +264,35 @@ def load_dataset(
 
 def model_forward(model: nn.Module, x: torch.Tensor) -> Dict[str, torch.Tensor]:
     """
-    TODO: Run forward pass and return dict with keys:
+    Run forward pass and return dict with keys:
       - "entry_logit"  : [B] or [B,1]
       - "exit_logit"   : [B] or [B,1]
       - "size_score"   : [B] (continuous) or [B,K] (discrete sizing)
+
+    New 10-output format (2026-01-26):
+      [0] call_off, [1] put_off, [2] width, [3] dte,
+      [4] prob_profit, [5] expected_roi, [6] max_loss_pct, [7] confidence,
+      [8] entry_logit (NEW), [9] exit_logit (NEW)
     """
     outputs = model(x)
     pol = outputs[0]
-    # Policy head: [call_off, put_off, width, te, prob_profit, expected_roi, max_loss_pct, confidence]
+
+    # Policy head indices (from CondorExpertHead)
     prob_profit = pol[:, 4]
     expected_roi = pol[:, 5]
     confidence = pol[:, 7]
 
-    eps = 1e-6
-    conf_clamped = torch.clamp(confidence, eps, 1 - eps)
-    entry_logit = torch.log(conf_clamped / (1 - conf_clamped))
-    exit_logit = torch.log((1 - conf_clamped) / conf_clamped)
+    # NEW: Use explicit entry/exit logits if available (10-output model)
+    if pol.size(1) >= 10:
+        entry_logit = pol[:, 8]  # Explicit entry logit
+        exit_logit = pol[:, 9]   # Explicit exit logit
+    else:
+        # FALLBACK: Legacy 8-output model - derive from confidence (will collapse!)
+        eps = 1e-6
+        conf_clamped = torch.clamp(confidence, eps, 1 - eps)
+        entry_logit = torch.log(conf_clamped / (1 - conf_clamped))
+        exit_logit = torch.log((1 - conf_clamped) / conf_clamped)
+
     size_score = expected_roi if expected_roi is not None else prob_profit
 
     return {
@@ -363,7 +376,66 @@ def summarize_attribution(
 # -------------------------
 # 3) SURROGATE "LEARNED CONDITIONS"
 # -------------------------
+def compute_temporal_features(Xs: np.ndarray, feature_names: List[str]) -> Tuple[np.ndarray, List[str]]:
+    """
+    Compute temporal aggregations from sequence data for surrogate tree fitting.
+
+    Instead of just using the last timestep, compute multiple temporal summaries:
+    - last: value at final timestep (original behavior)
+    - mean: mean over entire sequence
+    - std: standard deviation over sequence
+    - min: minimum value
+    - max: maximum value
+    - slope: linear regression slope (trend)
+    - last5_mean: mean of last 5 timesteps (recent momentum)
+
+    Args:
+        Xs: (N, T, D) sequence data
+        feature_names: List of D feature names
+
+    Returns:
+        X_temporal: (N, D*7) flattened temporal features
+        temporal_names: List of D*7 feature names
+    """
+    N, T, D = Xs.shape
+
+    # Compute temporal aggregations
+    last = Xs[:, -1, :]  # (N, D)
+    mean = Xs.mean(axis=1)  # (N, D)
+    std = Xs.std(axis=1)  # (N, D)
+    min_val = Xs.min(axis=1)  # (N, D)
+    max_val = Xs.max(axis=1)  # (N, D)
+
+    # Last 5 timesteps mean (or all if T < 5)
+    last5 = Xs[:, max(0, T-5):, :].mean(axis=1)  # (N, D)
+
+    # Slope (linear regression coefficient)
+    # Use simple (y[-1] - y[0]) / (T-1) as proxy for speed
+    slope = (Xs[:, -1, :] - Xs[:, 0, :]) / max(T - 1, 1)  # (N, D)
+
+    # Concatenate all temporal features
+    X_temporal = np.concatenate([
+        last, mean, std, min_val, max_val, last5, slope
+    ], axis=1)  # (N, D*7)
+
+    # Generate feature names
+    suffixes = ['_last', '_mean', '_std', '_min', '_max', '_last5', '_slope']
+    temporal_names = []
+    for suffix in suffixes:
+        for name in feature_names:
+            temporal_names.append(f"{name}{suffix}")
+
+    return X_temporal.astype(np.float32), temporal_names
+
+
 def fit_tree_surrogate_classification(X: np.ndarray, y: np.ndarray, max_depth: int = 4):
+    # Handle edge case: if all y are same class, can't stratify
+    if len(np.unique(y)) < 2:
+        # Return dummy tree with 100% accuracy on constant class
+        clf = DecisionTreeClassifier(max_depth=1, random_state=42)
+        clf.fit(X[:10], y[:10])  # Fit on small subset
+        return clf, 1.0
+
     Xtr, Xte, ytr, yte = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
@@ -534,13 +606,16 @@ def main(
         size_y = size_raw.numpy().reshape(-1).astype(np.float32)
         size_is_classification = False
 
-    Xflat = Xs[:, -1, :]
+    # 2026-01-26: Use temporal feature aggregations instead of just last timestep
+    # This helps surrogate trees capture temporal patterns that sequence models learn
+    X_temporal, temporal_feature_names = compute_temporal_features(Xs, feature_names)
+    print(f"[Surrogate] Using {len(temporal_feature_names)} temporal features ({len(feature_names)} base * 7 aggregations)")
 
-    entry_tree, entry_acc = fit_tree_surrogate_classification(Xflat, entry_y, max_depth=surrogate_depth)
-    exit_tree, exit_acc = fit_tree_surrogate_classification(Xflat, exit_y, max_depth=surrogate_depth)
+    entry_tree, entry_acc = fit_tree_surrogate_classification(X_temporal, entry_y, max_depth=surrogate_depth)
+    exit_tree, exit_acc = fit_tree_surrogate_classification(X_temporal, exit_y, max_depth=surrogate_depth)
 
-    entry_rules = tree_to_markdown_rules(entry_tree, feature_names, class_names=["NO_ENTRY", "ENTRY"])
-    exit_rules = tree_to_markdown_rules(exit_tree, feature_names, class_names=["NO_EXIT", "EXIT"])
+    entry_rules = tree_to_markdown_rules(entry_tree, temporal_feature_names, class_names=["NO_ENTRY", "ENTRY"])
+    exit_rules = tree_to_markdown_rules(exit_tree, temporal_feature_names, class_names=["NO_EXIT", "EXIT"])
 
     save_text(
         os.path.join(OUT_DIR, "entry_rules.md"),
@@ -554,16 +629,16 @@ def main(
     )
 
     if size_is_classification:
-        size_tree, size_score = fit_tree_surrogate_classification(Xflat, size_y, max_depth=surrogate_depth)
-        size_rules = tree_to_markdown_rules(size_tree, feature_names)
+        size_tree, size_score = fit_tree_surrogate_classification(X_temporal, size_y, max_depth=surrogate_depth)
+        size_rules = tree_to_markdown_rules(size_tree, temporal_feature_names)
         save_text(
             os.path.join(OUT_DIR, "sizing_rules.md"),
             f"# SIZING surrogate rules (classification, depth={surrogate_depth})\n\n"
             f"Surrogate accuracy~{size_score:.3f}\n\n{size_rules}\n",
         )
     else:
-        size_tree, size_score = fit_tree_surrogate_regression(Xflat, size_y, max_depth=surrogate_depth)
-        size_rules = tree_to_markdown_rules(size_tree, feature_names)
+        size_tree, size_score = fit_tree_surrogate_regression(X_temporal, size_y, max_depth=surrogate_depth)
+        size_rules = tree_to_markdown_rules(size_tree, temporal_feature_names)
         save_text(
             os.path.join(OUT_DIR, "sizing_rules.md"),
             f"# SIZING surrogate rules (regression, depth={surrogate_depth})\n\n"

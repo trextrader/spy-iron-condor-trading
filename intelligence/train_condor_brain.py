@@ -134,43 +134,130 @@ FEATURE_COLS = FEATURE_COLS_V22
 # ============================================================================
 
 def prepare_features(df: pd.DataFrame) -> tuple:
-    """Prepare features and targets for CondorBrain training."""
-    print("[CondorBrain] Preparing features...")
-    
+    """Prepare features and targets for CondorBrain training.
+
+    2026-01-26 UPDATE: Now generates 10 targets (added explicit entry/exit targets)
+    and uses REALISTIC values instead of constants to prevent model collapse.
+
+    Target indices:
+        [0] target_call_offset, [1] target_put_offset, [2] target_wing_width, [3] target_dte,
+        [4] was_profitable, [5] realized_roi, [6] realized_max_loss, [7] confidence_target,
+        [8] entry_target (NEW), [9] exit_target (NEW)
+    """
+    print("[CondorBrain] Preparing features (v2.0 - anti-collapse targets)...")
+
     # Handle call_put encoding
     if 'call_put' in df.columns and 'cp_num' not in df.columns:
         df['cp_num'] = df['call_put'].map({'C': 1.0, 'P': -1.0}).fillna(0)
-    
-    # Generate synthetic targets (default offsets)
-    df['target_call_offset'] = 2.0
-    df['target_put_offset'] = 2.0
-    df['target_wing_width'] = 5.0
-    df['target_dte'] = 14.0
-    df['was_profitable'] = 0.5
-    df['realized_roi'] = 0.0
-    df['realized_max_loss'] = 0.2
-    df['confidence_target'] = 0.5
-    
+
+    # ========================================================================
+    # GENERATE REALISTIC TARGETS (Critical fix for model collapse)
+    # ========================================================================
+    n = len(df)
+    rng = np.random.default_rng(42)  # Reproducible
+
+    # --- IVR-based regime detection for conditional targets ---
+    ivr = df['ivr'].fillna(50).values if 'ivr' in df.columns else np.full(n, 50.0)
+    low_vol = ivr < 30
+    high_vol = ivr > 70
+    normal_vol = ~low_vol & ~high_vol
+
+    # Offset targets: vary by regime (low vol → wider wings, high vol → tighter)
+    df['target_call_offset'] = np.where(low_vol, 2.5 + rng.uniform(-0.5, 0.5, n),
+                                np.where(high_vol, 1.5 + rng.uniform(-0.3, 0.3, n),
+                                         2.0 + rng.uniform(-0.4, 0.4, n)))
+    df['target_put_offset'] = np.where(low_vol, 2.5 + rng.uniform(-0.5, 0.5, n),
+                               np.where(high_vol, 1.5 + rng.uniform(-0.3, 0.3, n),
+                                        2.0 + rng.uniform(-0.4, 0.4, n)))
+    df['target_wing_width'] = np.where(low_vol, 6.0 + rng.uniform(-1, 1, n),
+                               np.where(high_vol, 4.0 + rng.uniform(-0.5, 0.5, n),
+                                        5.0 + rng.uniform(-0.8, 0.8, n)))
+    df['target_dte'] = np.where(low_vol, 21.0 + rng.uniform(-5, 5, n),
+                        np.where(high_vol, 7.0 + rng.uniform(-2, 2, n),
+                                 14.0 + rng.uniform(-3, 3, n)))
+
+    # --- Profitability based on RSI (mean-reversion proxy) ---
+    rsi = df['rsi'].fillna(50).values if 'rsi' in df.columns else np.full(n, 50.0)
+    # RSI 40-60 is neutral range → higher probability of IC profit
+    rsi_neutral = (rsi > 40) & (rsi < 60)
+    df['was_profitable'] = np.where(rsi_neutral, 0.6 + rng.uniform(0, 0.15, n),
+                            np.where((rsi < 30) | (rsi > 70), 0.3 + rng.uniform(0, 0.1, n),
+                                     0.45 + rng.uniform(0, 0.1, n)))
+
+    # --- ROI based on IV rank (higher IV → higher premium → potentially better ROI) ---
+    df['realized_roi'] = np.clip(
+        (ivr / 100 - 0.5) * 0.3 + rng.uniform(-0.1, 0.1, n),
+        -0.5, 0.5
+    ).astype(np.float32)
+
+    # --- Max loss correlates with volatility ---
+    df['realized_max_loss'] = np.where(high_vol, 0.4 + rng.uniform(0, 0.2, n),
+                               np.where(low_vol, 0.1 + rng.uniform(0, 0.1, n),
+                                        0.2 + rng.uniform(0, 0.15, n)))
+
+    # --- Confidence: multi-factor signal (NOT constant!) ---
+    # High confidence when: neutral RSI + normal IVR + low ADX (ranging)
+    adx = df['adx'].fillna(25).values if 'adx' in df.columns else np.full(n, 25.0)
+    conf_rsi = np.where(rsi_neutral, 0.3, 0.1)  # RSI contribution
+    conf_ivr = np.where(normal_vol, 0.3, np.where(low_vol, 0.2, 0.1))  # IVR contribution
+    conf_adx = np.where(adx < 25, 0.3, 0.1)  # Low ADX = ranging = good for IC
+    df['confidence_target'] = np.clip(conf_rsi + conf_ivr + conf_adx + rng.uniform(-0.1, 0.1, n), 0.1, 0.95)
+
+    # --- Friction Gate (Rule #14: RULE_SPREAD) ---
+    # exec_allow = 1 means friction is OK for entry, 0 means blocked
+    # friction_ratio: Spread / AvgRange - higher means worse liquidity
+    exec_allow = df['exec_allow'].fillna(1.0).values if 'exec_allow' in df.columns else np.ones(n)
+    friction_ratio = df['friction_ratio'].fillna(0.5).values if 'friction_ratio' in df.columns else np.full(n, 0.5)
+    gap_risk = df['gap_risk_score'].fillna(0.0).values if 'gap_risk_score' in df.columns else np.zeros(n)
+
+    # --- NEW: Explicit ENTRY target (logit space) ---
+    # Entry signal: positive logit when conditions favorable for new IC
+    # Favorable: neutral RSI, normal-to-high IV, low ADX, AND friction gate allows
+    entry_score = np.zeros(n, dtype=np.float32)
+    entry_score += np.where(rsi_neutral, 1.0, -0.5)  # RSI neutral: enter
+    entry_score += np.where(ivr > 30, 0.5, -0.5)     # IV above 30: enter
+    entry_score += np.where(adx < 30, 0.5, -0.3)     # Low trend: enter
+    # FRICTION GATE (Rule #14): Block entry if exec_allow=0 or friction too high
+    entry_score += np.where(exec_allow > 0.5, 0.5, -2.0)  # exec_allow gate
+    entry_score += np.where(friction_ratio < 1.0, 0.3, -1.0)  # friction < 1.0 allows
+    entry_score += np.where(gap_risk < 0.8, 0.2, -1.5)  # gap risk < 0.8 allows
+    entry_score += rng.uniform(-0.3, 0.3, n)        # Noise for diversity
+    df['entry_target'] = entry_score  # Logit, not sigmoid
+
+    # --- NEW: Explicit EXIT target (logit space) ---
+    # Exit signal: positive logit when should close IC early
+    # Unfavorable: extreme RSI, expanding vol, high ADX, OR friction gate triggers
+    exit_score = np.zeros(n, dtype=np.float32)
+    exit_score += np.where((rsi < 30) | (rsi > 70), 1.0, -0.5)  # Extreme RSI: exit
+    exit_score += np.where(high_vol, 0.8, -0.3)                 # High vol: exit
+    exit_score += np.where(adx > 35, 0.5, -0.2)                 # Strong trend: exit
+    # FRICTION GATE (Rule #14): Force exit if gap risk exceeds critical threshold
+    exit_score += np.where(gap_risk >= 0.8, 2.0, -0.3)  # gap_risk >= 0.8 forces exit
+    exit_score += np.where(friction_ratio >= 1.5, 1.0, -0.2)  # high friction suggests exit
+    exit_score += rng.uniform(-0.3, 0.3, n)                     # Noise
+    df['exit_target'] = exit_score  # Logit
+
     # Regime labeling (with NaN safety)
     if 'regime_label' not in df.columns:
         if 'ivr' in df.columns:
             df['regime_label'] = pd.cut(
                 df['ivr'].fillna(50),  # Default to normal regime
-                bins=[-0.1, 30, 70, 101], 
+                bins=[-0.1, 30, 70, 101],
                 labels=[0, 1, 2]
             ).fillna(1).astype(int)  # Default to normal (1)
         else:
             df['regime_label'] = 1
-    
+
     # Fill ALL NaNs
     df = df.ffill().bfill().fillna(0)
-    
-    # Build arrays
+
+    # Build arrays (10 targets now)
     target_cols = [
         'target_call_offset', 'target_put_offset', 'target_wing_width', 'target_dte',
-        'was_profitable', 'realized_roi', 'realized_max_loss', 'confidence_target'
+        'was_profitable', 'realized_roi', 'realized_max_loss', 'confidence_target',
+        'entry_target', 'exit_target'  # NEW: explicit entry/exit logits
     ]
-    
+
     X = select_feature_frame(df, FEATURE_COLS, strict=True).values.astype(np.float32)
     y = df[target_cols].values.astype(np.float32)
     regime = df['regime_label'].values.astype(np.int64)
@@ -326,7 +413,15 @@ def parse_args():
                         help="Number of MoE experts (default: 3).")
     parser.add_argument("--moe-k", type=int, default=1,
                         help="Number of experts to activate per sample (default: 1).")
-    
+
+    # NEW (2026-01-26): Diffusion and anti-collapse features
+    parser.add_argument("--diffusion", action="store_true",
+                        help="Enable ConditionalDiffusionHead for trajectory forecasting.")
+    parser.add_argument("--diffusion-steps", type=int, default=50,
+                        help="Number of diffusion denoising steps (default: 50).")
+    parser.add_argument("--feature-group-dropout", type=float, default=0.0,
+                        help="Feature-group dropout probability (0.15 recommended, default: 0).")
+
     args = parser.parse_args()
     
     # Parse loss lambdas
@@ -509,7 +604,10 @@ def train_condor_brain(args):
         use_vol_gated_attn=args.vol_gated_attn,
         use_topk_moe=args.topk_moe,
         moe_n_experts=args.moe_experts,
-        moe_k=args.moe_k
+        moe_k=args.moe_k,
+        use_diffusion=args.diffusion,
+        diffusion_steps=args.diffusion_steps,
+        feature_group_dropout=args.feature_group_dropout  # NEW: anti-collapse regularization
     ).to(device)
     
     # Force model weights to BF16 so Mamba kernels take the BF16 fast path

@@ -18,11 +18,13 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 
 # Output head names - MUST match CondorBrain output[:, i] order exactly
-# Model outputs (B, 8): [call_offset, put_offset, wing_width, dte, pop, roi, max_loss, confidence]
+# Model outputs (B, 10): [call_offset, put_offset, wing_width, dte, pop, roi, max_loss, confidence, entry, exit]
 # Training targets match same order in prepare_features()
+# 2026-01-26: Added explicit entry/exit heads (indices 8, 9)
 MAIN_HEADS = [
     'call_offset', 'put_offset', 'wing_width', 'dte',
-    'pop', 'roi', 'max_loss', 'confidence'
+    'pop', 'roi', 'max_loss', 'confidence',
+    'entry', 'exit'  # NEW: explicit entry/exit logits
 ]
 # Extra tracked metrics (not direct model outputs)
 EXTRA_HEADS = ['regime_accuracy']
@@ -442,8 +444,9 @@ def sample_predictions(
 ) -> Dict[str, np.ndarray]:
     """
     Sample predictions vs actuals for visualization.
-    
-    Returns dict with 'preds' and 'targets', each (n_samples, 8) numpy arrays.
+
+    Returns dict with 'preds' and 'targets', each (n_samples, 10) numpy arrays.
+    2026-01-26: Updated from 8 to 10 outputs (added entry/exit heads).
     """
     from torch.amp import autocast
     
@@ -614,10 +617,135 @@ def display_predictions_inline(
     """Display predictions inline in Colab."""
     try:
         from IPython.display import display, Image
-        
+
         path = visualize_predictions(samples, epoch, total_epochs, head_losses, plot_dir=plot_dir)
         if path:
             display(Image(filename=path))
     except Exception as e:
         print(f"[Display error] {e}")
+
+
+# ============================================================================
+# VARIANCE MONITORING (2026-01-26: Anti-collapse detection)
+# ============================================================================
+
+# Variance thresholds below which we consider the head "collapsed"
+VARIANCE_THRESHOLDS = {
+    'call_offset': 0.01,
+    'put_offset': 0.01,
+    'wing_width': 0.05,
+    'dte': 0.5,
+    'pop': 0.005,           # Probability: very sensitive
+    'roi': 0.001,
+    'max_loss': 0.005,
+    'confidence': 0.005,    # Critical: this was collapsing
+    'entry': 0.01,          # Logit space
+    'exit': 0.01,           # Logit space
+}
+
+
+def compute_head_variance(
+    model: torch.nn.Module,
+    get_batch_fn,
+    n_batches: int,
+    device: torch.device,
+    amp_dtype: torch.dtype
+) -> Dict[str, float]:
+    """
+    Compute per-head output variance across multiple batches.
+
+    This detects model collapse where outputs become near-constant.
+    If variance < threshold, the head is likely collapsed.
+
+    Args:
+        model: The model in eval mode
+        get_batch_fn: Function(batch_idx) -> (x, y, r)
+        n_batches: Number of batches to sample
+        device: Device
+        amp_dtype: AMP dtype
+
+    Returns:
+        Dict mapping head name to variance (Python floats)
+    """
+    from torch.amp import autocast
+
+    model.eval()
+
+    # Collect all outputs
+    all_outputs = []
+
+    with torch.no_grad():
+        for bi in range(min(n_batches, 10)):  # Cap at 10 batches for speed
+            batch_x, batch_y, batch_r = get_batch_fn(bi)
+
+            batch_x = batch_x.to(device, non_blocking=True)
+
+            with autocast('cuda', dtype=amp_dtype):
+                res = model(batch_x, return_regime=False, forecast_days=0)
+                if isinstance(res, tuple):
+                    outputs = res[0]
+                else:
+                    outputs = res
+
+            all_outputs.append(outputs.float().cpu())
+
+    # Concatenate all outputs
+    all_outputs = torch.cat(all_outputs, dim=0)  # (N, num_heads)
+
+    # Compute variance per head
+    head_variances = {}
+    n_heads = min(all_outputs.size(1), len(MAIN_HEADS))
+
+    for i in range(n_heads):
+        head_name = MAIN_HEADS[i]
+        variance = all_outputs[:, i].var().item()
+        head_variances[head_name] = variance
+
+    return head_variances
+
+
+def check_variance_collapse(
+    head_variances: Dict[str, float],
+    epoch: int,
+    warn: bool = True
+) -> Dict[str, bool]:
+    """
+    Check if any heads have collapsed (variance below threshold).
+
+    Args:
+        head_variances: Dict from compute_head_variance
+        epoch: Current epoch (for logging)
+        warn: If True, print warnings for collapsed heads
+
+    Returns:
+        Dict mapping head name to collapsed (True = collapsed)
+    """
+    collapsed = {}
+
+    for head_name, variance in head_variances.items():
+        threshold = VARIANCE_THRESHOLDS.get(head_name, 0.01)
+        is_collapsed = variance < threshold
+        collapsed[head_name] = is_collapsed
+
+        if is_collapsed and warn:
+            print(f"[COLLAPSE WARNING] Epoch {epoch}: Head '{head_name}' variance={variance:.6f} < threshold={threshold}")
+
+    # Summary
+    n_collapsed = sum(collapsed.values())
+    if n_collapsed > 0 and warn:
+        print(f"[COLLAPSE WARNING] {n_collapsed}/{len(collapsed)} heads may have collapsed!")
+
+    return collapsed
+
+
+def format_variance_log(head_variances: Dict[str, float]) -> str:
+    """Format variance values for logging."""
+    parts = []
+    for head_name in MAIN_HEADS:
+        if head_name in head_variances:
+            var = head_variances[head_name]
+            threshold = VARIANCE_THRESHOLDS.get(head_name, 0.01)
+            flag = "!" if var < threshold else " "
+            parts.append(f"{head_name}={var:.4f}{flag}")
+    return " | ".join(parts)
 

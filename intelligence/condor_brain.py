@@ -51,14 +51,14 @@ class RMSNorm(nn.Module):
     """
     BF16-friendly RMSNorm (no mean subtraction; stable without FP32 casts).
     y = x * rsqrt(mean(x^2) + eps) * weight
-    
+
     Unlike nn.RMSNorm, this returns the same dtype as input (BF16 stays BF16).
     """
     def __init__(self, dim: int, eps: float = 1e-6):
         super().__init__()
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(dim))
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Keep stats in FP32 for stability, but return in original dtype
         dtype = x.dtype
@@ -66,6 +66,80 @@ class RMSNorm(nn.Module):
         rms = torch.rsqrt(x_fp32.pow(2).mean(dim=-1, keepdim=True) + self.eps)
         y = (x_fp32 * rms).to(dtype)
         return y * self.weight.to(dtype)
+
+
+# ============================================================================
+# FEATURE GROUP DROPOUT (2026-01-26: Anti-collapse regularization)
+# ============================================================================
+
+class FeatureGroupDropout(nn.Module):
+    """
+    Drops entire feature groups during training to encourage redundancy learning.
+
+    Feature groups for V2.2 (52 features):
+    - market_primitives: indices 0-4 (open, high, low, close, volume)
+    - greeks: indices 5-13 (delta, gamma, vega, theta, iv, ivr, spread_ratio, te, strike)
+    - targets_risk: indices 14-15 (target_spot, max_dd_60m)
+    - dynamic_regime: indices 16-31 (log_return, vol_ewma, ..., breakout_score)
+    - v22_primitives: indices 32-51 (bb_percentile, bw_expansion_rate, ...)
+
+    During training, randomly masks entire groups with probability p.
+    """
+
+    # Define feature group slices for V2.2 schema
+    FEATURE_GROUPS = {
+        'market_primitives': slice(0, 5),      # OHLCV
+        'greeks': slice(5, 14),                # Delta, gamma, etc.
+        'targets_risk': slice(14, 16),         # Target spot, max DD
+        'dynamic_regime': slice(16, 32),       # Dynamic features
+        'v22_primitives': slice(32, 52),       # V2.2 new features
+    }
+
+    def __init__(self, group_drop_prob: float = 0.15, input_dim: int = 52):
+        """
+        Args:
+            group_drop_prob: Probability of dropping each group (default 0.15)
+            input_dim: Expected input dimension (for validation)
+        """
+        super().__init__()
+        self.group_drop_prob = group_drop_prob
+        self.input_dim = input_dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Apply feature-group dropout during training.
+
+        Args:
+            x: (B, T, D) input tensor
+
+        Returns:
+            Tensor with same shape, some feature groups zeroed out
+        """
+        if not self.training or self.group_drop_prob <= 0:
+            return x
+
+        B, T, D = x.shape
+        device = x.device
+        dtype = x.dtype
+
+        # Create mask (start with all 1s)
+        mask = torch.ones(D, device=device, dtype=dtype)
+
+        # Randomly drop each group
+        for group_name, group_slice in self.FEATURE_GROUPS.items():
+            if torch.rand(1).item() < self.group_drop_prob:
+                # Check bounds
+                start = group_slice.start
+                stop = min(group_slice.stop, D)
+                if start < D:
+                    mask[start:stop] = 0.0
+
+        # Apply mask (broadcast across batch and time)
+        # Scale remaining features to maintain expected magnitude
+        remaining_frac = mask.mean().clamp(min=0.1)
+        x = x * mask.view(1, 1, D) / remaining_frac
+
+        return x
 
 # ============================================================================
 # OUTPUT DATA STRUCTURES
@@ -225,7 +299,22 @@ class HorizonForecaster(nn.Module):
 # ============================================================================
 
 class CondorExpertHead(nn.Module):
-    """Single expert head that outputs 8 IC parameters."""
+    """Single expert head that outputs 10 IC parameters (8 original + explicit ENTRY/EXIT)."""
+
+    # Output indices for external reference
+    IDX_CALL_OFFSET = 0
+    IDX_PUT_OFFSET = 1
+    IDX_WING_WIDTH = 2
+    IDX_DTE = 3
+    IDX_PROB_PROFIT = 4
+    IDX_EXPECTED_ROI = 5
+    IDX_MAX_LOSS = 6
+    IDX_CONFIDENCE = 7
+    IDX_ENTRY_LOGIT = 8   # NEW: Explicit entry signal (logit, not derived)
+    IDX_EXIT_LOGIT = 9    # NEW: Explicit exit signal (logit, not derived)
+
+    NUM_OUTPUTS = 10
+
     def __init__(self, d_model: int = 1024):
         super().__init__()
         self.fc = nn.Sequential(
@@ -234,16 +323,16 @@ class CondorExpertHead(nn.Module):
             nn.Dropout(0.1),
             nn.Linear(512, 256),
             nn.ReLU(),
-            nn.Linear(256, 8)  # 8 outputs
+            nn.Linear(256, self.NUM_OUTPUTS)  # 10 outputs (was 8)
         )
-        
+
         # Output activations (applied post-forward)
         self.offset_activation = nn.Sigmoid()  # Constrain to 0-1, then scale
         self.prob_activation = nn.Sigmoid()    # 0-1 probabilities
-        
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        raw = self.fc(x)  # (B, 8)
-        
+        raw = self.fc(x)  # (B, 10)
+
         # Apply appropriate activations per output
         out = torch.zeros_like(raw)
         out[:, 0] = self.offset_activation(raw[:, 0]) * 5.0    # short_call_offset: 0-5%
@@ -254,7 +343,10 @@ class CondorExpertHead(nn.Module):
         out[:, 5] = torch.tanh(raw[:, 5]) * 0.5                # expected_roi: -50% to +50%
         out[:, 6] = self.prob_activation(raw[:, 6])            # max_loss_pct: 0-1
         out[:, 7] = self.prob_activation(raw[:, 7])            # confidence: 0-1
-        
+        # NEW: Explicit entry/exit logits (no activation - raw logits for BCEWithLogitsLoss)
+        out[:, 8] = raw[:, 8]                                  # entry_logit: raw logit
+        out[:, 9] = raw[:, 9]                                  # exit_logit: raw logit
+
         return out
 
 # ============================================================================
@@ -264,14 +356,15 @@ class CondorExpertHead(nn.Module):
 class CondorBrain(nn.Module):
     """
     Advanced Mamba 2 architecture for direct Iron Condor optimization.
-    
+
     Features:
     - 32-layer Selective State Space backbone
     - 3 regime-specific expert heads (Low/Normal/High volatility)
     - Gated mixture-of-experts output
-    - 8-dimensional output for complete IC parameterization
+    - 10-dimensional output for complete IC parameterization (8 orig + entry/exit)
+    - Feature-group dropout for anti-collapse regularization (2026-01-26)
     """
-    
+
     def __init__(
         self,
         d_model: int = 1024,
@@ -286,23 +379,30 @@ class CondorBrain(nn.Module):
         moe_n_experts: int = 3,
         moe_k: int = 1,
         use_diffusion: bool = False,
-        diffusion_steps: int = 50
+        diffusion_steps: int = 50,
+        feature_group_dropout: float = 0.0  # NEW: 0.15 recommended for training
     ):
         super().__init__()
-        
+
         self.d_model = d_model
         self.n_layers = n_layers
         self.input_dim = input_dim
         self.use_vol_gated_attn = use_vol_gated_attn
         self.use_topk_moe = use_topk_moe
-        
+
         # Default attention insertion points: after layers 8, 16, 24 (0-indexed: 7, 15, 23)
         if vol_attn_layers is None:
             # For 32 layers: [7, 15, 23]; for 24 layers: [7, 15, 23]; etc.
             self.vol_attn_layers = [i for i in [7, 15, 23] if i < n_layers]
         else:
             self.vol_attn_layers = vol_attn_layers
-        
+
+        # NEW: Feature-group dropout (2026-01-26)
+        self.feature_dropout = FeatureGroupDropout(
+            group_drop_prob=feature_group_dropout,
+            input_dim=input_dim
+        ) if feature_group_dropout > 0 else None
+
         # Input projection
         self.input_proj = nn.Linear(input_dim, d_model)
         
@@ -394,15 +494,19 @@ class CondorBrain(nn.Module):
             diffusion_target: If provided (B, Horizon, 4), computes diffusion loss
             
         Returns:
-            outputs: (B, 8) IC parameters
+            outputs: (B, 10) IC parameters (8 orig + entry_logit + exit_logit)
             regime_probs: (B, 3) regime probabilities [Low, Normal, High]
             horizon_forecast: dict with daily predictions (if forecast_days > 0)
             experts: dict with discrete expert outputs (if return_experts > 0)
             diffusion_out: scalar loss (if target provided) OR sampled trajectory (if forecast_days>0 and diffusion enabled)
         """
+        # NEW: Apply feature-group dropout before input projection (training only)
+        if self.feature_dropout is not None:
+            x = self.feature_dropout(x)
+
         # Input projection
         x = self.input_proj(x)
-        
+
         # DTYPE PROBE: Track where FP32 upcast happens (one-time)
         if not hasattr(self, '_dtype_sanity_printed'):
             self._dtype_sanity_printed = False
@@ -454,10 +558,10 @@ class CondorBrain(nn.Module):
                     'selected_indices': moe_indices
                 }
             else:
-                outputs = self.moe_head(last_hidden)  # (B, 8) raw
-            
-            # --- NEW: Apply activations to MoE raw output ---
-            # Replicates CondorExpertHead logic for the MoE path
+                outputs = self.moe_head(last_hidden)  # (B, 10) raw
+
+            # --- Apply activations to MoE raw output ---
+            # Replicates CondorExpertHead logic for the MoE path (10 outputs)
             raw = outputs
             outputs = torch.zeros_like(raw)
             outputs[:, 0] = torch.sigmoid(raw[:, 0]) * 5.0    # short_call_offset: 0-5%
@@ -468,6 +572,10 @@ class CondorBrain(nn.Module):
             outputs[:, 5] = torch.tanh(raw[:, 5]) * 0.5       # expected_roi: -50% to +50%
             outputs[:, 6] = torch.sigmoid(raw[:, 6])          # max_loss_pct: 0-1
             outputs[:, 7] = torch.sigmoid(raw[:, 7])          # confidence: 0-1
+            # NEW: Explicit entry/exit logits (indices 8,9 - raw, no activation)
+            if raw.size(1) >= 10:
+                outputs[:, 8] = raw[:, 8]                     # entry_logit: raw
+                outputs[:, 9] = raw[:, 9]                     # exit_logit: raw
         else:
             # Traditional 3-expert weighted MoE
             out_low = self.expert_low(last_hidden)       # (B, 8)
@@ -616,22 +724,26 @@ class CondorBrain(nn.Module):
 class CondorLoss(nn.Module):
     """
     Multi-objective loss function for CondorBrain training.
-    
+
     Components:
     - Strike accuracy (offset predictions vs optimal)
     - P&L alignment (ROI prediction vs realized)
     - Risk calibration (max loss prediction)
     - Probability calibration (Brier score for POP)
     - Regime consistency (auxiliary loss)
+    - NEW (2026-01-26): Entry/Exit logit supervision
+    - NEW: Anti-collapse entropy regularization
     """
-    
+
     def __init__(
         self,
         strike_weight: float = 1.0,
         pnl_weight: float = 2.0,
         risk_weight: float = 1.5,
         prob_weight: float = 1.0,
-        regime_weight: float = 0.5
+        regime_weight: float = 0.5,
+        entry_exit_weight: float = 1.0,  # NEW: weight for entry/exit losses
+        entropy_weight: float = 0.1      # NEW: anti-collapse regularization
     ):
         super().__init__()
         self.strike_weight = strike_weight
@@ -639,11 +751,14 @@ class CondorLoss(nn.Module):
         self.risk_weight = risk_weight
         self.prob_weight = prob_weight
         self.regime_weight = regime_weight
-        
+        self.entry_exit_weight = entry_exit_weight
+        self.entropy_weight = entropy_weight
+
         self.huber = nn.HuberLoss(delta=1.0)
         self.bce = nn.BCELoss()
+        self.bce_logits = nn.BCEWithLogitsLoss()  # For entry/exit logits
         self.ce = nn.CrossEntropyLoss()
-        
+
     def forward(
         self,
         pred: torch.Tensor,
@@ -653,45 +768,81 @@ class CondorLoss(nn.Module):
     ) -> torch.Tensor:
         """
         Compute composite loss.
-        
+
         Args:
-            pred: (B, 8) predicted IC parameters
-            target: (B, 8) target IC parameters
+            pred: (B, 10) predicted IC parameters (8 orig + entry_logit + exit_logit)
+            target: (B, 10) target IC parameters
             regime_probs: (B, 3) predicted regime probabilities
             regime_labels: (B,) ground truth regime indices
         """
         # Strike offset loss (indices 0, 1)
         l_strike = self.huber(pred[:, 0:2], target[:, 0:2])
-        
+
         # Wing width loss (index 2)
         l_width = self.huber(pred[:, 2], target[:, 2])
-        
+
         # DTE loss (index 3)
         l_dte = self.huber(pred[:, 3], target[:, 3])
-        
+
         # P&L alignment (index 5 = expected_roi)
         l_pnl = self.huber(pred[:, 5], target[:, 5])
-        
+
         # Risk calibration (index 6 = max_loss_pct)
         l_risk = self.huber(pred[:, 6], target[:, 6])
-        
+
         # Probability calibration - Brier score for POP (index 4)
         l_prob = torch.mean((pred[:, 4] - target[:, 4]) ** 2)
-        
+
+        # Confidence loss (index 7) - Brier score
+        l_conf = torch.mean((pred[:, 7] - target[:, 7]) ** 2)
+
         # Regime loss (if labels provided)
         l_regime = torch.tensor(0.0, device=pred.device)
         if regime_probs is not None and regime_labels is not None:
             l_regime = self.ce(regime_probs, regime_labels)
-        
+
+        # NEW: Entry/Exit logit supervision (indices 8, 9)
+        l_entry = torch.tensor(0.0, device=pred.device)
+        l_exit = torch.tensor(0.0, device=pred.device)
+        if pred.size(1) >= 10 and target.size(1) >= 10:
+            # Entry: pred[:, 8] is logit, target[:, 8] is logit
+            # Convert target logit to probability for BCE
+            entry_target_prob = torch.sigmoid(target[:, 8])
+            l_entry = self.bce_logits(pred[:, 8], entry_target_prob)
+
+            # Exit: pred[:, 9] is logit, target[:, 9] is logit
+            exit_target_prob = torch.sigmoid(target[:, 9])
+            l_exit = self.bce_logits(pred[:, 9], exit_target_prob)
+
+        # NEW: Anti-collapse entropy regularization
+        # Encourage diverse outputs by penalizing low entropy in probability heads
+        l_entropy = torch.tensor(0.0, device=pred.device)
+        if self.entropy_weight > 0:
+            # For prob_profit (idx 4), confidence (idx 7) - encourage away from 0.5
+            eps = 1e-6
+            p4 = torch.clamp(pred[:, 4], eps, 1 - eps)
+            p7 = torch.clamp(pred[:, 7], eps, 1 - eps)
+            # Binary entropy: -p*log(p) - (1-p)*log(1-p)
+            # We want to MAXIMIZE entropy early, so we negate
+            # But actually we want outputs to vary, so penalize low variance
+            # Simpler: penalize if batch variance is too low
+            var_penalty = torch.relu(0.02 - pred[:, 4].var()) + torch.relu(0.02 - pred[:, 7].var())
+            if pred.size(1) >= 10:
+                # Also check entry/exit logit variance
+                var_penalty += torch.relu(0.1 - pred[:, 8].var()) + torch.relu(0.1 - pred[:, 9].var())
+            l_entropy = var_penalty
+
         # Combine
         total_loss = (
             self.strike_weight * (l_strike + l_width + l_dte) +
             self.pnl_weight * l_pnl +
             self.risk_weight * l_risk +
-            self.prob_weight * l_prob +
-            self.regime_weight * l_regime
+            self.prob_weight * (l_prob + l_conf) +  # Include confidence Brier score
+            self.regime_weight * l_regime +
+            self.entry_exit_weight * (l_entry + l_exit) +  # NEW: entry/exit supervision
+            self.entropy_weight * l_entropy  # NEW: anti-collapse regularization
         )
-        
+
         return total_loss
 
 # ============================================================================

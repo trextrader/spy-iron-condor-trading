@@ -30,19 +30,19 @@ from typing import Tuple, Optional
 class TopKMoE(nn.Module):
     """
     Top-K Mixture of Experts for regime-specialized Iron Condor output.
-    
+
     Args:
         d_model: Input embedding dimension
-        output_dim: Output dimension (8 for IC parameters)
+        output_dim: Output dimension (10 for IC parameters: 8 orig + entry/exit logits)
         n_experts: Number of expert networks (default: 3 for Low/Normal/High)
         k: Number of experts to activate per sample (default: 1)
         hidden_ratio: Expert hidden layer size ratio (default: 4)
     """
-    
+
     def __init__(
         self,
         d_model: int,
-        output_dim: int = 8,
+        output_dim: int = 10,  # Changed from 8: now includes entry_logit, exit_logit
         n_experts: int = 3,
         k: int = 1,
         hidden_ratio: int = 4
@@ -154,14 +154,14 @@ class TopKMoE(nn.Module):
 class BatchedTopKMoE(nn.Module):
     """
     Batch-efficient Top-K MoE using einsum for parallel expert computation.
-    
+
     This version is more efficient for large batches by avoiding per-sample loops.
     """
-    
+
     def __init__(
         self,
         d_model: int,
-        output_dim: int = 8,
+        output_dim: int = 10,  # Changed from 8: now includes entry_logit, exit_logit
         n_experts: int = 3,
         k: int = 1,
         hidden_ratio: int = 4
