@@ -96,6 +96,11 @@
 - [ ] Add determinism/golden fixture bundle (`artifacts/audit/golden_fixtures`)
 - [ ] Add collapse guards to output distribution tests
 - [ ] Add model auto-discovery selection test
+- [ ] Add data staleness gates + tests
+- [ ] Add OCC/contract selection tests (expiry/DTE/strike rounding)
+- [ ] Add multi-leg execution state machine tests
+- [ ] Add kill switch safety controls + tests
+- [ ] Add checkpoint compatibility/version tests
 - [ ] Add data staleness gate contract + tests
 - [ ] Add OCC symbol parsing + expiry calendar tests
 - [ ] Add multi-leg execution state machine tests
