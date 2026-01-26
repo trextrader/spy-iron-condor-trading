@@ -596,12 +596,18 @@ def visualize_predictions(
                 title, color = head_info.get(name, (name, 'gray'))
             else:
                 name = f"Head_{i}"
-                if i == 8: title, color = "Entry Logit", "magenta"
-                elif i == 9: title, color = "Exit Logit", "black"
-                else: title, color = name, "gray"
+                if i == 8: 
+                    title, color = "Entry Logit", "magenta"
+                    loss_key = "entry" # Check this matches key in training loop logs
+                elif i == 9: 
+                    title, color = "Exit Logit", "black"
+                    loss_key = "exit"
+                else: 
+                    title, color = name, "gray"
+                    loss_key = name
             
             # Scatter: pred vs actual
-            ax.scatter(t, p, alpha=0.6, s=40, c=head_info[name][1], edgecolors='black', linewidth=0.5)
+            ax.scatter(t, p, alpha=0.6, s=40, c=color, edgecolors='black', linewidth=0.5)
             
             # Perfect prediction line
             all_vals = np.concatenate([p, t])
@@ -613,7 +619,10 @@ def visualize_predictions(
             # Stats
             mae = np.mean(np.abs(p - t))
             corr = np.corrcoef(p, t)[0, 1] if np.std(p) > 1e-6 and np.std(t) > 1e-6 else 0
-            loss = head_losses.get(name, 0)
+            
+            # Use specific loss key if defined, else name
+            key_to_use = loss_key if 'loss_key' in locals() else name
+            loss = head_losses.get(key_to_use, 0)
             
             ax.set_xlabel('Actual', fontsize=9)
             ax.set_ylabel('Predicted', fontsize=9)
