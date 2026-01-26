@@ -554,8 +554,11 @@ def visualize_predictions(
         targets = samples['targets']
         n_samples = preds.shape[0]
         
-        # Create 2x4 grid for 8 heads
-        fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+        # Create 3x4 grid for 10 heads (indices 0-9) + extra
+        # Indices: [0..7] = Original 8 heads
+        # Indices: [8] = Entry Logit
+        # Indices: [9] = Exit Logit
+        fig, axes = plt.subplots(3, 4, figsize=(16, 12))
         axes = axes.flatten()
         
         # Head display info
@@ -570,10 +573,32 @@ def visualize_predictions(
             'confidence': ('Confidence', 'cyan')
         }
         
-        for i, name in enumerate(MAIN_HEADS):
+        # 2026-01: Added Entry/Exit logits (indices 8, 9). 
+        # But MAIN_HEADS likely only has 8 keys.
+        # Let's iterate up to min(10, tensor dimension)
+        num_heads = min(10, preds.shape[1])
+        
+        # Extended names if not in dict
+        extra_names = ['Entry Logit', 'Exit Logit']
+        
+        for i in range(num_heads):
             ax = axes[i]
             p = preds[:, i]
-            t = targets[:, i]
+            
+            # Target might not have 10 columns if using old data loading
+            # If targets has fewer cols, skip target plotting for extra heads
+            has_target = i < targets.shape[1]
+            t = targets[:, i] if has_target else np.zeros_like(p)
+
+            # Determine name/color
+            if i < len(MAIN_HEADS):
+                name = MAIN_HEADS[i]
+                title, color = head_info.get(name, (name, 'gray'))
+            else:
+                name = f"Head_{i}"
+                if i == 8: title, color = "Entry Logit", "magenta"
+                elif i == 9: title, color = "Exit Logit", "black"
+                else: title, color = name, "gray"
             
             # Scatter: pred vs actual
             ax.scatter(t, p, alpha=0.6, s=40, c=head_info[name][1], edgecolors='black', linewidth=0.5)
