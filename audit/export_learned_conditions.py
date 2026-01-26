@@ -53,24 +53,59 @@ def load_model(model_path: str) -> nn.Module:
     if isinstance(checkpoint, dict):
         state_dict = checkpoint.get("state_dict", checkpoint)
         input_dim = checkpoint.get("input_dim")
+        model_config = checkpoint.get("model_config", {})
     else:
         state_dict = checkpoint
         input_dim = None
+        model_config = {}
 
     if input_dim is None:
-        raise ValueError("Checkpoint missing input_dim; cannot build CondorBrain.")
+        # Fallback to hardcoded assumption if old checkpoint
+        print("[WARN] Checkpoint missing input_dim, assuming 52 (V2.2)")
+        input_dim = 52
+
+    # Robustly infer architecture from config or state_dict
+    d_model = model_config.get("d_model", 512)
+    n_layers = model_config.get("n_layers", 16) # Default to 16 for this run
+    use_vol = model_config.get("use_vol_gated_attn", True)
+    
+    # Infer diffusion from state_dict if not in config
+    has_diffusion_weights = any("diffusion_head" in k for k in state_dict.keys())
+    use_diff = model_config.get("use_diffusion", has_diffusion_weights)
+    
+    # Infer MoE from state_dict
+    has_moe_weights = any("moe_head" in k for k in state_dict.keys())
+    use_topk = model_config.get("use_topk_moe", has_moe_weights)
+    moe_experts = model_config.get("moe_n_experts", 3)
+    moe_k = model_config.get("moe_k", 1)
+
+    print(f"[Model] Loading CondorBrain: {d_model}d x {n_layers}L | Diffusion={use_diff} | MoE={use_topk}")
 
     model = CondorBrain(
-        d_model=512,
-        n_layers=12,
+        d_model=d_model,
+        n_layers=n_layers,
         input_dim=input_dim,
-        use_vol_gated_attn=True,
-        use_topk_moe=True,
-        moe_n_experts=3,
-        moe_k=1,
-        use_diffusion=True,
+        use_vol_gated_attn=use_vol,
+        use_topk_moe=use_topk,
+        moe_n_experts=moe_experts,
+        moe_k=moe_k,
+        use_diffusion=use_diff,
+        diffusion_steps=50, # Default, not critical for inference unless using sampling loop
+        diffusion_input_dim=10, 
+        diffusion_horizon=1
     )
-    model.load_state_dict(state_dict, strict=False)
+    
+    # Strip 'module.' or '_orig_mod.' prefixes if present (torch.compile artifact)
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        name = k
+        if name.startswith("module."):
+            name = name[7:]
+        if name.startswith("_orig_mod."):
+            name = name[10:]
+        new_state_dict[name] = v
+        
+    model.load_state_dict(new_state_dict, strict=False)
     model.eval()
     return model
 

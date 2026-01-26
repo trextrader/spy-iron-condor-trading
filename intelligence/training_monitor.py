@@ -570,7 +570,9 @@ def visualize_predictions(
             'pop': ('Prob of Profit', 'purple'),
             'roi': ('Expected ROI', 'brown'),
             'max_loss': ('Max Loss %', 'pink'),
-            'confidence': ('Confidence', 'cyan')
+            'confidence': ('Confidence', 'cyan'),
+            'entry': ('Entry Logit', 'magenta'),
+            'exit': ('Exit Logit', 'black')
         }
         
         # 2026-01: Added Entry/Exit logits (indices 8, 9). 

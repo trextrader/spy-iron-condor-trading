@@ -93,7 +93,7 @@ class CompositeCondorLoss(nn.Module):
             returns_flat = returns.flatten()
             if returns_flat.numel() > 1:
                 mu = returns_flat.mean()
-                sigma = returns_flat.std() + 1e-9
+                sigma = torch.clamp(returns_flat.std(), min=1e-6)
                 l_sharpe = -mu / sigma  # Negative because we minimize
         
         # 3. Soft Drawdown Penalty (if returns provided)
@@ -172,7 +172,7 @@ class CompositeCondorLoss(nn.Module):
             returns_flat = returns.flatten()
             if returns_flat.numel() > 1:
                 mu = returns_flat.mean()
-                sigma = returns_flat.std() + 1e-9
+                sigma = torch.clamp(returns_flat.std(), min=1e-6)
                 l_sharpe = -mu / sigma
         
         if returns is not None and self.lambdas[2] > 0:

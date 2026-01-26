@@ -688,8 +688,15 @@ def train_condor_brain(args):
     patience_counter = 0
     train_losses = []
     val_losses = []
+    train_losses = []
+    val_losses = []
     best_epoch = 0
     
+    # Loss component tracking
+    loss_history = {
+        'total': [], 'pred': [], 'sharpe': [], 
+        'dd': [], 'turnover': [], 'rule': [], 'diff': []
+    }
     # Live plotting setup (Colab/Jupyter compatible)
     if args.live_plot and not args.monitor:
         try:
@@ -727,11 +734,23 @@ def train_condor_brain(args):
     
     for epoch in range(args.epochs):
         model.train()
+        if not use_gpu_dataset: # Only shuffle if using DataLoader
+            train_loader.dataset.shuffle()
+        
+        # Reset epoch accumulators
         train_loss = 0.0
+        train_loss_components = {
+            'pred': 0.0, 'sharpe': 0.0, 'dd': 0.0, 
+            'turnover': 0.0, 'rule': 0.0, 'diff': 0.0
+        }
         n_batches = 0
         
         epoch_start = time.time()
         optimizer.zero_grad(set_to_none=True)  # Zero at start of epoch
+        
+        # Throughput monitoring
+        _tp_last_t = time.time()
+        _tp_start_t = time.time()
         
         # Direct iteration over GPU batches (FAST) or DataLoader (fallback)
         pbar = tqdm(
@@ -831,9 +850,47 @@ def train_condor_brain(args):
                     print(f"  outputs max: {torch.max(torch.abs(outputs[~torch.isnan(outputs)])).item() if (~torch.isnan(outputs)).any() else 'ALL NaN'}")
                     raise RuntimeError("Model produced NaN/Inf outputs - check data normalization!")
                 
-                loss = criterion(outputs.float(), batch_y.float(), regime_probs.float() if regime_probs is not None else None, batch_r)
+                # Calculate loss (decomposed if supported)
+                if hasattr(criterion, 'forward_decomposed') and args.composite_loss:
+                    loss_dict = criterion.forward_decomposed(
+                        outputs.float(), 
+                        batch_y.float(), 
+                        regime_probs.float() if regime_probs is not None else None, 
+                        batch_r,
+                        # Pass rule signals if available (placeholder for now)
+                        rule_signals=None 
+                    )
+                    loss = loss_dict['total']
+                    
+                    # Accumulate components (unscaled)
+                    for k in train_loss_components:
+                        if k in loss_dict:
+                            # We must .item() here carefully since we are in autocast/graph?
+                            # No, just keep it as tensor for backward, extract .item() for logging
+                            pass 
+                else:
+                     loss = criterion(outputs.float(), batch_y.float(), regime_probs.float() if regime_probs is not None else None, batch_r)
+                     loss_dict = {'total': loss, 'pred': loss}
+
+                # Add diffusion loss if present
+                if diffusion_loss is not None:
+                    # Scale diffusion loss to be comparable
+                    diff_loss_scaled = diffusion_loss * 0.1 # Weighting factor?
+                    loss = loss + diff_loss_scaled
+                    loss_dict['diff'] = diff_loss_scaled
+                    loss_dict['total'] = loss
+
                 # Scale loss for gradient accumulation
                 loss = loss / args.accum_steps
+            
+            # Extract component values for logging (detached from graph)
+            with torch.no_grad():
+                for k in train_loss_components:
+                    if k in loss_dict:
+                        train_loss_components[k] += loss_dict[k].item()
+                if 'diff' in loss_dict:
+                     # 'diff' key might be missing if diffusion_loss is None, manually added above
+                     pass
             
             # Hard check on loss
             if torch.isnan(loss) or torch.isinf(loss):
@@ -994,7 +1051,18 @@ def train_condor_brain(args):
             alloc = torch.cuda.memory_allocated() / 1e9
             reserved = torch.cuda.memory_reserved() / 1e9
             val_str = f"Val: {val_loss:.4f}" if run_val else "Val: SKIP"
-            print(f"Epoch {epoch+1:3d}/{args.epochs} | Train: {train_loss:.4f} | {val_str} | "
+            val_str = f"Val: {val_loss:.4f}" if run_val else "Val: SKIP"
+            
+            # Normalize train loss for reporting
+            avg_train_loss = train_loss / max(n_batches, 1)
+            
+            # detailed component string
+            comp_str = (f"Pred:{train_loss_components['pred']/max(n_batches,1):.2f} "
+                        f"Sh:{train_loss_components['sharpe']/max(n_batches,1):.2f} "
+                        f"DD:{train_loss_components['dd']/max(n_batches,1):.2f} "
+                        f"Diff:{train_loss_components['diff']/max(n_batches,1):.2f}")
+            
+            print(f"Epoch {epoch+1:3d}/{args.epochs} | Train: {avg_train_loss:.4f} ({comp_str}) | {val_str} | "
                   f"LR: {lr:.2e} | Time: {epoch_time:.1f}s | GPU alloc: {alloc:.1f}GB | reserved: {reserved:.1f}GB")
         else:
             print(f"Epoch {epoch+1:3d}/{args.epochs} | Train: {train_loss:.4f} | Val: {val_loss:.4f} | LR: {lr:.2e}")
@@ -1208,6 +1276,8 @@ def train_condor_brain(args):
                     "use_topk_moe": bool(args.topk_moe),
                     "moe_n_experts": int(args.moe_experts),
                     "moe_k": int(args.moe_k),
+                    "use_diffusion": bool(args.diffusion),
+                    "diffusion_steps": int(args.diffusion_steps),
                 },
                 "training_config": {
                     "epochs": int(args.epochs),
