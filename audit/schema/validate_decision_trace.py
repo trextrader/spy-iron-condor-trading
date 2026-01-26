@@ -23,22 +23,15 @@ def _iter_jsonl(path: str):
             yield idx, json.loads(line)
 
 
-def main() -> int:
+def validate_decision_trace(trace_path: str) -> bool:
     if jsonschema is None:
-        print("jsonschema not installed; install with `pip install jsonschema`.")
-        return 2
+        raise RuntimeError("jsonschema not installed; install with `pip install jsonschema`.")
 
-    if len(sys.argv) < 2:
-        print("Usage: python audit/schema/validate_decision_trace.py <decision_trace.jsonl>")
-        return 2
-
-    trace_path = sys.argv[1]
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     schema_path = os.path.join(repo_root, "audit", "schemas", "decision_trace_schema_v1.json")
 
     if not os.path.exists(schema_path):
-        print(f"Schema not found: {schema_path}")
-        return 2
+        raise FileNotFoundError(f"Schema not found: {schema_path}")
 
     schema = _load_json(schema_path)
     validator = jsonschema.Draft7Validator(schema)
@@ -55,10 +48,24 @@ def main() -> int:
 
     if errors:
         print(f"Validation failed with {errors} error(s).")
-        return 1
+        return False
 
     print("Decision trace validation passed.")
-    return 0
+    return True
+
+
+def main() -> int:
+    if jsonschema is None:
+        print("jsonschema not installed; install with `pip install jsonschema`.")
+        return 2
+
+    if len(sys.argv) < 2:
+        print("Usage: python audit/schema/validate_decision_trace.py <decision_trace.jsonl>")
+        return 2
+
+    trace_path = sys.argv[1]
+    ok = validate_decision_trace(trace_path)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

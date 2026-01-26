@@ -12,6 +12,8 @@ import torch.nn as nn
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+import os
+from audit.contract_snapshot import generate_contract_snapshot
 print("✅ Imports complete")
 
 # --- GPU CHECK ---
@@ -48,6 +50,12 @@ else:
 
 model.eval()
 print(f"✅ Model loaded: {sum(p.numel() for p in model.parameters()):,} params")
+generate_contract_snapshot(
+    os.path.join(os.getcwd(), "artifacts", "audit", "contract_snapshot.json"),
+    os.getcwd(),
+    checkpoint_path=MODEL_PATH,
+    extra={"mode": "backtest_optimized"},
+)
 
 # --- LOAD DATA ---
 print("\n[4/6] Loading data...")

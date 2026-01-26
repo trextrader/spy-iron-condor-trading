@@ -1,0 +1,33 @@
+name: Contract Checks
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  contract-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install minimal deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install jsonschema
+
+      - name: Docs contract sync
+        run: |
+          python scripts/model_tests/12_docs_contract_sync_check.py
+
+      - name: Schema validators (fixtures)
+        run: |
+          python audit/schema/validate_decision_trace.py audit/schemas/fixtures/decision_trace_fixture.jsonl
+          python audit/schema/validate_decision_factor_attribution.py audit/schemas/fixtures/decision_factor_attribution_fixture.csv

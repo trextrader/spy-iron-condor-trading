@@ -18,6 +18,8 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from torch.cuda.amp import autocast
+import os
+from audit.contract_snapshot import generate_contract_snapshot
 print("✅ Imports complete")
 
 # --- 2. CONFIG & GPU ---
@@ -44,6 +46,12 @@ checkpoint = torch.load(MODEL_PATH, map_location=device, weights_only=False)
 model.load_state_dict(checkpoint, strict=False)
 model.eval()
 print(f"✅ Model loaded: {sum(p.numel() for p in model.parameters()):,} params")
+generate_contract_snapshot(
+    os.path.join(os.getcwd(), "artifacts", "audit", "contract_snapshot.json"),
+    os.getcwd(),
+    checkpoint_path=MODEL_PATH,
+    extra={"mode": "backtest_final"},
+)
 
 # --- 4. LOAD DATA ---
 print("\n[4/6] Loading data...")

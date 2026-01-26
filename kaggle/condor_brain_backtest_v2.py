@@ -58,6 +58,9 @@ try:
 except Exception:
     HAS_TRACE_LOGGER = False
 from audit.contract_snapshot import generate_contract_snapshot
+from audit.generate_decision_factor_attribution import generate_attribution_csv
+from audit.schema.validate_decision_factor_attribution import validate_decision_factor_attribution
+from audit.schema.validate_decision_trace import validate_decision_trace
 
 # --- SCALING HELPERS (Matched to training) ---
 def robust_zscore_fit(X):
@@ -1698,6 +1701,18 @@ def main():
             csv_path = os.path.join(REPORTS_DIR, "trades_v2.csv")
             pd.DataFrame(trades).to_csv(csv_path, index=False)
             print(f"Saved trades to {csv_path}")
+
+            try:
+                attribution_path = os.path.join(REPORTS_DIR, "decision_factor_attribution.csv")
+                if os.path.exists(DECISION_TRACE_PATH):
+                    generate_attribution_csv(DECISION_TRACE_PATH, attribution_path)
+                    validate_decision_factor_attribution(attribution_path)
+                    validate_decision_trace(DECISION_TRACE_PATH)
+                    print(f"Saved decision factor attribution to {attribution_path}")
+                else:
+                    print("⚠️ decision_trace.jsonl not found; skipping attribution export.")
+            except Exception as e:
+                print(f"⚠️ Attribution export/validation failed: {e}")
             
             # 6. FACTOR ATTRIBUTION ANALYSIS
             print("\n" + "=" * 80)

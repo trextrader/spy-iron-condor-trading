@@ -22,6 +22,7 @@ import torch
 import pandas as pd
 import numpy as np
 from pathlib import Path
+from audit.contract_snapshot import generate_contract_snapshot
 
 # Clone repo
 # !git clone https://github.com/trextrader/spy-iron-condor-trading.git repo
@@ -123,6 +124,13 @@ if torch.cuda.device_count() > 1:
 
 print(f"✅ Model loaded on {device}")
 print(f"   Parameters: {sum(p.numel() for p in model.parameters()):,}")
+generate_contract_snapshot(
+    os.path.join(os.getcwd(), "artifacts", "audit", "contract_snapshot.json"),
+    os.getcwd(),
+    feature_cols=FEATURE_COLS,
+    checkpoint_path=MODEL_PATH,
+    extra={"mode": "backtest"},
+)
 
 # =============================================================================
 # CELL 4: Load Test Data
