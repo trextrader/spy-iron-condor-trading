@@ -221,7 +221,9 @@ def _export_attribution(epoch_num: int, batch_idx: int, model, batch_x, feature_
     model.zero_grad(set_to_none=True)
     pred = model({"encoder_cont": x_attr, **{k: v[:batch_size] for k, v in batch_x.items() if k != "encoder_cont"}})
     y_hat = _unwrap_pred_tensor(pred)
-    if not torch.is_tensor(y_hat) or y_hat.ndim < 3:
+    if not torch.is_tensor(y_hat):
+        return
+    if y_hat.ndim < 3:
         return
     y_hat = y_hat[:, 0, :]  # [B, heads]
 
@@ -291,9 +293,11 @@ def _unwrap_pred_tensor(pred):
         pred = pred.prediction
     if isinstance(pred, (list, tuple)):
         tensors = [p for p in pred if torch.is_tensor(p)]
+        if len(tensors) == 0:
+            return None
         if len(tensors) == 1:
             pred = tensors[0]
-        elif len(tensors) > 1:
+        else:
             norm = []
             for t in tensors:
                 if t.ndim == 2:
@@ -799,10 +803,10 @@ class LearnedConditionsCallback(pl.Callback):
             enc = x["encoder_cont"]
             pred = pl_module(x)
             y_hat = _unwrap_pred_tensor(pred)
-            if torch.is_tensor(y_hat) and y_hat.ndim >= 3:
-                y_hat = y_hat[:, 0, :]
-            elif not torch.is_tensor(y_hat):
+            if not torch.is_tensor(y_hat):
                 return
+            if y_hat.ndim >= 3:
+                y_hat = y_hat[:, 0, :]
             x_last = enc[:, -1, :].detach().cpu().numpy()
             y_out = y_hat.detach().cpu().numpy()
             self.surrogate_seen = _surrogate_update(self.surrogate_x, self.surrogate_y, self.surrogate_seen, x_last, y_out)
