@@ -591,6 +591,21 @@ class TFTWithDiffusion(pl.LightningModule):
             n_steps=DIFFUSION_STEPS,
         )
 
+    def _move_batch(self, batch):
+        if isinstance(batch, dict):
+            out = {}
+            for k, v in batch.items():
+                if torch.is_tensor(v):
+                    out[k] = v.to(self.device)
+                else:
+                    out[k] = v
+            return out
+        if isinstance(batch, (list, tuple)):
+            return type(batch)(self._move_batch(x) for x in batch)
+        if torch.is_tensor(batch):
+            return batch.to(self.device)
+        return batch
+
     def forward(self, x):
         return self.tft(x)
 
@@ -609,7 +624,7 @@ class TFTWithDiffusion(pl.LightningModule):
         return enc.mean(dim=1)
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
+        x, y = self._move_batch(batch)
         pred = self.tft(x)
         y_hat = pred["prediction"] if isinstance(pred, dict) else pred
         base_loss = self.tft.loss(y_hat, y)
@@ -625,7 +640,7 @@ class TFTWithDiffusion(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, y = batch
+        x, y = self._move_batch(batch)
         pred = self.tft(x)
         y_hat = pred["prediction"] if isinstance(pred, dict) else pred
         base_loss = self.tft.loss(y_hat, y)
