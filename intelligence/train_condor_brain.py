@@ -757,6 +757,12 @@ def train_condor_brain(args):
                 batch_r = _data[2].to(device, non_blocking=True)
             
             with autocast('cuda', dtype=amp_dtype):
+                # Prepare diffusion target if enabled
+                # Using batch_y as the default target source for now. 
+                # Ideally this should be a specific slice (e.g. next 32 feature steps), 
+                # but batch_y is the closest available target tensor.
+                batch_y_diff = batch_y if args.diffusion else None
+
                 # Model returns variable tuple depending on flags
                 model_out = model(
                     batch_x, 
