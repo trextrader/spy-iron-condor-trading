@@ -380,6 +380,8 @@ class CondorBrain(nn.Module):
         moe_k: int = 1,
         use_diffusion: bool = False,
         diffusion_steps: int = 50,
+        diffusion_input_dim: int = 4,   # NEW: allow configurable diffusion dims
+        diffusion_horizon: int = 32,    # NEW: allow configurable horizon
         feature_group_dropout: float = 0.0  # NEW: 0.15 recommended for training
     ):
         super().__init__()
@@ -468,13 +470,13 @@ class CondorBrain(nn.Module):
         self.use_diffusion = use_diffusion
         if use_diffusion:
             self.diffusion_head = ConditionalDiffusionHead(
-                input_dim=4,           # r, rho, d, v
+                input_dim=diffusion_input_dim,    # Configurable
                 cond_dim=d_model,
                 hidden_dim=256,
-                horizon=32,            # Fixed to 32 steps
+                horizon=diffusion_horizon,        # Configurable
                 n_steps=diffusion_steps
             )
-            logger.info(f"[CondorBrain] Diffusion Head enabled: {diffusion_steps} steps")
+            logger.info(f"[CondorBrain] Diffusion Head enabled: {diffusion_steps} steps, dim={diffusion_input_dim}, horizon={diffusion_horizon}")
         else:
             self.diffusion_head = None
         
