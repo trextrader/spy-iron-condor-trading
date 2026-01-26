@@ -761,7 +761,13 @@ def train_condor_brain(args):
                 # Using batch_y as the default target source for now. 
                 # Ideally this should be a specific slice (e.g. next 32 feature steps), 
                 # but batch_y is the closest available target tensor.
-                batch_y_diff = batch_y if args.diffusion else None
+                # Diffusion expects (B, Horizon, Features), so unsqueeze to (B, 1, Features) if 2D
+                if args.diffusion:
+                    batch_y_diff = batch_y
+                    if batch_y_diff.dim() == 2:
+                        batch_y_diff = batch_y_diff.unsqueeze(1)
+                else:
+                    batch_y_diff = None
 
                 # Model returns variable tuple depending on flags
                 model_out = model(
