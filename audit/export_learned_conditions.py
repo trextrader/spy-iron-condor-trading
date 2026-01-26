@@ -317,6 +317,8 @@ def model_forward(model: nn.Module, x: torch.Tensor) -> Dict[str, torch.Tensor]:
     expected_roi = pol[:, 5]
     confidence = pol[:, 7]
 
+    print(f"[DEBUG] policy_head_dim = {pol.size(1)}")  # Check if 8 or 10
+
     # NEW: Use explicit entry/exit logits if available (10-output model)
     if pol.size(1) >= 10:
         entry_logit = pol[:, 8]  # Explicit entry logit
@@ -630,6 +632,9 @@ def main(
 
     entry_prob = torch.sigmoid(entry_logit).numpy()
     exit_prob = torch.sigmoid(exit_logit).numpy()
+
+    print(f"[DEBUG] entry_prob: min={entry_prob.min():.4f}, mean={entry_prob.mean():.4f}, max={entry_prob.max():.4f}")
+    print(f"[DEBUG] entry_prob >= 0.5 rate: {(entry_prob >= 0.5).mean():.4f}")
 
     entry_y = (entry_prob >= 0.5).astype(np.int32)
     exit_y = (exit_prob >= 0.5).astype(np.int32)
