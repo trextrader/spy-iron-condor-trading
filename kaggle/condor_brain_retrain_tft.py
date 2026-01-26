@@ -369,12 +369,24 @@ if MSE is None:
                 q_mid = y_pred.shape[-1] // 2
                 y_pred = y_pred[..., q_mid]
             if torch.is_tensor(y_pred) and torch.is_tensor(target):
-                if y_pred.ndim > target.ndim:
-                    reduce_dims = tuple(range(target.ndim, y_pred.ndim))
+                if y_pred.ndim > 2:
+                    reduce_dims = tuple(range(2, y_pred.ndim))
                     y_pred = y_pred.mean(dim=reduce_dims)
-                if y_pred.ndim < target.ndim:
-                    reduce_dims = tuple(range(y_pred.ndim, target.ndim))
+                if target.ndim > 2:
+                    reduce_dims = tuple(range(2, target.ndim))
                     target = target.mean(dim=reduce_dims)
+                if y_pred.ndim == 1:
+                    y_pred = y_pred.unsqueeze(1)
+                if target.ndim == 1:
+                    target = target.unsqueeze(1)
+                if y_pred.size(1) == 1 and target.size(1) > 1:
+                    y_pred = y_pred.repeat(1, target.size(1))
+                if target.size(1) == 1 and y_pred.size(1) > 1:
+                    target = target.repeat(1, y_pred.size(1))
+                if y_pred.size(1) != target.size(1):
+                    t = min(y_pred.size(1), target.size(1))
+                    y_pred = y_pred[:, :t]
+                    target = target[:, :t]
             return F.mse_loss(y_pred, target, reduction="none")
 
 # ------------------------------
