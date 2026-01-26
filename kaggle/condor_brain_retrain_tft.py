@@ -220,10 +220,9 @@ def _export_attribution(epoch_num: int, batch_idx: int, model, batch_x, feature_
 
     model.zero_grad(set_to_none=True)
     pred = model({"encoder_cont": x_attr, **{k: v[:batch_size] for k, v in batch_x.items() if k != "encoder_cont"}})
-    if isinstance(pred, dict):
-        y_hat = pred["prediction"]
-    else:
-        y_hat = pred
+    y_hat = _unwrap_pred_tensor(pred)
+    if not torch.is_tensor(y_hat) or y_hat.ndim < 3:
+        return
     y_hat = y_hat[:, 0, :]  # [B, heads]
 
     header = [
@@ -283,6 +282,32 @@ def _surrogate_update(buf_x: list, buf_y: list, seen: int, x_last: np.ndarray, y
                 buf_x[j] = x_last[i].copy()
                 buf_y[j] = y_out[i].copy()
     return seen
+
+
+def _unwrap_pred_tensor(pred):
+    if isinstance(pred, dict) and "prediction" in pred:
+        pred = pred["prediction"]
+    if hasattr(pred, "prediction"):
+        pred = pred.prediction
+    if isinstance(pred, (list, tuple)):
+        tensors = [p for p in pred if torch.is_tensor(p)]
+        if len(tensors) == 1:
+            pred = tensors[0]
+        elif len(tensors) > 1:
+            norm = []
+            for t in tensors:
+                if t.ndim == 2:
+                    t = t.unsqueeze(-1)
+                elif t.ndim == 1:
+                    t = t.view(-1, 1, 1)
+                norm.append(t)
+            pred = torch.cat(norm, dim=-1)
+    if torch.is_tensor(pred):
+        if pred.ndim == 2:
+            pred = pred.unsqueeze(1)
+        elif pred.ndim == 1:
+            pred = pred.view(-1, 1, 1)
+    return pred
 
 
 def _rule_feature_name(rule_id: str) -> str:
@@ -773,18 +798,11 @@ class LearnedConditionsCallback(pl.Callback):
                 return
             enc = x["encoder_cont"]
             pred = pl_module(x)
-            if isinstance(pred, dict) and "prediction" in pred:
-                y_hat = pred["prediction"]
-            elif hasattr(pred, "prediction"):
-                y_hat = pred.prediction
-            elif isinstance(pred, (list, tuple)):
-                y_hat = pred[0]
-            else:
-                y_hat = pred
+            y_hat = _unwrap_pred_tensor(pred)
             if torch.is_tensor(y_hat) and y_hat.ndim >= 3:
                 y_hat = y_hat[:, 0, :]
-            elif torch.is_tensor(y_hat) and y_hat.ndim == 2:
-                y_hat = y_hat
+            elif not torch.is_tensor(y_hat):
+                return
             x_last = enc[:, -1, :].detach().cpu().numpy()
             y_out = y_hat.detach().cpu().numpy()
             self.surrogate_seen = _surrogate_update(self.surrogate_x, self.surrogate_y, self.surrogate_seen, x_last, y_out)
