@@ -607,6 +607,8 @@ def train_condor_brain(args):
         moe_k=args.moe_k,
         use_diffusion=args.diffusion,
         diffusion_steps=args.diffusion_steps,
+        diffusion_input_dim=10,  # Matches batch_y dimensions (targets)
+        diffusion_horizon=1,     # Matches unsqueezed single step
         feature_group_dropout=args.feature_group_dropout  # NEW: anti-collapse regularization
     ).to(device)
     
