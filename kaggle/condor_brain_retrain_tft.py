@@ -53,7 +53,7 @@ from audit.contract_snapshot import generate_contract_snapshot
 # ------------------------------
 # CONFIG + ARGS
 # ------------------------------
-ROWS_TO_LOAD = 1_000_000
+ROWS_TO_LOAD = 500_000
 EPOCHS = 6
 SEQ_LEN = 256
 LR = 1e-4
