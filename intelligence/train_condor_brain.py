@@ -757,15 +757,53 @@ def train_condor_brain(args):
                 batch_r = _data[2].to(device, non_blocking=True)
             
             with autocast('cuda', dtype=amp_dtype):
-                # Model returns variable tuple: (outputs, regime, horizon, [features], [diffusion], [experts])
-                # We only need outputs and regime_probs for training loss
-                model_out = model(batch_x, return_regime=True, forecast_days=0)
+                # Model returns variable tuple depending on flags
+                model_out = model(
+                    batch_x, 
+                    return_regime=True, 
+                    forecast_days=0,
+                    return_features=False, # We don't train features here yet
+                    diffusion_target=batch_y_diff if args.diffusion else None # Pass diffusion targets if enabled
+                )
+                
+                # Robust unpacking
                 if isinstance(model_out, tuple):
                     outputs = model_out[0]
                     regime_probs = model_out[1] if len(model_out) > 1 else None
+                    # We might have other outputs (horizon, features, diffusion, experts)
+                    # For basic loss we just need outputs and regime.
+                    # If diffusion is enabled, diffusion_loss is at index 4 (if features=False) or 5 (if features=True)
+                    # Let's extract diffusion loss if present for logging/loss addition
+                    
+                    # Logic: 
+                    # [outputs]
+                    # + [regime]
+                    # + [horizon=None]
+                    # + [features] (if requested)
+                    # + [diffusion] (if requested)
+                    # + [experts] (if requested)
+                    
+                    # Currently we only request regime. But we might request diffusion.
+                    # To be safe, let's unpack specifically if we are doing diffusion training in this loop?
+                    # The current command line uses --diffusion, so we need to handle it.
+                    
+                    diffusion_loss = None
+                    if args.diffusion:
+                         # Browse tuple for scalar diffusion loss
+                         # It usually appears after horizon/features.
+                         # Let's iterate or assume position? 
+                         # Position is stable: 0=out, 1=reg, 2=hor, 3=feat(opt), 4=diff(opt), 5=exp(opt)
+                         # We passed return_features=False. So diffusion should be at index 4?
+                         # Let's verify: res.append(diffusion_out) comes after features (if any).
+                         # return_features=False -> indices: 0,1,2, [3=diff]
+                         
+                         if len(model_out) > 3:
+                             diffusion_loss = model_out[3]
+
                 else:
                     outputs = model_out
                     regime_probs = None
+                    diffusion_loss = None
 
                 # Log dtype on first batch (sanity check)
                 if batch_idx == 0 and epoch == 0:
