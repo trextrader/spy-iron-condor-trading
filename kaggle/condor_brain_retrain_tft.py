@@ -591,6 +591,10 @@ class TFTWithDiffusion(pl.LightningModule):
             n_steps=DIFFUSION_STEPS,
         )
 
+    def on_fit_start(self):
+        self.tft.to(self.device)
+        self.diffusion_head.to(self.device)
+
     def transfer_batch_to_device(self, batch, device, dataloader_idx=0):
         return self._to_device(batch, device)
 
