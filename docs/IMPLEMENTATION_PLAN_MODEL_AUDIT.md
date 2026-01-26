@@ -33,6 +33,17 @@ training → serialization → inference contract → backtest → live usage �
    - Gate order and override behavior are documented and enforced.
 10. **Determinism & Reproducibility Contract**
    - Seeds, library versions, and inference determinism are captured in run manifests.
+11. **Data Freshness & Staleness Contract**
+   - Max tolerated staleness for spot bars, options chain, and greeks is enforced.
+   - Stale data forces no-entry / exit-only behavior and logs gate failures.
+12. **Instrument & Contract Selection Contract**
+   - OCC parsing, strike rounding, expiry selection, and DTE filters are explicit and tested.
+13. **Multi-leg Execution Integrity Contract**
+   - Partial fills, leg imbalance, and cancel/replace behavior are deterministic.
+14. **Safety Controls / Kill Switch Contract**
+   - Daily loss limits, consecutive-loss limits, anomaly halts, and staleness halts are enforced.
+15. **Backward Compatibility Contract**
+   - Checkpoints declare compatibility with registry/head mapping/normalization versions.
 
 ## 3) Deliverables
 ### 3.1 Scripts (Smoke tests, fast gating)
@@ -51,6 +62,12 @@ training → serialization → inference contract → backtest → live usage �
 - `scripts/model_tests/test_time_alignment_and_session.py`
 - `scripts/model_tests/test_pnl_accounting_parity.py`
 - `scripts/model_tests/test_model_autodiscovery_selection.py`
+- `scripts/model_tests/test_data_staleness_gate.py`
+- `scripts/model_tests/test_occ_symbol_roundtrip.py`
+- `scripts/model_tests/test_expiry_calendar_and_dte.py`
+- `scripts/model_tests/test_multileg_fill_state_machine.py`
+- `scripts/model_tests/test_kill_switch_triggers.py`
+- `scripts/model_tests/test_checkpoint_version_compat.py`
 
 ### 3.2 Audit tools (heavier, on-demand)
 - `audit/export_learned_conditions.py` (attribution + surrogate rules)
@@ -88,6 +105,9 @@ Before demo/live:
 2. Generate a `run_manifest.json` and attach to the session log.
 3. Confirm backtest/live output contract match.
 4. Confirm time/session alignment and execution accounting parity.
+5. Confirm data freshness gates and staleness handling (entry blocked, exit allowed).
+6. Confirm kill switch behavior and reset procedure.
+7. Confirm multi-leg execution integrity under partial fill simulations.
 
 ## 5) Phased Execution Plan
 ### Phase A — Smoke Test Harness (Immediate)
@@ -133,3 +153,8 @@ Before demo/live:
 - Collapse guards pass (non-degenerate outputs).
 - Docs contract matches code-derived contract.
 - run_manifest.json + contract_snapshot.json generated for each RC model.
+- Data staleness gate blocks entry and logs reason codes.
+- Kill switch halts trading under configured thresholds and requires explicit reset.
+- Multi-leg execution state machine handles partial fills safely.
+- Instrument selection is correct across expiries/strikes/OCC formatting.
+- Checkpoint compatibility enforced across registry/head/normalization versions.
