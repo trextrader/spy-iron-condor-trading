@@ -757,8 +757,16 @@ def train_condor_brain(args):
                 batch_r = _data[2].to(device, non_blocking=True)
             
             with autocast('cuda', dtype=amp_dtype):
-                outputs, regime_probs, _ = model(batch_x, return_regime=True, forecast_days=0)
-                
+                # Model returns variable tuple: (outputs, regime, horizon, [features], [diffusion], [experts])
+                # We only need outputs and regime_probs for training loss
+                model_out = model(batch_x, return_regime=True, forecast_days=0)
+                if isinstance(model_out, tuple):
+                    outputs = model_out[0]
+                    regime_probs = model_out[1] if len(model_out) > 1 else None
+                else:
+                    outputs = model_out
+                    regime_probs = None
+
                 # Log dtype on first batch (sanity check)
                 if batch_idx == 0 and epoch == 0:
                     print(f"[SANITY] batch_x dtype: {batch_x.dtype}")
@@ -771,7 +779,7 @@ def train_condor_brain(args):
                     print(f"  outputs max: {torch.max(torch.abs(outputs[~torch.isnan(outputs)])).item() if (~torch.isnan(outputs)).any() else 'ALL NaN'}")
                     raise RuntimeError("Model produced NaN/Inf outputs - check data normalization!")
                 
-                loss = criterion(outputs.float(), batch_y.float(), regime_probs.float(), batch_r)
+                loss = criterion(outputs.float(), batch_y.float(), regime_probs.float() if regime_probs is not None else None, batch_r)
                 # Scale loss for gradient accumulation
                 loss = loss / args.accum_steps
             
@@ -911,8 +919,15 @@ def train_condor_brain(args):
                         batch_r = _data[2].to(device, non_blocking=True)
                     
                     with autocast('cuda', dtype=amp_dtype):
-                        outputs, regime_probs, _ = model(batch_x, return_regime=True, forecast_days=0)
-                        loss = criterion(outputs.float(), batch_y.float(), regime_probs.float(), batch_r)
+                        # Handle variable tuple returns (diffusion adds extra outputs)
+                        model_out = model(batch_x, return_regime=True, forecast_days=0)
+                        if isinstance(model_out, tuple):
+                            outputs = model_out[0]
+                            regime_probs = model_out[1] if len(model_out) > 1 else None
+                        else:
+                            outputs = model_out
+                            regime_probs = None
+                        loss = criterion(outputs.float(), batch_y.float(), regime_probs.float() if regime_probs is not None else None, batch_r)
                     val_loss += loss.item()
                     _n_val_done += 1
             
