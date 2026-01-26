@@ -21,6 +21,11 @@ from tqdm import tqdm
 import os
 from torch.utils.tensorboard import SummaryWriter
 from audit.contract_snapshot import generate_contract_snapshot
+import argparse
+import csv
+import hashlib
+import json
+from datetime import datetime, timezone
 from intelligence.condor_brain import CondorBrain
 from intelligence.canonical_feature_registry import (
     FEATURE_COLS_V21, INPUT_DIM_V21, VERSION_V21,
@@ -45,6 +50,159 @@ from intelligence.training_monitor import (
 import io
 from PIL import Image
 import matplotlib.pyplot as plt
+
+# --- LEARNED CONDITIONS EXPORT FLAGS ---
+_parser = argparse.ArgumentParser(add_help=False)
+_parser.add_argument("--learned-export", dest="learned_export", action="store_true")
+_parser.add_argument("--no-learned-export", dest="learned_export", action="store_false")
+_parser.set_defaults(learned_export=True)
+_args, _ = _parser.parse_known_args()
+ENABLE_LEARNED_EXPORT = bool(_args.learned_export)
+LEARNED_COND_DIR = os.path.join("artifacts", "learned_conditions_v2")
+os.makedirs(LEARNED_COND_DIR, exist_ok=True)
+ATTR_EVERY_N = 5
+ATTR_BATCH = 4
+SURROGATE_DEPTH = 6
+SURROGATE_MAX_SAMPLES = 2048
+ATTR_HEAD_NAMES = [
+    "call_off",
+    "put_off",
+    "width",
+    "te",
+    "prob_profit",
+    "expected_roi",
+    "max_loss_pct",
+    "confidence",
+]
+
+def _append_csv(path: str, header: list, rows: list) -> None:
+    write_header = not os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(header)
+        writer.writerows(rows)
+
+def _tree_to_markdown_rules(tree, feature_names: list) -> str:
+    try:
+        from sklearn.tree import _tree
+    except Exception:
+        return "sklearn not available; cannot render rules."
+    t = tree.tree_
+    feat = t.feature
+    thr = t.threshold
+    def rec(node: int, indent: int) -> list:
+        pad = "  " * indent
+        if feat[node] != _tree.TREE_UNDEFINED:
+            name = feature_names[feat[node]]
+            lines = []
+            lines.append(f"- IF `{name} <= {thr[node]:.6g}`:")
+            lines += rec(t.children_left[node], indent + 1)
+            lines.append(f"- ELSE (`{name} > {thr[node]:.6g}`):")
+            lines += rec(t.children_right[node], indent + 1)
+            return [pad + line if line.startswith("- ") else pad + line for line in lines]
+        pred = float(t.value[node][0][0])
+        return [f"{pad}- THEN => **pred≈{pred:.6g}**"]
+    return "\n".join(rec(0, 0))
+
+def _export_surrogate_rules(epoch_num: int, X_flat: np.ndarray, Y: np.ndarray, feature_cols: list, schema_id: str) -> None:
+    if not ENABLE_LEARNED_EXPORT:
+        return
+    try:
+        from sklearn.tree import DecisionTreeRegressor
+    except Exception:
+        err_path = os.path.join(LEARNED_COND_DIR, f"surrogate_rules_epoch_{epoch_num}.md")
+        with open(err_path, "w", encoding="utf-8") as f:
+            f.write("# Surrogate Rules\n\nsklearn not available; cannot train surrogate trees.\n")
+        return
+    combined = []
+    for head_idx in range(Y.shape[1]):
+        reg = DecisionTreeRegressor(max_depth=SURROGATE_DEPTH, random_state=42)
+        reg.fit(X_flat, Y[:, head_idx])
+        rules = _tree_to_markdown_rules(reg, feature_cols)
+        head_name = ATTR_HEAD_NAMES[head_idx] if head_idx < len(ATTR_HEAD_NAMES) else f"head_{head_idx}"
+        out_path = os.path.join(LEARNED_COND_DIR, f"{head_name}_rules_epoch_{epoch_num}.md")
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(f"# {head_name} surrogate rules (depth={SURROGATE_DEPTH})\n\n")
+            f.write(rules + "\n")
+        latest_path = os.path.join(LEARNED_COND_DIR, f"{head_name}_rules_latest.md")
+        with open(latest_path, "w", encoding="utf-8") as f:
+            f.write(f"# {head_name} surrogate rules (depth={SURROGATE_DEPTH})\n\n")
+            f.write(rules + "\n")
+        combined.append(f"## {head_name}\n\n{rules}\n")
+    combined_path = os.path.join(LEARNED_COND_DIR, f"all_rules_epoch_{epoch_num}.md")
+    with open(combined_path, "w", encoding="utf-8") as f:
+        f.write(f"# All heads surrogate rules (depth={SURROGATE_DEPTH})\n\n")
+        f.write("\n".join(combined))
+    latest_combined = os.path.join(LEARNED_COND_DIR, "all_rules_latest.md")
+    with open(latest_combined, "w", encoding="utf-8") as f:
+        f.write(f"# All heads surrogate rules (depth={SURROGATE_DEPTH})\n\n")
+        f.write("\n".join(combined))
+
+def _export_attribution(epoch_num: int, batch_idx: int, model: nn.Module, x_seq: torch.Tensor, feature_cols: list, schema_id: str) -> None:
+    if not ENABLE_LEARNED_EXPORT or x_seq.shape[0] == 0:
+        return
+    batch_size = min(ATTR_BATCH, x_seq.shape[0])
+    x_attr = x_seq[:batch_size].detach().clone().requires_grad_(True)
+    model.zero_grad(set_to_none=True)
+    res = model(x_attr)
+    outputs = res[0] if isinstance(res, (list, tuple)) else res
+    header = [
+        "ts_utc",
+        "epoch",
+        "batch",
+        "head_index",
+        "head_name",
+        "feature_schema_id",
+        "feature_count",
+        "head_count",
+        "head_names",
+        "feature",
+        "importance",
+        "contribution",
+    ]
+    rows = []
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    for head_idx in range(outputs.shape[1]):
+        model.zero_grad(set_to_none=True)
+        out = outputs[:, head_idx].sum()
+        grads = torch.autograd.grad(out, x_attr, retain_graph=True)[0]
+        attr = grads * x_attr
+        imp = attr.abs().mean(dim=(0, 1)).detach().cpu().numpy()
+        contrib = attr.mean(dim=(0, 1)).detach().cpu().numpy()
+        head_name = ATTR_HEAD_NAMES[head_idx] if head_idx < len(ATTR_HEAD_NAMES) else f"head_{head_idx}"
+        for j, feat in enumerate(feature_cols):
+            rows.append([
+                ts,
+                int(epoch_num),
+                int(batch_idx),
+                int(head_idx),
+                head_name,
+                schema_id,
+                len(feature_cols),
+                int(outputs.shape[1]),
+                "|".join(ATTR_HEAD_NAMES),
+                feat,
+                float(imp[j]),
+                float(contrib[j]),
+            ])
+    out_path = os.path.join(LEARNED_COND_DIR, "live_attribution.csv")
+    _append_csv(out_path, header, rows)
+
+def _surrogate_update(buf_x: list, buf_y: list, seen: int, x_last: np.ndarray, y_out: np.ndarray) -> int:
+    if not ENABLE_LEARNED_EXPORT:
+        return seen
+    for i in range(x_last.shape[0]):
+        seen += 1
+        if len(buf_x) < SURROGATE_MAX_SAMPLES:
+            buf_x.append(x_last[i].copy())
+            buf_y.append(y_out[i].copy())
+        else:
+            j = random.randint(0, seen - 1)
+            if j < SURROGATE_MAX_SAMPLES:
+                buf_x[j] = x_last[i].copy()
+                buf_y[j] = y_out[i].copy()
+    return seen
 
 # --- TRAINING CONFIG ---
 # ROWS_TO_LOAD: Number of rows from end of dataset
@@ -170,6 +328,19 @@ print(f"   Using V2.1 Schema: {len(FEATURE_COLS)} features")
 assert len(FEATURE_COLS) == INPUT_DIM, (
     f"Schema mismatch: len(FEATURE_COLS)={len(FEATURE_COLS)} != INPUT_DIM={INPUT_DIM}"
 )
+FEATURE_SCHEMA_ID = hashlib.sha256(",".join(FEATURE_COLS).encode("utf-8")).hexdigest()
+if ENABLE_LEARNED_EXPORT:
+    meta_path = os.path.join(LEARNED_COND_DIR, "live_attribution_meta.json")
+    if not os.path.exists(meta_path):
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "feature_schema_id": FEATURE_SCHEMA_ID,
+                "feature_count": len(FEATURE_COLS),
+                "feature_cols": FEATURE_COLS,
+                "head_names": ATTR_HEAD_NAMES,
+                "attr_every_n_batches": ATTR_EVERY_N,
+                "attr_batch_size": ATTR_BATCH,
+            }, f, indent=2)
 
 # ------------------------------
 # FEATURE & TARGET CONSTRUCTION
@@ -445,6 +616,9 @@ for epoch in range(EPOCHS):
     total_pol_loss = 0
     total_feat_loss = 0
     total_diff_loss = 0
+    surrogate_x = []
+    surrogate_y = []
+    surrogate_seen = 0
     
     # 🌟 Staged Training Logic 🌟
     use_diffusion = (epoch >= DIFFUSION_WARMUP_EPOCHS)
@@ -549,6 +723,19 @@ for epoch in range(EPOCHS):
         scaler.step(optimizer)
         scaler.update()
         scheduler.step()
+
+        if (batch_idx + 1) % ATTR_EVERY_N == 0:
+            try:
+                _export_attribution(epoch + 1, batch_idx + 1, model, x_seq, FEATURE_COLS, FEATURE_SCHEMA_ID)
+            except Exception as e:
+                pbar.write(f"⚠️ Attribution export failed: {e}")
+
+        try:
+            x_last_np = x_seq[:, -1, :].detach().cpu().numpy()
+            out_np = outputs.detach().cpu().numpy()
+            surrogate_seen = _surrogate_update(surrogate_x, surrogate_y, surrogate_seen, x_last_np, out_np)
+        except Exception as e:
+            pbar.write(f"⚠️ Surrogate buffer update failed: {e}")
         
         total_loss += loss.item()
         total_pol_loss += loss_pol.item()
@@ -699,6 +886,14 @@ for epoch in range(EPOCHS):
 
         except Exception as e:
             print(f"[TensorBoard] Image logging error: {e}")
+
+    if surrogate_x and surrogate_y:
+        try:
+            X_flat = np.stack(surrogate_x, axis=0)
+            Y_out = np.stack(surrogate_y, axis=0)
+            _export_surrogate_rules(epoch + 1, X_flat, Y_out, FEATURE_COLS, FEATURE_SCHEMA_ID)
+        except Exception as e:
+            print(f"⚠️ Surrogate rule export failed: {e}")
 
     # Save Checkpoint with Metadata
     save_path = f"condor_brain_retrain_e{epoch+1}.pth"

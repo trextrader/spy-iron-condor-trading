@@ -16,6 +16,7 @@ import random
 import signal
 import warnings
 import csv
+import hashlib
 from datetime import datetime, timezone
 # Suppress mamba-ssm / torch.amp deprecation warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="mamba_ssm")
@@ -110,6 +111,9 @@ parser.add_argument("--input", type=str, default=None, help="Override input data
 parser.add_argument("--resume", type=str, default=None, help="Resume from checkpoint path")
 parser.add_argument("--resume-auto", action="store_true", help="Auto-resume from latest checkpoint")
 parser.add_argument("--artifact-dir", type=str, default="artifacts/epochs", help="Epoch artifact output directory")
+parser.add_argument("--learned-export", dest="learned_export", action="store_true", help="Enable learned-conditions export")
+parser.add_argument("--no-learned-export", dest="learned_export", action="store_false", help="Disable learned-conditions export")
+parser.set_defaults(learned_export=True)
 
 # Parse args (handle Jupyter/Colab gracefully)
 try:
@@ -118,7 +122,8 @@ except:
     args = argparse.Namespace(
         start_date=None, end_date=None, model_suffix="",
         epochs=None, use_precomputed_v21=False, use_diffusion=False, rows=None,
-        input=None, resume=None, resume_auto=False, artifact_dir="artifacts/epochs"
+        input=None, resume=None, resume_auto=False, artifact_dir="artifacts/epochs",
+        learned_export=True,
     )
 
 # Apply argument overrides
@@ -138,6 +143,7 @@ RESUME_AUTO = args.resume_auto
 ARTIFACT_DIR = args.artifact_dir
 LEARNED_COND_DIR = os.path.join(ARTIFACT_DIR, "learned_conditions")
 os.makedirs(LEARNED_COND_DIR, exist_ok=True)
+ENABLE_LEARNED_EXPORT = bool(args.learned_export)
 
 # --- LEARNED CONDITIONS EXPORT CONFIG ---
 ATTR_EVERY_N = 5  # user request: every 5 batches
@@ -152,6 +158,8 @@ ATTR_HEAD_NAMES = [
     "max_loss_pct",
     "confidence",
 ]
+FEATURE_SCHEMA_ID = hashlib.sha256(",".join(FEATURE_COLS).encode("utf-8")).hexdigest()
+HEAD_NAMES_JOINED = "|".join(ATTR_HEAD_NAMES)
 SURROGATE_DEPTH = 6  # "verbose"
 SURROGATE_MAX_SAMPLES = 2048
 
@@ -250,6 +258,8 @@ def _export_surrogate_rules(
     Y: np.ndarray,
     feature_cols: list,
 ) -> None:
+    if not ENABLE_LEARNED_EXPORT:
+        return
     try:
         from sklearn.tree import DecisionTreeRegressor
     except Exception:
@@ -291,6 +301,8 @@ def _export_attribution(
     x_seq: torch.Tensor,
     feature_cols: list,
 ) -> None:
+    if not ENABLE_LEARNED_EXPORT:
+        return
     if x_seq.shape[0] == 0:
         return
     batch_size = min(ATTR_BATCH, x_seq.shape[0])
@@ -306,6 +318,10 @@ def _export_attribution(
         "batch",
         "head_index",
         "head_name",
+        "feature_schema_id",
+        "feature_count",
+        "head_count",
+        "head_names",
         "feature",
         "importance",
         "contribution",
@@ -328,6 +344,10 @@ def _export_attribution(
                 int(batch_idx),
                 int(head_idx),
                 head_name,
+                FEATURE_SCHEMA_ID,
+                len(feature_cols),
+                int(outputs.shape[1]),
+                HEAD_NAMES_JOINED,
                 feat,
                 float(imp[j]),
                 float(contrib[j]),
@@ -343,6 +363,8 @@ def _surrogate_update(
     x_last: np.ndarray,
     y_out: np.ndarray,
 ) -> int:
+    if not ENABLE_LEARNED_EXPORT:
+        return seen
     for i in range(x_last.shape[0]):
         seen += 1
         if len(buf_x) < SURROGATE_MAX_SAMPLES:
@@ -357,6 +379,18 @@ def _surrogate_update(
 def _append_jsonl(path: str, payload: dict) -> None:
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+
+if ENABLE_LEARNED_EXPORT:
+    meta_path = os.path.join(LEARNED_COND_DIR, "live_attribution_meta.json")
+    if not os.path.exists(meta_path):
+        _save_json(meta_path, {
+            "feature_schema_id": FEATURE_SCHEMA_ID,
+            "feature_count": len(FEATURE_COLS),
+            "feature_cols": FEATURE_COLS,
+            "head_names": ATTR_HEAD_NAMES,
+            "attr_every_n_batches": ATTR_EVERY_N,
+            "attr_batch_size": ATTR_BATCH,
+        })
 
 def _get_rng_state() -> dict:
     state = {
