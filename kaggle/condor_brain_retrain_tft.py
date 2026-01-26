@@ -368,6 +368,13 @@ if MSE is None:
             if torch.is_tensor(y_pred) and y_pred.ndim >= 1 and y_pred.shape[-1] in (3, 5, 7, 9):
                 q_mid = y_pred.shape[-1] // 2
                 y_pred = y_pred[..., q_mid]
+            if torch.is_tensor(y_pred) and torch.is_tensor(target):
+                if y_pred.ndim > target.ndim:
+                    reduce_dims = tuple(range(target.ndim, y_pred.ndim))
+                    y_pred = y_pred.mean(dim=reduce_dims)
+                if y_pred.ndim < target.ndim:
+                    reduce_dims = tuple(range(y_pred.ndim, target.ndim))
+                    target = target.mean(dim=reduce_dims)
             return F.mse_loss(y_pred, target, reduction="none")
 
 # ------------------------------
