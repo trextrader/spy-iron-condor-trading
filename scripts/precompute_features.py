@@ -274,11 +274,28 @@ def main() -> int:
     else:
         out_df['te'] = 0.0
 
-    # IVR Stub
-    if 'iv' in out_df.columns:
-        out_df['ivr'] = 0.5 
-    else:
-        out_df['ivr'] = 0.0
+    # IVR / RVR (Realized Volatility Rank) Proxy
+    # Since we don't have historical IV options chain here, we use Realized Volatility Rank (RVR)
+    # as a proxy for IVR. This restores regime variety (0.0 to 1.0).
+    print("   Computing Realized Vol Rank (IVR proxy)...")
+    
+    # 252 trading days * 390 minutes/day = ~98,280 minutes
+    # We use a slightly faster window for approximation if needed, but 100k is fine.
+    rvr_window = 390 * 60 # ~2 months rolling for responsiveness, or 252 days for long-term.
+    # Let's use 60 days (approx 23,400 mins) to be responsive to medium-term regimes.
+    rvr_window = 23400 
+    
+    # We use 'vol_ewma' (realized vol) to compute rank
+    vol_min = out_df['vol_ewma'].rolling(window=rvr_window, min_periods=390).min()
+    vol_max = out_df['vol_ewma'].rolling(window=rvr_window, min_periods=390).max()
+    
+    # Avoid zero division
+    vol_range = vol_max - vol_min
+    vol_range = vol_range.replace(0, 1.0)
+    
+    out_df['ivr'] = ((out_df['vol_ewma'] - vol_min) / vol_range).astype(np.float32)
+    # Fill startup NaNs with 0.5 (neutral)
+    out_df['ivr'] = out_df['ivr'].fillna(0.5).clip(0.0, 1.0)
 
     added = [c for c in out_df.columns if c not in before_cols]
     missing = [c for c in before_cols if c not in out_df.columns]

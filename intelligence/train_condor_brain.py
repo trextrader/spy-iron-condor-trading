@@ -157,7 +157,26 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     rng = np.random.default_rng(42)  # Reproducible
 
     # --- IVR-based regime detection for conditional targets ---
-    ivr = df['ivr'].fillna(50).values if 'ivr' in df.columns else np.full(n, 50.0)
+    # --- IVR-based regime detection for conditional targets ---
+    ivr_raw = df['ivr'].fillna(50).values if 'ivr' in df.columns else np.full(n, 50.0)
+
+    # Robust scale detection (HANDLE 0-1 vs 0-100 AUTOMATICALLY)
+    # If max value is small (<1.5), assume 0-1 scale and normalize to 0-100
+    # This prevents model collapse if feeding normalized inputs to 0-100 threshold logic.
+    finite_mask = np.isfinite(ivr_raw)
+    if finite_mask.any():
+        ivr_max = np.nanmax(ivr_raw[finite_mask])
+        if ivr_max <= 1.5:
+            # Scale 0-1 -> 0-100
+            ivr = np.where(finite_mask, ivr_raw * 100.0, 50.0)
+        else:
+            # Already 0-100
+            ivr = np.where(finite_mask, ivr_raw, 50.0)
+    else:
+        ivr = np.full(n, 50.0)
+
+    ivr = np.clip(ivr, 0.0, 100.0)
+
     low_vol = ivr < 30
     high_vol = ivr > 70
     normal_vol = ~low_vol & ~high_vol

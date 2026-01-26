@@ -182,6 +182,10 @@ Phase B - Audit Artifacts (Short-term)
 - Produce decision_trace.jsonl (ENTRY/EXIT/SIZING) for backtests and SIM.
 - Produce decision_factor_attribution.csv scoped by ENTRY/EXIT/SIZING.
 - Generate contract_snapshot.json for every RC model.
+- [ ] **Contract Verification**: `scripts/verify_model_contract.py` must pass on any `./models/*.pth`.
+- [ ] **Component Logging**: Future runs must log split losses (`L_diff`, `L_policy`, `L_feat`) to TensorBoard/Console.
+
+## Phase 11: Audit & Accountability
 - Generate audit packet PDF for release candidates: artifacts/audit/Accountability_Audit_Packet.pdf.
 
 Phase C - Docs Contract (Short-term)
