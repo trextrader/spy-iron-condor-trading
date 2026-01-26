@@ -598,6 +598,13 @@ class TFTWithDiffusion(pl.LightningModule):
             from pytorch_lightning.utilities import move_data_to_device
         return move_data_to_device(batch, device)
 
+    def _ensure_device(self, obj):
+        try:
+            from lightning.pytorch.utilities import move_data_to_device
+        except Exception:
+            from pytorch_lightning.utilities import move_data_to_device
+        return move_data_to_device(obj, self.device)
+
     def forward(self, x):
         return self.tft(x)
 
@@ -617,6 +624,8 @@ class TFTWithDiffusion(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, y = batch
+        x = self._ensure_device(x)
+        y = self._ensure_device(y)
         pred = self.tft(x)
         y_hat = pred["prediction"] if isinstance(pred, dict) else pred
         base_loss = self.tft.loss(y_hat, y)
@@ -633,6 +642,8 @@ class TFTWithDiffusion(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
+        x = self._ensure_device(x)
+        y = self._ensure_device(y)
         pred = self.tft(x)
         y_hat = pred["prediction"] if isinstance(pred, dict) else pred
         base_loss = self.tft.loss(y_hat, y)
