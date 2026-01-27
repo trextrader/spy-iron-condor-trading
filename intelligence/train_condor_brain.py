@@ -309,6 +309,23 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     debug_tensor_stats("y_clamped", y)
     
     # Sanity check: confirm dtypes and ranges
+    
+    # 2026-01-26: Explicitly CLAMP targets to safe range (prevent FP16/BF16 instability)
+    y = np.nan_to_num(y, nan=0.0, posinf=10.0, neginf=-10.0)
+    y[:, 0] = np.clip(y[:, 0], -100.0, 100.0) # offset
+    y[:, 1] = np.clip(y[:, 1], -100.0, 100.0) # offset
+    y[:, 2] = np.clip(y[:, 2], 0.5, 50.0)     # width
+    y[:, 3] = np.clip(y[:, 3], 0.0, 120.0)    # dte
+    y[:, 4] = np.clip(y[:, 4], 0.0, 1.0)      # profitable
+    y[:, 5] = np.clip(y[:, 5], -5.0, 5.0)     # roi
+    y[:, 6] = np.clip(y[:, 6], 0.0, 5.0)      # max loss
+    y[:, 7] = np.clip(y[:, 7], 0.0, 1.0)      # confidence
+    
+    # NEW (targets[8], targets[9]) = entry/exit logits
+    if y.shape[1] > 8:
+        y[:, 8] = np.clip(y[:, 8], -5.0, 5.0)
+        y[:, 9] = np.clip(y[:, 9], -5.0, 5.0)
+
     print(f"[SANITY] X dtype: {X.dtype}, min/max: {X.min():.4f}/{X.max():.4f}")
     print(f"[SANITY] y dtype: {y.dtype}, min/max: {y.min():.4f}/{y.max():.4f}")
     
@@ -336,8 +353,12 @@ class BatchedSequenceDataset(IterableDataset):
         self.B = int(batch_size)
         self.drop_last = drop_last
         
-        # Store as CPU tensors ONCE - X as BF16 to avoid per-batch conversion
-        self.X = torch.from_numpy(X2d).to(torch.bfloat16)   # (N, F) bf16 - no per-batch conversion!
+        # Store as CPU tensors ONCE - X as BF16 (or FP16) to avoid per-batch conversion
+        # We assume standard amp_dtype (bf16 for Ampere+, fp16 for T4/older)
+        use_bf16 = torch.cuda.is_available() and torch.cuda.get_device_capability(0)[0] >= 8
+        dtype = torch.bfloat16 if use_bf16 else torch.float16
+        
+        self.X = torch.from_numpy(X2d).to(dtype)   # (N, F) bf16/fp16 - no per-batch conversion!
         self.y = torch.from_numpy(y2d).to(torch.float32)    # (N, T) fp32
         self.r = torch.from_numpy(r1d).long()               # (N,)  int64
         
@@ -570,11 +591,15 @@ def train_condor_brain(args):
         print("[CondorBrain] ✅ gpu-dataset ENABLED: data on GPU, using unfold() views (FASTEST)")
         
         # Move data to GPU ONCE (no H2D in training loop!)
-        X_train_t = torch.from_numpy(X_train).to(device=device, dtype=torch.bfloat16)
+        # Move data to GPU ONCE (no H2D in training loop!)
+        # Use amp_dtype (bf16 for A100/Ampere, fp16 for T4/Volta)
+        dtype_gpu = torch.bfloat16 if use_bf16 else torch.float16
+        
+        X_train_t = torch.from_numpy(X_train).to(device=device, dtype=dtype_gpu)
         y_train_t = torch.from_numpy(y_train).to(device=device, dtype=torch.float32)
         r_train_t = torch.from_numpy(r_train).to(device=device, dtype=torch.long)
         
-        X_val_t = torch.from_numpy(X_val).to(device=device, dtype=torch.bfloat16)
+        X_val_t = torch.from_numpy(X_val).to(device=device, dtype=dtype_gpu)
         y_val_t = torch.from_numpy(y_val).to(device=device, dtype=torch.float32)
         r_val_t = torch.from_numpy(r_val).to(device=device, dtype=torch.long)
         
@@ -801,8 +826,18 @@ def train_condor_brain(args):
             if use_gpu_dataset:
                 batch_x, batch_y, batch_r = get_train_batch(batch_idx)
             else:
-                # Fallback path: iterate through DataLoader
-                _data = next(iter(train_loader))  # This is inefficient, but works as fallback
+                # Fallback path: iterate through DataLoader efficiently
+                # Initialize iterator at start of epoch
+                if batch_idx == 0:
+                    train_iter = iter(train_loader)
+                
+                try:
+                    _data = next(train_iter)
+                except StopIteration:
+                    # Should not happen if n_train_batches is correct, but safe fallback
+                    train_iter = iter(train_loader)
+                    _data = next(train_iter)
+                    
                 batch_x = _data[0].to(device, non_blocking=True)
                 batch_y = _data[1].to(device, non_blocking=True)
                 batch_r = _data[2].to(device, non_blocking=True)
@@ -855,7 +890,7 @@ def train_condor_brain(args):
                     # The current command line uses --diffusion, so we need to handle it.
                     
                     diffusion_loss = None
-                    if args.diffusion:
+                    if use_diffusion_now:
                          # Browse tuple for scalar diffusion loss
                          # It usually appears after horizon/features.
                          # Let's iterate or assume position? 
