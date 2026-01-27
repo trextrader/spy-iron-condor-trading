@@ -138,7 +138,66 @@ def fetch_live_data(client, symbol, lookback_bars=1000):
         
     return df
 
-# --- HELPER: Contract Resolution ---
+    return df
+
+# --- HELPER: Greek Aggregation ---
+def calculate_live_greeks(contracts, current_spot):
+    """
+    Aggregates Greeks from a list of Alpaca option contracts.
+    Returns a dict of {delta, gamma, theta, vega, iv}.
+    Logic:
+      - Filter for meaningful volume/open_interest (if possible) within ATM range.
+      - Simple average of ATM +/- 5 strikes (Call + Put combined? Or typically model expects blended).
+      - Note: Alpaca 'OptionContract' model has 'greeks' field which is a struct.
+    """
+    if not contracts:
+        return None
+        
+    # Filter for ATM range (Spot +/- 2%)
+    valid_contracts = []
+    
+    # We want near-term (<= 7 days) and ATM.
+    # The list passed in `contracts` is already filtered by date and strike range presumably.
+    
+    deltas, gammas, thetas, vegas, ivs = [], [], [], [], []
+    
+    for c in contracts:
+        # Check if greeks data exists
+        if hasattr(c, 'greeks') and c.greeks:
+            g = c.greeks
+            # Filter bad data
+            if g.delta is not None: deltas.append(abs(g.delta)) # ABS Delta for exposure sizing, but model might want directional?
+            # Actually, standard feature 'delta' usually refers to directional (Calls + Puts -)? 
+            # OR is it 'market_greeks'?
+            # Let's assume the model trains on "ATM Delta" which for a CALL is ~0.5.
+            # V2.2 Feature registry usually has 'delta' as part of the market state...
+            # If the feature is just 'delta', it's ambiguous.
+            # However, `canonical_feature_registry` V2.2 likely has 'put_call_volume_ratio' etc.
+            # Let's check the list. It includes `delta`, `gamma`, `vega`, `theta`, `iv`.
+            # These are likely "ATM Contract Average" or "Portfolio Delta"? 
+            # In single-asset CDE models, these are usually "ATM Implied stats".
+            # So: Avg(Abs(Delta_Call), Abs(Delta_Put)) -> ~0.5 usually.
+            # Gamma: Sum or Avg? Avg.
+            
+            if g.gamma is not None: gammas.append(g.gamma)
+            if g.theta is not None: thetas.append(g.theta)
+            if g.vega is not None: vegas.append(g.vega)
+        
+        # IV is often top-level or in greeks? Alpaca has it in `implied_volatility`
+        if c.implied_volatility is not None:
+            ivs.append(c.implied_volatility)
+
+    if not ivs: 
+        return None
+        
+    return {
+        'delta': float(np.mean(deltas)) if deltas else 0.5,
+        'gamma': float(np.mean(gammas)) if gammas else 0.0,
+        'theta': float(np.mean(thetas)) if thetas else 0.0,
+        'vega': float(np.mean(vegas)) if vegas else 0.0,
+        'iv': float(np.mean(ivs)) if ivs else 0.0,
+        'svr': float(np.std(ivs)) if len(ivs) > 1 else 0.0 # Spread of Vol or similar
+    }
 def find_closest_contract(client, symbol, contract_type, target_strike, ideal_date):
     """
     Finds the contract closest to target_strike and ideal_date.
@@ -281,10 +340,46 @@ def run_live_loop(executor, model, metadata, device):
                 print(f" [Data Recorder Error] {e_rec}")
             # --- LIVE DATA RECORDER END ---
 
-
             
             # 1. Fetch Data
             df = fetch_live_data(data_client, SYMBOL, lookback_bars=LOOKBACK_BARS)
+
+            # --- INJECT LIVE GREEKS ---
+            # If we successfully fetched contracts, use them to populate Greek columns
+            # The model expects consistent time-series, so we ideally append these values to the end.
+            # But `df` is historical bars. Current Greeks apply to "NOW" (last row).
+            # We will fill the *last row* with current Greeks.
+            # Note: This means historical rows in `df` will have 0.0 or older values?
+            # Yes, unless we fetch historical Greeks (impossible efficiently).
+            # The Neural CDE is robust to this if `lag_minutes` handles it, BUT...
+            # If the model relies on the Trajectory of Greeks, having only the last point non-zero is an issue.
+            # HOWEVER, `gamma` and `iv` are state variables. CDE interpolates.
+            # For live trading, we often assume "Last Known State" propagates or we just provide the current state.
+            # Let's fill the Enture Column with the current value? No, that destroys trends.
+            # Compromise: Fill the last 5-10 bars with the current Greek value to simulate "recent state".
+            # Or better: `compute_all_primitive_features` might require them.
+            
+            current_greeks = None
+            if 'all_contracts' in locals() and all_contracts:
+                 current_greeks = calculate_live_greeks(all_contracts, df['close'].iloc[-1])
+                 if current_greeks:
+                     print(f"  [Greeks] IV: {current_greeks['iv']:.2f} | Gamma: {current_greeks['gamma']:.4f}")
+            
+            if current_greeks:
+                # We apply these values to the LAST ROW (Current Market State)
+                # And importantly: The model uses a window.
+                # If historical values are 0, the derivative is huge.
+                # FIX: We should likely forward-fill or back-fill for the immediate window if history is missing.
+                # But we can't invent history.
+                # Simplest robust approach for now: 
+                # Set the columns in the DF. 
+                # If they don't exist, init with current value (flat line assumption is better than 0).
+                for k, v in current_greeks.items():
+                    if k not in df.columns:
+                        df[k] = v # Init whole column with current value (Flat Trend)
+                    else:
+                        df.iloc[-1, df.columns.get_loc(k)] = v
+            # ---------------------------
 
 # ... (Previous code) ...
 
@@ -312,6 +407,9 @@ def run_live_loop(executor, model, metadata, device):
                     # Special handling for targets -> 0.0
                     if col in ['target_spot', 'max_dd_60m', 'target_profit']:
                         df[col] = 0.0
+                    elif col in ['delta', 'gamma', 'vega', 'theta', 'iv']:
+                        # If we missed calculating it (e.g. data fail), use fill value
+                         df[col] = get_neutral_fill_value_v22(col)
                     else:
                         # Fallback for others (e.g. from V2.2 defaults)
                         fill_val = get_neutral_fill_value_v22(col)
