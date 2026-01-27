@@ -86,6 +86,8 @@ def analyze_permutation_importance(model, dataset, feature_names, n_samples=1000
     model.eval()
     with torch.no_grad():
         base_out = model(X_base)
+        if isinstance(base_out, tuple):
+            base_out = base_out[0]
         
     # FILTER: Keep only samples with finite outputs
     # base_out: (B, Hidden)
@@ -118,6 +120,8 @@ def analyze_permutation_importance(model, dataset, feature_names, n_samples=1000
         
         with torch.no_grad():
             perm_out = model(X_perm)
+            if isinstance(perm_out, tuple):
+                perm_out = perm_out[0]
             
         # Measure impact: Mean Absolute Difference between base_out and perm_out
         # This captures how much the output *changes* when the feature is destroyed
