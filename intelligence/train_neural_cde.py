@@ -47,11 +47,11 @@ def load_and_prep_data(data_path):
     Y = np.zeros((len(X), 2), dtype=np.float32)
     
     # 1. 5-day return
-    future_close = df['close'].shift(-5).fillna(method='ffill')
+    future_close = df['close'].shift(-5).ffill()
     Y[:, 0] = (future_close / df['close'] - 1.0) * 100.0
     
     # 2. 5-day volatility change
-    future_vol = df['iv'].shift(-5).fillna(method='ffill')
+    future_vol = df['iv'].shift(-5).ffill()
     Y[:, 1] = future_vol - df['iv']
     
     return X, Y, feature_cols

@@ -26,6 +26,11 @@ class CDEFunc(nn.Module):
         h = self.act(h)
         # Output: (batch, hidden * input)
         out = self.linear2(h)
+        
+        # STABILIZATION: Tanh activation on the vector field bounds the rate of change.
+        # This prevents the hidden state from exploding over long sequences (256 steps).
+        out = torch.tanh(out) 
+        
         # Reshape to (batch, hidden, input) for matrix multiplication
         return out.view(z.size(0), self.hidden_dim, self.input_dim)
 
