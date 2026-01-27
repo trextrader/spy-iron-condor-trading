@@ -317,8 +317,6 @@ def model_forward(model: nn.Module, x: torch.Tensor) -> Dict[str, torch.Tensor]:
     expected_roi = pol[:, 5]
     confidence = pol[:, 7]
 
-    print(f"[DEBUG] policy_head_dim = {pol.size(1)}")  # Check if 8 or 10
-
     # NEW: Use explicit entry/exit logits if available (10-output model)
     if pol.size(1) >= 10:
         entry_logit = pol[:, 8]  # Explicit entry logit

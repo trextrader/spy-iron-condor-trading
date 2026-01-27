@@ -51,7 +51,13 @@ from intelligence.features.dynamic_features import (
 )
 from intelligence.rule_engine.dsl_parser import RuleDSLParser
 from intelligence.rule_engine.executor import RuleExecutionEngine
-from torch.utils.tensorboard import SummaryWriter # Added for TB support
+try:
+    from torch.utils.tensorboard import SummaryWriter # Added for TB support
+except ImportError:
+    class SummaryWriter:
+        def __init__(self, log_dir=None): pass
+        def add_scalar(self, tag, scalar_value, global_step=None): pass
+        def close(self): pass
 try:
     from audit.decision_trace_logger import DecisionTraceLogger, TraceConfig
     HAS_TRACE_LOGGER = True
@@ -1575,16 +1581,34 @@ def main():
             ckpt_feature_cols = checkpoint.get("feature_cols")
             if ckpt_feature_cols:
                 feature_cols = list(ckpt_feature_cols)
+        # Dynamic Attributes
         model_input_dim = checkpoint.get("input_dim", len(feature_cols)) if isinstance(checkpoint, dict) else len(feature_cols)
+        
+        # Extract model config if available
+        ckpt_config = {}
+        if isinstance(checkpoint, dict):
+            if "model_config" in checkpoint:
+                ckpt_config = checkpoint["model_config"]
+            elif "config" in checkpoint:
+                ckpt_config = checkpoint["config"]
+                
+        # Default to 12 layers, 512 dim if not specified
+        n_layers = int(ckpt_config.get("n_layers", ckpt_config.get("layers", 12)))
+        d_model = int(ckpt_config.get("d_model", ckpt_config.get("dim", 512)))
+
         if model_input_dim != len(feature_cols):
             print(f"⚠️ input_dim mismatch: checkpoint={model_input_dim} vs features={len(feature_cols)}; using checkpoint value.")
         
+        print(f"Initializing CondorBrain: d_model={d_model}, n_layers={n_layers}, input_dim={model_input_dim}")
+        
         # V2.2 Model
         model = CondorBrain(
-            d_model=512, n_layers=12,
+            d_model=d_model, n_layers=n_layers,
             input_dim=model_input_dim,
             use_vol_gated_attn=True, use_topk_moe=True, moe_n_experts=3, moe_k=1,
-            use_diffusion=True
+            use_diffusion=True,
+            diffusion_steps=50, # Match training
+            horizon=32          # Match training
         ).to(DEVICE)
         
         try:
