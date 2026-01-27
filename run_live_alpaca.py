@@ -17,20 +17,13 @@ from intelligence.features.dynamic_features import compute_all_dynamic_features,
 from intelligence.rule_engine.dsl_parser import RuleDSLParser
 from intelligence.rule_engine.executor import RuleExecutionEngine
 
+from intelligence.canonical_feature_registry import FEATURE_COLS_V22, get_neutral_fill_value_v22
+
 # --- CONFIG ---
 SYMBOL = "SPY"
 TIMEFRAME = "1Min"
-LOOKBACK_BARS = 600 # Need 256 for model + extra for calc
-MODEL_PATH = "condor_brain_retrain_v22_e3.pth"
-RULESET_PATH = "docs/Complete_Ruleset_DSL.yaml"
+LOOKBACK_BARS = 600 # Need enough for all adaptive indicators
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-# Feature list matches training
-FEATURE_COLS_V22 = [
-    'open', 'high', 'low', 'close', 'volume', 
-    'strike', 'cp_num', 'delta', 'gamma', 'vega', 'theta', 'iv', 'ivr', 'spread_ratio', 'te',
-    'rsi', 'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 'psar', 'psar_mark'
-]
 
 def apply_scaling(X, median, scale, clip_val=10.0):
     """Apply persistent scaling from checkpoint."""
