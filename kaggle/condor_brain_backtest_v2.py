@@ -736,17 +736,41 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     logged_count = 0
     MAX_LOGS = 50  # Console only
     
+    # --- BATCHED OPTIMIZATION ---
+    print(f"Pre-computing model outputs for {num_bars - SEQ_LEN} bars (Batch Size: 64)...")
+    BATCH_SIZE = 64
+    all_policy_outputs = []
+    
+    # We slice the tensor into batches of sequences
+    # Sequence indices start from SEQ_LEN to num_bars-1
+    for b_start in tqdm(range(SEQ_LEN, num_bars - 1, BATCH_SIZE), desc="Batched Inference"):
+        b_end = min(b_start + BATCH_SIZE, num_bars - 1)
+        batch_seqs = []
+        for j in range(b_start, b_end):
+            batch_seqs.append(X_tensor[j - SEQ_LEN : j])
+        
+        batch_x = torch.stack(batch_seqs).to(device)
+        with torch.no_grad():
+            # CondorBrain forward returns (policy_outputs, regime, horizon, features, ...)
+            out_tuple = model(batch_x)
+            policy_batch = out_tuple[0].cpu().numpy()
+            all_policy_outputs.append(policy_batch)
+            
+    all_policy_outputs = np.concatenate(all_policy_outputs, axis=0)
+    print(f"✅ Pre-computation complete. Starting simulation loop...")
+
     # Start from SEQ_LEN
-    for i in tqdm(range(SEQ_LEN, num_bars - 1)):
+    for i in tqdm(range(SEQ_LEN, num_bars - 1), desc="Simulating"):
         # 1. State
         if i >= len(X_tensor): break
-        x_seq = X_tensor[i-SEQ_LEN : i].unsqueeze(0) # [1, 256, 52]
         
-        # 2. Model Inference
-        with torch.no_grad():
-            outputs = model(x_seq)
-            
-        pol = outputs[0].cpu().numpy().flatten()
+        # 2. Sequential logic (Position management) - Using Pre-computed Inference
+        idx_offset = i - SEQ_LEN
+        pol = all_policy_outputs[idx_offset]
+        
+        # Slicing x_seq only if needed for tracing (expensive, but only for active decision bars in trace)
+        # We can optimize trace later if needed. For now, we need x_seq for _emit_trace_event.
+        x_seq = X_tensor[i-SEQ_LEN : i].unsqueeze(0) 
         
         # Extract ALL policy outputs for logging
         # Policy head: [call_off, put_off, width, te, prob_profit, expected_roi, max_loss_pct, confidence]
