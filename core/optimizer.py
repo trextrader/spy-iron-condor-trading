@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import datetime
 from core.backtest_engine import run_backtest_headless
-from core.config import StrategyConfig, RunConfig
+from config import StrategyConfig, RunConfig
 from tabulate import tabulate
 from intelligence.indicators.manifold_volatility import (
     curvature_proxy_from_returns,

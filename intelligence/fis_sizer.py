@@ -6,7 +6,7 @@ Integrates Fuzzifier, InferenceEngine, and Defuzzifier to produce
 risk-adjusted position sizes based on capital constraints and market regime.
 """
 import math
-from core.config import StrategyConfig
+from config import StrategyConfig
 from core.dto import MarketSnapshot, TradeDecision, SizedDecision
 from intelligence.fuzzifier import Fuzzifier
 from intelligence.inference_engine import InferenceEngine

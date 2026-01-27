@@ -9,11 +9,10 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
-    from core.config import StrategyConfig, RunConfig
+    from config import StrategyConfig, RunConfig
 except ImportError:
-    print("\n[ERROR] 'core/config.py' not found.")
-    print("Action: Copy 'core/config.template.py' to 'core/config.py' and fill in your API keys.")
-    print("Command: cp core/config.template.py core/config.py\n")
+    print("\n[ERROR] 'config.py' not found.")
+    print("Action: Ensure 'config.py' exists in the root directory.")
     sys.exit(1)
 from core.backtest_engine import run_backtest_and_report
 from data_factory.polygon_client import PolygonClient

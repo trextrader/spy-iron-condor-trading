@@ -1,14 +1,3 @@
-# core/backtest_engine.py - Iron Condor with MTF + Professional Reporting
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from core.config import StrategyConfig, RunConfig
-import backtrader as bt
-import matplotlib.pyplot as plt
-import math
-import pandas as pd
-import numpy as np
 from tabulate import tabulate
 import mplfinance as mpf
 import os

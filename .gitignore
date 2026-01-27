@@ -1,5 +1,6 @@
 # API Keys and Secrets
 core/config.py
+config.py
 .env
 *.key
 *.secret

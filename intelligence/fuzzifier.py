@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from core.config import StrategyConfig
+from config import StrategyConfig
 from core.dto import MarketSnapshot
 from intelligence.features.dynamic_features import compute_all_dynamic_features, compute_all_primitive_features_v22
 import intelligence.fuzzy_engine as fe

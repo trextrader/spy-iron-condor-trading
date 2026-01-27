@@ -19,7 +19,7 @@ from intelligence.rule_engine.executor import RuleExecutionEngine
 
 from intelligence.canonical_feature_registry import FEATURE_COLS_V22, get_neutral_fill_value_v22
 import intelligence.fuzzy_engine as fe
-from core.config import StrategyConfig
+from config import StrategyConfig
 from core.dto import MarketSnapshot, TradeDecision
 
 # --- CONFIG ---
