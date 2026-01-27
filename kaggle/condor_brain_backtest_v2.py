@@ -1607,8 +1607,9 @@ def main():
             input_dim=model_input_dim,
             use_vol_gated_attn=True, use_topk_moe=True, moe_n_experts=3, moe_k=1,
             use_diffusion=True,
-            diffusion_steps=50, # Match training
-            horizon=32          # Match training
+            diffusion_steps=50,      # Match training
+            diffusion_horizon=1,     # Match training (was 32)
+            diffusion_input_dim=10   # Match training (targets=10)
         ).to(DEVICE)
         
         try:
