@@ -11,7 +11,7 @@ from tqdm import tqdm
 # Add project root to path
 sys.path.insert(0, os.getcwd())
 
-from intelligence.models.neural_cde import NeuralCDE
+from intelligence.condor_brain import CondorBrain
 from intelligence.canonical_feature_registry import FEATURE_COLS_V22
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -20,17 +20,26 @@ SEQ_LEN = 256
 def load_cde_model(ckpt_path, input_dim=52):
     print(f"Loading {ckpt_path}...")
     ckpt = torch.load(ckpt_path, map_location=DEVICE)
-    if 'config' in ckpt:
-        config = ckpt['config']
-        hidden = config['hidden']
-        layers = config['layers']
-    else:
-        # Fallback defaults if config missing
-        hidden = 128
-        layers = 2
+    
+    config = ckpt.get('config', {})
+    d_model = config.get('d_model', 128)
+    n_layers = config.get('n_layers', 2)
+    use_topk = config.get('use_topk_moe', False)
+    
+    model = CondorBrain(
+        d_model=d_model,
+        n_layers=n_layers,
+        input_dim=input_dim,
+        use_cde=True,
+        use_topk_moe=use_topk
+    )
+    
+    # Strip 'module.' prefix if trained with DataParallel
+    state_dict = ckpt['state_dict']
+    if any(k.startswith('module.') for k in state_dict.keys()):
+        state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
         
-    model = NeuralCDE(input_dim, hidden, 2, n_layers=layers)
-    model.load_state_dict(ckpt['state_dict'])
+    model.load_state_dict(state_dict)
     model.to(DEVICE)
     model.eval()
     return model
@@ -151,10 +160,14 @@ def train_surrogate_tree(model, X, feature_cols, n_samples=5000):
             last_step = seq[-1] # Interpret based on current state
             
             x_tensor = torch.tensor(seq, device=DEVICE).unsqueeze(0).float()
-            # Predict Return
-            out = model(x_tensor)
-            decoded = model.decoder(out)
-            pred = decoded[0, 0].item()
+            # Predict
+            with torch.no_grad():
+                out = model(x_tensor)
+                # CondorBrain forward returns (outputs, regime, horizon, features, ...)
+                # Primary logic uses index 0 (regression outputs)
+                if isinstance(out, tuple):
+                    out = out[0]
+                pred = out[0, 5].item() # index 5 is expected_roi in CondorBrain
             
             # CRITICAL: Skip if scalar prediction is NaN or Inf
             if not np.isfinite(pred):
