@@ -68,45 +68,71 @@ class CDETrainer:
         self.loss_fn = nn.MSELoss()
         
     def train_epoch(self, X, Y, batch_size=512, steps=1000):
+        # Time-based split: Use first 80% for train, last 20% for val
+        split_idx = int(len(X) * 0.8)
+        
+        # Train Loop
         self.model.train()
         total_loss = 0
-        
-        # Random sampling loader
-        max_idx = len(X) - SEQ_LEN - 1
+        max_train_idx = split_idx - SEQ_LEN - 1
         
         pbar = tqdm(range(steps), desc="Training CDE")
         for _ in pbar:
-            idxs = np.random.randint(0, max_idx, size=batch_size)
+            idxs = np.random.randint(0, max_train_idx, size=batch_size)
+            batch_x = [X[idx : idx+SEQ_LEN] for idx in idxs]
+            batch_y = [Y[idx+SEQ_LEN] for idx in idxs]
             
-            # Construct batch: (B, T, D)
-            batch_x = []
-            batch_y = []
-            
-            for idx in idxs:
-                batch_x.append(X[idx : idx+SEQ_LEN])
-                batch_y.append(Y[idx+SEQ_LEN]) # Target at T+1
-                
             x_tensor = torch.tensor(np.array(batch_x), device=DEVICE)
             y_tensor = torch.tensor(np.array(batch_y), device=DEVICE)
             
             self.optimizer.zero_grad()
-            
-            # CDE Forward: Expects (B, T, D)
-            # Returns final state z_T: (B, hidden)
             z_final = self.model(x_tensor)
-            
-            # Decode to output
             preds = self.model.decoder(z_final)
-            
             loss = self.loss_fn(preds, y_tensor)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
-            
             total_loss += loss.item()
             pbar.set_postfix({'loss': f"{loss.item():.6f}"})
             
-        return total_loss / steps
+        train_loss = total_loss / steps
+
+        # Validation Loop (One pass over random samples from Val set)
+        self.model.eval()
+        val_steps = 200
+        val_loss = 0
+        all_preds = []
+        all_targets = []
+        max_val_idx = len(X) - SEQ_LEN - 1
+        
+        with torch.no_grad():
+            for _ in range(val_steps):
+                idxs = np.random.randint(split_idx, max_val_idx, size=batch_size)
+                batch_x = [X[idx : idx+SEQ_LEN] for idx in idxs]
+                batch_y = [Y[idx+SEQ_LEN] for idx in idxs]
+                
+                x_tensor = torch.tensor(np.array(batch_x), device=DEVICE)
+                y_tensor = torch.tensor(np.array(batch_y), device=DEVICE)
+                
+                z_final = self.model(x_tensor)
+                preds = self.model.decoder(z_final)
+                loss = self.loss_fn(preds, y_tensor)
+                val_loss += loss.item()
+                
+                if len(all_preds) < 1000: # detailed stats for first batch
+                    all_preds.append(preds.cpu().numpy())
+                    all_targets.append(y_tensor.cpu().numpy())
+
+        avg_val_loss = val_loss / val_steps
+        
+        # Print Stats
+        preds_arr = np.concatenate(all_preds, axis=0)
+        targets_arr = np.concatenate(all_targets, axis=0)
+        print(f"\n📊 Stats | Train Loss: {train_loss:.6f} | Val Loss: {avg_val_loss:.6f}")
+        print(f"   Preds  Mean: {preds_arr.mean():.4f} | Std: {preds_arr.std():.4f}")
+        print(f"   Target Mean: {targets_arr.mean():.4f} | Std: {targets_arr.std():.4f}")
+        
+        return train_loss
 
 def main():
     parser = argparse.ArgumentParser()
