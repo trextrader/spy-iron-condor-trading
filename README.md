@@ -842,51 +842,41 @@ The system leverages a **Neural Controlled Differential Equation (CDE)** archite
 
 ### 7.1 Architecture Details
 *   **Model**: `CondorBrain` (Neural CDE Implementation)
-*   **Layers**: 16–32 selective SSM layers
-*   **Dimension** ($d_{model}$): 64–1024
-*   **State Dim** ($d_{state}$): 32
-*   **Activation**: Selective Hidden State Evolution with $Tanh$ head
+*   **Solver**: Explicit Euler Integration
+*   **Vector Field**: 2-layer MLP (SiLU → Tanh)
+*   **Latent Dim** ($Z$): 512–1024
+*   **Activation**: Tanh-bounded continuous evolution
 
 ### 7.2 Mathematical Foundation
 
-The core of the Mamba block is a continuous-time system discretized for digital computation:
+Unlike discrete models, the Neural CDE treats the input sequence as a **control path** $X$ that drives the latent state $Z$:
 
-#### Continuous Form
-
-$$
-h'(t) = \mathbf{A}h(t) + \mathbf{B}x(t)
-$$
+#### Path-Driven Integration
 
 $$
-y(t) = \mathbf{C}h(t)
+Z_{t+1} = Z_t + f(Z_t) \cdot (X_{t+1} - X_t)
 $$
 
-#### Discretization (Zero-Order Hold)
-To process discrete market bars, the parameters are transformed using step size $\Delta$:
-$$
-\overline{\mathbf{A}} = \exp(\Delta \mathbf{A})
-$$
-$$
-\overline{\mathbf{B}} = (\Delta \mathbf{A})^{-1}(\exp(\Delta \mathbf{A}) - \mathbf{I}) \cdot \Delta \mathbf{B}
-$$
+Where:
+*   $Z_t \in \mathbb{R}^{512}$ is the latent status (memory)
+*   $X_t \in \mathbb{R}^{52}$ is the input vector (v2.2 schema)
+*   $f(Z)$ is the learned vector field
 
-#### Selective Mechanism
-Mamba 2 makes $\Delta, \mathbf{B}, \mathbf{C}$ functions of the input $x_t$, allowing the model to selectively propagate or reset its hidden state based on market volatility:
+#### Vector Field Network
+The vector field $f$ is constrained to ensure stability:
 $$
-\Delta_t = \text{Softplus}(\text{Linear}(x_t))
+f(Z) = \text{Tanh}(W \cdot \text{SiLU}(Z) + b)
 $$
-$$
-\mathbf{B}_t = \text{Linear}(x_t), \quad \mathbf{C}_t = \text{Linear}(x_t)
-$$
+The Tanh activation ensures $\|f(Z)\|_\infty \leq 1$, preventing numerical explosion over long sequences.
 
 ### 7.3 Feature Engineering (Input Vector)
-The model consumes advanced features including TDA signatures and Manifold Volatility:
+The model consumes a 52-parameter manifold including Curvature Proxy and Volatility EWMA:
 $$
-\vec{V}_t = [ \Delta \log(P_t), \text{RSI}_{norm}, \text{Curvature}, \text{Persistence}_1 ]
+\vec{V}_t = [ \ln(C_t/C_{t-1}), \sigma_{ewma}, \kappa_{proxy}, \text{IVR}, \text{VIX} ]
 $$
 
 ### 7.4 Generative Diffusion Head
-A conditional diffusion module (DDPM) refines the Mamba hidden state into a probabilistic price trajectory (32 steps), capturing uncertainty in high-volatility regimes.
+A conditional diffusion module (DDPM) refines the **CDE latent status** into a probabilistic price trajectory (32 steps), capturing uncertainty in high-volatility regimes.
 
 ---
 

@@ -5,12 +5,12 @@ This directory contains the visual specifications for the CondorBrain system. Be
 ## 🗺️ Master Maps
 - **[diagram_map.png](diagram_map.png)**: The master navigational map that links all other diagrams together, organized by functional cluster (Data, Intelligence, Logic, Execution, Optimization).
 - **[system_overview.png](system_overview.png)**: A high-level conceptual view of the entire system, showing the interaction between Data, Intelligence, and Execution layers.
-- **[full_system_architecture.png](full_system_architecture.png)**: The detailed V2.2 specification diagram, acting as the primary reference for the complete system architecture including Mamba 2 and Diffusion components.
+- **[full_system_architecture.png](full_system_architecture.png)**: The detailed V2.2 specification diagram, acting as the primary reference for the complete system architecture including Neural CDE and Diffusion components.
 - **[phase2_phase3_architecture.png](phase2_phase3_architecture.png)**: Roadmap diagram outlining the transition from basic indicator logic (Phase 2) to advanced risk controls and execution (Phase 3).
 
 ## 🧠 Intelligence Core
-- **[enhanced_architecture.png](enhanced_architecture.png)**: Focuses specifically on the Mamba 2 backbone and its connection to the new specialized output heads (Diffusion, TopKMoE).
-- **[mamba_engine_logic.png](mamba_engine_logic.png)**: Internal schematic of a single Mamba 2 block, showing the Selective Scan mechanism (SSM) and hardware-accelerated pathways.
+- **[enhanced_architecture.png](enhanced_architecture.png)**: Focuses specifically on the Neural CDE backbone and its connection to the new specialized output heads (Diffusion, TopKMoE).
+- **[cde_engine_logic.png](cde_engine_logic.png)**: Internal schematic of the Neural CDE engine, showing the explicit Euler integration and continuous vector fields.
 - **[condor_intelligence_flow_premium.png](condor_intelligence_flow_premium.png)**: Enhanced version of the intelligence flow including Topological Data Analysis (TDA) and Generative Diffusion components.
 - **[condor_intelligence_flow.png](condor_intelligence_flow.png)**: Standard logical flow through the Neural Intelligence Core, detailing the transformation from input tensors to trading signals.
 

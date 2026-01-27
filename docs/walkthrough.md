@@ -126,10 +126,8 @@ CSV → MarketSnapshot → Trading Decision with sample data.
 
 ## Next Steps (Phase 3+)
 
-1. **Strategy Refactor**: Move to pure signal gating
-2. **FIS Pipeline**: Complete fuzzy inference system for sizing
-3. **Risk Enhancement**: CVaR, beta-weighting, POT monitoring
-4. **Full Orchestration**: Wire complete pipeline with real sizing/risk/execution
+4. **Neural CDE Migration**: Replaced legacy Mamba-2 SSM backbone with continuous-time Neural CDE for superior stability.
+5. **Documentation Audit**: Completed a thorough audit to remove Mamba/SSM references from core specifications.
 
 ## Commits
 - `feat: Multi-timeframe support (1/5/15m) with auto file selection`

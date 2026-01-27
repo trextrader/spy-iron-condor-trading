@@ -457,7 +457,7 @@ $$
 
 | Parameter | Value | Rationale |
 |:----------|:------|:----------|
-| **d_model** | 1024 | Optimal width for SSM state capacity |
+| **d_model** | 1024 | Latent space dimension for CDE state |
 | **n_layers** | 32 | Sufficient depth for 128-step context |
 | **batch_size** | 64 × 4 accum = 256 | Gradient accumulation for memory efficiency |
 | **learning_rate** | $1 \times 10^{-4}$ | Standard for Adam with gradient clipping |
