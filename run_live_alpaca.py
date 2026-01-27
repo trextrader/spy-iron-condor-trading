@@ -220,8 +220,43 @@ def find_closest_contract(client, symbol, contract_type, target_strike, ideal_da
         contracts = res.option_contracts
     except ImportError:
         # Fallback to OptionChainRequest (older SDK or different version)
-        print("Warning: OptionContractsRequest not found. Please run `pip install alpaca-py -U`")
-        return None
+        try:
+             # Try generic strategy using OptionChainRequest
+             from alpaca.data.requests import OptionChainRequest
+             req = OptionChainRequest(
+                 underlying_symbol=symbol,
+                 type=contract_type,
+                 expiration_date_gte=ideal_date.date(),
+                 expiration_date_lte=(ideal_date + pd.Timedelta(days=5)).date(),
+                 strike_price_gte=target_strike - 2,
+                 strike_price_lte=target_strike + 2
+             )
+             # get_option_chain returns Dict[symbol, Snapshot]
+             chain_map = client.get_option_chain(req)
+             contracts = []
+             for sym, snap in chain_map.items():
+                 # Mock an object with .symbol and .strike_price to match expected interface
+                 # Snapshot has .latest_quote, .greeks etc. 
+                 # We need to parse symbol to get strike? Or snapshot has it?
+                 # Snapshot object usually doesn't have strike directly unless in metadata.
+                 # ACTUALLY: The keys are symbols. We can parse the OSI symbol.
+                 # SPY250101C00500000
+                 # For safety, let's just skip if we can't easily get strike.
+                 # But wait, we need it. 
+                 # Let's trust the filter did its job. We just need to find "closest to target".
+                 # We can parse strike from symbol string.
+                 try:
+                     # Parse OSI
+                     # SPY   25  01  01  C  00500000
+                     # 012345678901234567890
+                     # Strike is last 8 chars / 1000
+                     strike = float(sym[-8:]) / 1000.0
+                     contracts.append(type('obj', (object,), {'symbol': sym, 'strike_price': strike}))
+                 except: 
+                     continue
+        except Exception as e_fallback:
+             print(f"Fallback Search Error: {e_fallback}")
+             return None
     except Exception as e:
         print(f"Contract Search Error: {e}")
         return None
@@ -333,7 +368,26 @@ def run_live_loop(executor, model, metadata, device):
                         all_contracts = res_c.option_contracts + res_p.option_contracts
                         
                     except ImportError:
-                        print(" [Recorder Warning] OptionContractsRequest missing (old SDK?). Skipping chain record.")
+                        # Fallback for Recorder
+                        try:
+                           from alpaca.data.requests import OptionChainRequest
+                           req_chain = OptionChainRequest(
+                               underlying_symbol=SYMBOL,
+                               expiration_date_gte=datetime.now().date(),
+                               expiration_date_lte=datetime.now().date() + pd.Timedelta(days=7),
+                           )
+                           # get_option_chain returns Dict[symbol, Snapshot]
+                           res_chain = run_live_loop.opt_client.get_option_chain(req_chain)
+                           # Convert values to list for saving
+                           # Snapshot has greeks, iv, quote. perfect.
+                           all_contracts = list(res_chain.values())
+                           # We need to attach 'symbol' to the object if it's missing (it's the key)
+                           for sym, snap in res_chain.items():
+                               if not hasattr(snap, 'symbol'):
+                                   snap.symbol = sym # Inject symbol if missing
+                        except Exception as e_fb:
+                            print(f" [Recorder Warning] Fallback chain fetch failed: {e_fb}")
+
                     except Exception as e_chain:
                         print(f"  [Recorder Warning] fetching chain failed: {e_chain}")
 
