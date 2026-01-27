@@ -247,8 +247,27 @@ if __name__ == "__main__":
     parser.add_argument("--paper", action="store_true", default=True, help="Use paper trading")
     args = parser.parse_args()
 
+    # --- ENV VAR AUTO-POPULATION FROM CONFIG ---
     if not os.getenv('APCA_API_KEY_ID'):
-        print("Please set APCA_API_KEY_ID and APCA_API_SECRET_KEY env vars.")
+        try:
+            # Try to load keys from RunConfig (where user pasted them)
+            try:
+                from config import RunConfig
+            except ImportError:
+                 from core.config import RunConfig
+            
+            cfg = RunConfig()
+            if cfg.alpaca_key and "YOUR" not in cfg.alpaca_key:
+                print(f"🔑 Loaded Alpaca Keys from Config.")
+                os.environ['APCA_API_KEY_ID'] = cfg.alpaca_key
+                os.environ['APCA_API_SECRET_KEY'] = cfg.alpaca_secret
+            else:
+                 print("⚠️ Config has placeholder keys. Please set APCA_API_KEY_ID env var.")
+        except Exception as e:
+            print(f"⚠️ Failed to load keys from config: {e}")
+
+    if not os.getenv('APCA_API_KEY_ID'):
+        print("❌ Error: Please set APCA_API_KEY_ID and APCA_API_SECRET_KEY env vars.")
         sys.exit(1)
         
     try:
