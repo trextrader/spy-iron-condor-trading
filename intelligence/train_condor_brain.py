@@ -158,28 +158,36 @@ def prepare_features(df: pd.DataFrame) -> tuple:
 
     # --- IVR-based regime detection for conditional targets ---
     # --- IVR-based regime detection for conditional targets ---
-    ivr_raw = df['ivr'].fillna(50).values if 'ivr' in df.columns else np.full(n, 50.0)
+    # --- IVR-based regime detection for conditional targets ---
+    ivr_raw = df['ivr'].astype(float).values if 'ivr' in df.columns else np.full(n, np.nan)
 
     # Robust scale detection (HANDLE 0-1 vs 0-100 AUTOMATICALLY)
-    # If max value is small (<1.5), assume 0-1 scale and normalize to 0-100
-    # This prevents model collapse if feeding normalized inputs to 0-100 threshold logic.
     finite_mask = np.isfinite(ivr_raw)
     if finite_mask.any():
         ivr_max = np.nanmax(ivr_raw[finite_mask])
         if ivr_max <= 1.5:
-            # Scale 0-1 -> 0-100
-            ivr = np.where(finite_mask, ivr_raw * 100.0, 50.0)
+            # Dataset has normalized IVR in 0..1
+            ivr_0_100 = np.where(finite_mask, ivr_raw * 100.0, 50.0)
         else:
-            # Already 0-100
-            ivr = np.where(finite_mask, ivr_raw, 50.0)
+            # Dataset already in 0..100
+            ivr_0_100 = np.where(finite_mask, ivr_raw, 50.0)
     else:
-        ivr = np.full(n, 50.0)
+        ivr_0_100 = np.full(n, 50.0)
 
-    ivr = np.clip(ivr, 0.0, 100.0)
+    ivr_0_100 = np.clip(ivr_0_100, 0.0, 100.0).astype(np.float32)
+    
+    # Overwrite df['ivr'] so downstream is consistent
+    df['ivr'] = ivr_0_100
+    ivr = ivr_0_100 # Local alias for target logic below
 
-    low_vol = ivr < 30
-    high_vol = ivr > 70
+    low_vol = ivr_0_100 < 30
+    high_vol = ivr_0_100 > 70
     normal_vol = ~low_vol & ~high_vol
+    
+    # SANITY PRINT (Verify distribution is not flat)
+    if n > 0:
+        print(f"[SANITY] IVR 0-100: min={ivr_0_100.min():.2f} mean={ivr_0_100.mean():.2f} max={ivr_0_100.max():.2f}")
+        print(f"[SANITY] IVR regimes: low={low_vol.mean():.3f} normal={normal_vol.mean():.3f} high={high_vol.mean():.3f}")
 
     # Offset targets: vary by regime (low vol → wider wings, high vol → tighter)
     df['target_call_offset'] = np.where(low_vol, 2.5 + rng.uniform(-0.5, 0.5, n),
@@ -259,8 +267,9 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     # Regime labeling (with NaN safety)
     if 'regime_label' not in df.columns:
         if 'ivr' in df.columns:
+            # Use strict 0-100 input from our robust normalization above
             df['regime_label'] = pd.cut(
-                df['ivr'].fillna(50),  # Default to normal regime
+                pd.Series(ivr_0_100),
                 bins=[-0.1, 30, 70, 101],
                 labels=[0, 1, 2]
             ).fillna(1).astype(int)  # Default to normal (1)

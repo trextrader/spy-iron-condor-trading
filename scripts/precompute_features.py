@@ -293,9 +293,10 @@ def main() -> int:
     vol_range = vol_max - vol_min
     vol_range = vol_range.replace(0, 1.0)
     
-    out_df['ivr'] = ((out_df['vol_ewma'] - vol_min) / vol_range).astype(np.float32)
-    # Fill startup NaNs with 0.5 (neutral)
-    out_df['ivr'] = out_df['ivr'].fillna(0.5).clip(0.0, 1.0)
+    # Output IVR in 0-100 scale for consistency with ecosystem (Regime thresholds are 30/70)
+    out_df['ivr'] = (((out_df['vol_ewma'] - vol_min) / vol_range) * 100.0).astype(np.float32)
+    # Fill startup NaNs with 50.0 (neutral)
+    out_df['ivr'] = out_df['ivr'].fillna(50.0).clip(0.0, 100.0)
 
     added = [c for c in out_df.columns if c not in before_cols]
     missing = [c for c in before_cols if c not in out_df.columns]
