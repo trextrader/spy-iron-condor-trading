@@ -39,7 +39,7 @@ digraph InstitutionalWorkflow {
 
     // --- PHASE 3: FUZZY RISK & SIZING ---
     subgraph cluster_risk {
-        label = <<b>3. INSTITUTIONAL RISK & SIZING</b>>;
+        label = <<b>3. INSTITUTIONAL RISK &amp; SIZING</b>>;
         fillcolor = "#F1F8E9"; style = "filled,rounded"; color = "#2E7D32";
         
         fuzzy_sizer [label="11-Factor Hybrid Sizer\n(Neural CDE + 10 Factors)", fillcolor="#81C784", color="#2E7D32"];
