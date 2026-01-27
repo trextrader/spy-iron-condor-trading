@@ -126,6 +126,9 @@ FEATURE_COLS = FEATURE_COLS_V22
 
 def prepare_features(df: pd.DataFrame) -> tuple:
     """Prepare features and targets for CondorBrain training.
+    
+    Returns:
+        (X, y, regime, median, scale)
 
     2026-01-26 UPDATE: Now generates 10 targets (added explicit entry/exit targets)
     and uses REALISTIC values instead of constants to prevent model collapse.
@@ -298,6 +301,8 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     # Debug output
     debug_tensor_stats("X_scaled", X)
     debug_tensor_stats("y_clamped", y)
+    
+    return X, y, regime, med, scale
     
     # Sanity check: confirm dtypes and ranges
     
@@ -558,7 +563,7 @@ def train_condor_brain(args):
     print(f"[CondorBrain] Loaded {len(df):,} rows")
     
     # Prepare features
-    X, y, regime = prepare_features(df)
+    X, y, regime, med, scale = prepare_features(df)
     
     # Free dataframe memory
     del df
@@ -1331,6 +1336,8 @@ def train_condor_brain(args):
                 "state_dict": model.state_dict(),
                 "feature_cols": list(FEATURE_COLS),
                 "input_dim": int(len(FEATURE_COLS)),
+                "median": med.tolist() if isinstance(med, np.ndarray) else med,
+                "mad": scale.tolist() if isinstance(scale, np.ndarray) else scale,
                 "seq_len": int(args.lookback),
                 "version": VERSION_V22,
                 "model_config": {
@@ -1379,6 +1386,8 @@ def train_condor_brain(args):
             "state_dict": model.state_dict(),
             "feature_cols": list(FEATURE_COLS),
             "input_dim": int(len(FEATURE_COLS)),
+            "median": med.tolist() if isinstance(med, np.ndarray) else med,
+            "mad": scale.tolist() if isinstance(scale, np.ndarray) else scale,
             "seq_len": int(args.lookback),
             "version": VERSION_V22,
             "epoch": epoch + 1,
