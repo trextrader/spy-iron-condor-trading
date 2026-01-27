@@ -262,16 +262,120 @@ def run_live_loop(executor, model, metadata, device):
             
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Spot: ${spot:.2f} | Score: {entry_score}/100 | Conf: {confidence:.4f} | Prob: {prob_profit:.4f}")
 
+
+# --- HELPER: Contract Resolution ---
+def find_closest_contract(client, symbol, contract_type, target_strike, ideal_date):
+    """
+    Finds the contract closest to target_strike and ideal_date.
+    ideal_date: datetime object
+    """
+    from alpaca.data.requests import OptionChainRequest
+    from alpaca.data.enums import OptionsFeed
+    
+    # Range for expiration: ideal_date +/- 3 days? 
+    # Actually, let's look for exact day or next available.
+    # For DTE, we target specific window.
+    
+    # Request chain for symbol
+    # We filter specifically for the target strike range to minimize data
+    req = OptionChainRequest(
+        underlying_symbol=symbol,
+        status='active',
+        expiration_date_gte=ideal_date.date(),
+        expiration_date_lte=(ideal_date + pd.Timedelta(days=7)).date(), # 1 week window
+        root_symbol=symbol
+    )
+    
+    try:
+        # Note: get_option_chain returns a massive dict. 
+        # Ideally we use get_option_contracts if we know parameters?
+        # Alpaca-py `get_option_chain` is actually `get_option_snapshot`? No.
+        # Let's use `get_option_contracts` from TradingClient? No, DataClient.
+        # Check Alpaca API: OptionContractsRequest allows filtering by strike.
+        pass
+    except:
+        pass
+
+    # RE-IMPLEMENTATION with OptionContractsRequest (lighter)
+    from alpaca.data.requests import OptionContractsRequest
+    
+    req = OptionContractsRequest(
+        underlying_symbols=[symbol],
+        status='active',
+        expiration_date_gte=ideal_date.date(),
+        expiration_date_lte=(ideal_date + pd.Timedelta(days=5)).date(),
+        type=contract_type, # 'call' or 'put'
+        strike_price_gte=target_strike - 2,
+        strike_price_lte=target_strike + 2,
+        limit=10
+    )
+    
+    try:
+        res = client.get_option_contracts(req)
+        contracts = res.option_contracts
+        if not contracts:
+            return None
+            
+        # Sort by distance to strike, then distance to date
+        # But we already filtered strike +/- 2.
+        # Let's just take the one closest to target strike.
+        # contracts field: strike_price, expiration_date, symbol
+        
+        best = min(contracts, key=lambda x: abs(float(x.strike_price) - target_strike))
+        return best.symbol
+    except Exception as e:
+        print(f"Contract Search Error: {e}")
+        return None
+
+# -----------------------------------
+
             # 5. Execution Logic
             if active_trade is None:
                 if entry_score >= ENTRY_THRESHOLD and confidence > 0.4:
                     trade_num = running_stats['total_trades'] + 1
                     call_off, put_off, width, dte = preds[0], preds[1], preds[2], preds[3]
                     width = width if width > 1.0 else 5.0
-                    dte = dte if dte > 1.0 else 14.0
-                    short_call = spot + (call_off * spot * 0.01)
-                    short_put = spot - (put_off * spot * 0.01)
+                    dte = dte if dte > 1.0 else 14.0 # Default min DTE
                     
+                    # Target Strikes
+                    target_short_call = spot + (call_off * spot * 0.01)
+                    target_short_put = spot - (put_off * spot * 0.01)
+                    target_long_call = target_short_call + width
+                    target_long_put = target_short_put - width
+                    
+                    # Target Date
+                    target_date = datetime.now() + pd.Timedelta(days=dte)
+                    
+                    # Try to resolve OSI Symbols
+                    # Check if we have opt_client from recorder loop, else init
+                    if not hasattr(run_live_loop, 'opt_client'):
+                         try:
+                             from alpaca.data.historical import OptionHistoricalDataClient
+                             ak = os.getenv('APCA_API_KEY_ID')
+                             sk = os.getenv('APCA_API_SECRET_KEY')
+                             run_live_loop.opt_client = OptionHistoricalDataClient(ak, sk)
+                         except:
+                             print("❌ Failed to init OptionClient for execution.")
+                             run_live_loop.opt_client = None
+
+                    osi_legs = []
+                    if run_live_loop.opt_client:
+                        print(f"🔎 Solving Contracts (DTE={dte:.1f}d)...")
+                        sc_sym = find_closest_contract(run_live_loop.opt_client, SYMBOL, 'call', target_short_call, target_date)
+                        lc_sym = find_closest_contract(run_live_loop.opt_client, SYMBOL, 'call', target_long_call, target_date)
+                        sp_sym = find_closest_contract(run_live_loop.opt_client, SYMBOL, 'put', target_short_put, target_date)
+                        lp_sym = find_closest_contract(run_live_loop.opt_client, SYMBOL, 'put', target_long_put, target_date)
+                        
+                        if all([sc_sym, lc_sym, sp_sym, lp_sym]):
+                            osi_legs = [
+                                {'option_symbol': sc_sym, 'side': 'sell'},
+                                {'option_symbol': lc_sym, 'side': 'buy'},
+                                {'option_symbol': sp_sym, 'side': 'sell'},
+                                {'option_symbol': lp_sym, 'side': 'buy'}
+                            ]
+                        else:
+                            print(f"⚠️ Could not resolve all legs: SC={sc_sym}, LC={lc_sym}, SP={sp_sym}, LP={lp_sym}")
+
                     entry_msg = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║ 🦅 IRON CONDOR #{trade_num} ENTRY @ {datetime.now().strftime('%H:%M:%S')}
@@ -280,11 +384,32 @@ def run_live_loop(executor, model, metadata, device):
 ║ FUZZY SCORE:   {entry_score}/100 (threshold: {ENTRY_THRESHOLD})
 ║ CONFIDENCE:     {confidence:.4f} | PROB: {prob_profit:.4f}
 ╠─────────────────────────── IRON CONDOR SETUP ────────────────────────────────╣
-║   Short Call:  ${short_call:.2f}  |  Short Put:   ${short_put:.2f}
+║   Short Call:  ${target_short_call:.2f}  |  Short Put:   ${target_short_put:.2f}
 ║   Width:       ${width:.2f}  |  DTE: {dte:.1f} days
+╠─────────────────────────── EXECUTION ────────────────────────────────────────╣
+║   Resolved:    {len(osi_legs) == 4}
+║   Short Legs:  {osi_legs[0]['option_symbol'] if osi_legs else 'N/A'} / {osi_legs[2]['option_symbol'] if osi_legs else 'N/A'}
 ╚══════════════════════════════════════════════════════════════════════════════╝"""
                     print(entry_msg)
-                    active_trade = {'entry_spot': spot, 'short_call': short_call, 'short_put': short_put, 'entry_time': now, 'qty': 10}
+                    
+                    # EXECUTE
+                    if osi_legs and executor:
+                        try:
+                            t_ids = executor.submit_iron_condor(SYMBOL, osi_legs, quantity=1)
+                            print(f"🚀 SUBMITTED TO ALPACA! Trade IDs: {t_ids}")
+                        except Exception as e:
+                            print(f"❌ EXECUTION FAILED: {e}")
+                    else:
+                        print("⚠️ DRY RUN (No executor or unresolved legs)")
+
+                    active_trade = {
+                        'entry_spot': spot, 
+                        'short_call': target_short_call, 
+                        'short_put': target_short_put, 
+                        'entry_time': now, 
+                        'qty': 1,
+                        'legs': osi_legs
+                    }
                     running_stats['total_trades'] += 1
             else:
                 exit_reason = None
