@@ -39,6 +39,33 @@ except ImportError:
 
 from core.dto import MarketSnapshot, TradeDecision
 
+# --- LOGGING HELPER ---
+class TradeLogger:
+    def __init__(self, log_dir="data/live"):
+        self.log_path = os.path.join(log_dir, "trade_log.csv")
+        os.makedirs(log_dir, exist_ok=True)
+        if not os.path.exists(self.log_path):
+            with open(self.log_path, "w") as f:
+                f.write("timestamp,spot,score,confidence,prob_profit,action,short_call,short_put,long_call,long_put,width,dte,trade_ids\n")
+    
+    def log_entry(self, spot, score, conf, prob, legs, trade_ids):
+        # legs is list of dicts: [{'option_symbol': '...', 'side': '...'}, ...]
+        # Extract symbols
+        sc = next((l['option_symbol'] for l in legs if l['side'] == 'sell' and 'C' in l['option_symbol']), "N/A")
+        sp = next((l['option_symbol'] for l in legs if l['side'] == 'sell' and 'P' in l['option_symbol']), "N/A")
+        lc = next((l['option_symbol'] for l in legs if l['side'] == 'buy' and 'C' in l['option_symbol']), "N/A")
+        lp = next((l['option_symbol'] for l in legs if l['side'] == 'buy' and 'P' in l['option_symbol']), "N/A")
+        
+        t_ids_str = "|".join(str(t) for t in trade_ids) if trade_ids else "DRY_RUN"
+        
+        row = f"{datetime.now()},{spot:.2f},{score},{conf:.4f},{prob:.4f},ENTRY,{sc},{sp},{lc},{lp},,N/A,{t_ids_str}\n"
+        with open(self.log_path, "a") as f:
+            f.write(row)
+        print(f"📝 Logged Trade to {self.log_path}")
+
+# Initialize Logger Global
+trade_logger = TradeLogger()
+
 # --- CONFIG ---
 SYMBOL = "SPY"
 TIMEFRAME = "1Min"
@@ -197,32 +224,6 @@ def run_live_loop(executor, model, metadata, device):
                 print(f" [Data Recorder Error] {e_rec}")
             # --- LIVE DATA RECORDER END ---
 
-# --- LOGGING HELPER ---
-class TradeLogger:
-    def __init__(self, log_dir="data/live"):
-        self.log_path = os.path.join(log_dir, "trade_log.csv")
-        os.makedirs(log_dir, exist_ok=True)
-        if not os.path.exists(self.log_path):
-            with open(self.log_path, "w") as f:
-                f.write("timestamp,spot,score,confidence,prob_profit,action,short_call,short_put,long_call,long_put,width,dte,trade_ids\n")
-    
-    def log_entry(self, spot, score, conf, prob, legs, trade_ids):
-        # legs is list of dicts: [{'option_symbol': '...', 'side': '...'}, ...]
-        # Extract symbols
-        sc = next((l['option_symbol'] for l in legs if l['side'] == 'sell' and 'C' in l['option_symbol']), "N/A")
-        sp = next((l['option_symbol'] for l in legs if l['side'] == 'sell' and 'P' in l['option_symbol']), "N/A")
-        lc = next((l['option_symbol'] for l in legs if l['side'] == 'buy' and 'C' in l['option_symbol']), "N/A")
-        lp = next((l['option_symbol'] for l in legs if l['side'] == 'buy' and 'P' in l['option_symbol']), "N/A")
-        
-        t_ids_str = "|".join(str(t) for t in trade_ids) if trade_ids else "DRY_RUN"
-        
-        row = f"{datetime.now()},{spot:.2f},{score},{conf:.4f},{prob:.4f},ENTRY,{sc},{sp},{lc},{lp},,N/A,{t_ids_str}\n"
-        with open(self.log_path, "a") as f:
-            f.write(row)
-        print(f"📝 Logged Trade to {self.log_path}")
-
-# Initialize Logger Global
-trade_logger = TradeLogger()
 
             
             # 1. Fetch Data
