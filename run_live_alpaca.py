@@ -392,7 +392,7 @@ if __name__ == "__main__":
             
         model.load_state_dict(state_dict, strict=False)
         model.eval()
-        print(f"✅ Model & Executor Ready. (Backbone: Neural CDE)")
+        print(f"✅ Model & Executor Ready. (Device: {DEVICE}) (Backbone: Neural CDE)")
         
         run_live_loop(executor, model, metadata, DEVICE)
         
