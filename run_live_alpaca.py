@@ -19,7 +19,24 @@ from intelligence.rule_engine.executor import RuleExecutionEngine
 
 from intelligence.canonical_feature_registry import FEATURE_COLS_V22, get_neutral_fill_value_v22
 import intelligence.fuzzy_engine as fe
-from config import StrategyConfig
+try:
+    from config import StrategyConfig
+except ImportError:
+    # Safe Fallback: Check if config is in core/ (Users often paste it there)
+    core_config = os.path.join(os.getcwd(), 'core', 'config.py')
+    if os.path.exists(core_config):
+        print(f"⚠️ Warning: 'config.py' not found in root. Loading from '{core_config}'.")
+        print(f"👉 Fix: Please move 'core/config.py' to './config.py' for standard behavior.")
+        sys.path.append(os.path.join(os.getcwd(), 'core'))
+        try:
+             from config import StrategyConfig
+        except ImportError:
+             print("❌ Error: Failed to import StrategyConfig from core/config.py")
+             sys.exit(1)
+    else:
+        print("❌ Error: 'config.py' not found in root or core/.")
+        sys.exit(1)
+
 from core.dto import MarketSnapshot, TradeDecision
 
 # --- CONFIG ---
