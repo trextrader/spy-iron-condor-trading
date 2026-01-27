@@ -22,7 +22,7 @@ class ConditionalDiffusionHead(nn.Module):
     Conditional Diffusion Model for Time Series Forecasting.
     
     Refines a latent trajectory using a denoising process conditioned on the 
-    Mamba backbone's embedding.
+    Neural CDE backbone's latent state.
     
     Architecture:
     - Epsilon-Predictor: Residual MLP taking (x_t, t, condition)
@@ -31,7 +31,7 @@ class ConditionalDiffusionHead(nn.Module):
     def __init__(
         self, 
         input_dim: int = 4,    # e.g., r, rho, d, v (4 features)
-        cond_dim: int = 512,   # Mamba d_model
+        cond_dim: int = 512,   # Neural CDE hidden state dim
         hidden_dim: int = 256,
         horizon: int = 32, 
         n_steps: int = 100     # Diffusion steps (keep small for speed)
@@ -49,7 +49,7 @@ class ConditionalDiffusionHead(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
         )
         
-        # Condition Projection (Mamba -> Hidden)
+        # Condition Projection (Neural CDE -> Hidden)
         self.cond_proj = nn.Linear(cond_dim, hidden_dim)
         
         # Denoising Network (Residual MLP)
@@ -80,7 +80,7 @@ class ConditionalDiffusionHead(nn.Module):
         
         Args:
             x_start: Ground truth trajectory (B, H, F)
-            condition: Mamba embedding (B, D)
+            condition: Neural CDE latent state (B, D)
             t: Optional time steps (B,). If None, sampled uniformly.
             
         Returns:

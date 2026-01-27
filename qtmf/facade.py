@@ -285,7 +285,6 @@ def benchmark_and_size(
     # relative weight w_nl for neural, (1-w_nl) for technical.
     w_nl = float(extras.get("fuzzy_weight_neural", 0.60))
     
-    # gaussian_confidence here represents the Neural (Mamba) probability/signal
     neural_conf = ti.gaussian_confidence
     
     fused_conf = _clamp((neural_conf * w_nl) + (Ft * (1.0 - w_nl)), 0.0, 1.0)

@@ -4,7 +4,8 @@ CondorBrain Training Script (Ultra-Fast GPU Dataset)
 Optimizations:
 - GPU-resident data with unfold() views (zero-copy sequence slicing)
 - No H2D transfers in training loop
-- BF16 end-to-end for Mamba fast path
+- BF16 end-to-end for performance
+- Continuous-time dynamics via Neural CDE backbone
 """
 import sys
 import os
@@ -29,7 +30,8 @@ from tqdm import tqdm
 # Add project root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from intelligence.condor_brain import CondorBrain, CondorLoss, HAS_MAMBA
+from intelligence.condor_brain import CondorBrain, CondorLoss, HAS_CDE
+
 from intelligence.condor_loss import CompositeCondorLoss
 from intelligence.canonical_feature_registry import (
     FEATURE_COLS_V22,
@@ -48,24 +50,13 @@ from intelligence.training_monitor import (
 
 def probe_fast_kernels() -> dict:
     """
-    Returns a dict describing whether fused CUDA kernels are available.
-    If these are missing, you will be stuck in the ~1-3 it/s range for big models.
+    Returns a dict describing whether high-performance kernels are available.
+    For Neural CDE, standard PyTorch operations are typically sufficient.
     """
     info = {
-        "mamba_selective_scan_cuda": False,
-        "causal_conv1d": False,
+        "cuda_available": torch.cuda.is_available(),
+        "bf16_supported": torch.cuda.is_bf16_supported() if torch.cuda.is_available() else False,
     }
-    try:
-        # selective_scan_cuda is the core fast path for mamba_ssm
-        from mamba_ssm.ops.selective_scan_interface import selective_scan_fn  # noqa: F401
-        info["mamba_selective_scan_cuda"] = True
-    except Exception:
-        info["mamba_selective_scan_cuda"] = False
-    try:
-        import causal_conv1d  # noqa: F401
-        info["causal_conv1d"] = True
-    except Exception:
-        info["causal_conv1d"] = False
     return info
 
 # ============================================================================

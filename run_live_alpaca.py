@@ -103,7 +103,6 @@ def run_live_loop(executor, model, ruleset, device):
             # 2. Compute Features (V2.2)
             # Requires 'cp_num', 'strike' etc? No, live run computes indicators from OHLCV.
             # But 'strike' / 'delta' features depend on Option Chain. 
-            # BACKTEST used 'mamba_institutional.csv' which had these pre-calc.
             # LIVE run: We either need to fetch real-time Greeks/Strike from Alpaca Option Chain
             # OR use dummy values if model doesn't strictly rely on them (risk).
             # The model HAS 'delta', 'gamma' in feature list.

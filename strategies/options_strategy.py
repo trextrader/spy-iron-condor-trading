@@ -12,11 +12,11 @@ from intelligence.regime_filter import check_liquidity_gate
 
 # CondorBrain Neural Integration (Optional - falls back to rule-based if not available)
 try:
-    from intelligence.condor_brain import CondorBrainEngine, CondorSignal, HAS_MAMBA
+    from intelligence.condor_brain import CondorBrainEngine, CondorSignal, HAS_CDE
     # Auto-discover any condor_brain model
     import glob
     _model_candidates = glob.glob("models/condor_brain*.pth")
-    HAS_CONDOR_BRAIN = HAS_MAMBA and len(_model_candidates) > 0
+    HAS_CONDOR_BRAIN = HAS_CDE and len(_model_candidates) > 0
 except (ImportError, OSError):
     HAS_CONDOR_BRAIN = False
     CondorBrainEngine = None
@@ -219,7 +219,7 @@ def regime_wing_width(cfg, iv_rank: float, vix: float, regime: str = "NEUTRAL") 
         
     if regime == "RANGING":
         return base
-
+ 
     # Fallback VIX/IVR Logic
     high_vol = (iv_rank >= cfg.regime_iv_rank_widen) or (vix >= cfg.regime_vix_widen)
     if high_vol:
@@ -429,10 +429,10 @@ def can_enter_trade(broker, cfg) -> Tuple[bool, str]:
     if len(positions) >= cfg.max_positions:
         return False, "Skip: max positions reached"
     
-    positions_value = acct.get("positions_value", 0.0)
+    positions_value = acct.get("equity_used", 0.0)
     equity = max(acct.get("equity", 1.0), 1.0)
     
-    if positions_value / equity >= cfg.max_portfolio_alloc:
+    if (positions_value / equity) >= cfg.max_portfolio_alloc:
         return False, "Skip: portfolio allocation limit"
     
     return True, "OK"
@@ -460,7 +460,7 @@ def calculate_breach_probability(delta: float) -> float:
     return abs(delta)
 
 def validate_pricing_and_risk(legs: IronCondorLegs, width: float, 
-                              cfg, acct_equity: float) -> Tuple[bool, str, float]:
+                               cfg, acct_equity: float) -> Tuple[bool, str, float]:
     """Validate credit and risk constraints"""
     credit = calc_condor_credit(legs)
     credit_ratio = credit / width

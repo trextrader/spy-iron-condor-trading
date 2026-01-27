@@ -17,7 +17,7 @@ Key Insight:
 - The model learns when global context is needed
 
 Usage:
-    Insert VolGatedAttn modules after Mamba layers 8, 16, 24 in CondorBrain.
+    Insert VolGatedAttn modules into the Neural CDE backbone in CondorBrain.
 """
 
 import torch

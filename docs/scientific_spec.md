@@ -66,23 +66,29 @@ To prevent lookahead bias (Data Leakage), the pipeline uses an `as_of` merge str
 
 The curvature $\kappa$ of the log-price manifold is estimated using the second difference (discrete acceleration):
 
+
 $$
 \ddot{r}_t = r_t - 2r_{t-1} + r_{t-2}
 $$
 
+
 Smoothed over 64 bars and normalized by local volatility:
+
 
 $$
 \kappa_t = \frac{\text{EMA}_{64}(\ddot{r}_t)}{\sigma_t + \epsilon}
 $$
 
+
 **Volatility Energy:**
 
 Inspired by differential geometry, we define a scalar "energy" that captures the local curvature magnitude:
 
+
 $$
 E_t = \ln(1 + \alpha |\kappa_t|), \quad \alpha = 1000
 $$
+
 
 High energy indicates regime transitions (trend reversals, breakouts).
 
@@ -109,17 +115,29 @@ For each timestep $t \in [0, T-1]$:
 
 $$dZ_t = f(Z_t; \theta) \cdot dX_t$$
 
-$$Z_{t+1} = Z_t + dZ_t$$
+
+$$
+Z_{t+1} = Z_t + dZ_t
+$$
+
 
 Where $f: \mathbb{R}^{512} \to \mathbb{R}^{512 \times 52}$ is the learned vector field:
 
-$$f(z) = \tanh(W_2 \cdot \text{SiLU}(W_1 \cdot z + b_1) + b_2)$$
+
+$$
+f(z) = \tanh(W_2 \cdot \text{SiLU}(W_1 \cdot z + b_1) + b_2)
+$$
+
 
 *The tanh activation bounds $\|f(z)\|_\infty \leq 1$, ensuring numerical stability over long sequences.*
 
 **4. Policy Head (Output):**
 
-$$\hat{y} = W_{out} \cdot \text{RMSNorm}(Z_T)$$
+
+$$
+\hat{y} = W_{out} \cdot \text{RMSNorm}(Z_T)
+$$
+
 
 *The final hidden state $Z_T$ captures the entire sequence dynamics for policy generation.*
 
@@ -220,9 +238,11 @@ Training was stabilized using a robust Z-Score Normalization pipeline to prevent
 
 **Scaling Equation:**
 
+
 $$
 x_{scaled} = \text{clip}\left(\frac{x - \mu}{\sigma + \epsilon}, -10, 10\right)
 $$
+
 
 - $\mu, \sigma$: Calculated globally across the 10M dataset.
 - $\text{clip}(-10, 10)$: Prevents "Black Swan" outliers (e.g., VIX spikes) from generating infinite gradients in half-precision training.
@@ -307,30 +327,38 @@ We implement a probabilistic gating network $G(h_T) \in \mathbb{R}^3$ that blend
 
 **Gating Logic:**
 
+
 $$
 \pi(h_T) = \text{Softmax}(W_g h_T) = [P(Low), P(Normal), P(High)]^T
 $$
 
+
 **Output Synthesis:**
+
 
 $$
 \hat{y} = \sum_{i \in \text{Regimes}} \pi_i(h_T) \cdot \text{Expert}_i(h_T)
 $$
+
 
 This allows the model to maintain discrete strike selection policies for high-fright (VIX > 25) vs. low-volatility (VIX < 15) environments while sharing a common CDE backbone for feature extraction.
 
 ### 6.3 HorizonForecaster Trajectory Mathematics
 The Forecaster generates a 45-day price surface $F \in \mathbb{R}^{45 \times 4}$ where each step $j$ contains:
 
+
 $$
 f_j = [P_{close}, P_{high}, P_{low}, \sigma_{vol}]
 $$
 
+
 The trajectory is constrained by a price envelope calculated via the GRU hidden state $z_j$:
+
 
 $$
 \mathrm{Range_{max}} = \sigma(W_{\mathrm{range}} z_{45}) \in [0, 1]
 $$
+
 
 This provides the model with a "predictive horizon" to calibrate the Iron Condor wings against expected 45-day outliers.
 
@@ -372,9 +400,11 @@ The primary output head generates optimal Iron Condor configuration:
 
 **Policy Head Mathematics:**
 
+
 $$
 \hat{\pi}_{IC} = \text{Softmax}\left( W_{policy} \cdot \text{RMSNorm}(h_T^{(L)}) + b_{policy} \right) \in \mathbb{R}^8
 $$
+
 
 ### 8.2 Regime Classification (3 Probability Outputs)
 
@@ -388,15 +418,19 @@ The `RegimeDetector` module classifies market volatility state:
 
 **Regime Detection Mathematics:**
 
+
 $$
 p_{regime} = \text{Softmax}\left( W_G \cdot h_T^{(L)} \right) \in \mathbb{R}^3
 $$
 
+
 **Mixture-of-Experts Aggregation:**
+
 
 $$
 \hat{y}_{final} = \sum_{i \in \{low, normal, high\}} p_i \cdot E_i(h_T^{(L)})
 $$
+
 
 Where each $E_i$ is a specialized expert head trained for that volatility regime.
 
@@ -412,9 +446,11 @@ This "Synergistic Learning" ensures that the features learned for price trajecto
 ### 8.5 Real-Time Money Management Logic
 The final trade size is not static; it is a **dynamic function of predictive alignment**:
 
+
 $$
 S_{trade} = S_{max} \cdot \left( w_1 \cdot \mu_{fuzzy} + w_2 \cdot \phi_{cde} \right) \cdot \text{RiskFactor}
 $$
+
 
 - **$\mu_{fuzzy}$:** Consensus from the 11-factor fuzzy engine.
 - **$\phi_{cde}$:** The confidence head of the policy branch.
@@ -437,17 +473,23 @@ The `HorizonForecaster` module generates probabilistic price predictions:
 
 For each horizon $h \in \{1, 3, 5, 10\}$:
 
+
 $$
 \mu_h = W_{\mu}^{(h)} \cdot h_T^{(L)} + b_{\mu}^{(h)}
 $$
+
+
 
 $$
 \sigma_h = \text{Softplus}\left( W_{\sigma}^{(h)} \cdot h_T^{(L)} + b_{\sigma}^{(h)} \right)
 $$
 
+
+
 $$
 p_h^{up} = \sigma\left( W_p^{(h)} \cdot h_T^{(L)} + b_p^{(h)} \right)
 $$
+
 
 ---
 
@@ -470,9 +512,11 @@ $$
 
 Simulates large batch without memory explosion:
 
+
 $$
 \nabla \theta_{eff} = \frac{1}{K} \sum_{k=1}^{K} \nabla \theta_{micro}^{(k)}
 $$
+
 
 Where $K$ = `accum_steps` and effective batch = $B_{micro} \times K$.
 
@@ -538,9 +582,11 @@ python intelligence/train_condor_brain.py \
 
 The loss represents the **average error** between model predictions and ground truth. Since CondorLoss is primarily MSE-based, the **Root Mean Squared Error (RMSE)** provides intuitive interpretation:
 
+
 $$
 \text{RMSE} = \sqrt{\text{Loss}}
 $$
+
 
 | Loss Value | RMSE | Interpretation |
 |:-----------|:-----|:---------------|
@@ -593,9 +639,11 @@ Experimental batch logs from the A100 training run demonstrate the stability of 
 ### 10.1 Multi-Objective Composite Loss
 The objective function $\mathcal{J}(\theta)$ is a weighted convex combination of regression, classification, and calibration losses:
 
+
 $$
 \min_\theta \mathcal{L}_{total} = \underbrace{\frac{\lambda_{stk}}{2} \sum_{i=0}^3 \text{Huber}(\hat{y}_i, y_i, \delta=1)}_{\text{Position Precision}} + \underbrace{\lambda_{reg} \, \text{XEnt}(\hat{\pi}, \text{Regime})}_{\text{Context Extraction}} + \underbrace{\lambda_{pnl} \sum_{i=4}^7 \text{MSE}(\hat{y}_i, y_i)}_{\text{Risk Calibration}}
 $$
+
 
 **Loss Components:**
 1. **Huber Loss ($\delta=1$):** Used for strike offsets to remain robust against price spikes while penalizing large miss-calibrations linearly.
@@ -644,39 +692,49 @@ The `CompositeCondorLoss` replaces the standard multi-head loss with a trading-a
 
 **Mathematical Formulation:**
 
+
 $$
 \mathcal{L}_{\text{composite}} = \lambda_1 \mathcal{L}_{\text{pred}} - \lambda_2 \mathcal{L}_{\text{sharpe}} + \lambda_3 \mathcal{L}_{\text{dd}} + \lambda_4 \mathcal{L}_{\text{turn}}
 $$
+
 
 Where the four components are:
 
 **1. Predictive Fidelity (Huber Loss):**
 
+
 $$
 \mathcal{L}_{\text{pred}} = \frac{1}{8} \sum_{i=1}^{8} \text{Huber}(\hat{y}_i, y_i, \delta=1.0)
 $$
 
+
 **2. Sharpe Proxy (Negative for Maximization):**
+
 
 $$
 \mathcal{L}_{\text{sharpe}} = \frac{\mathbb{E}[r_t]}{\sqrt{\text{Var}(r_t) + \epsilon}}
 $$
 
+
 Where $r_t = f(\hat{y}_t, \text{price}_t)$ represents the PnL derived from model predictions. The negative sign allows gradient descent to **maximize** Sharpe ratio.
 
 **3. Soft Drawdown Penalty:**
+
 
 $$
 \mathcal{L}_{\text{dd}} = \frac{1}{T} \sum_{t=1}^{T} \max(0, \text{HWM}_t - \text{Equity}_t)^2
 $$
 
+
 Where $\text{HWM}_t$ is the running high-water mark of cumulative returns.
 
 **4. Turnover Penalty:**
 
+
 $$
 \mathcal{L}_{\text{turn}} = \frac{1}{T-1} \sum_{t=2}^{T} ||\hat{y}_t - \hat{y}_{t-1}||_1
 $$
+
 
 This discourages excessive position changes, reducing transaction costs.
 
@@ -690,21 +748,27 @@ Applied to the CDE output hidden state, `VolGatedAttn` implements a **dynamic co
 
 **Architecture:**
 
+
 $$
 \text{VolGatedAttn}(X) = (1 - g) \cdot X + g \cdot \text{MultiHeadAttn}(X)
 $$
 
+
 Where the gate $g \in [0, 1]$ is computed as:
+
 
 $$
 g = \sigma\left(\text{MLP}(\text{VolEstimate}(X))\right)
 $$
 
+
 **Volatility Estimation:**
+
 
 $$
 \text{VolEstimate}(X) = \sqrt{\frac{1}{L} \sum_{t=1}^{L} (x_t - \bar{x})^2}
 $$
+
 
 **Interpretation:**
 - **Low volatility ($g \approx 0$):** Passthrough mode, efficient local processing via CDE
@@ -720,29 +784,37 @@ The `TopKMoE` replaces the traditional softmax-weighted expert blend with a **sp
 
 **Routing Function:**
 
+
 $$
 \text{TopK}(\mathbf{s}, k) = \text{argmax}_k(s_1, s_2, \ldots, s_n)
 $$
 
+
 Where router scores are computed as:
+
 
 $$
 \mathbf{s} = \text{Softmax}(W_{\text{route}} \cdot h + b_{\text{route}})
 $$
 
+
 **Expert Output:**
+
 
 $$
 \hat{y} = \sum_{i \in \text{TopK}(\mathbf{s}, k)} \frac{s_i}{\sum_{j \in \text{TopK}} s_j} \cdot \text{Expert}_i(h)
 $$
 
+
 **Auxiliary Load Balancing Loss:**
 
 To prevent expert collapse, we add:
 
+
 $$
 \mathcal{L}_{\text{aux}} = \alpha \cdot \sum_{i=1}^{n} f_i \cdot P_i
 $$
+
 
 Where $f_i$ is the fraction of tokens routed to expert $i$, and $P_i$ is the mean probability assigned to expert $i$.
 
@@ -758,25 +830,31 @@ These geometric features capture the **intrinsic curvature** of the return manif
 
 For three consecutive log-return points $(r_{t-2}, r_{t-1}, r_t)$, the discrete curvature is:
 
+
 $$
 \kappa_t = \frac{2 \cdot |r_{t-2} - 2r_{t-1} + r_t|}{(|r_{t-1} - r_{t-2}|^2 + |r_t - r_{t-1}|^2 + |r_t - r_{t-2}|^2)^{3/2} + \epsilon}
 $$
+
 
 **Volatility Energy:**
 
 A scale-invariant stress measure:
 
+
 $$
 E_{\text{vol}}(t) = \log(1 + |\kappa_t|)
 $$
+
 
 **Dynamic RSI:**
 
 Standard RSI weighted by volatility energy:
 
+
 $$
 \text{RSI}_{\text{dyn}}(t) = \text{RSI}(t) \cdot \left(1 + \beta \cdot E_{\text{vol}}(t)\right)
 $$
+
 
 Where $\beta=0.5$ by default.
 
@@ -790,9 +868,11 @@ Topological Data Analysis (TDA) extracts **hidden regime structure** from the pr
 
 Given a univariate time series $\{p_t\}$, construct the delay embedding:
 
+
 $$
 \mathbf{X}_t = \begin{bmatrix} p_t & p_{t-\tau} & p_{t-2\tau} & \cdots & p_{t-(d-1)\tau} \end{bmatrix}^T
 $$
+
 
 Where $d=3$ (embedding dimension) and $\tau=5$ (delay).
 
@@ -800,9 +880,11 @@ Where $d=3$ (embedding dimension) and $\tau=5$ (delay).
 
 Construct simplicial complexes at filtration scale $\epsilon$:
 
+
 $$
 \text{VR}_\epsilon = \{S \subseteq \mathbf{X} \mid \text{diam}(S) \leq \epsilon\}
 $$
+
 
 **Persistence Diagram:**
 
@@ -810,9 +892,11 @@ Track birth-death pairs $(b_i, d_i)$ of homology classes as $\epsilon$ increases
 
 **H1 Persistence (Cycles):**
 
+
 $$
 \pi_{\text{TDA}} = \sum_{(b,d) \in H_1} (d - b)^2
 $$
+
 
 **Interpretation:**
 - **High $\pi_{\text{TDA}}$:** Market exhibits cyclical/ranging behavior (mean-reverting)
@@ -828,23 +912,29 @@ The `StateBinner` discretizes continuous state space into interpretable bins, en
 
 For state dimension $i$ with bounds $[a_i, b_i]$ and $K$ bins:
 
+
 $$
 \text{Bin}(x_i) = \min\left(K-1, \left\lfloor \frac{x_i - a_i}{b_i - a_i} \cdot K \right\rfloor\right)
 $$
 
+
 **State Index:**
+
 
 $$
 s = \sum_{i=0}^{D-1} \text{Bin}(x_i) \cdot K^i
 $$
 
+
 **Policy Vector:**
 
 Given a pre-trained Q-table $Q(s, a)$:
 
+
 $$
 \pi(a|s) = \frac{\exp(Q(s,a) / \tau)}{\sum_{a'} \exp(Q(s,a') / \tau)}
 $$
+
 
 Where $\tau$ is the temperature parameter controlling exploration.
 
@@ -879,9 +969,11 @@ The Meta-Forecaster minimizes the generalization error by dynamically weighting 
 
 To stabilize the variance for the AR solvers, we transform the raw OHLCV bar into a stationary feature vector $y_t \in \mathbb{R}^4$:
 
+
 $$
 y_t = [r_t, \rho_t, d_t, v_t]^\top
 $$
+
 
 Where:
 *   $r_t = \log C_t - \log C_{t-1}$ (Close Return)
@@ -892,29 +984,37 @@ Where:
 **Reconstruction Physics:**
 Forecasts $\hat{y}_{t+1}$ are projected back to price space ($\mathcal{P}$) via:
 
+
 $$
 \widehat{C}_{t+1} = C_t \cdot \exp(\hat{r}_{t+1})
 $$
+
 
 $$
 \widehat{O}_{t+1} \approx C_t \quad (\text{1-min assumption})
 $$
 
+
 $$
 \widehat{H}_{t+1} = \max(\widehat{O}, \widehat{C}) \cdot \exp(\frac{1}{2} \hat{\rho}_{t+1})
 $$
+
+
 
 $$
 \widehat{L}_{t+1} = \min(\widehat{O}, \widehat{C}) \cdot \exp(-\frac{1}{2} \hat{\rho}_{t+1})
 $$
 
+
 ### 13.2 Classical Autoregressive (AR) Derivations
 
 The core assumption of the classical experts is that the feature $x_t$ is a linear combination of past values plus white noise $\epsilon_t$:
 
+
 $$
 x_t = \sum_{i=1}^{p} a_i x_{t-i} + \epsilon_t
 $$
+
 
 Where $p$ is the model order and $a_i$ are the AR coefficients.
 
@@ -922,16 +1022,20 @@ Where $p$ is the model order and $a_i$ are the AR coefficients.
 
 We derive coefficients by minimizing the forward prediction error power. Multiplying the AR equation by $x_{t-k}$ and taking expectations yields the Yule-Walker equations:
 
+
 $$
 \gamma_k = \sum_{i=1}^{p} a_i \gamma_{k-i}, \quad k=1, \dots, p
 $$
 
+
 Where $\gamma_k = E[x_t x_{t-k}]$ is the auto-covariance.
 In matrix form:
+
 
 $$
 \mathbf{R} \mathbf{a} = \mathbf{r}
 $$
+
 
 where $\mathbf{R}$ is the Toeplitz covariance matrix. We solve for $\mathbf{a}$ using the Levinson-Durbin recursion ($O(p^2)$ complexity).
 
@@ -940,16 +1044,20 @@ where $\mathbf{R}$ is the Toeplitz covariance matrix. We solve for $\mathbf{a}$ 
 Burg's method minimizes both forward and backward prediction errors, ensuring a stable lattice filter.
 We minimize the sum of squares:
 
+
 $$
 E_p = \sum_{t=p}^{N-1} [|f_{p,t}|^2 + |b_{p,t}|^2]
 $$
 
+
 where $f_{p,t}$ and $b_{p,t}$ are forward and backward errors.
 The reflection coefficient $k_p$ at stage $p$ is derived as:
+
 
 $$
 k_p = \frac{-2 \sum f_{p-1,t} b_{p-1,t-1}^*}{\sum [|f_{p-1,t}|^2 + |b_{p-1,t-1}|^2]}
 $$
+
 
 This guarantees $|k_p| \le 1$, ensuring a stable spectral estimate.
 
@@ -957,9 +1065,11 @@ This guarantees $|k_p| \le 1$, ensuring a stable spectral estimate.
 
 Minimizes prediction error *without* assuming Toeplitz structure (no zero-padding assumption outside window).
 
+
 $$
 \min_a \sum_{n=t-N+1}^{t} \left(y_n+\sum_{i=1}^{p} a_i y_{n-i}\right)^2
 $$
+
 
 This yields the normal equations $\mathbf{C}\mathbf{a} = -\mathbf{c}$, where $\mathbf{C}$ is the covariance of lagged vectors. It provides sharper spectral peaks but uses $O(Np^2)$.
 
@@ -967,15 +1077,19 @@ This yields the normal equations $\mathbf{C}\mathbf{a} = -\mathbf{c}$, where $\m
 
 Combines forward and backward error minimization (like Burg) but solves via least-squares rather than recursive lattice.
 
+
 $$
 \text{Error} = \sum_n \left(|e_f[n]|^2 + |e_b[n]|^2\right)
 $$
 
+
 Where:
+
 
 $$
 e_f[n] = y_n + \sum_{i=1}^p a_i y_{n-i}, \quad e_b[n] = y_{n-p} + \sum_{i=1}^p a_i^* y_{n-p+i}
 $$
+
 
 This reduces spectral line splitting observed in standard Burg.
 
@@ -983,9 +1097,11 @@ This reduces spectral line splitting observed in standard Burg.
 
 Selects the AR spectrum $P_a(\omega)$ that minimizes the Itakura-Saito divergence from the window's periodogram $S(\omega)$.
 
+
 $$
 D_{IS}(S|P_a) = \int \left( \frac{S}{P_a} - \log \frac{S}{P_a} - 1 \right) d\omega
 $$
+
 
 Implemented via **Iterative Reweighted Least Squares (IRLS)**:
 1.  Compute FFT periodogram $S_k$.
@@ -997,13 +1113,17 @@ Implemented via **Iterative Reweighted Least Squares (IRLS)**:
 
 Unlike AR models, the CondorBrain creates a non-linear mapping via the Neural CDE integration:
 
+
 $$
 Z_{t+1} = Z_t + f(Z_t; \theta) \cdot (X_{t+1} - X_t)
 $$
 
+
+
 $$
 \hat{x}_{t+1} = \text{FeatureHead}(Z_T)
 $$
+
 
 Here, the vector field $f(Z_t)$ is input-dependent (learned nonlinear function), allowing the model to adapt its state evolution during regime shifts (e.g., jumps), which linear AR models cannot do. The continuous-time formulation naturally handles variable-rate market data.
 

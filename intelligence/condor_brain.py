@@ -1,10 +1,11 @@
 """
-CondorBrain: Advanced Multi-Output Mamba 2 Architecture for Iron Condor Optimization
+CondorBrain: Advanced Multi-Output Neural CDE Architecture for Iron Condor Optimization
 
-This module implements a specialized neural architecture that directly outputs
-Iron Condor trading parameters instead of just price predictions.
+This module implements a specialized neural architecture (Neural Controlled Differential Equations)
+that directly outputs Iron Condor trading parameters instead of just price predictions.
 
-Enhancements (2026-01-15):
+Enhancements (2026-01-27):
+- Neural CDE: Continuous-time backbone for superior temporal stability
 - VolGatedAttn: Dynamic volatility-gated attention after layers 8, 16, 24
 - TopKMoE: Sparse mixture-of-experts for regime-specialized output
 """
@@ -30,7 +31,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Import Neural CDE
+# Check for Neural CDE
 try:
     from intelligence.models.neural_cde import NeuralCDE
     HAS_CDE = True
@@ -38,9 +39,7 @@ except ImportError:
     HAS_CDE = False
     logger.warning("NeuralCDE not found. CDE backbone will not be available.")
 
-# ... [Existing imports remain] ...
-
-# Check for Mamba
+# Check for Mamba (Legacy support)
 try:
     from mamba_ssm import Mamba
     HAS_MAMBA = True
@@ -365,10 +364,9 @@ class CondorExpertHead(nn.Module):
 
 class CondorBrain(nn.Module):
     """
-    Advanced Mamba 2 / Neural CDE architecture for direct Iron Condor optimization.
-
-    Features:
-    - Backbone: 32-layer Mamba OR Neural CDE (Continuous Time)
+    Advanced Neural CDE architecture for direct Iron Condor optimization.
+    
+    - Backbone: Neural CDE (Continuous Time) with optional Mamba fallback
     - 3 regime-specific expert heads (Low/Normal/High volatility)
     - Gated mixture-of-experts output
     - 10-dimensional output for complete IC parameterization
@@ -403,7 +401,7 @@ class CondorBrain(nn.Module):
         self.use_topk_moe = use_topk_moe
         self.use_cde = use_cde and HAS_CDE
 
-        # Default attention insertion points (Mamba only)
+        # Default attention insertion points (Temporal backbone only)
         if vol_attn_layers is None:
             self.vol_attn_layers = [i for i in [7, 15, 23] if i < n_layers]
         else:
@@ -522,7 +520,7 @@ class CondorBrain(nn.Module):
             last_hidden = self.norm(last_hidden)
             
         else:
-            # Mamba: (B, T, In) -> (B, T, Hidden)
+            # Backbone logic: Neural CDE (Continuous) OR Mamba (Legacy Discrete)
             x = self.input_proj(x)
 
             for i, layer in enumerate(self.layers):
@@ -1191,5 +1189,6 @@ __all__ = [
     'CondorSignal',
     'CondorLoss',
     'HorizonForecaster',
-    'HAS_MAMBA'
+    'HAS_CDE',
+    'HAS_MAMBA' # Kept for backward compatibility
 ]

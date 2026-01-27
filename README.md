@@ -871,9 +871,11 @@ The Tanh activation ensures $\|f(Z)\|_\infty \leq 1$, preventing numerical explo
 
 ### 7.3 Feature Engineering (Input Vector)
 The model consumes a 52-parameter manifold including Curvature Proxy and Volatility EWMA:
+
 $$
 \vec{V}_t = [ \ln(C_t/C_{t-1}), \sigma_{ewma}, \kappa_{proxy}, \text{IVR}, \text{VIX} ]
 $$
+
 
 ### 7.4 Generative Diffusion Head
 A conditional diffusion module (DDPM) refines the **CDE latent status** into a probabilistic price trajectory (32 steps), capturing uncertainty in high-volatility regimes.
@@ -891,21 +893,27 @@ An Iron Condor consists of 4 legs:
 4. **Long Put** ($P_l$): Buy further OTM put (protection)
 
 ### Credit Received
+
 $$
 Credit = (C_s - C_l) + (P_s - P_l)
 $$
 
+
 ### Maximum Loss
+
 $$
 MaxLoss = W - Credit
 $$
 
+
 Where $W$ = wing width (e.g., $W = K_{C_l} - K_{C_s} = K_{P_s} - K_{P_l}$)
 
 ### Mark-to-Market P&L
+
 $$
 PnL_{\mathrm{t}} = (Credit - Cost_{\mathrm{t}}) \times Q \times 100
 $$
+
 
 Where:
 - $Cost_t = (C_{s,t} - C_{l,t}) + (P_{s,t} - P_{l,t})$ = current replacement cost
@@ -915,23 +923,29 @@ Where:
 ### Exit Conditions
 
 #### Profit Take
+
 $$
 PnL_{\mathrm{t}} \geq Credit \cdot \alpha_{\mathrm{PT}}
 $$
 
+
 Example: $\alpha_{PT} = 0.50$ (50% of max profit)
 
 #### Stop Loss
+
 $$
 PnL_{\mathrm{t}} \leq -Credit \cdot \alpha_{\mathrm{SL}}
 $$
 
+
 Example: $\alpha_{SL} = 2.00$ (200% of credit = max loss)
 
 #### DTE Exit
+
 $$
 DTE_{\mathrm{t}} \leq DTE_{\mathrm{exit}}
 $$
+
 
 Example: $DTE_{exit} = 21$ days
 
@@ -942,9 +956,11 @@ Example: $DTE_{exit} = 21$ days
 ### Portfolio Greeks Tracking
 
 #### Delta
+
 $$
 \Delta_{\mathrm{portfolio}} = \sum_{i=1}^{N} \Delta_{\mathrm{trade}_i} \cdot Q_i
 $$
+
 
 **Limit**: $|\Delta_{\mathrm{portfolio}}| \leq \Delta_{\mathrm{max}}$ (e.g., $\Delta_{\mathrm{max}} = 200$)
 

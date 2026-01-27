@@ -17,7 +17,6 @@ class TradeIntent:
     current_price: float
 
     # Optional context fields
-    direction_probs: Optional[Sequence[float]] = None  # [down, neutral, up] (from Mamba/Neural)
     vix: Optional[float] = None
     ivr: Optional[float] = None
     realized_vol: Optional[float] = None
