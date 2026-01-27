@@ -63,3 +63,6 @@ models/**/*.pth
 
 # Kaggle
 !kaggle/
+epoch_snapshots/
+*.docx
+nul

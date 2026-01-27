@@ -39,6 +39,7 @@ def analyze_sensitivity(model, X, feature_cols, n_samples=1000):
     print(f"\n🔬 Running Sensitivity Analysis on {n_samples} samples...")
     idxs = np.random.randint(0, len(X) - SEQ_LEN, size=n_samples)
     grads_sum = np.zeros(X.shape[1])
+    valid_samples = 0
     
     for idx in tqdm(idxs):
         # (1, T, D)
@@ -55,12 +56,24 @@ def analyze_sensitivity(model, X, feature_cols, n_samples=1000):
         score.backward()
         
         # Gradients: Max absolute grad over time window
+        if x_tensor.grad is None:
+            continue
+            
         grad = x_tensor.grad.abs().squeeze(0).cpu().numpy() # (T, D)
+        
+        if np.isnan(grad).any():
+            continue
+            
         time_max_grad = grad.max(axis=0) # (D,)
         
         grads_sum += time_max_grad
+        valid_samples += 1
         
-    avg_sensitivity = grads_sum / n_samples
+    if valid_samples == 0:
+        print("⚠️ Warning: All samples produced NaN gradients!")
+        return
+
+    avg_sensitivity = grads_sum / valid_samples
     # Normalize
     if avg_sensitivity.sum() > 0:
         avg_sensitivity = 100 * avg_sensitivity / avg_sensitivity.sum()

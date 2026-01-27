@@ -30,6 +30,16 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Import Neural CDE
+try:
+    from intelligence.models.neural_cde import NeuralCDE
+    HAS_CDE = True
+except ImportError:
+    HAS_CDE = False
+    logger.warning("NeuralCDE not found. CDE backbone will not be available.")
+
+# ... [Existing imports remain] ...
+
 # Check for Mamba
 try:
     from mamba_ssm import Mamba
@@ -355,14 +365,13 @@ class CondorExpertHead(nn.Module):
 
 class CondorBrain(nn.Module):
     """
-    Advanced Mamba 2 architecture for direct Iron Condor optimization.
+    Advanced Mamba 2 / Neural CDE architecture for direct Iron Condor optimization.
 
     Features:
-    - 32-layer Selective State Space backbone
+    - Backbone: 32-layer Mamba OR Neural CDE (Continuous Time)
     - 3 regime-specific expert heads (Low/Normal/High volatility)
     - Gated mixture-of-experts output
-    - 10-dimensional output for complete IC parameterization (8 orig + entry/exit)
-    - Feature-group dropout for anti-collapse regularization (2026-01-26)
+    - 10-dimensional output for complete IC parameterization
     """
 
     def __init__(
@@ -380,9 +389,10 @@ class CondorBrain(nn.Module):
         moe_k: int = 1,
         use_diffusion: bool = False,
         diffusion_steps: int = 50,
-        diffusion_input_dim: int = 4,   # NEW: allow configurable diffusion dims
-        diffusion_horizon: int = 32,    # NEW: allow configurable horizon
-        feature_group_dropout: float = 0.0  # NEW: 0.15 recommended for training
+        diffusion_input_dim: int = 4,
+        diffusion_horizon: int = 32,
+        feature_group_dropout: float = 0.0,
+        use_cde: bool = True               # NEW: Default to CDE given recent success
     ):
         super().__init__()
 
@@ -391,253 +401,220 @@ class CondorBrain(nn.Module):
         self.input_dim = input_dim
         self.use_vol_gated_attn = use_vol_gated_attn
         self.use_topk_moe = use_topk_moe
+        self.use_cde = use_cde and HAS_CDE
 
-        # Default attention insertion points: after layers 8, 16, 24 (0-indexed: 7, 15, 23)
+        # Default attention insertion points (Mamba only)
         if vol_attn_layers is None:
-            # For 32 layers: [7, 15, 23]; for 24 layers: [7, 15, 23]; etc.
             self.vol_attn_layers = [i for i in [7, 15, 23] if i < n_layers]
         else:
             self.vol_attn_layers = vol_attn_layers
 
-        # NEW: Feature-group dropout (2026-01-26)
+        # Feature-group dropout
         self.feature_dropout = FeatureGroupDropout(
             group_drop_prob=feature_group_dropout,
             input_dim=input_dim
         ) if feature_group_dropout > 0 else None
 
-        # Input projection
-        self.input_proj = nn.Linear(input_dim, d_model)
-        
-        # Mamba backbone (32 layers)
-        if HAS_MAMBA:
-            self.layers = nn.ModuleList([
-                Mamba(
-                    d_model=d_model,
-                    d_state=d_state,
-                    d_conv=d_conv,
-                    expand=expand
-                ) for _ in range(n_layers)
-            ])
-        else:
-            # Mock layers for CPU testing
-            self.layers = nn.ModuleList([
-                nn.Linear(d_model, d_model) for _ in range(n_layers)
-            ])
-        
-        # Volatility-gated attention modules (inserted after specified layers)
-        if use_vol_gated_attn:
-            self.vol_attn_modules = nn.ModuleDict({
-                str(layer_idx): VolGatedAttn(d_model, n_heads=8)
-                for layer_idx in self.vol_attn_layers
-            })
-            logger.info(f"[CondorBrain] VolGatedAttn enabled after layers: {self.vol_attn_layers}")
-        else:
+        # ----------------------------------------------------------------
+        # BACKBONE SELECTION
+        # ----------------------------------------------------------------
+        if self.use_cde:
+            logger.info(f"[CondorBrain] Initializing Neural CDE Backbone (In={input_dim}, Hidden={d_model})")
+            self.cde_backbone = NeuralCDE(
+                input_dim=input_dim,
+                hidden_dim=d_model,
+                output_dim=d_model, # Dummy output dim, we use latent state
+                n_layers=n_layers,   # Doesn't affect CDE much, maybe depth of vector field?
+                dropout=0.0
+            )
+            # Mamba components are not initialized to save memory
+            self.input_proj = None
+            self.layers = None
             self.vol_attn_modules = None
-        
-        # Use our custom BF16-friendly RMSNorm (returns same dtype as input)
-        self.norm = RMSNorm(d_model)
-        
-        # Regime detector
-        self.regime_detector = RegimeDetector(d_model)
-        
-        # Multi-horizon forecaster (price trajectory up to 45 days)
-        self.horizon_forecaster = HorizonForecaster(d_model, max_horizon=45)
+            self.norm = RMSNorm(d_model) # Still needed for CDE output
+            
+        else:
+            # Standard Mamba Implementation
+            self.input_proj = nn.Linear(input_dim, d_model)
+            
+            if HAS_MAMBA:
+                self.layers = nn.ModuleList([
+                    Mamba(
+                        d_model=d_model,
+                        d_state=d_state,
+                        d_conv=d_conv,
+                        expand=expand
+                    ) for _ in range(n_layers)
+                ])
+            else:
+                self.layers = nn.ModuleList([
+                    nn.Linear(d_model, d_model) for _ in range(n_layers)
+                ])
+            
+            if use_vol_gated_attn:
+                self.vol_attn_modules = nn.ModuleDict({
+                    str(layer_idx): VolGatedAttn(d_model, n_heads=8)
+                    for layer_idx in self.vol_attn_layers
+                })
+            else:
+                self.vol_attn_modules = None
+            
+            self.norm = RMSNorm(d_model)
 
-        # Feature forecasting head (Next-step prediction for Meta-Forecaster Mode 7)
-        # Predicts [r, rho, d, v]
+        # ----------------------------------------------------------------
+        # HEADS (Shared)
+        # ----------------------------------------------------------------
+        self.regime_detector = RegimeDetector(d_model)
+        self.horizon_forecaster = HorizonForecaster(d_model, max_horizon=45)
         self.feature_head = nn.Linear(d_model, 4)
         
-        # Output heads: TopKMoE or traditional 3 experts
+        # Expert Heads
         if use_topk_moe:
             self.moe_head = BatchedTopKMoE(
                 d_model=d_model,
-                output_dim=CondorExpertHead.NUM_OUTPUTS,  # 10 outputs (was hardcoded 8)
+                output_dim=CondorExpertHead.NUM_OUTPUTS,
                 n_experts=moe_n_experts,
                 k=moe_k
             )
-            logger.info(f"[CondorBrain] TopKMoE enabled: {moe_n_experts} experts, k={moe_k}")
             self.expert_low = None
             self.expert_normal = None
             self.expert_high = None
         else:
             self.moe_head = None
-            # 3 Expert heads (Low, Normal, High volatility)
             self.expert_low = CondorExpertHead(d_model)
             self.expert_normal = CondorExpertHead(d_model)
             self.expert_high = CondorExpertHead(d_model)
         
-        # Diffusion Head (Generative Forecasting)
+        # Diffusion Head
         self.use_diffusion = use_diffusion
         if use_diffusion:
             self.diffusion_head = ConditionalDiffusionHead(
-                input_dim=diffusion_input_dim,    # Configurable
+                input_dim=diffusion_input_dim,
                 cond_dim=d_model,
                 hidden_dim=256,
-                horizon=diffusion_horizon,        # Configurable
+                horizon=diffusion_horizon,
                 n_steps=diffusion_steps
             )
-            logger.info(f"[CondorBrain] Diffusion Head enabled: {diffusion_steps} steps, dim={diffusion_input_dim}, horizon={diffusion_horizon}")
         else:
             self.diffusion_head = None
         
-        # Legacy single-output head (for backward compatibility)
         self.legacy_head = nn.Linear(d_model, 1)
         
     def forward(self, x: torch.Tensor, return_regime: bool = True, return_experts: bool = False, return_features: bool = False, forecast_days: int = 0, diffusion_target: Optional[torch.Tensor] = None) -> Any:
         """
         Forward pass.
-        
         Args:
             x: Input tensor (B, SeqLen, InputDim)
-            return_regime: If True, also return regime probabilities
-            return_experts: If True, also return discrete expert outputs
-            return_features: If True, also return next-step feature prediction
-            forecast_days: If > 0, generate price trajectory for this many days (Deterministic)
-            diffusion_target: If provided (B, Horizon, 4), computes diffusion loss
-            
-        Returns:
-            outputs: (B, 10) IC parameters (8 orig + entry_logit + exit_logit)
-            regime_probs: (B, 3) regime probabilities [Low, Normal, High]
-            horizon_forecast: dict with daily predictions (if forecast_days > 0)
-            experts: dict with discrete expert outputs (if return_experts > 0)
-            diffusion_out: scalar loss (if target provided) OR sampled trajectory (if forecast_days>0 and diffusion enabled)
         """
-        # NEW: Apply feature-group dropout before input projection (training only)
+        # Apply dropout to raw features
         if self.feature_dropout is not None:
             x = self.feature_dropout(x)
 
-        # Input projection
-        x = self.input_proj(x)
-
-        # DTYPE PROBE: Track where FP32 upcast happens (one-time)
-        if not hasattr(self, '_dtype_sanity_printed'):
-            self._dtype_sanity_printed = False
-        
-
-        
-        # Pass through Mamba layers (with optional gradient checkpointing)
-        for i, layer in enumerate(self.layers):
-            if self.training and getattr(self, 'gradient_checkpointing', False):
-                from torch.utils.checkpoint import checkpoint
-                x = checkpoint(layer, x, use_reentrant=False)
-            else:
-                x = layer(x)
+        # ----------------------------------------------------------------
+        # BACKBONE FOWARD PASS
+        # ----------------------------------------------------------------
+        if self.use_cde:
+            # Neural CDE: (B, T, In) -> (B, Hidden)
+            # CDE handles its own projection via encoder
+            last_hidden = self.cde_backbone(x)
             
-            # Apply VolGatedAttn after specified layers
-            if self.use_vol_gated_attn and self.vol_attn_modules is not None:
-                if str(i) in self.vol_attn_modules:
-                    x = self.vol_attn_modules[str(i)](x)
+            # Normalize the final state
+            last_hidden = self.norm(last_hidden)
             
+        else:
+            # Mamba: (B, T, In) -> (B, T, Hidden)
+            x = self.input_proj(x)
 
+            for i, layer in enumerate(self.layers):
+                if self.training and getattr(self, 'gradient_checkpointing', False):
+                    from torch.utils.checkpoint import checkpoint
+                    x = checkpoint(layer, x, use_reentrant=False)
+                else:
+                    x = layer(x)
+                
+                if self.use_vol_gated_attn and self.vol_attn_modules is not None:
+                    if str(i) in self.vol_attn_modules:
+                        x = self.vol_attn_modules[str(i)](x)
+            
+            x = self.norm(x)
+            last_hidden = x[:, -1, :]
+
+        # ----------------------------------------------------------------
+        # HEAD PROCESSING (Unified)
+        # ----------------------------------------------------------------
         
-        # RMSNorm is BF16-friendly, no cast needed
-        x = self.norm(x)
-        
-        # Take last timestep
-        last_hidden = x[:, -1, :]  # (B, d_model)
-        
-        # Detect regime (logits)
-        regime_logits = self.regime_detector(last_hidden)  # (B, 3)
-        
-        # Probabilities for weighting experts
-        # Softmax often promotes to FP32 internally; cast back to BF16 so expert mix stays BF16
+        # Detect regime
+        regime_logits = self.regime_detector(last_hidden)
         regime_probs = torch.softmax(regime_logits.float(), dim=-1).to(last_hidden.dtype)
         
-        # Multi-horizon price forecast (if requested)
+        # Horizon Forecast
         horizon_forecast = None
         if forecast_days > 0:
             horizon_forecast = self.horizon_forecaster(last_hidden, num_days=forecast_days)
         
-        # Get expert outputs (TopKMoE or traditional 3-expert MoE)
+        # Expert Outputs
         moe_routing_info = None
-        
         if self.use_topk_moe and self.moe_head is not None:
-            # Sparse TopKMoE output
             if return_experts and hasattr(self.moe_head, 'forward_with_routing'):
                 outputs, moe_probs, moe_indices = self.moe_head.forward_with_routing(last_hidden)
-                moe_routing_info = {
-                    'routing_weights': moe_probs,
-                    'selected_indices': moe_indices
-                }
+                moe_routing_info = {'routing_weights': moe_probs, 'selected_indices': moe_indices}
             else:
-                outputs = self.moe_head(last_hidden)  # (B, 10) raw
+                outputs = self.moe_head(last_hidden)
 
-            # --- Apply activations to MoE raw output ---
-            # Replicates CondorExpertHead logic for the MoE path (10 outputs)
+            # Activations
             raw = outputs
             outputs = torch.zeros_like(raw)
-            outputs[:, 0] = torch.sigmoid(raw[:, 0]) * 5.0    # short_call_offset: 0-5%
-            outputs[:, 1] = torch.sigmoid(raw[:, 1]) * 5.0    # short_put_offset: 0-5%
-            outputs[:, 2] = torch.sigmoid(raw[:, 2]) * 10.0   # wing_width: 0-$10
-            outputs[:, 3] = 2 + torch.sigmoid(raw[:, 3]) * 43  # dte: 2-45 days
-            outputs[:, 4] = torch.sigmoid(raw[:, 4])          # prob_profit: 0-1
-            outputs[:, 5] = torch.tanh(raw[:, 5]) * 0.5       # expected_roi: -50% to +50%
-            outputs[:, 6] = torch.sigmoid(raw[:, 6])          # max_loss_pct: 0-1
-            outputs[:, 7] = torch.sigmoid(raw[:, 7])          # confidence: 0-1
-            # NEW: Explicit entry/exit logits (indices 8,9 - raw, no activation)
+            outputs[:, 0] = torch.sigmoid(raw[:, 0]) * 5.0
+            outputs[:, 1] = torch.sigmoid(raw[:, 1]) * 5.0
+            outputs[:, 2] = torch.sigmoid(raw[:, 2]) * 10.0
+            outputs[:, 3] = 2 + torch.sigmoid(raw[:, 3]) * 43
+            outputs[:, 4] = torch.sigmoid(raw[:, 4])
+            outputs[:, 5] = torch.tanh(raw[:, 5]) * 0.5
+            outputs[:, 6] = torch.sigmoid(raw[:, 6])
+            outputs[:, 7] = torch.sigmoid(raw[:, 7])
             if raw.size(1) >= 10:
-                outputs[:, 8] = raw[:, 8]                     # entry_logit: raw
-                outputs[:, 9] = raw[:, 9]                     # exit_logit: raw
+                outputs[:, 8] = raw[:, 8]
+                outputs[:, 9] = raw[:, 9]
         else:
-            # Traditional 3-expert weighted MoE
-            out_low = self.expert_low(last_hidden)       # (B, 8)
-            out_normal = self.expert_normal(last_hidden)  # (B, 8)
-            out_high = self.expert_high(last_hidden)      # (B, 8)
+            out_low = self.expert_low(last_hidden)
+            out_normal = self.expert_normal(last_hidden)
+            out_high = self.expert_high(last_hidden)
             
-            # Ensure experts stay in same dtype as hidden (BF16)
             if out_low.dtype != last_hidden.dtype:
                 out_low = out_low.to(last_hidden.dtype)
                 out_normal = out_normal.to(last_hidden.dtype)
                 out_high = out_high.to(last_hidden.dtype)
             
-            # Mixture-of-experts: weighted sum by regime probabilities (BF16 end-to-end)
             outputs = (
                 regime_probs[:, 0:1] * out_low +
                 regime_probs[:, 1:2] * out_normal +
                 regime_probs[:, 2:3] * out_high
             )
         
-        # Next-step feature prediction (for Meta-Forecaster)
+        # Feature Prediction
         feature_pred = None
         if return_features:
              feature_pred = self.feature_head(last_hidden)
         
-        # Diffusion Head (Training or Inference)
+        # Diffusion
         diffusion_out = None
         if self.use_diffusion and self.diffusion_head is not None:
             if diffusion_target is not None:
-                # Training: Compute Loss
-                diffusion_out = self.diffusion_head(diffusion_target, last_hidden) # Returns scalar loss
+                diffusion_out = self.diffusion_head(diffusion_target, last_hidden)
             elif forecast_days > 0:
-                # Inference: Sample Trajectory
-                # Note: This might be slow; usually done offline
                 diffusion_out = self.diffusion_head.sample(last_hidden, n_samples=1)
 
-        # Return package
+        # Return construction
         res = [outputs]
-        if return_regime:
-            res.append(regime_logits)
-        else:
-            res.append(None)
-            
+        if return_regime: res.append(regime_logits)
+        else: res.append(None)
         res.append(horizon_forecast)
-        
-        if return_features:
-            res.append(feature_pred)
-            
-        if self.use_diffusion:
-            res.append(diffusion_out)
+        if return_features: res.append(feature_pred)
+        if self.use_diffusion: res.append(diffusion_out)
         
         if return_experts:
-            # TopKMoE returns routing weights
-            if self.use_topk_moe:
-                res.append(moe_routing_info)
-            else:
-                res.append({
-                    'low': out_low,
-                    'normal': out_normal,
-                    'high': out_high
-                })
+            if self.use_topk_moe: res.append(moe_routing_info)
+            else: res.append({'low': out_low, 'normal': out_normal, 'high': out_high})
             
         return tuple(res) if len(res) > 1 else outputs
     
