@@ -65,7 +65,7 @@
 - [x] **Make Training Robust** (Result: `train_condor_brain.py` handles 0-1 scale)
 - [x] **Regenerate Datasets** (Action: Run `precompute_features` on all 3 files)
 - [x] **Handle OOM on 16GB GPU** (Action: Enable `--grad-checkpoint`, reduce batch to 64)
-- [/] **Retrain & Verify** (Result: Epoch 2 Val Pass `3.96`. Diffusion ACTIVE from Epoch 3.)
+- [x] **Retrain & Verify** (Result: **SUCCESS**. E6 Val `4.88` / Best `3.96`. Diffusion active & learning.)
 
 ## Phase 8.5: Path to Live (V2.1 Dynamic Feature Pipeline)
 - [x] **Step 1A**: Create `intelligence/canonical_feature_registry.py`

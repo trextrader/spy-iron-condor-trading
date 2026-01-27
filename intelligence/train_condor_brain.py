@@ -1416,7 +1416,7 @@ def train_condor_brain(args):
         # Offer to save best checkpoint (model already saved, but with full state)
         ckpt_path = args.output.replace('.pth', '_full_ckpt.pth')
         monitor.save_checkpoint_to_disk(ckpt_path)
-        print(f"\n\ud83d\udcbe Full checkpoint (with optimizer state) saved to: {ckpt_path}")
+        print(f"\n[Checkpoint] Full checkpoint (with optimizer state) saved to: {ckpt_path}")
         print("\ud83d\udca1 TIP: Use monitor.restore_best(model) to restore optimal weights after interruption")
         
         # Save analytics JSON for post-analysis

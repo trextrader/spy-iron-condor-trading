@@ -583,6 +583,50 @@ def main(
     model.eval()
 
     X, meta = load_dataset(dataset_path, model_path, sample_n=sample_n)
+    
+    # -----------------------------------------------------------
+    # CRITICAL FIX: Robust Normalization (Match Training Logic)
+    # -----------------------------------------------------------
+    if not meta.get("normalized", False):
+        print("[Audit] Robust-normalizing features (Median/MAD) to match training distribution...")
+        
+        # 1. IVR Robustness
+        feature_names = list(meta["feature_names"])
+        if 'ivr' in feature_names:
+            ivr_idx = feature_names.index('ivr')
+            # Check last timestep of each sequence for scale
+            # X shape is usually (N, L, F) or (N, F). 
+            # load_dataset returns sequences (N, L, F).
+            # We must normalize the feature dimension (last dim).
+            
+            # Flatten for stats calculation
+            N, L, F = X.shape
+            X_flat = X.reshape(-1, F)
+            
+            ivr_vals = X_flat[:, ivr_idx]
+            finite = np.isfinite(ivr_vals)
+            if finite.any() and np.nanmax(ivr_vals) <= 1.5:
+                 print("[Audit] Detected IVR 0-1 scale. Boosting to 0-100.")
+                 X_flat[:, ivr_idx] = np.where(finite, ivr_vals * 100.0, 50.0)
+            X_flat[:, ivr_idx] = np.clip(X_flat[:, ivr_idx], 0.0, 100.0)
+            
+            # 2. Robust Z-Score
+            # Helper functions (inline)
+            def robust_zscore_fit(arr, eps=1e-6):
+                med = np.nanmedian(arr, axis=0)
+                mad = np.nanmedian(np.abs(arr - med), axis=0)
+                return med, np.maximum(mad, eps)
+
+            def robust_zscore_transform(arr, med, scale, clip_val=10.0):
+                return np.clip((arr - med) / scale, -clip_val, clip_val)
+            
+            med, scale = robust_zscore_fit(X_flat)
+            X_flat_norm = robust_zscore_transform(X_flat, med, scale, clip_val=10.0)
+            
+            # Reshape back to sequences
+            X = X_flat_norm.reshape(N, L, F)
+            print("[Audit] Features normalized.")
+    # -----------------------------------------------------------
     feature_names = list(meta["feature_names"])
     _check_checkpoint_feature_cols(model_path, feature_names)
 
@@ -606,6 +650,11 @@ def main(
         "notes": "Baked-in inputs consumed by the model (FeatureVector).",
     }
     save_json(os.path.join(OUT_DIR, "inputs_schema.json"), inputs_schema)
+
+    # DEBUG: Check stats of input Xs
+    print(f"[DEBUG] Xs stats: shape={Xs.shape}, min={Xs.min():.4f}, max={Xs.max():.4f}, mean={Xs.mean():.4f}")
+    if np.abs(Xs.mean()) > 10.0 or np.abs(Xs.max()) > 50.0:
+        print("[WARNING] Input features seem UNNORMALIZED! Model expects Z-scores.")
 
     # Batched forward to avoid GPU OOM
     entry_logits = []
