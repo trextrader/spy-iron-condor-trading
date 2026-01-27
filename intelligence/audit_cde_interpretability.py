@@ -16,6 +16,11 @@ from intelligence.canonical_feature_registry import FEATURE_COLS_V22
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 SEQ_LEN = 256
+EPS = 1e-6
+
+def safe_nan_to_num(X: np.ndarray) -> np.ndarray:
+    """Replace NaN/Inf with 0 to prevent Neural CDE explosion."""
+    return np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
 def load_cde_model(ckpt_path, input_dim=52):
     print(f"Loading {ckpt_path}...")
@@ -225,12 +230,25 @@ def main():
         if c not in df.columns: df[c] = 0.0
             
     X = df[feature_cols].values.astype(np.float32)
-    # Simple robust scaler (match training logic)
-    median = np.median(X, axis=0)
-    mad = np.median(np.abs(X - median), axis=0)
-    mad = np.maximum(mad, 1e-6)
-    X = (X - median) / (1.4826 * mad)
+    X = safe_nan_to_num(X)
+    
+    # Robust scale detection (try to load from checkpoint first)
+    ckpt = torch.load(args.model, map_location=DEVICE)
+    if 'median' in ckpt and 'mad' in ckpt:
+        print("Using scaling parameters from checkpoint...")
+        median = np.array(ckpt['median'], dtype=np.float32)
+        scale = np.array(ckpt['mad'], dtype=np.float32) # In training we store scale = 1.4826 * mad
+    else:
+        print("Recalculating scaling parameters from data...")
+        median = np.median(X, axis=0)
+        mad = np.median(np.abs(X - median), axis=0)
+        scale = 1.4826 * mad
+        scale = np.where(scale < EPS, 1.0, scale)
+            
+    # Apply Scaling
+    X = (X - median) / (scale + EPS)
     X = np.clip(X, -10.0, 10.0)
+    X = safe_nan_to_num(X) # Final safety check
     
     # Mask leakage
     leakage = ['target_spot', 'max_dd_60m']
