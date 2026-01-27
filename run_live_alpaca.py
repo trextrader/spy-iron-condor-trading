@@ -112,6 +112,37 @@ def fetch_live_data(client, symbol, lookback_bars=1000):
         
     return df
 
+# --- HELPER: Contract Resolution ---
+def find_closest_contract(client, symbol, contract_type, target_strike, ideal_date):
+    """
+    Finds the contract closest to target_strike and ideal_date.
+    ideal_date: datetime object
+    """
+    from alpaca.data.requests import OptionContractsRequest
+    
+    req = OptionContractsRequest(
+        underlying_symbols=[symbol],
+        status='active',
+        expiration_date_gte=ideal_date.date(),
+        expiration_date_lte=(ideal_date + pd.Timedelta(days=5)).date(),
+        type=contract_type, # 'call' or 'put'
+        strike_price_gte=target_strike - 2,
+        strike_price_lte=target_strike + 2,
+        limit=10
+    )
+    
+    try:
+        res = client.get_option_contracts(req)
+        contracts = res.option_contracts
+        if not contracts:
+            return None
+            
+        best = min(contracts, key=lambda x: abs(float(x.strike_price) - target_strike))
+        return best.symbol
+    except Exception as e:
+        print(f"Contract Search Error: {e}")
+        return None
+
 def run_live_loop(executor, model, metadata, device):
     print(f"[{datetime.now()}] Starting Live Loop for {SYMBOL}...")
     
@@ -321,71 +352,6 @@ def run_live_loop(executor, model, metadata, device):
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Spot: ${spot:.2f} | Score: {entry_score}/100 | Conf: {confidence:.4f} | Prob: {prob_profit:.4f}")
 
 
-# --- HELPER: Contract Resolution ---
-def find_closest_contract(client, symbol, contract_type, target_strike, ideal_date):
-    """
-    Finds the contract closest to target_strike and ideal_date.
-    ideal_date: datetime object
-    """
-    from alpaca.data.requests import OptionChainRequest
-    from alpaca.data.enums import OptionsFeed
-    
-    # Range for expiration: ideal_date +/- 3 days? 
-    # Actually, let's look for exact day or next available.
-    # For DTE, we target specific window.
-    
-    # Request chain for symbol
-    # We filter specifically for the target strike range to minimize data
-    req = OptionChainRequest(
-        underlying_symbol=symbol,
-        status='active',
-        expiration_date_gte=ideal_date.date(),
-        expiration_date_lte=(ideal_date + pd.Timedelta(days=7)).date(), # 1 week window
-        root_symbol=symbol
-    )
-    
-    try:
-        # Note: get_option_chain returns a massive dict. 
-        # Ideally we use get_option_contracts if we know parameters?
-        # Alpaca-py `get_option_chain` is actually `get_option_snapshot`? No.
-        # Let's use `get_option_contracts` from TradingClient? No, DataClient.
-        # Check Alpaca API: OptionContractsRequest allows filtering by strike.
-        pass
-    except:
-        pass
-
-    # RE-IMPLEMENTATION with OptionContractsRequest (lighter)
-    from alpaca.data.requests import OptionContractsRequest
-    
-    req = OptionContractsRequest(
-        underlying_symbols=[symbol],
-        status='active',
-        expiration_date_gte=ideal_date.date(),
-        expiration_date_lte=(ideal_date + pd.Timedelta(days=5)).date(),
-        type=contract_type, # 'call' or 'put'
-        strike_price_gte=target_strike - 2,
-        strike_price_lte=target_strike + 2,
-        limit=10
-    )
-    
-    try:
-        res = client.get_option_contracts(req)
-        contracts = res.option_contracts
-        if not contracts:
-            return None
-            
-        # Sort by distance to strike, then distance to date
-        # But we already filtered strike +/- 2.
-        # Let's just take the one closest to target strike.
-        # contracts field: strike_price, expiration_date, symbol
-        
-        best = min(contracts, key=lambda x: abs(float(x.strike_price) - target_strike))
-        return best.symbol
-    except Exception as e:
-        print(f"Contract Search Error: {e}")
-        return None
-
-# -----------------------------------
 
             # 5. Execution Logic
             if active_trade is None:
