@@ -380,7 +380,7 @@ def estimate_condor_pnl(spot, short_call, long_call, short_put, long_put, credit
     return net_pnl
 
 def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None, 
-                 use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False):
+                 use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None):
     print("Starting Backtest Simulation...")
     
     # Pre-process Features (Robust Norm same as training)
@@ -1551,12 +1551,25 @@ def main():
         "mamba_institutional_1m.csv",
         "mamba_institutional_1m_500k.csv"
     ]
-    use_data_path = DATA_PATH
-    for p in possible_data_paths:
-        if p and os.path.exists(p):
-            use_data_path = p
-            print(f"Found data at: {use_data_path}")
-            break
+    use_data_path = None
+    if input_override:
+        if os.path.exists(input_override):
+            use_data_path = input_override
+            print(f"✅ Using CLI Data Override: {use_data_path}")
+        else:
+            print(f"❌ ERROR: CLI Data path not found: {input_override}")
+            return
+
+    if not use_data_path:
+        for p in possible_data_paths[1:]: # Skip the first which was input_override
+            if p and os.path.exists(p):
+                use_data_path = p
+                print(f"Found data at: {use_data_path}")
+                break
+    
+    if not use_data_path:
+        use_data_path = DATA_PATH
+        print(f"Using default data path: {use_data_path}")
             
     # 1. Pipeline
     # Load limited rows for test? Or all.
