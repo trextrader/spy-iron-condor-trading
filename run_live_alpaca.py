@@ -121,58 +121,115 @@ def run_live_loop(executor, model, metadata, device):
             
             # --- LIVE DATA RECORDER START ---
             try:
-                # 1. Fetch Option Chain Snapshot if using Alpaca
-                if executor and hasattr(executor, 'client'): 
-                    # Use the raw trading client or data client if available
-                    # Actually, we need a data client for options. 
-                    # Assuming we can instantiate one or executor has one.
-                    # executor doesn't expose data_client publically in previous steps?
-                    # Let's check if we can grab it from internal or re-instantiate.
-                    pass 
-                
-                    # For now, let's try to get a snapshot using the keys we have
-                    from alpaca.data.historical import OptionHistoricalDataClient
-                    from alpaca.data.requests import OptionChainRequest
-                    # We need to construct this client once
-                    if not hasattr(run_live_loop, 'opt_client'):
-                        api_k = os.getenv('APCA_API_KEY_ID')
-                        sec_k = os.getenv('APCA_API_SECRET_KEY')
-                        run_live_loop.opt_client = OptionHistoricalDataClient(api_k, sec_k)
-                        run_live_loop.csv_path = os.path.join("data", "live", f"spy_live_chain_{datetime.now().strftime('%Y%m%d')}.csv")
-                        os.makedirs(os.path.dirname(run_live_loop.csv_path), exist_ok=True)
-                        print(f"📁 Recording Live Options Data to: {run_live_loop.csv_path}")
+                # 1. Fetch Option Chain Snapshot (WideNet: ATM +/- 5 strikes for speed/relevance in V1)
+                # User asked for "all spy call and put symbols". 
+                # A full chain fetch is expensive (bandwidth/time). 
+                # We will fetch a "Trading Window" snapshot for accountability.
+                if not hasattr(run_live_loop, 'opt_client'):
+                     try:
+                         from alpaca.data.historical import OptionHistoricalDataClient
+                         ak = os.getenv('APCA_API_KEY_ID')
+                         sk = os.getenv('APCA_API_SECRET_KEY')
+                         run_live_loop.opt_client = OptionHistoricalDataClient(ak, sk)
+                     except:
+                         run_live_loop.opt_client = None
 
-                    # Fetch Chain (Snapshot)
-                    # Note: providing 'expiration_le' or similar might speed it up, but let's grab nearest 3
-                    # Alpaca OptionChainRequest is efficient
-                    req = OptionChainRequest(underlying_symbol=SYMBOL)
-                    # This might be huge. Let's try to filter if possible or just snapshot top level.
-                    # Actually, for just recording, let's grab what we can.
-                    # Be careful of API limits.
-                    # Let's fetch latest trade for underlying first to save
-                    pass
+                if run_live_loop.opt_client:
+                    # Logic: Fetch contracts expiring in next 7 days, +/- 20 strikes from spot
+                    # We need a rough spot reference.
+                    # Since we haven't fetched 'df' yet for this new bar, we use the last known price or just a wide net.
+                    # Let's use a try-except to get a quick quote or just assume previous close?
+                    # Better: Just run this AFTER fetching df? 
+                    # No, user wants it during the wait or parallel.
+                    # Let's use a wide net: 650-750 for now (hardcoded based on ~695 spot) 
+                    # OR better: use the `active_trade` spot if available, else roughly 695.
+                    center_strike = 695 
+                    if 'active_trade' in locals() and active_trade:
+                        center_strike = active_trade['entry_spot']
+                    
+                    from alpaca.data.requests import OptionContractsRequest
+                    
+                    timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    chain_dir = os.path.join("data", "live", "chains")
+                    os.makedirs(chain_dir, exist_ok=True)
+                    chain_path = os.path.join(chain_dir, f"spy_chain_{timestamp_str}.csv")
+                    
+                    # Fetch Calls & Puts
+                    # We limit to near term (next 7 days) and near money (+/- 25 strikes)
+                    # This is enough to reconstruct the decision surface.
+                    start_date = datetime.now().date()
+                    req_c = OptionContractsRequest(
+                        underlying_symbols=[SYMBOL],
+                        status='active',
+                        expiration_date_gte=start_date,
+                        expiration_date_lte=start_date + pd.Timedelta(days=7),
+                        type='call',
+                        limit=1000
+                    )
+                    req_p = OptionContractsRequest(
+                        underlying_symbols=[SYMBOL],
+                        status='active',
+                        expiration_date_gte=start_date,
+                        expiration_date_lte=start_date + pd.Timedelta(days=7),
+                        type='put',
+                        limit=1000
+                    )
+                    
+                    try:
+                        res_c = run_live_loop.opt_client.get_option_contracts(req_c)
+                        res_p = run_live_loop.opt_client.get_option_contracts(req_p)
+                        
+                        all_contracts = res_c.option_contracts + res_p.option_contracts
+                        # Convert to DataFrame for saving
+                        if all_contracts:
+                            import pandas as pd
+                            chain_df = pd.DataFrame([c.model_dump() for c in all_contracts])
+                            # Filter fields to save space
+                            cols = ['symbol', 'strike_price', 'expiration_date', 'type', 'open_interest', 'style']
+                            chain_df = chain_df[[c for c in cols if c in chain_df.columns]]
+                            chain_df.to_csv(chain_path, index=False)
+                            # print(f"  [Recorder] Saved {len(chain_df)} contracts to {chain_path}")
+                    except Exception as e_chain:
+                        print(f"  [Recorder Warning] fetching chain failed: {e_chain}")
 
-                    # Simplified: Just append the Spot Data we are about to fetch below, 
-                    # AND if possible, current ATM Option Quotes.
-                    # Implementing full chain recording every minute might be heavy/slow.
-                    # Let's start by just saving the Spot Bar + 11 Factors to a dataset file.
-                    # The user specifically asked for "spy options contracts".
-                    
-                    # OK, let's try to fetch just the relevant strikes around ATM?
-                    # That requires logic.
-                    # Let's assume user wants the raw stream.
-                    
-                    # For V1 speed: Let's dump the 11-Factor DataFrame features we compute! 
-                    # That is high value training data.
-                    # AND let's try to get a snapshot of the option chain.
-                    
+
             except Exception as e_rec:
                 print(f" [Data Recorder Error] {e_rec}")
             # --- LIVE DATA RECORDER END ---
 
+# --- LOGGING HELPER ---
+class TradeLogger:
+    def __init__(self, log_dir="data/live"):
+        self.log_path = os.path.join(log_dir, "trade_log.csv")
+        os.makedirs(log_dir, exist_ok=True)
+        if not os.path.exists(self.log_path):
+            with open(self.log_path, "w") as f:
+                f.write("timestamp,spot,score,confidence,prob_profit,action,short_call,short_put,long_call,long_put,width,dte,trade_ids\n")
+    
+    def log_entry(self, spot, score, conf, prob, legs, trade_ids):
+        # legs is list of dicts: [{'option_symbol': '...', 'side': '...'}, ...]
+        # Extract symbols
+        sc = next((l['option_symbol'] for l in legs if l['side'] == 'sell' and 'C' in l['option_symbol']), "N/A")
+        sp = next((l['option_symbol'] for l in legs if l['side'] == 'sell' and 'P' in l['option_symbol']), "N/A")
+        lc = next((l['option_symbol'] for l in legs if l['side'] == 'buy' and 'C' in l['option_symbol']), "N/A")
+        lp = next((l['option_symbol'] for l in legs if l['side'] == 'buy' and 'P' in l['option_symbol']), "N/A")
+        
+        t_ids_str = "|".join(str(t) for t in trade_ids) if trade_ids else "DRY_RUN"
+        
+        row = f"{datetime.now()},{spot:.2f},{score},{conf:.4f},{prob:.4f},ENTRY,{sc},{sp},{lc},{lp},,N/A,{t_ids_str}\n"
+        with open(self.log_path, "a") as f:
+            f.write(row)
+        print(f"📝 Logged Trade to {self.log_path}")
+
+# Initialize Logger Global
+trade_logger = TradeLogger()
+
             
             # 1. Fetch Data
             df = fetch_live_data(data_client, SYMBOL, lookback_bars=LOOKBACK_BARS)
+
+# ... (Previous code) ...
+
             
             if len(df) < 256:
                 print(f"Warning: Not enough bars ({len(df)}). Waiting...")
@@ -401,6 +458,9 @@ def find_closest_contract(client, symbol, contract_type, target_strike, ideal_da
                             print(f"❌ EXECUTION FAILED: {e}")
                     else:
                         print("⚠️ DRY RUN (No executor or unresolved legs)")
+                    
+                    # LOGGING
+                    trade_logger.log_entry(spot, entry_score, confidence, prob_profit, osi_legs, t_ids)
 
                     active_trade = {
                         'entry_spot': spot, 
