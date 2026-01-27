@@ -473,6 +473,12 @@ def parse_args():
     parser.add_argument("--diffusion-warmup", type=int, default=0,
                         help="Epochs to train WITHOUT diffusion before enabling it (default: 0).")
 
+    # NEW (CDE Integration)
+    parser.add_argument("--cde", action="store_true", default=True,
+                        help="Use Neural CDE backbone (Default: True).")
+    parser.add_argument("--no-cde", dest="cde", action="store_false",
+                        help="Disable Neural CDE backbone and use Mamba/Linear.")
+
     args = parser.parse_args()
     
     # Parse loss lambdas
@@ -664,7 +670,8 @@ def train_condor_brain(args):
         diffusion_steps=args.diffusion_steps,
         diffusion_input_dim=10,  # Matches batch_y dimensions (targets)
         diffusion_horizon=1,     # Matches unsqueezed single step
-        feature_group_dropout=args.feature_group_dropout  # NEW: anti-collapse regularization
+        feature_group_dropout=args.feature_group_dropout,  # NEW: anti-collapse regularization
+        use_cde=args.cde  # NEW: CDE Backbone flag
     ).to(device)
     
     # Force model weights to BF16 so Mamba kernels take the BF16 fast path

@@ -35,61 +35,112 @@ def load_cde_model(ckpt_path, input_dim=52):
     model.eval()
     return model
 
-def analyze_sensitivity(model, X, feature_cols, n_samples=1000):
-    print(f"\n🔬 Running Sensitivity Analysis on {n_samples} samples...")
-    idxs = np.random.randint(0, len(X) - SEQ_LEN, size=n_samples)
-    grads_sum = np.zeros(X.shape[1])
-    valid_samples = 0
+def analyze_permutation_importance(model, dataset, feature_names, n_samples=1000):
+    """
+    Computes feature importance via Permutation Importance (Robust to Gradient issues).
     
-    for idx in tqdm(idxs):
-        # (1, T, D)
-        x_seq = X[idx : idx+SEQ_LEN]
-        x_tensor = torch.tensor(x_seq, device=DEVICE).unsqueeze(0).float()
-        x_tensor.requires_grad = True # Enable gradients w.r.t input
+    Method:
+    1. Measure baseline error/output magnitude.
+    2. For each feature:
+       - Shuffle that feature across the batch (breaking its signal).
+       - Measure the change in output (magnitude of deviation from baseline).
+       - Higher deviation = Higher importance.
+    """
+    print(f"\n🔬 Running Permutation Importance on {n_samples} samples...")
+    
+    # Get a batch
+    # Ensure n_samples does not exceed available sequences in dataset
+    n_samples = min(n_samples, len(dataset))
+    indices = np.random.choice(len(dataset), n_samples, replace=False)
+    batch_X = []
+    
+    # Collect batch
+    for idx in indices:
+        # data is raw (N, D), slice sequence manually
+        x_seq = dataset[idx : idx+32] # SEQ_LEN is 32 globally
+        batch_X.append(torch.tensor(x_seq, dtype=torch.float32))
         
-        # Forward
-        z_out = model(x_tensor)
-        preds = model.decoder(z_out) # (1, 2) -> [Return, Vol]
+    X_base = torch.stack(batch_X).to(DEVICE) # (B, T, D)
+    
+    X_base = torch.stack(batch_X).to(DEVICE) # (B, T, D)
+    
+    # Baseline forward pass
+    model.eval()
+    with torch.no_grad():
+        base_out = model(X_base)
         
-        # Backward on Predicted Return (Index 0)
-        score = preds[0, 0] 
-        score.backward()
+    # FILTER: Keep only samples with finite outputs
+    # base_out: (B, Hidden)
+    valid_mask = torch.isfinite(base_out).all(dim=1) # (B,)
+    n_valid = valid_mask.sum().item()
+    
+    if n_valid == 0:
+        print("⚠️ Warning: All baseline samples produced NaN outputs! Model may be unstable.")
+        return {}
         
-        # Gradients: Max absolute grad over time window
-        if x_tensor.grad is None:
-            continue
+    if n_valid < n_samples:
+        print(f"⚠️ Note: Filtered {n_samples - n_valid} NaN samples. using {n_valid} valid samples.")
+        
+    # Keep only valid
+    X_base = X_base[valid_mask]
+    base_out = base_out[valid_mask]
+    
+    # We use strict output magnitude or just the output tensor itself to compare
+    # Let's track mean absolute change in the output vector
+    
+    importances = {}
+    
+    for i, fname in enumerate(tqdm(feature_names, desc="Perturbing features")):
+        # Create perturbed batch
+        X_perm = X_base.clone()
+        
+        # Shuffle feature i across batch dimension (only valid samples)
+        perm_indices = torch.randperm(n_valid)
+        X_perm[:, :, i] = X_perm[perm_indices, :, i]
+        
+        with torch.no_grad():
+            perm_out = model(X_perm)
             
-        grad = x_tensor.grad.abs().squeeze(0).cpu().numpy() # (T, D)
+        # Measure impact: Mean Absolute Difference between base_out and perm_out
+        # This captures how much the output *changes* when the feature is destroyed
+        # Handle valid outputs only (perm_out might become NaN due to perturbation)
+        diff_tensor = torch.abs(base_out - perm_out)
         
-        if np.isnan(grad).any():
-            continue
-            
-        time_max_grad = grad.max(axis=0) # (D,)
+        # Mean over features (Hidden dim)
+        diff_per_sample = diff_tensor.mean(dim=1)
         
-        grads_sum += time_max_grad
-        valid_samples += 1
+        # Ignore new NaNs
+        idx_valid_perm = torch.isfinite(diff_per_sample)
+        if idx_valid_perm.sum() > 0:
+            diff = diff_per_sample[idx_valid_perm].mean().item()
+        else:
+            diff = 0.0 # If perturbation causes 100% NaNs, effectively it broke the model (high impact?)
+            # Or 0.0 to be safe
         
-    if valid_samples == 0:
-        print("⚠️ Warning: All samples produced NaN gradients!")
-        return
+        importances[fname] = diff
 
-    avg_sensitivity = grads_sum / valid_samples
-    # Normalize
-    if avg_sensitivity.sum() > 0:
-        avg_sensitivity = 100 * avg_sensitivity / avg_sensitivity.sum()
+    # Normalize to 0-100
+    total_impact = sum(importances.values())
+    if total_impact > 0:
+        for k in importances:
+            importances[k] = (importances[k] / total_impact) * 100.0
+            
+    # Sort
+    sorted_feats = sorted(importances.items(), key=lambda x: x[1], reverse=True)
     
-    sens_df = pd.DataFrame({
-        'Feature': feature_cols,
-        'Importance': avg_sensitivity
-    }).sort_values('Importance', ascending=False)
-    
-    print("\n🏆 Top 10 Most Important Features (Gradient Sensitivity):")
-    print(sens_df.head(10).to_string(index=False))
+    print("\n🌟 CDE Feature Importance (Permutation Method):")
+    print(f"{'Feature':<30} | {'Impact Score':<10}")
+    print("-" * 45)
+    for name, score in sorted_feats[:15]:
+        print(f"{name:<30} | {score:6.2f}")
+        
+    return importances
 
 def train_surrogate_tree(model, X, feature_cols, n_samples=5000):
     print(f"\n🌳 Training Surrogate Decision Tree on {n_samples} samples...")
     from sklearn.tree import DecisionTreeRegressor, export_text
     
+    n_samples = min(n_samples, len(X) - SEQ_LEN)
     idxs = np.random.randint(0, len(X) - SEQ_LEN, size=n_samples)
     input_states = []
     targets = []
@@ -101,13 +152,27 @@ def train_surrogate_tree(model, X, feature_cols, n_samples=5000):
             
             x_tensor = torch.tensor(seq, device=DEVICE).unsqueeze(0).float()
             # Predict Return
-            pred = model.decoder(model(x_tensor))[0, 0].item()
+            out = model(x_tensor)
+            decoded = model.decoder(out)
+            pred = decoded[0, 0].item()
             
+            # CRITICAL: Skip if scalar prediction is NaN or Inf
+            if not np.isfinite(pred):
+                continue
+                
             input_states.append(last_step)
             targets.append(pred)
             
+    if not input_states:
+        print("⚠️ Warning: No valid samples collected for surrogate tree (all NaNs).")
+        return
+            
     input_states = np.array(input_states)
     targets = np.array(targets)
+    
+    # Check if we have enough samples
+    if len(targets) < 50:
+         print(f"⚠️ Warning: Only {len(targets)} valid samples. Tree might be unstable.")
     
     tree = DecisionTreeRegressor(max_depth=3, min_samples_leaf=50)
     tree.fit(input_states, targets)
@@ -151,8 +216,8 @@ def main():
     # 2. Load Model
     model = load_cde_model(args.model, input_dim=len(feature_cols))
     
-    # 3. Analyze
-    analyze_sensitivity(model, X, feature_cols, n_samples=args.samples)
+    # 3. Analyze (Permutation Importance)
+    analyze_permutation_importance(model, X, feature_cols, n_samples=args.samples)
     train_surrogate_tree(model, X, feature_cols, n_samples=args.samples * 5)
 
 if __name__ == "__main__":
