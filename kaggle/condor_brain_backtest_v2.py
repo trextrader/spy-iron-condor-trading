@@ -1501,6 +1501,7 @@ def main():
     parser.add_argument("--data", type=str, default=None, help="Alias for --input")
     parser.add_argument("--model", type=str, default=None, help="Path to model checkpoint (.pth)")
     parser.add_argument("--ruleset", type=str, default=None, help="Path to ruleset YAML")
+    parser.add_argument("--rules-only", action="store_true", help="Run in logic-only mode without neural model")
     args = parser.parse_args()
 
     # --- GPU CHECK ---
@@ -1547,8 +1548,11 @@ def main():
     df, rule_signals, ruleset = run_rule_engine(df, ruleset_path)
     
     # 3. Model
+    # 3. Model
     POSSIBLE_PATHS = [
         args.model, # CLI override first
+        # Epoch 4 (New Request)
+        "models/old models/condor_brain_retrain_e4.pth",
         # Colab 500K trained models (E3 first)
         "/content/spy-iron-condor-trading/condor_brain_retrain_e3+500k.pth",  # 🚀 E3 500K
         "/content/spy-iron-condor-trading/condor_brain_retrain_e2_500k.pth",
@@ -1564,60 +1568,72 @@ def main():
         "/kaggle/working/condor_brain_retrain_e3.pth",
         "/kaggle/working/condor_brain_retrain_v22_e3.pth",
     ]
-    model_path = MODEL_PATH
-    for p in POSSIBLE_PATHS:
-        if p and os.path.exists(p):
-            model_path = p
-            break
+    
+    if args.rules_only:
+        print("⚠️ RULES-ONLY MODE: Skipping model search.")
+        model_path = "RULES_ONLY"
+    else:
+        model_path = MODEL_PATH
+        for p in POSSIBLE_PATHS:
+            if p and os.path.exists(p):
+                model_path = p
+                break
             
     # Align feature schema with training (52 base + 4 rule consensus)
     feature_cols = FEATURE_COLS_V22 + RULE_FEATURES
 
-    print(f"Loading Model from {model_path}...")
-    if os.path.exists(model_path):
-        checkpoint = torch.load(model_path, map_location=DEVICE)
-        state_dict = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
-        if isinstance(checkpoint, dict):
-            ckpt_feature_cols = checkpoint.get("feature_cols")
-            if ckpt_feature_cols:
-                feature_cols = list(ckpt_feature_cols)
-        # Dynamic Attributes
-        model_input_dim = checkpoint.get("input_dim", len(feature_cols)) if isinstance(checkpoint, dict) else len(feature_cols)
-        
-        # Extract model config if available
-        ckpt_config = {}
-        if isinstance(checkpoint, dict):
-            if "model_config" in checkpoint:
-                ckpt_config = checkpoint["model_config"]
-            elif "config" in checkpoint:
-                ckpt_config = checkpoint["config"]
-                
-        # Default to 12 layers, 512 dim if not specified
-        n_layers = int(ckpt_config.get("n_layers", ckpt_config.get("layers", 12)))
-        d_model = int(ckpt_config.get("d_model", ckpt_config.get("dim", 512)))
+    if args.rules_only:
+        print("🛠️ RULES-ONLY MODE: Initializing Dummy CondorBrain...")
+        n_layers, d_model, model_input_dim = 1, 32, len(feature_cols)
+        # Minimal dummy model for compatibility
+        model = CondorBrain(d_model=d_model, n_layers=n_layers, input_dim=model_input_dim).to(DEVICE)
+    else:
+        print(f"Loading Model from {model_path}...")
+        if os.path.exists(model_path):
+            # Set weights_only=False to support numpy/legacy checkpoints
+            checkpoint = torch.load(model_path, map_location=DEVICE, weights_only=False)
+            state_dict = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
+            if isinstance(checkpoint, dict):
+                ckpt_feature_cols = checkpoint.get("feature_cols")
+                if ckpt_feature_cols:
+                    feature_cols = list(ckpt_feature_cols)
+            # Dynamic Attributes
+            model_input_dim = checkpoint.get("input_dim", len(feature_cols)) if isinstance(checkpoint, dict) else len(feature_cols)
+            
+            # Extract model config if available
+            ckpt_config = {}
+            if isinstance(checkpoint, dict):
+                if "model_config" in checkpoint:
+                    ckpt_config = checkpoint["model_config"]
+                elif "config" in checkpoint:
+                    ckpt_config = checkpoint["config"]
+                    
+            # Default to 12 layers, 512 dim if not specified
+            n_layers = int(ckpt_config.get("n_layers", ckpt_config.get("layers", 12)))
+            d_model = int(ckpt_config.get("d_model", ckpt_config.get("dim", 512)))
 
-        if model_input_dim != len(feature_cols):
-            print(f"⚠️ input_dim mismatch: checkpoint={model_input_dim} vs features={len(feature_cols)}; using checkpoint value.")
-        
-        print(f"Initializing CondorBrain: d_model={d_model}, n_layers={n_layers}, input_dim={model_input_dim}")
-        
-        # V2.2 Model
-        model = CondorBrain(
-            d_model=d_model, n_layers=n_layers,
-            input_dim=model_input_dim,
-            use_vol_gated_attn=True, use_topk_moe=True, moe_n_experts=3, moe_k=1,
-            use_diffusion=True,
-            diffusion_steps=50,      # Match training
-            diffusion_horizon=1,     # Match training (was 32)
-            diffusion_input_dim=10   # Match training (targets=10)
-        ).to(DEVICE)
-        
-        try:
-            model.load_state_dict(state_dict, strict=False)
-            print("Model loaded.")
-        except Exception as e:
-            print(f"Model load failed: {e}")
-            return
+            if model_input_dim != len(feature_cols):
+                print(f"⚠️ input_dim mismatch: checkpoint={model_input_dim} vs features={len(feature_cols)}; using checkpoint value.")
+            
+            print(f"Initializing CondorBrain: d_model={d_model}, n_layers={n_layers}, input_dim={model_input_dim}")
+            
+            # V2.2 Model
+            model = CondorBrain(
+                d_model=d_model, n_layers=n_layers,
+                input_dim=model_input_dim,
+                use_vol_gated_attn=True, use_topk_moe=True, moe_n_experts=3, moe_k=1,
+                use_diffusion=True,
+                diffusion_steps=50,      # Match training
+                diffusion_horizon=1,     # Match training (was 32)
+                diffusion_input_dim=10   # Match training (targets=10)
+            ).to(DEVICE)
+            
+            try:
+                model.load_state_dict(state_dict, strict=False)
+                print("Model loaded.")
+            except Exception as e:
+                print(f"Model load failed: {e}")
+                return
             
         # 4. Backtest
         norm_stats = {}
