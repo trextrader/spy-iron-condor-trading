@@ -42,6 +42,15 @@ def load_and_prep_data(data_path):
     X = (X - median) / (1.4826 * mad)
     X = np.clip(X, -10.0, 10.0)
     
+    # LEAKAGE PROTECTION: Zero out forward-looking target columns
+    # These are in V22 for calculating rewards/targets, but must NOT be inputs.
+    leakage_cols = ['target_spot', 'max_dd_60m']
+    for c in leakage_cols:
+        if c in feature_cols:
+            idx = feature_cols.index(c)
+            X[:, idx] = 0.0
+            print(f"🔒 Masked potential leakage column: {c}")
+    
     # Targets: [Future Return, Future Vol] simplification for prototype
     # Just fitting the "Next Step" or "Horizon" to prove CDE learning
     Y = np.zeros((len(X), 2), dtype=np.float32)
