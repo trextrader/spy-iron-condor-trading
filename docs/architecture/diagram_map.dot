@@ -87,8 +87,8 @@ digraph DiagramMap {
         
         node [fillcolor="#4a148c", fontcolor="white"]; // Purple Nodes
         
-        d_enhanced [label="enhanced_architecture.png\n(Inputs -> Mamba -> Heads)", href="enhanced_architecture.png"];
-        d_mamba_logic [label="mamba_engine_logic.png\n(SSM Block Internals)", href="mamba_engine_logic.png"];
+        d_enhanced [label="enhanced_architecture.png\n(Inputs -> Neural CDE -> Heads)", href="enhanced_architecture.png"];
+        d_mamba_logic [label="cde_engine_logic.png\n(CDE Vector Field Internals)", href="cde_engine_logic.png"];
         d_flow [label="condor_intelligence_flow.png\n(Standard Flow)", href="condor_intelligence_flow.png"];
         d_flow_prem [label="condor_intelligence_flow_premium.png\n(Premium + TDA + Diff)", href="condor_intelligence_flow_premium.png", shape=component];
         

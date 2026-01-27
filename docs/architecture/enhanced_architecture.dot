@@ -1,7 +1,7 @@
 /*
- * CondorBrain Enhanced Architecture (v2.2)
- * Technical Graphviz Diagram - Model Training Pipeline with Advanced Enhancements
- * 
+ * CondorBrain Enhanced Architecture (v3.0 - Neural CDE)
+ * Technical Graphviz Diagram - Model Training Pipeline with Neural CDE Backbone
+ *
  * Compile: dot -Tpng enhanced_architecture.dot -o enhanced_architecture.png
  */
 
@@ -60,66 +60,44 @@ digraph CondorBrainEnhanced {
     }
     
     // ==========================================================================
-    // MAMBA BACKBONE WITH ENHANCEMENTS
+    // NEURAL CDE BACKBONE
     // ==========================================================================
     subgraph cluster_backbone {
-        label="🧠 MAMBA-2 BACKBONE (24 Layers)";
+        label="🧠 NEURAL CDE BACKBONE (Continuous-Time)";
         style=filled;
         fillcolor="#1a2a1a";
         fontcolor=white;
         color="#4a6a4a";
-        
-        input_proj [label="Input Projection\nLinear(24→1024)", shape=box, fillcolor="#2d4a2d", style=filled, fontcolor=white];
-        
-        // Layer blocks with VolGatedAttn
-        subgraph cluster_layers_1_7 {
-            label="Layers 1-7";
+
+        // Initial Encoder
+        init_encoder [label="Initial Encoder\nZ₀ = softplus(W·X₀)", shape=box, fillcolor="#2d4a2d", style=filled, fontcolor=white];
+
+        // CDE Integration Loop
+        subgraph cluster_cde_loop {
+            label="CDE Integration Loop (t=0 to T-1)";
             style=dashed;
             color="#6b8e23";
             fontcolor="#6b8e23";
-            
-            mamba_1_7 [label="Mamba SSM\n×7 layers\nO(N) complexity", shape=box, fillcolor="#3d5a3d", style=filled, fontcolor=white];
+
+            control_incr [label="Control Increments\ndX_t = X_{t+1} - X_t", shape=parallelogram, fillcolor="#3d5a3d", style=filled, fontcolor=white];
+
+            vec_field [label="Vector Field f(Z)\nLinear→SiLU→Linear→Tanh\n‖f(z)‖∞ ≤ 1", shape=box, fillcolor="#48bb78", style=filled, fontcolor=white];
+
+            euler_step [label="Euler Integration\nZ_{t+1} = Z_t + f(Z_t)·dX_t", shape=component, fillcolor="#68d391", style=filled, fontcolor=white];
         }
-        
-        vol_attn_1 [label="🆕 VolGatedAttn\ng·Attn + (1-g)·X\n8 heads", shape=diamond, fillcolor="#ff6b6b", style=filled, fontcolor=white];
-        
-        subgraph cluster_layers_8_15 {
-            label="Layers 8-15";
-            style=dashed;
-            color="#6b8e23";
-            fontcolor="#6b8e23";
-            
-            mamba_8_15 [label="Mamba SSM\n×8 layers", shape=box, fillcolor="#3d5a3d", style=filled, fontcolor=white];
-        }
-        
-        vol_attn_2 [label="🆕 VolGatedAttn\n8 heads", shape=diamond, fillcolor="#ff6b6b", style=filled, fontcolor=white];
-        
-        subgraph cluster_layers_16_23 {
-            label="Layers 16-23";
-            style=dashed;
-            color="#6b8e23";
-            fontcolor="#6b8e23";
-            
-            mamba_16_23 [label="Mamba SSM\n×8 layers", shape=box, fillcolor="#3d5a3d", style=filled, fontcolor=white];
-        }
-        
-        vol_attn_3 [label="🆕 VolGatedAttn\n8 heads", shape=diamond, fillcolor="#ff6b6b", style=filled, fontcolor=white];
-        
-        // Layer 24
-        mamba_24 [label="Mamba Layer 24\nFinal SSM", shape=box, fillcolor="#3d5a3d", style=filled, fontcolor=white];
-        
+
+        vol_attn_1 [label="VolGatedAttn\ng·Attn + (1-g)·X\n8 heads", shape=diamond, fillcolor="#ff6b6b", style=filled, fontcolor=white];
+
         rms_norm [label="RMSNorm\n(BF16-safe)", shape=box, fillcolor="#4a4a6a", style=filled, fontcolor=white];
-        
-        last_hidden [label="h_T ∈ ℝ¹⁰²⁴\nLast Hidden", shape=ellipse, fillcolor="#5a5a8a", style=filled, fontcolor=white];
-        
-        input_proj -> mamba_1_7;
-        mamba_1_7 -> vol_attn_1;
-        vol_attn_1 -> mamba_8_15;
-        mamba_8_15 -> vol_attn_2;
-        vol_attn_2 -> mamba_16_23;
-        mamba_16_23 -> vol_attn_3;
-        vol_attn_3 -> mamba_24;
-        mamba_24 -> rms_norm;
+
+        last_hidden [label="Z_T ∈ ℝ⁵¹²\nFinal Hidden State", shape=ellipse, fillcolor="#5a5a8a", style=filled, fontcolor=white];
+
+        init_encoder -> control_incr;
+        control_incr -> vec_field;
+        vec_field -> euler_step;
+        euler_step -> euler_step [label="loop", style=dashed, color="#68d391"];
+        euler_step -> vol_attn_1;
+        vol_attn_1 -> rms_norm;
         rms_norm -> last_hidden;
     }
     
@@ -204,14 +182,14 @@ digraph CondorBrainEnhanced {
     // ==========================================================================
     // CONNECTIONS
     // ==========================================================================
-    feature_vec -> input_proj [lhead=cluster_backbone, color="#4a9eff", penwidth=2];
+    feature_vec -> init_encoder [lhead=cluster_backbone, color="#4a9eff", penwidth=2];
     last_hidden -> regime_detector [color="#9b59b6", penwidth=2];
     last_hidden -> topk_moe [color="#ff9f43", penwidth=2];
     last_hidden -> horizon_forecast [color="#4a9eff"];
     last_hidden -> diffusion_head [color="#FF00FF", style=dotted];
     ic_params -> loss_pred [color="#e67e22"];
     ic_params -> state_binner [color="#1abc9c", penwidth=2];
-    composite_loss -> input_proj [label="∇L", style=dashed, color="#e74c3c", constraint=false];
+    composite_loss -> init_encoder [label="∇L", style=dashed, color="#e74c3c", constraint=false];
     
     // ==========================================================================
     // LEGEND

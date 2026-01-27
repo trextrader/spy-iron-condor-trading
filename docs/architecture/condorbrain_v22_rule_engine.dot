@@ -201,7 +201,7 @@ digraph CondorBrain_V22_RuleEngine_Architecture {
         n_feat_build [label="Feature Construction\n(V2.1 + V2.2)", fillcolor="#4455cc", fontcolor="white"];
         n_scaling [label="Robust Scaling\nmedian/MAD", fillcolor="#5566dd", fontcolor="white"];
         n_targets [label="Targets\nY_feat_np, Y_policy_np", fillcolor="#6677ee", fontcolor="white"];
-        n_model [label="CondorBrain\nMamba + MoE + Diffusion", fillcolor="#7788ff", fontcolor="white"];
+        n_model [label="CondorBrain\nCDE + MoE + Diffusion", fillcolor="#7788ff", fontcolor="white"];
         n_train_loop [label="Training Loop\nLosses + Checkpoints", fillcolor="#8899ff", fontcolor="white"];
     }
 

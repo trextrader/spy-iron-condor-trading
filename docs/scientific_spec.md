@@ -1,11 +1,13 @@
-# Scientific Specification: CondorBrain & Mamba Architecture
+# Scientific Specification: CondorBrain & Neural CDE Architecture
 
-**Version:** 2.0 (H100 Optimized)
-**Date:** 2026-01-11
-**Architecture:** DeepMamba (State Space Model)
+**Version:** 3.0 (Neural CDE)
+**Date:** 2026-01-27
+**Architecture:** Neural Controlled Differential Equations (CDE)
 
 ## Abstract
-This specification outlines the architecture of **CondorBrain**, a high-frequency Parametric Policy Network designed for volatility arbitrage on the SPY index. Leveraging the **Linear State-Space Model (SSM) Mamba-2** architecture, the system achieves $O(N)$ linear scaling on sequences exceeding 120 steps, overcoming the quadratic bottleneck of Transformer attention mechanisms. The model incorporates a **Selective Scan CUDA kernel** for hardware-aware state modulation, enhancing Signal-to-Noise Ratio (SNR) in non-stationary regimes. Optimization is driven by a 20-generation **Evolutionary Bayesian Strategy**, dynamically tuning hyperparameters (Lookback window, State dimension $D$) to traverse the non-convex loss landscape. The architecture concludes with a **Regime-Gated Mixture-of-Experts (MoE)** decoder, disentangling price directionality from volatility surface parameters to generate risk-adjusted Iron Condor execution signals.
+This specification outlines the architecture of **CondorBrain**, a high-frequency Parametric Policy Network designed for volatility arbitrage on the SPY index. Leveraging **Neural Controlled Differential Equations (CDE)**, the system models market dynamics as continuous-time processes, treating input sequences as control paths that drive latent state evolution. This replaces the previous Mamba-2 SSM backbone, addressing numerical instability and feature collapse issues while maintaining $O(N)$ linear scaling. The CDE formulation uses **Explicit Euler integration** with a tanh-bounded vector field for guaranteed stability. Optimization is driven by a 20-generation **Evolutionary Bayesian Strategy**, dynamically tuning hyperparameters (Lookback window, State dimension $D$) to traverse the non-convex loss landscape. The architecture concludes with a **Regime-Gated Mixture-of-Experts (MoE)** decoder, disentangling price directionality from volatility surface parameters to generate risk-adjusted Iron Condor execution signals.
+
+> **Architecture Migration Note:** This document supersedes the Mamba-2 specification (v2.x). See `docs/legacy/` for archived Mamba documentation.
 
 ## 2. Input Data & Tensor Specification
 
@@ -23,17 +25,17 @@ The following table represents the raw `float32` input vectors fed into the Neur
 | **14:30:00** | 472.16 / 472.67 / ... | 60,276 | 427.0 | Put | 0.0000 | $5.42 \times 10^{-20}$ | $9.95 \times 10^{-18}$ | $-1.36 \times 10^{-16}$ | 0.15 | 50.0 | 30.33 | 0.218 |
 
 ### 2.2 Neural Input Feature Vector (24 Parameters)
-The Input Layer transforms these raw fields into a vector $x_t \in \mathbb{R}^{24}$. Weights indicate the initialized importance (scalar scaling) before entering the Mamba block.
+The Input Layer transforms these raw fields into a vector $x_t \in \mathbb{R}^{52}$. Weights indicate the initialized importance (scalar scaling) before entering the Neural CDE backbone.
 
-| Feature Group | Parameters (Fields) | Count | Purpose | Neural Weighting |
+| Feature Group | Parameters (Fields) | Count | Purpose | CDE Influence |
 | :--- | :--- | :--- | :--- | :--- |
-| **Spot Dynamics** | `open`, `high`, `low`, `close`, `volume` | 5 | Micro-structure Price Action | **High** (Trend Detection) |
-| **Option Physics** | `strike`, `delta`, `gamma`, `vega`, `theta` | 5 | Black-Scholes Risk Surface | **Critical** (Pricing) |
+| **Spot Dynamics** | `open`, `high`, `low`, `close`, `volume` | 5 | Micro-structure Price Action | **High** (Control Path) |
+| **Option Physics** | `strike`, `delta`, `gamma`, `vega`, `theta` | 5 | Black-Scholes Risk Surface | **Critical** (Vector Field) |
 | **Volatility** | `iv` (Implied Vol), `ivr` (Rank), `spread_ratio` | 3 | Regime Classification | **Gating** (MoE Switch) |
 | **Technicals** | `rsi`, `atr`, `adx`, `stoch_k` | 4 | Momentum & Exhaustion | **Medium** (Entry Timing) |
 | **Bands & Trend** | `bb_lower`, `bb_upper`, `sma`, `psar`, `psar_mark` | 5 | Mean Reversion Bounds | **High** (Exit Logic) |
 | **Metadata** | `dist_to_spot` (Derived), `call_put` (One-Hot) | 2 | Positional Encoding | **Static** (Filtering) |
-| **TOTAL** | **24 Active Neurons per Time-Step** | **24** | **Input Tensor Shape: (B, L, 24)** | |
+| **TOTAL** | **52 Active Neurons per Time-Step (V2.2)** | **52** | **Input Tensor Shape: (B, L, 52)** | |
 
 ### 2.3 Data Synthesis: 10M+ Row Alignment Pipeline
 The 4GB+ dataset is not a simple dump; it is a **Time-Aligned Join** of two distinct distinct high-frequency manifolds:
@@ -86,34 +88,44 @@ High energy indicates regime transitions (trend reversals, breakouts).
 
 
 
-### 2.4 Forward Pass Mathematics
-The Mamba Engine processes this stream using the following mathematical transformation:
+### 2.4 Forward Pass Mathematics (Neural CDE)
+The CDE Engine processes this stream using continuous-time differential equations:
 
-**1. Input Embedding (Expansion):**
+**1. Initial State Encoding:**
 
-$E_t = \text{LayerNorm}(W_{in} \cdot x_t + b_{in})$
+$$Z_0 = \text{softplus}(W_{enc} \cdot X_0 + b_{enc})$$
 
-Where $x_t \in R^{24}$ maps to Latent State $E_t \in R^{512}$.
+Where $X_0 \in \mathbb{R}^{52}$ is the first observation, mapping to initial latent state $Z_0 \in \mathbb{R}^{512}$.
 
-**2. SSM State Transition (The "Crunch"):**
+**2. Control Path Computation:**
 
-For each Mamba Layer $l \in [1..32]$:
+The input sequence $X = (X_0, X_1, \ldots, X_T)$ is treated as a discrete control path. We compute increments:
 
-$h_t^{(l)} = \text{SSM}(A, B, C, \Delta, E_t^{(l-1)})$
+$$dX_t = X_{t+1} - X_t \in \mathbb{R}^{52}$$
 
-$E_t^{(l)} = \text{SiLU}(W_{gate} \cdot E_t^{(l-1)}) \odot h_t^{(l)}$
+**3. CDE Integration (The "Crunch"):**
 
-*The model compresses the 24-feature history into a rolling hidden state $h_t$ that retains infinite context.*
+For each timestep $t \in [0, T-1]$:
 
-**3. Policy Head (Output):**
+$$dZ_t = f(Z_t; \theta) \cdot dX_t$$
 
-$\hat{y} = W_{out} \cdot \text{RMSNorm}(E_t^{(Final)})$
+$$Z_{t+1} = Z_t + dZ_t$$
 
-*Outputs the Policy Distribution: Strike Selection, Width, and Allocation Size.*
+Where $f: \mathbb{R}^{512} \to \mathbb{R}^{512 \times 52}$ is the learned vector field:
+
+$$f(z) = \tanh(W_2 \cdot \text{SiLU}(W_1 \cdot z + b_1) + b_2)$$
+
+*The tanh activation bounds $\|f(z)\|_\infty \leq 1$, ensuring numerical stability over long sequences.*
+
+**4. Policy Head (Output):**
+
+$$\hat{y} = W_{out} \cdot \text{RMSNorm}(Z_T)$$
+
+*The final hidden state $Z_T$ captures the entire sequence dynamics for policy generation.*
 
 ## 0. System Architecture
 
-The following diagram provides a granular mapping of the CondorIntelligence hardware-aware Mamba-2 backbone, its synergistic 23-head output distribution, and the downstream Neural-Fuzzy fusion logic. A one-page [Technical Architecture Summary](architecture/technical_architecture_summary.md) is also available.
+The following diagram provides a granular mapping of the CondorIntelligence Neural CDE backbone, its synergistic 23-head output distribution, and the downstream Neural-Fuzzy fusion logic. A one-page [Technical Architecture Summary](architecture/technical_architecture_summary.md) is also available.
 
 ![CondorIntelligence Detailed Flow](architecture/condor_intelligence_flow.png)
 
@@ -133,51 +145,58 @@ This diagram shows the advanced enhancements including VolGatedAttn, TopKMoE, an
 
 ![Enhanced Architecture v2.2](architecture/enhanced_architecture.png)
 
-## 1. Core Architecture: Mamba Protocol
-Unlike traditional Transformers with $O(N^2)$ quadratic complexity, CondorBrain utilizes the **Mamba State Space Model (SSM)**, achieving $O(N)$ linear complexity with respect to sequence length.
+## 1. Core Architecture: Neural CDE Protocol
+Unlike traditional Transformers with $O(N^2)$ quadratic complexity, CondorBrain utilizes **Neural Controlled Differential Equations (CDE)**, achieving $O(N)$ linear complexity with respect to sequence length while providing continuous-time dynamics modeling.
 
-### 1.1 Mathematical Formulation (Mamba-2)
-The core of CondorBrain is a Structured State Space Model (SSM) that maps a sequence $x \in \mathbb{R}^{L \times F}$ to $y \in \mathbb{R}^{L \times D}$ through a latent manifold.
+### 1.1 Mathematical Formulation (Neural CDE)
+The core of CondorBrain is a Neural CDE that maps a sequence $X \in \mathbb{R}^{T \times D}$ to a final hidden state $Z_T \in \mathbb{R}^{H}$ through continuous-time integration.
 
-**Continuous-Time System (ODEs):**
-The latent state $h(t) \in \mathbb{R}^{N}$ evolves according to:
-
-$$
-\dot{h}(t) = \mathbf{A}h(t) + \mathbf{B}x(t)
-$$
+**Core CDE Equation:**
+The latent state $Z_t \in \mathbb{R}^{H}$ evolves according to:
 
 $$
-y(t) = \mathbf{C}h(t) + \mathbf{D}x(t)
+dZ_t = f(Z_t; \theta) \, dX_t
 $$
 
-**Hardware-Aware Discretization (Zero-Order Hold):**
-On the H100, we apply dynamic step-size $\Delta_t$ to discretize the system:
+Where $f: \mathbb{R}^H \to \mathbb{R}^{H \times D}$ is a learned vector field parameterized by a neural network.
+
+**Integral Form:**
 
 $$
-\bar{\mathbf{A}}_t = \exp(\Delta_t \mathbf{A})
+Z_T = Z_0 + \int_0^T f(Z_t) \, dX_t
 $$
 
-$$
-\bar{\mathbf{B}}_t = (\Delta_t \mathbf{A})^{-1} (\bar{\mathbf{A}}_t - \mathbf{I}) \cdot \Delta_t \mathbf{B} \approx \Delta_t \mathbf{B}
-$$
-
-**Selective Scan Mechanism (Associative Property):**
-Unlike LSTMs, Mamba-2 leverages the associative property of the scan operator to parallelize the recursion:
+**Explicit Euler Discretization:**
+On the observation grid, we apply explicit Euler integration:
 
 $$
-h_t = \bar{\mathbf{A}}_t h_{t-1} + \bar{\mathbf{B}}_t x_t
+Z_{t+1} = Z_t + f(Z_t) \cdot (X_{t+1} - X_t)
 $$
 
+This treats the input sequence as a **control path** that drives the evolution of the hidden state through the learned vector field.
+
+**Vector Field Network:**
+The vector field $f$ is parameterized as a 2-layer MLP with tanh stabilization:
+
 $$
-(h_0, \dots, h_L) = \text{ParallelScan}(\{ \bar{\mathbf{A}}_t, \bar{\mathbf{B}}_t x_t \}_{t=1}^L)
+f(z) = \tanh(W_2 \cdot \text{SiLU}(W_1 \cdot z + b_1) + b_2)
 $$
 
-The state transition $\bar{\mathbf{A}}_t$ is computed as a function of the input: $\Delta_t = \text{Softplus}(W_\Delta x_t + b_\Delta)$. This allows the model to compress sequences by "stretching" time during low-entropy market periods.
+The tanh activation ensures $\|f(z)\|_\infty \leq 1$, preventing state explosion over long sequences (256+ steps). This is critical for numerical stability that the previous Mamba-2 backbone lacked.
 
-### 1.2 Performance vs Transformers
-- **Inference Latency:** Constant time per step ($O(1)$) due to recurrent state formulation.
-- **Training Throughput:** $3x$ faster than Transformer-XL for sequences > 2k length.
-- **Performance:** Outperforms Llama-2-7B on key reasoning tasks despite being 10x smaller.
+**Why CDE Over SSM:**
+| Aspect | Mamba-2 SSM | Neural CDE |
+|--------|-------------|------------|
+| State Update | $h_t = Ah_{t-1} + Bx_t$ (Linear) | $Z_{t+1} = Z_t + f(Z_t) \cdot dX_t$ (Nonlinear) |
+| Stability | Required gradient clipping | Inherently stable (tanh-bounded) |
+| Time Modeling | Discrete steps | Continuous-time integral |
+| Feature Collapse | Frequent | Prevented by continuous dynamics |
+
+### 1.2 Performance vs Transformers & SSMs
+- **Inference Latency:** Linear $O(N)$ complexity with simpler PyTorch ops.
+- **Training Stability:** No gradient explosions due to bounded vector field.
+- **Interpretability:** Vector field Jacobian reveals feature importance.
+- **Robustness:** Handles variable-rate sequences naturally (market gaps, overnight periods).
 
 ---
 
@@ -264,16 +283,16 @@ Financial loss landscapes are highly non-convex with numerous local minima. A si
 *   **Loss Landscape Geometry:** The sweep process probes different basins of attraction. By varying hyperparameters (learning rate, model depth, lookback), we perform a **Bayesian Exploration** of the optimization surface.
 *   **Robustness:** We select models not just with the lowest loss, but with the "flattest" minima (Low Spectral Norm), which correlates with better out-of-distribution generalization.
 
-### 5.4 Mamba 2 Pipeline Enhancements
+### 5.4 Neural CDE Pipeline Enhancements
 This pipeline substantially enhances the standard Deep Learning approach by:
-1.  **Dynamic Context Optimization:** The sweep dynamically finds the optimal `lookback` window (e.g., 120 vs 240 steps), matching the model's receptive field to the market's current fractal memory.
-2.  **Selective State Management:** Mamba 2's `continuous_scan` allows the model to compress irrelevant noise (choppy sideways action) and prioritize high-information events (regime shifts) into its hidden state $h_t$, effectively increasing the Signal-to-Noise Ratio (SNR) of the input stream.
+1.  **Dynamic Context Optimization:** The sweep dynamically finds the optimal `lookback` window (e.g., 120 vs 256 steps), matching the model's receptive field to the market's current fractal memory.
+2.  **Continuous-Time Dynamics:** The CDE integration naturally compresses irrelevant noise (choppy sideways action) through the vector field's learned response to control increments. Small $dX_t$ produce small state updates, while regime shifts (large $dX_t$) drive proportionally larger state changes, effectively increasing the Signal-to-Noise Ratio (SNR) of the input stream.
 
 ---
 
-## 6. Mamba Intelligence & Enhancements Breakdown
+## 6. CDE Intelligence & Enhancements Breakdown
 
-This section details the specific architectural innovations added to the standard Mamba backbone, transforming it into the **CondorBrain Intelligence**.
+This section details the specific architectural innovations added to the Neural CDE backbone, transforming it into the **CondorBrain Intelligence**.
 
 ### 6.1 Multi-Head Expert Decoder
 Standard LSTMs/Transformers output a single vector. We architected a **Branched Decoder** to disentangle conflicting objectives:
@@ -298,7 +317,7 @@ $$
 \hat{y} = \sum_{i \in \text{Regimes}} \pi_i(h_T) \cdot \text{Expert}_i(h_T)
 $$
 
-This allows the model to maintain discrete strike selection policies for high-fright (VIX > 25) vs. low-volatility (VIX < 15) environments while sharing a common Mamba backbone for feature extraction.
+This allows the model to maintain discrete strike selection policies for high-fright (VIX > 25) vs. low-volatility (VIX < 15) environments while sharing a common CDE backbone for feature extraction.
 
 ### 6.3 HorizonForecaster Trajectory Mathematics
 The Forecaster generates a 45-day price surface $F \in \mathbb{R}^{45 \times 4}$ where each step $j$ contains:
@@ -319,15 +338,16 @@ This provides the model with a "predictive horizon" to calibrate the Iron Condor
 
 ## 7. Compute Logic Graph (Granular Engine)
 
-The following diagram details the exact parallel computation flow within a single Mamba 2 Block, highlighting the hardware-accelerated **Selective Scan Kernel** on the H100.
+The following diagram details the exact computation flow within the Neural CDE backbone, highlighting the **Explicit Euler integration loop** and **vector field network**.
 
-![Mamba Engine Logic](architecture/mamba_engine_logic.png)
+![CDE Engine Logic](architecture/cde_engine_logic.png)
 
 ### 7.1 Key Operations
-1.  **Linear Projection (Expansion):** The input dimension $D$ is expanded (typically $2x$) to separate the "State" (SSM) and "Gate" branches.
-2.  **Conv1d (Local Context):** A short convolution ($L=4$) ensures token locality before the sequence model, preventing "state collapse" on very short patterns.
-3.  **Selective Scan Kernel (Fused):** The critical operation. It discretizes the continuous parameters $\textbf{A}, \textbf{B}$ using the Zero-Order Hold (ZOH) method *per time-step* based on $\Delta$, then performs a parallel inclusive scan (associative) to compute the hidden states $h_t$. This is the $O(N)$ magic compared to Attention's $O(N^2)$.
-4.  **Multiplicative Gate:** The output of the SSM branch is modulated by the "Gate" branch (SiLU activated), allowing the model to silence irrelevant features completely.
+1.  **Initial State Encoding:** The first observation $X_0$ is projected through a linear layer with softplus activation to create the initial hidden state $Z_0 \in \mathbb{R}^{512}$.
+2.  **Control Path Increments:** The input sequence is differenced to create control increments $dX_t = X_{t+1} - X_t$, representing how the market "drives" the latent state.
+3.  **Vector Field Evaluation:** The learned function $f(Z_t)$ maps the current hidden state to a matrix $\mathbb{R}^{H \times D}$ that determines how each input dimension influences each hidden dimension. The tanh activation bounds outputs to prevent divergence.
+4.  **Euler Integration:** The state update $Z_{t+1} = Z_t + f(Z_t) \cdot dX_t$ is computed via batch matrix multiplication, accumulating the effects of market movements over time.
+5.  **RMSNorm Output:** The final hidden state $Z_T$ is normalized before routing to the multi-head expert decoder.
 
 ---
 
@@ -381,7 +401,7 @@ $$
 Where each $E_i$ is a specialized expert head trained for that volatility regime.
 
 ### 8.4 Synergy of the 23-Channel Intelligence
-The CondorBrain's primary advantage is its **Simultaneous Multi-Head Inference**. Rather than training separate models for price, volatility, and timing, the system utilizes a shared Mamba-2 backbone to optimize 23 discrete learning objectives:
+The CondorBrain's primary advantage is its **Simultaneous Multi-Head Inference**. Rather than training separate models for price, volatility, and timing, the system utilizes a shared Neural CDE backbone to optimize 23 discrete learning objectives:
 
 1. **Policy Heads (8):** Direct configuration for Iron Condor strikes and wings.
 2. **Regime Detector (3):** Probabilistic gating for the Mixture-of-Experts.
@@ -393,14 +413,14 @@ This "Synergistic Learning" ensures that the features learned for price trajecto
 The final trade size is not static; it is a **dynamic function of predictive alignment**:
 
 $$
-S_{trade} = S_{max} \cdot \left( w_1 \cdot \mu_{fuzzy} + w_2 \cdot \phi_{mamba} \right) \cdot \text{RiskFactor}
+S_{trade} = S_{max} \cdot \left( w_1 \cdot \mu_{fuzzy} + w_2 \cdot \phi_{cde} \right) \cdot \text{RiskFactor}
 $$
 
 - **$\mu_{fuzzy}$:** Consensus from the 11-factor fuzzy engine.
-- **$\phi_{mamba}$:** The confidence head of the policy branch.
+- **$\phi_{cde}$:** The confidence head of the policy branch.
 - **RiskFactor:** A multiplier derived from the predicted **Max Loss %** and **POP**.
 
-If all 23 heads align with high confidence (e.g., Bearish Trajectory + Low Vol Regime + DeepMamba Confidence > 0.9), the system scales to $100\%$ of the per-trade risk limit. Conversely, any divergence among heads triggers a **Defensive Scaling** reduction, preventing over-exposure in uncertain market states.
+If all 23 heads align with high confidence (e.g., Bearish Trajectory + Low Vol Regime + CDE Confidence > 0.9), the system scales to $100\%$ of the per-trade risk limit. Conversely, any divergence among heads triggers a **Defensive Scaling** reduction, preventing over-exposure in uncertain market states.
 
 ### 8.3 Multi-Horizon Price Forecasts (12 Outputs)
 
@@ -565,7 +585,7 @@ Experimental batch logs from the A100 training run demonstrate the stability of 
 
 **Key Observations:**
 - **Global Loss ($Batch/train\_loss$):** Shows a classic exponential decay, transitioning from a high-entropy search (Loss > 9) to a stable basin (Loss < 0.4) within the first 1,000 batches. This indicates effective learning rate scheduling and robust normalization.
-- **Parametric Convergence:** Primary Iron Condor parameters such as `call_offset` and `put_offset` exhibit "staged" convergence. They initially oscillate as the Mamba backbone identifies the regime, then lock into precise strike selections once the `RegimeDetector` stabilizes.
+- **Parametric Convergence:** Primary Iron Condor parameters such as `call_offset` and `put_offset` exhibit "staged" convergence. They initially oscillate as the CDE backbone identifies the regime, then lock into precise strike selections once the `RegimeDetector` stabilizes.
 - **Stability of the Mixture:** The `Batch/roi` and `Batch/pop` curves (Probability heads) show higher sensitivity to batch-level variance but maintain a downward trajectory without divergence, validating the use of Huber loss for risk-weighted components.
 
 ---
@@ -666,7 +686,7 @@ This discourages excessive position changes, reducing transaction costs.
 
 ### 12.2 Volatility-Gated Attention (VolGatedAttn)
 
-Inserted after Mamba layers 8, 16, and 24, `VolGatedAttn` implements a **dynamic context blending** mechanism that adapts receptive field based on volatility regime.
+Applied to the CDE output hidden state, `VolGatedAttn` implements a **dynamic context blending** mechanism that adapts receptive field based on volatility regime.
 
 **Architecture:**
 
@@ -687,10 +707,10 @@ $$
 $$
 
 **Interpretation:**
-- **Low volatility ($g \approx 0$):** Passthrough mode, efficient local processing via Mamba SSM
+- **Low volatility ($g \approx 0$):** Passthrough mode, efficient local processing via CDE
 - **High volatility ($g \approx 1$):** Full attention, captures regime-wide dependencies
 
-**Hyperparameters:** 8 attention heads, inserted at layer indices {7, 15, 23}.
+**Hyperparameters:** 8 attention heads, applied to final CDE hidden state.
 
 ---
 
@@ -975,17 +995,17 @@ Implemented via **Iterative Reweighted Least Squares (IRLS)**:
 
 ### 13.3 Neural Forecasting (Mode 7: CondorBrain)
 
-Unlike AR models, the CondorBrain creates a non-linear mapping via the Mamba State Space:
+Unlike AR models, the CondorBrain creates a non-linear mapping via the Neural CDE integration:
 
 $$
-h_t = \sigma( \mathbf{A} h_{t-1} + \mathbf{B} x_t )
+Z_{t+1} = Z_t + f(Z_t; \theta) \cdot (X_{t+1} - X_t)
 $$
 
 $$
-\hat{x}_{t+1} = \text{FeatureHead}(h_t)
+\hat{x}_{t+1} = \text{FeatureHead}(Z_T)
 $$
 
-Here, the transition matrix $\mathbf{A}$ is data-dependent (Selective Scan), allowing the model to "reset" memory during regime shifts (e.g., jumps), which linear AR models cannot do.
+Here, the vector field $f(Z_t)$ is input-dependent (learned nonlinear function), allowing the model to adapt its state evolution during regime shifts (e.g., jumps), which linear AR models cannot do. The continuous-time formulation naturally handles variable-rate market data.
 
 ### 13.4 Dynamic Selection Criterion ($\epsilon$-Greedy)
 
@@ -1041,7 +1061,7 @@ While this accumulates error ($\text{Var}(\hat{x}_{t+k}) \propto k$), it ensures
 To address the limitations of pure regression in high-volatility regimes, CondorBrain integrates generative and geometric modules.
 
 #### 14.1 Conditional Diffusion Head
-A Denoising Diffusion Probabilistic Model (DDPM) is attached to the Mamba backbone to refine the deterministic forecast into a probabilistic trajectory.
+A Denoising Diffusion Probabilistic Model (DDPM) is attached to the Neural CDE backbone to refine the deterministic forecast into a probabilistic trajectory.
 - **Process**: The model $x_\theta(x_t, t, h)$ learns to reverse a Gaussian noise process conditioned on the hidden state $h$.
 - **Sampling**: At inference, we sample $N$ trajectories to estimate the confidence intervals of future price paths.
 
@@ -1319,7 +1339,7 @@ With clipping to $[-10, 10]$ to handle outliers.
 
 ---
 
-*Document Version: 2.4 | Last Updated: 2026-01-20*
+*Document Version: 3.0 (Neural CDE) | Last Updated: 2026-01-27*
 
 
 ---

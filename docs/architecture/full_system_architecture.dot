@@ -101,29 +101,29 @@ digraph SPYIronCondorSystem {
         color="#2e7d32";
         penwidth=2;
         
-        // === CondorBrain Neural Network ===
+        // === CondorBrain Neural Network (CDE Backbone) ===
         subgraph cluster_condor_brain {
-            label="CondorBrain (Mamba-2 SSM)";
+            label="CondorBrain (Neural CDE)";
             style=filled;
             fillcolor="#1a3a1a";
             fontcolor="#2ecc71";
             color="#27ae60";
-            
-            input_proj [label="Input Projection\n24 → 1024 dims", shape=box, fillcolor="#1e4a1e", fontcolor=white];
-            
-            // Mamba Layers with VolGatedAttn
-            mamba_1_7 [label="Mamba Layers 1-7\nO(N) SSM", shape=box, fillcolor="#2d5a2d", fontcolor=white];
-            vol_attn_1 [label="🆕 VolGatedAttn\n8 heads", shape=diamond, fillcolor="#ff6b6b", fontcolor=white];
-            
-            mamba_8_15 [label="Mamba Layers 8-15", shape=box, fillcolor="#2d5a2d", fontcolor=white];
-            vol_attn_2 [label="🆕 VolGatedAttn", shape=diamond, fillcolor="#ff6b6b", fontcolor=white];
-            
-            mamba_16_23 [label="Mamba Layers 16-23", shape=box, fillcolor="#2d5a2d", fontcolor=white];
-            vol_attn_3 [label="🆕 VolGatedAttn", shape=diamond, fillcolor="#ff6b6b", fontcolor=white];
-            
-            mamba_24 [label="Mamba Layer 24\n+ RMSNorm", shape=box, fillcolor="#2d5a2d", fontcolor=white];
-            
-            hidden_state [label="h_T ∈ ℝ¹⁰²⁴\nLast Hidden State", shape=ellipse, fillcolor="#3a6a3a", fontcolor=white];
+
+            // Initial Encoder
+            init_encoder [label="Initial Encoder\nZ₀ = softplus(W·X₀)\n52 → 512 dims", shape=box, fillcolor="#1e4a1e", fontcolor=white];
+
+            // CDE Integration Loop
+            control_incr [label="Control Increments\ndX_t = X_{t+1} - X_t", shape=parallelogram, fillcolor="#2d5a2d", fontcolor=white];
+
+            vec_field [label="Vector Field f(Z)\nLinear→SiLU→Linear→Tanh\n‖f(z)‖∞ ≤ 1", shape=box, fillcolor="#48bb78", fontcolor=white];
+
+            euler_step [label="Euler Integration\nZ_{t+1} = Z_t + f(Z_t)·dX_t\n(t = 0 to T-1)", shape=component, fillcolor="#68d391", fontcolor=white];
+
+            vol_attn_1 [label="VolGatedAttn\n8 heads", shape=diamond, fillcolor="#ff6b6b", fontcolor=white];
+
+            rms_norm [label="RMSNorm\n(BF16-safe)", shape=box, fillcolor="#2d5a2d", fontcolor=white];
+
+            hidden_state [label="Z_T ∈ ℝ⁵¹²\nFinal Hidden State", shape=ellipse, fillcolor="#3a6a3a", fontcolor=white];
         }
         
         // === Output Heads ===
@@ -317,14 +317,14 @@ digraph SPYIronCondorSystem {
     technicals -> fuzzifier [color="#9b59b6"];
     
     // CondorBrain Internal Flow
-    input_proj -> mamba_1_7 [color="#27ae60"];
-    mamba_1_7 -> vol_attn_1 [color="#27ae60"];
-    vol_attn_1 -> mamba_8_15 [color="#ff6b6b", penwidth=2];
-    mamba_8_15 -> vol_attn_2 [color="#27ae60"];
-    vol_attn_2 -> mamba_16_23 [color="#ff6b6b", penwidth=2];
-    mamba_16_23 -> vol_attn_3 [color="#27ae60"];
-    vol_attn_3 -> mamba_24 [color="#ff6b6b", penwidth=2];
-    mamba_24 -> hidden_state [color="#27ae60", penwidth=2];
+    input_proj -> init_encoder [color="#27ae60"];
+    init_encoder -> control_incr [color="#27ae60"];
+    control_incr -> euler_step [color="#27ae60"];
+    euler_step -> vec_field [dir=both, label="f(z, dx)", style=dashed];
+    euler_step -> vol_attn_1 [color="#ff6b6b", penwidth=2];
+    vol_attn_1 -> euler_step [label="Gated Update", style=dotted];
+    euler_step -> rms_norm [color="#27ae60"];
+    rms_norm -> hidden_state [color="#27ae60", penwidth=2];
     
     // Output Heads
     hidden_state -> regime_detector [color="#8e44ad"];

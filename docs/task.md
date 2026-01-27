@@ -137,20 +137,6 @@
 ## Stage 4 — Advanced Strategy Expansion (Future)
 - [ ] Create CalendarStrategy (Low Vol)
 - [ ] Create BrokenWingButterflyStrategy (Skew/Bias)
-- [ ] Implement StrategySelector logic
-- [ ] Divergence Monitor (SPY vs ES)
-
-## Stage 5 — Neuro-Fuzzy Integration (Future)
-- [ ] Connect Fuzzy Sizing to Trade Execution
-- [ ] Optimize Membership Functions
-- [ ] Mamba Model Training Pipeline
-- [ ] Full System Integration Tests
-
-
----
-
-## Repository Sync Addendum (2026-01-24)
-
 This document is part of the synchronized documentation set. The authoritative engineering spec and audit references are:
 
 - `docs/INTEGRATION_PLAN_MASTER.md`

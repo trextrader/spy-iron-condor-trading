@@ -1,0 +1,181 @@
+digraph NeuralCDE {
+    rankdir=TB;
+    splines=spline;
+    nodesep=0.4;
+    ranksep=0.6;
+    fontname="Segoe UI";
+    bgcolor="#0a0a0a";
+    compound=true;
+
+    node [fontname="Consolas", fontsize=10, shape=record, style=filled, fillcolor="white", penwidth=1.0, color="#2d3748"];
+    edge [fontname="Segoe UI", fontsize=9, color="#718096", penwidth=1.0];
+
+    // Title
+    Title [label="CondorBrain Intelligence Engine\n(Neural CDE + Mixture of Experts)", shape=plaintext, fontsize=14, fontcolor="#2d3748"];
+
+    subgraph cluster_input {
+        label="Input Processing";
+        style=dashed;
+        color="#cbd5e0";
+
+        Input [label="Input Tensor\n(B, T=256, D=52)\nV2.2 Feature Schema", shape=box3d, fillcolor="#e2e8f0"];
+        FirstObs [label="First Observation\nX₀ = x[:, 0, :]", shape=parallelogram, fillcolor="#e2e8f0"];
+        Norm [label="Robust Normalization\n(Median/MAD)", shape=box];
+    }
+
+    subgraph cluster_encoder {
+        label="Initial State Encoder";
+        style=filled;
+        color="#3182ce";
+        fillcolor="#ebf8ff";
+
+        Encoder [label="Linear Projection\n(D=52 → H=512)", shape=trapezium, fillcolor="#bee3f8"];
+        Softplus [label="Softplus Activation\nZ₀ = softplus(W·X₀)", shape=ellipse, fillcolor="#90cdf4"];
+    }
+
+    subgraph cluster_cde_core {
+        label="Neural CDE Integration Loop";
+        style=filled;
+        color="#48bb78";
+        fillcolor="#f0fff4";
+
+        // Control Path
+        subgraph cluster_control {
+            label="Control Path dX";
+            style=dashed;
+            color="#68d391";
+
+            ControlIncr [label="Control Increment\ndX_t = X_{t+1} - X_t\n(B, T-1, 52)", shape=parallelogram, fillcolor="#c6f6d5"];
+        }
+
+        // Vector Field
+        subgraph cluster_vector_field {
+            label="Vector Field f(Z_t)";
+            style=filled;
+            color="#2f855a";
+            fillcolor="#9ae6b4";
+
+            VF_Linear1 [label="Linear Expansion\n(H → 2H)", shape=box, fillcolor="#68d391"];
+            VF_SiLU [label="SiLU Activation", shape=ellipse, fillcolor="#68d391"];
+            VF_Linear2 [label="Linear Projection\n(2H → H×D)", shape=box, fillcolor="#68d391"];
+            VF_Tanh [label="Tanh Stabilization\n‖f(z)‖∞ ≤ 1", shape=diamond, fillcolor="#48bb78"];
+            VF_Reshape [label="Reshape to Matrix\n(B, H, D)", shape=parallelogram, fillcolor="#68d391"];
+        }
+
+        // Integration
+        subgraph cluster_integration {
+            label="Explicit Euler Integration";
+            style=filled;
+            color="#276749";
+            fillcolor="#c6f6d5";
+
+            MatMul [label="Matrix-Vector Product\ndZ_t = f(Z_t) @ dX_t", shape=component, fillcolor="#9ae6b4"];
+            StateUpdate [label="State Update\nZ_{t+1} = Z_t + dZ_t", shape=cylinder, fillcolor="#f0fff4"];
+            LoopBack [label="t = 0 to T-1\n(Sequential)", shape=note, fillcolor="#c6f6d5"];
+        }
+
+        FinalState [label="Final Hidden State\nZ_T ∈ (B, H=512)", shape=box3d, fillcolor="#68d391"];
+    }
+
+    subgraph cluster_post {
+        label="Output Normalization";
+        style=dashed;
+        color="#805ad5";
+
+        RMSNorm [label="RMSNorm\n(Stabilize magnitude)", shape=box, fillcolor="#e9d8fd"];
+    }
+
+    subgraph cluster_heads {
+        label="Multi-Head Expert Decoder (Mixture of Experts)";
+        style=filled;
+        color="#805ad5";
+        fillcolor="#faf5ff";
+
+        Regime [label="Regime Detector\n(3 Logits: Low/Normal/High Vol)", shape=diamond, fillcolor="#e9d8fd"];
+
+        subgraph cluster_experts {
+            label="3 Expert Heads";
+            style=dashed;
+            color="#9f7aea";
+
+            ExpertLow [label="Expert (Low Vol)\n10 outputs", shape=box, fillcolor="#d6bcfa"];
+            ExpertNorm [label="Expert (Normal)\n10 outputs", shape=box, fillcolor="#d6bcfa"];
+            ExpertHigh [label="Expert (High Vol)\n10 outputs", shape=box, fillcolor="#d6bcfa"];
+        }
+
+        Mixture [label="Regime-Weighted Mixture\nŷ = Σ πᵢ · Expertᵢ(Z_T)", shape=hexagon, fillcolor="#b794f4"];
+
+        Heads [label="{ <stk> Strike Offsets (0-1) | <dte> DTE (2-3) | <prob> POP/Conf (4,7) | <roi> ROI/MaxLoss (5-6) | <entry> Entry/Exit (8-9) }", shape=record, fillcolor="#d6bcfa"];
+
+        FinalPolicy [label="Iron Condor Parameters\n(10 Outputs)", shape=parallelogram, fillcolor="#b794f4"];
+    }
+
+    // Mathematical Annotations
+    subgraph cluster_math {
+        label="CDE Mathematics";
+        style=dashed;
+        color="#4a5568";
+        rank=same;
+
+        Eq1 [label="Core Equation:\ndZ_t = f(Z_t; θ) dX_t", shape=note, fillcolor="#edf2f7", fontsize=9];
+        Eq2 [label="Integral Form:\nZ_T = Z₀ + ∫₀ᵀ f(Z_t) dX_t", shape=note, fillcolor="#edf2f7", fontsize=9];
+        Eq3 [label="Discrete (Euler):\nZ_{t+1} = Z_t + f(Z_t)·dX_t", shape=note, fillcolor="#edf2f7", fontsize=9];
+    }
+
+    // Connections - Input Flow
+    Title -> Input [style=invis];
+    Input -> Norm;
+    Input -> FirstObs [label=" Extract X₀"];
+    Norm -> ControlIncr [label=" Full Sequence"];
+
+    // Encoder Flow
+    FirstObs -> Encoder;
+    Encoder -> Softplus;
+    Softplus -> StateUpdate [label=" Z₀ (Initial)"];
+
+    // Vector Field Flow
+    StateUpdate -> VF_Linear1 [label=" Z_t"];
+    VF_Linear1 -> VF_SiLU;
+    VF_SiLU -> VF_Linear2;
+    VF_Linear2 -> VF_Tanh;
+    VF_Tanh -> VF_Reshape;
+    VF_Reshape -> MatMul [label=" f(Z_t)"];
+
+    // Integration Flow
+    ControlIncr -> MatMul [label=" dX_t"];
+    MatMul -> StateUpdate [label=" dZ_t", style=dashed, color="#48bb78"];
+    LoopBack -> StateUpdate [style=dotted];
+    StateUpdate -> FinalState [label=" After T steps"];
+
+    // Output Flow
+    FinalState -> RMSNorm;
+    RMSNorm -> Regime;
+
+    // Expert Routing
+    Regime -> ExpertLow [label=" π₁"];
+    Regime -> ExpertNorm [label=" π₂"];
+    Regime -> ExpertHigh [label=" π₃"];
+
+    RMSNorm -> ExpertLow [style=dashed];
+    RMSNorm -> ExpertNorm [style=dashed];
+    RMSNorm -> ExpertHigh [style=dashed];
+
+    ExpertLow -> Mixture;
+    ExpertNorm -> Mixture;
+    ExpertHigh -> Mixture;
+
+    Mixture -> Heads;
+    Heads -> FinalPolicy;
+
+    // Math annotations positioning
+    Eq1 -> Eq2 [style=invis];
+    Eq2 -> Eq3 [style=invis];
+
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D\nAll rights reserved."];
+    }
+}

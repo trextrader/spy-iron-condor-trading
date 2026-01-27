@@ -77,17 +77,18 @@ The system uses two separate data sources that must be understood together:
 - **Backtest**: `backtrader` (Custom customized), `matplotlib` (Reporting)
 - **Data**: `pandas`, `numpy`, `polygon-api-client`
 - **Technical Analysis**: `pandas-ta` (Indicators: RSI, ADX, BBands, Stoch, etc.)
-- **Intelligence**: 
+- **Intelligence**:
   - **Fuzzy Logic**: 10-Factor Inference Engine (`qtmf.facade`)
-  - **Neural**: Mamba 2 State-Space Model (`intelligence.mamba_engine`)
+  - **Neural**: Neural CDE (Controlled Differential Equations) backbone (`intelligence/models/neural_cde.py`)
 
 ## Architecture
 - **Core**: `main.py` -> `RunConfig` -> `BacktestEngine`
 - **Data Layer**: `MTFSyncEngine` (1m, 5m, 15m) + `SyntheticOptionsEngine` (Pricing)
-- **Intelligence Layer**: 
+- **Intelligence Layer**:
   - `qtmf/`: Central Neuro-Fuzzy Facade (Adaptive Credit Logic + 10-Factor Filters)
-  - `intelligence/mamba_engine.py`: Neural Market State Forecasting (Truthful Mamba Backend: Mock/Real)
-  - `intelligence/fuzzy_engine.py`: Membership Functions
+  - `intelligence/condor_brain.py`: CondorBrain with Neural CDE backbone + MoE decoder
+  - `intelligence/models/neural_cde.py`: Neural CDE implementation (continuous-time dynamics)
+  - `intelligence/fuzzy_engine.py`: Membership Functions (unchanged - runs alongside neural)
 - **Strategy**: `ZeroDTE_IC` (Iron Condor) located in `core/backtest_engine.py`
    - Provides theoretical option prices (Black-Scholes model)
    - Used for mark-to-market P&L calculations

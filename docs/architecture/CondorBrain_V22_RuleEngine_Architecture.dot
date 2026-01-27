@@ -147,7 +147,7 @@ digraph CondorBrainPortraitWhite {
 
         train_loader   [label="Training Dataset\n(mamba_institutional_1m.csv)\n8.5M rows, 58 cols"];
         train_pipeline [label="Feature Construction\n(ensure schema=58)\nScaling (median/MAD)\nrobust_z + clipping"];
-        condorbrain    [label="CondorBrain™ Model\nDeepMamba2\n(input_dim=58,\nsequence modeling)"];
+        condorbrain    [label="CondorBrain™ Model\nNeural CDE\n(input_dim=58,\ncontinuous modeling)"];
         loss_heads     [label="Loss Heads:\n• Policy MSE (8-dim)\n• Feature Huber\n• Diffusion Loss\n(multi-task)"];
         training_loop  [label="Training Loop\nSequenceDataset\nOneCycleLR\nGradScaler + clipping\nCheckpointing\n(VERSION_V22)"];
     }

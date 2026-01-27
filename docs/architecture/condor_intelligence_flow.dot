@@ -26,11 +26,12 @@ digraph CondorIntelligence {
     }
 
     subgraph cluster_backbone {
-        label = "3. DeepMamba-2 Architecture";
+        label = "3. Neural CDE Architecture";
         fontcolor="white";
         color = purple;
-        mamba_layers [label="24x Selective SSM Layers\n(Selective Scan Kernel)", fillcolor="#f3e5f5"];
-        bf16 [label="BF16 Precision\n(H100 Optimized)", fillcolor="#f3e5f5"];
+        cde_encoder [label="Initial Encoder\nZ₀ = softplus(W·X₀)", fillcolor="#f3e5f5"];
+        cde_vecfield [label="Vector Field f(Z)\nLinear→SiLU→Linear→Tanh", fillcolor="#f3e5f5"];
+        cde_euler [label="Euler Integration\nZ_{t+1} = Z_t + f(Z_t)·dX_t", fillcolor="#f3e5f5"];
     }
 
     subgraph cluster_heads {
@@ -83,12 +84,13 @@ digraph CondorIntelligence {
     input_tech -> norm;
     
     norm -> gpu_unfold;
-    gpu_unfold -> mamba_layers;
-    mamba_layers -> bf16;
-    
-    bf16 -> head_ic [lhead=cluster_policy];
-    bf16 -> head_moe [lhead=cluster_regime];
-    bf16 -> head_price [lhead=cluster_horizon];
+    gpu_unfold -> cde_encoder;
+    cde_encoder -> cde_vecfield;
+    cde_vecfield -> cde_euler;
+
+    cde_euler -> head_ic [lhead=cluster_policy];
+    cde_euler -> head_moe [lhead=cluster_regime];
+    cde_euler -> head_price [lhead=cluster_horizon];
     
     head_ic -> loss;
     head_moe -> loss;

@@ -39,14 +39,14 @@ digraph CondorIntelligence {
         i3 [label=<<table border="0" cellspacing="0"><tr><td><b>VOLATILITY</b></td></tr><tr><td><font point-size="9">IVR, VIX, Term Structure (3)</font></td></tr></table>>, fillcolor="#FFF9C4", color="#FBC02D"];
         i4 [label=<<table border="0" cellspacing="0"><tr><td><b>TECHNICIALS</b></td></tr><tr><td><font point-size="9">RSI, ADX, BBands, PSAR (11)</font></td></tr></table>>, fillcolor="#F3E5F5", color="#7B1FA2"];
         
-        i5 [label=<<table border="0" cellspacing="0"><tr><td><b>TDA & MANIFOLD</b></td></tr><tr><td><font point-size="9">Topological + Geometric Features</font></td></tr></table>>, fillcolor="#E8F5E9", color="#4CAF50"];
+        i5 [label=<<table border="0" cellspacing="0"><tr><td><b>TDA &amp; MANIFOLD</b></td></tr><tr><td><font point-size="9">Topological + Geometric Features</font></td></tr></table>>, fillcolor="#E8F5E9", color="#4CAF50"];
         
         {rank=same; i1 i2 i3 i4 i5}
     }
 
-    // --- LAYER 2: NEURAL CORE (MAMBA-2 BACKBONE) ---
+    // --- LAYER 2: NEURAL CORE (CDE BACKBONE) ---
     subgraph cluster_l2 {
-        label = <<b>LAYER 2: DEEP MAMBA-2 NEURAL ENGINE</b>>;
+        label = <<b>LAYER 2: NEURAL CDE ENGINE</b>>;
         labelloc = "t";
         fontsize = 13;
         fontcolor = "#1A237E";
@@ -56,12 +56,12 @@ digraph CondorIntelligence {
         penwidth = 2;
         margin = 35;
 
-        mamba_core [label=<<table border="0" cellspacing="8">
+        cde_core [label=<<table border="0" cellspacing="8">
             <tr><td><font point-size="30" color="#1A237E">🧠</font></td></tr>
-            <tr><td><font point-size="20" color="#1A237E"><b>24X MAMBA-2 LAYERS</b></font></td></tr>
-            <tr><td><font point-size="12" color="#303F9F">SELECTIVE-SCAN SSM (STATE SPACE MODEL)</font></td></tr>
-            <tr><td><font point-size="10" color="#3F51B5">Hardware-Aware Discretization | BF16 Accelerated</font></td></tr>
-            <tr><td><font point-size="9" color="#5C6BC0">GPU-Resident Unfold (Zero-Copy) | O(N) Complexity</font></td></tr>
+            <tr><td><font point-size="20" color="#1A237E"><b>NEURAL CDE BACKBONE</b></font></td></tr>
+            <tr><td><font point-size="12" color="#303F9F">CONTROLLED DIFFERENTIAL EQUATIONS</font></td></tr>
+            <tr><td><font point-size="10" color="#3F51B5">Z_{t+1} = Z_t + f(Z_t)·dX_t | Tanh-Bounded</font></td></tr>
+            <tr><td><font point-size="9" color="#5C6BC0">Explicit Euler Integration | O(T) Complexity</font></td></tr>
         </table>>, shape=hexagon, style="filled", fillcolor="#C5CAE9", color="#1A237E", penwidth=3];
     }
 
@@ -97,7 +97,6 @@ digraph CondorIntelligence {
         o1 [label=<<table border="0" cellspacing="0"><tr><td><b>POLICY BRANCH (8)</b></td></tr><tr><td><font point-size="9">Offsets, Width, POP, ROI, DTE</font></td></tr></table>>, fillcolor="#E0F2F1", color="#00897B"];
         o2 [label=<<table border="0" cellspacing="0"><tr><td><b>REGIME EXPERTS (3)</b></td></tr><tr><td><font point-size="9">MoE Mixture: Low/Norm/High Vol</font></td></tr></table>>, fillcolor="#FFF3E0", color="#FB8C00"];
         o3 [label=<<table border="0" cellspacing="0"><tr><td><b>HORIZON FORECAST (12)</b></td></tr><tr><td><font point-size="9">1/3/5/10D Trajectory Envelopes</font></td></tr></table>>, fillcolor="#FCE4EC", color="#D81B60"];
-        o3 [label=<<table border="0" cellspacing="0"><tr><td><b>HORIZON FORECAST (12)</b></td></tr><tr><td><font point-size="9">1/3/5/10D Trajectory Envelopes</font></td></tr></table>>, fillcolor="#FCE4EC", color="#D81B60"];
         o4 [label=<<table border="0" cellspacing="0"><tr><td><b>DIFFUSION HEAD</b></td></tr><tr><td><font point-size="9">Generative Probabilistic Trajectory</font></td></tr></table>>, fillcolor="#F3E5F5", color="#AB47BC"];
         
         {rank=same; o1 o2 o3 o4}
@@ -112,12 +111,12 @@ digraph CondorIntelligence {
     </table>>, shape=circle, style=filled, fillcolor="#FF6F00", fontcolor=white, color="#E65100", penwidth=3];
 
     // Connections
-    i1 -> mamba_core [color="#0288D1", penwidth=2.0];
-    i2 -> mamba_core [color="#388E3C", penwidth=2.0];
-    i3 -> mamba_core [color="#FBC02D", penwidth=2.0];
-    i4 -> mamba_core [color="#7B1FA2", penwidth=2.0];
+    i1 -> cde_core [color="#0288D1", penwidth=2.0];
+    i2 -> cde_core [color="#388E3C", penwidth=2.0];
+    i3 -> cde_core [color="#FBC02D", penwidth=2.0];
+    i4 -> cde_core [color="#7B1FA2", penwidth=2.0];
 
-    mamba_core -> fuzzy_logic [label="Mamba Latents", fontcolor="#1A237E", color="#3949AB", penwidth=3, arrowhead=box];
+    cde_core -> fuzzy_logic [label="CDE Latents", fontcolor="#1A237E", color="#3949AB", penwidth=3, arrowhead=box];
 
     fuzzy_logic -> o1 [color="#43A047"];
     fuzzy_logic -> o2 [color="#43A047"];

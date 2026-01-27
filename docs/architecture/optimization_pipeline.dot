@@ -10,7 +10,7 @@ digraph OptimizationPipeline {
 
     # Title
     labelloc="t";
-    label="Mamba 2 Neural Iron Condor System\nEnd-to-End Optimization Architecture";
+    label="Neural CDE Iron Condor System\nEnd-to-End Optimization Architecture";
     fontsize=18;
     bgcolor="#0a0a0a";
 
@@ -35,22 +35,22 @@ digraph OptimizationPipeline {
         fontcolor="white";
         bgcolor="#0a0a0a";
         
-        TrainScript [label="Train Harness\n(train_mamba.py)", shape=component, fillcolor="#b71c1c", color="white", fontcolor="white"];
+        TrainScript [label="Train Harness\n(train_condor_brain.py)", shape=component, fillcolor="#b71c1c", color="white", fontcolor="white"];
         
         subgraph cluster_model {
-            label = "DeepMamba 2 Network";
+            label = "Neural CDE Network";
             style=filled;
             color="#212121";
             fontcolor="white";
             
-            SSM [label="Mamba 2 Block Stack\n(32 Layers / 1024 Dim)\n[State Space Duality]", shape=octagon, fillcolor="#880e4f", color="white", fontcolor="white"];
+            CDE [label="Neural CDE Backbone\n(Explicit Euler Integration)\n[Continuous Time Modeling]", shape=octagon, fillcolor="#880e4f", color="white", fontcolor="white"];
         }
 
-        ModelWeights [label="Model Weights\n(mamba_active.pth)", shape=note, fillcolor="#f57f17", color="white", fontcolor="white"];
+        ModelWeights [label="Model Weights\n(condor_brain_cde_prod.pth)", shape=note, fillcolor="#f57f17", color="white", fontcolor="white"];
         
         Alpaca -> TrainScript [label="Fetch History", color="white", fontcolor="white"];
-        TrainScript -> SSM [label="Train (GPU)", color="white", fontcolor="white"];
-        SSM -> ModelWeights [label="Save State", color="white", fontcolor="white"];
+        TrainScript -> CDE [label="Train (GPU)", color="white", fontcolor="white"];
+        CDE -> ModelWeights [label="Save State", color="white", fontcolor="white"];
     }
 
     # --- Production Runtime ---

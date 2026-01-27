@@ -14,22 +14,20 @@ Install dependencies if needed (Standard PyTorch is sufficient for the CDE proto
 pip install torch pandas numpy tqdm
 ```
 
-## 2. Train Neural CDE Prototype
-This uses the new self-contained CDE module (`intelligence/models/neural_cde.py`) which requires no extra libraries.
-
 **Command:**
 ```bash
-python intelligence/train_neural_cde.py \
-    --data "data/processed/mamba_institutional_2024_1m_last 1mil_v21.csv" \
-    --epochs 10 \
-    --hidden 128 \
-    --layers 2
+python intelligence/train_condor_brain.py \
+    --local-data "data/processed/mamba_institutional_2024_1m_last 1mil_v21.csv" \
+    --cde \
+    --epochs 20 \
+    --d-model 512 \
+    --n-layers 3
 ```
 
 **Expected Output:**
-*   You should see a progress bar for `Training CDE`.
-*   Loss should decrease.
-*   Final model saved to: `models/neural_cde_proto.pth`.
+*   You should see a progress bar for `Training CondorBrain (CDE Mode)`.
+*   Loss should decrease (BF16 precision).
+*   Final model saved to: `models/condor_brain_cde_final.pth`.
 
 ## 3. Run Rule-Based Backtest (Baseline)
 While the model trains, verify the P&L pipeline using the **Rule Engine** alone. This bypasses the neural network and makes trades based strictly on your heuristic rules (RSI, VIX, etc.).

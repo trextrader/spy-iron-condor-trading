@@ -1,10 +1,9 @@
-# Quantor-MTFuzz:# 🦅 CondorBrain: Institutional Iron Condor Trading System
-> **"The H100-Optimized Mamba Intelligence"**
+> **"The H100-Optimized Neural CDE Intelligence"**
 
 ## 🚀 New in v2.0 (Scientific Update)
 Full technical details available in [Scientific Specification](docs/scientific_spec.md).
 
-- **🧠 Mamba Architecture:** Replaced Transformer with `Mamba SSM`, achieving $O(N)$ linear scaling and 3x training throughput.
+- **🧠 Neural CDE Architecture:** Replaced Mamba-2 with **Neural Controlled Differential Equations (CDE)**, achieving superior numerical stability and continuous-time modeling.
 - **⚡ H100 Optimization:** Custom `TF32`, `cuDNN Benchmark`, and `LazySequenceDataset` allow training on **10 Million Rows** (1.2B tokens) entirely in-memory.
 - **🛡️ Robust Stability:** Implemented Z-Score Scaling ($x \leftarrow \frac{x-\mu}{\sigma}$) + Tanh Clipping to solve FP16 NaN divergence.
 - **📊 Advanced Monitoring:** Real-time TensorBoard logging for per-head loss, regime expert activations, and 45-day price trajectories.
@@ -77,32 +76,29 @@ CondorBrain is an advanced algorithmic trading system designed for SPY Iron Cond
 - **High-Fidelity Backtesting**: 5-minute bar simulation with accurate mark-to-market P&L, leg-by-leg exit logic, and realistic slippage/commissions
 - **Phased Serial Optimization**: Grid-search engine optimizing for **Net Profit / Max Drawdown** ratio with hardware benchmarking
 - **10-Factor Fuzzy Intelligence**: Dynamic position sizing based on MTF Consensus, IV Rank, VIX Regime, RSI, ADX, Bollinger Bands, Stochastic, Volume, SMA Distance, and **Parabolic SAR**
-- **Mamba 2 Neural Forecasting**: Deep State-Space Model (12-32 layers) with **Diffusion Head** for trajectory refinement and **Topological Data Analysis (TDA)** for regime detection.
+- **Neural CDE Forecasting**: Continuous-time state-space modeling with **Diffusion Head** for trajectory refinement and **Topological Data Analysis (TDA)** for regime detection.
 
-## 🧠 DeepMamba 2 Neural Engine
+## 🧠 Neural CDE Core Engine
 
-The system uses a custom **DeepMamba** architecture based on the Mamba 2 State-Space Model (SSM). Unlike Transformers, Mamba 2 offers linear scaling with sequence length, allowing the model to digest weeks of 15-minute bars (Lookback: 60-500) efficiently.
+The system uses a custom **Neural CDE** architecture. Unlike discrete models, CDEs treat the market as a continuous control path, allowing the model to digest weeks of 1-minute bars (Lookback: 60-500) with guaranteed stability.
 
 ### Mathematical Foundation
-The core mechanism is a discretized State Space Model:
+The core mechanism is a Neural Controlled Differential Equation:
 
 $$
-h'(t) = \mathbf{A}h(t) + \mathbf{B}x(t)
-$$
-
-$$
-y(t) = \mathbf{C}h(t)
+z_{t+1} = z_t + f(z_t) \cdot dx_t
 $$
 
 Where:
-*   $h(t)$ is the hidden state (memory)
-*   $x(t)$ is the input vector (Log Returns, RSI, ATR, Vol Ratio)
-*   $\mathbf{A}$ is the evolution matrix (diagonalized in Mamba 2 via SSD)
+*   $z_t$ is the latent status (memory)
+*   $x_t$ is the control path (Log Returns, RSI, ATR, Vol Ratio)
+*   $f(z)$ is a tanh-bounded neural vector field (Linear → SiLU → Linear → Tanh)
+*   $dx_t$ is the increment $(x_{t+1} - x_t)$
 
-In the **DeepMamba** implementation:
-*   **Input**: $(B, L, 4)$ tensor [LogRet, NormRSI, NormATR, NormVol]
-*   **Backbone**: $N$ layers of Mamba 2 Blocks (Residual + RMSNorm)
-*   **Output**: Next-bar Log Return prediction (Regression)
+In the **CondorBrain** implementation:
+*   **Input**: $(B, T, 52)$ tensor [V2.2 Feature Set]
+*   **Backbone**: Neural CDE Solver (Explicit Euler)
+*   **Output**: Multi-head predictive distribution (8-head policy + 3-head MoE + 12-head Horizon)
 
 ### Training Workflow
 The model creates its own "Brain" using historical intraday data.
@@ -110,20 +106,20 @@ The model creates its own "Brain" using historical intraday data.
 **1. Data Acquisition (Local)**
 ```powershell
 # Fetch 2 years of 15-min bars from Alpaca
-python intelligence/train_mamba.py --save-only
+python intelligence/train_condor_brain.py --cde --save-only
 ```
 
 **2. GPU Training (Colab)**
 ```python
 # Train the 12-layer model (Fast & Accurate)
-!python intelligence/train_mamba.py --local-data data/spy_training_data.csv --d-model 256 --layers 12
+!python intelligence/train_condor_brain.py --local-data data/processed/mamba_institutional_2024_1m_last 1mil_v21.csv --cde --d-model 512 --layers 3
 ```
 
 **3. Inference (Backtest)**
-The optimizer automatically loads `models/mamba_active.pth` and uses the GPU for batch inference (processing 500+ bars in parallel).
+The optimizer automatically loads `models/cde_active.pth` and uses the GPU for batch inference (processing 1M+ rows in parallel).
 
 ```python
-!python core/main.py --use-optimizer --mamba-d-model 256 --mamba-layers 12
+!python core/main.py --use-optimizer --cde --d-model 512
 ```
 ### 📊 Real-Time Monitoring Dashboard
 
@@ -288,7 +284,7 @@ Optimizes the 11-factor fuzzy weight blend including Neural Network influence.
 
 ## 🏗️ Architecture: Quantor-MTFuzz Specification
 
-The system architecture is tiered into four layers of intelligence, combining high-fidelity Mamba SSM forecasting with a robust Neural-Fuzzy decision suite.
+The system architecture is tiered into four layers of intelligence, combining high-fidelity **Neural CDE** forecasting with a robust Neural-Fuzzy decision suite.
 
 - **[Weekly Technical Progress Report (Jan 13)](docs/internal/WEEKLY_SUMMARY_2026-01-13.md):** Summary of recent high-impact work.
 - **[Technical Architecture Summary](docs/architecture/technical_architecture_summary.md):** A one-page engineering overview.
@@ -321,7 +317,7 @@ intelligence/
 ├── fuzzifier.py      → Feature extraction (ADX/RSI/IV Rank)
 ├── fuzzy_engine.py   → Fuzzy position sizing
 ├── regime_filter.py  → Market regime classification
-└── mamba_engine.py   → Neural forecasting (Mamba 2)
+└── condor_brain.py   → Neural forecasting (Neural CDE)
 
 analytics/            [Phase 1]
 ├── realized_vol.py   → Realized volatility calculator
@@ -559,12 +555,12 @@ F_t = \sum_{j=1}^{10} w_j \cdot \mu_j
 $$
 
 $$
-C = 0.10 \cdot \mu_{\mathrm{Mamba}} + 0.90 \cdot F_t
+C = 0.10 \cdot \mu_{\mathrm{CDE}} + 0.90 \cdot F_t
 $$
 
 | # | Factor | Weight | Description |
 |---|--------|--------|-------------|
-| 1 | **DeepMamba 2** | 0.10 (Rel) | Neural forecast confidence |
+| 1 | **Neural CDE** | 0.10 (Rel) | Neural forecast confidence |
 | 2 | MTF Consensus | 0.10 | Multi-timeframe alignment |
 | 3 | IV Rank | 0.10 | Implied volatility percentile |
 | 4 | VIX Regime | 0.08 | Market fear index |
@@ -840,12 +836,12 @@ print(f"Fuzzy Confidence: {Ft:.2f}")  # → 0.71
 
 ---
 
-## 🧠 7. DeepMamba 2 Neural Forecasting Engine
+## 🧠 7. Neural CDE Forecasting Engine
 
-The system leverages a **State-Space Model (SSM)** architecture (Mamba 2) for high-fidelity market forecasting. Unlike Transformers, Mamba scales linearly with sequence length and maintains a persistent "memory" of market state.
+The system leverages a **Neural Controlled Differential Equation (CDE)** architecture for high-fidelity market forecasting. Unlike discrete RNNs or SSMs, CDEs model market dynamics as continuous processes, treating input sequences as control paths that drive latent state evolution.
 
 ### 7.1 Architecture Details
-*   **Model**: `DeepMamba` (Custom PyTorch implementation)
+*   **Model**: `CondorBrain` (Neural CDE Implementation)
 *   **Layers**: 16–32 selective SSM layers
 *   **Dimension** ($d_{model}$): 64–1024
 *   **State Dim** ($d_{state}$): 32
@@ -1192,7 +1188,7 @@ MIT License - See LICENSE file for details
 Built on:
 - **Backtrader**: Python backtesting framework
 - **Alpaca-Py**: Live trading SDK
-- **Mamba**: State-space neural architecture
+- **Neural CDE**: Continuous-time neural architecture
 - **scikit-fuzzy**: Fuzzy logic toolkit
 
 ---

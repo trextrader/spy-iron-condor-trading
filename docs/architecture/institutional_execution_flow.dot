@@ -29,12 +29,12 @@ digraph InstitutionalWorkflow {
         label = <<b>2. AGENTIC INTELLIGENCE HUB</b>>;
         fillcolor = "#E8EAF6"; style = "filled,rounded"; color = "#3F51B5";
         
-        mamba_core [label="DeepMamba-2 Layers\n(Selective-Scan SSM)", fillcolor="#C5CAE9", color="#1A237E", shape=hexagon];
+        cde_core [label="Neural CDE Backbone\n(Continuous Vector Field)", fillcolor="#C5CAE9", color="#1A237E", shape=hexagon];
         heads [label="23-Head Joint Output\n(Policy, Regime, Horizon)", fillcolor="#E0F2F1", color="#00897B"];
         moe_gate [label="MoE Expert Mixture\n(Gating Logic)", fillcolor="#FFF3E0", color="#FB8C00"];
         
-        mamba_core -> heads;
-        mamba_core -> moe_gate [style=dotted];
+        cde_core -> heads;
+        cde_core -> moe_gate [style=dotted];
     }
 
     // --- PHASE 3: FUZZY RISK & SIZING ---
@@ -81,8 +81,8 @@ digraph InstitutionalWorkflow {
     }
 
     // Cross-Phase Feedback Loop
-    sync_engine -> mamba_core [label="Feature Matrix"];
-    tensorboard -> mamba_core [label="Parameter Gradient", style=dashed, constraint=false];
+    sync_engine -> cde_core [label="Feature Matrix"];
+    tensorboard -> cde_core [label="Parameter Gradient", style=dashed, constraint=false];
 
     // Copyright Notice
     subgraph cluster_copyright {
