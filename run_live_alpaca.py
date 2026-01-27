@@ -32,16 +32,10 @@ FEATURE_COLS_V22 = [
     'rsi', 'atr', 'adx', 'bb_lower', 'bb_upper', 'stoch_k', 'sma', 'psar', 'psar_mark'
 ]
 
-def robust_zscore_fit(X):
-    median = np.nanmedian(X, axis=0)
-    diff = np.abs(X - median)
-    mad = np.nanmedian(diff, axis=0)
-    return median, mad
-
-def robust_zscore_transform(X, median, mad, clip_val=10.0):
-    mad = np.where(mad < 1e-6, 1.0, mad) 
-    z = (X - median) / (mad * 1.4826)
-    return np.clip(z, -clip_val, clip_val)
+def apply_scaling(X, median, scale, clip_val=10.0):
+    """Apply persistent scaling from checkpoint."""
+    X = (X - median) / (scale + 1e-6)
+    return np.clip(X, -clip_val, clip_val)
 
 
 def fetch_live_data(client, symbol, lookback_bars=1000):
@@ -144,32 +138,30 @@ def run_live_loop(executor, model, ruleset, device):
             # We apply log1p AFTER or BEFORE? Training did it BEFORE scaling.
             # Let's do it here.
 
-            # 3. Scale Features (Robust Fit on Lookback)
-            features = df[FEATURE_COLS_V22].values.astype(np.float32) # (N, F)
+            # 3. Scaling & Persistence
+            # Ensure features matches FEATURE_COLS_V22 exactly
+            features = df[FEATURE_COLS_V22].values.astype(np.float32)
             features = np.nan_to_num(features, nan=0.0)
-            
-            med, mad = robust_zscore_fit(features)
-            X_scaled = robust_zscore_transform(features, med, mad)
+            X_scaled = apply_scaling(features, model_metadata['median'], model_metadata['scale'])
             
             # 4. Inference
-            # Seq slice: Inputs [1, 256, F]
-            x_seq = torch.tensor(X_scaled[-256:], device=device).unsqueeze(0)
+            # Seq slice: Inputs [1, SEQ_LEN, F]
+            seq_len = model_metadata.get('seq_len', 256)
+            x_seq = torch.tensor(X_scaled[-seq_len:], device=device).unsqueeze(0).to(dtype=torch.float32)
             
+            model.eval()
             with torch.no_grad():
-                outputs = model(x_seq)
-                # outputs: [1, 8] -> [call_off, put_off, width, te, prob, dir, conf, entry_score]
-                out = outputs[0].cpu().numpy()
+                out_tuple = model(x_seq)
+                # CondorBrain returns (logits, regime, horizon, features, ...)
+                preds = out_tuple[0].cpu().numpy()[0]
             
-            # Parse Outputs
-            prob_profit = out[4]
-            confidence = out[6] # Index from backtest
-            # Wait, Index mapping check:
-            # 0:Call, 1:Put, 2:Width, 3:TE, 4:Prob, 5:Dir, 6:Conf??
-            # Let's check backtest parsing.
-            # logic: entry_score = all_outputs['entry_score'] which is usually last index if custom head.
-            # Assuming same model structure.
+            # Parse Outputs (V2.2 Indexing)
+            # [0..3] Params, [4] Prob, [5] ROI, [6] MaxLoss, [7] Confidence, [8] Entry, [9] Exit
+            prob_profit = preds[4]
+            confidence = preds[7]
+            entry_logit = preds[8]
             
-            print(f"[{datetime.now()}] Model Output: Conf={confidence:.2f}, Prob={prob_profit:.2f}")
+            print(f"[{datetime.now()}] Model Output: Conf={confidence:.2f}, EntryLogit={entry_logit:.2f}, Prob={prob_profit:.2f}")
 
             # 5. Execute
             if confidence > 0.6: # Threshold
@@ -192,40 +184,61 @@ def run_live_loop(executor, model, ruleset, device):
             time.sleep(5)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", type=str, required=True, help="Path to production CDE model (.pth)")
+    parser.add_argument("--paper", action="store_true", default=True, help="Use paper trading")
+    args = parser.parse_args()
+
     if not os.getenv('APCA_API_KEY_ID'):
         print("Please set APCA_API_KEY_ID and APCA_API_SECRET_KEY env vars.")
         sys.exit(1)
         
     try:
-        executor = AlpacaExecutor(paper=True)
+        executor = AlpacaExecutor(paper=args.paper)
         
-        # Load Model
-        print(f"Loading model {MODEL_PATH}...")
-        # Need to init model class structure first!
-        # Assuming CondorBrain import works:
-        checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
+        # Load Model & Metadata
+        print(f"Loading model {args.model}...")
+        ckpt = torch.load(args.model, map_location=DEVICE)
         
-        # We need args from checkpoint or defaults
-        # Hack: Instantiate default CondorBrain
+        # Extract Config
+        config = ckpt.get('model_config', {})
+        
+        # Handle scaling parameters (Persisted in new training logic)
+        if 'median' in ckpt and 'mad' in ckpt:
+             print("Using persistent scaling parameters from checkpoint.")
+             med = np.array(ckpt['median'])
+             scale = np.array(ckpt['mad'])
+        else:
+             print("Warning: Checkpoint missing persistent scaling. Live behavior may drift!")
+             # Fallback or exit?
+             med = np.zeros(len(FEATURE_COLS_V22))
+             scale = np.ones(len(FEATURE_COLS_V22))
+
+        model_metadata = {
+            'median': med,
+            'scale': scale,
+            'seq_len': ckpt.get('seq_len', 256)
+        }
+        
         model = CondorBrain(
-            d_model=1024, n_layers=32, input_dim=len(FEATURE_COLS_V22)
-            # Add other params if needed
+            d_model=config.get('d_model', 1024),
+            n_layers=config.get('n_layers', 32),
+            input_dim=len(FEATURE_COLS_V22),
+            use_cde=True,
+            use_topk_moe=config.get('use_topk_moe', False)
         ).to(DEVICE)
         
-        # Handle state dict keys (module. prefix?)
-        state_dict = checkpoint
-        if 'model_state_dict' in checkpoint: state_dict = checkpoint['model_state_dict']
-        # Strip 'module.'
-        state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+        state_dict = ckpt['state_dict']
+        if any(k.startswith('module.') for k in state_dict.keys()):
+            state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+            
+        model.load_state_dict(state_dict)
+        model.eval()
+        print(f"Model Loaded (CDE={model.use_cde}, Dim={len(FEATURE_COLS_V22)})")
         
-        try:
-            model.load_state_dict(state_dict, strict=False)
-        except Exception as e:
-            print(f"Model load warning: {e}")
-        
-        print("Model Loaded.")
-        
-        run_live_loop(executor, model, None, DEVICE)
+        run_live_loop(executor, model, model_metadata, DEVICE)
         
     except Exception as e:
         print(f"Startup Failed: {e}")
+        import traceback
+        traceback.print_exc()
