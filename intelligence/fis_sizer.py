@@ -11,6 +11,7 @@ from core.dto import MarketSnapshot, TradeDecision, SizedDecision
 from intelligence.fuzzifier import Fuzzifier
 from intelligence.inference_engine import InferenceEngine
 from intelligence.defuzzifier import Defuzzifier
+import intelligence.fuzzy_engine as fe
 
 class FISSizer:
     def __init__(self, cfg: StrategyConfig):
@@ -22,7 +23,7 @@ class FISSizer:
             high_vol_threshold=getattr(cfg, 'regime_vix_high', 30.0)
         )
 
-    def size_trade(self, decision: TradeDecision, snapshot: MarketSnapshot, account_equity: float) -> SizedDecision:
+    def size_trade(self, decision: TradeDecision, snapshot: MarketSnapshot, account_equity: float, model_outputs: dict = None) -> SizedDecision:
         """
         Execute the full sizing pipeline.
         
@@ -67,8 +68,16 @@ class FISSizer:
              return self._reject(decision, "Insufficient Capital or Zero Width")
 
         # --- Stage 2: Fuzzification ---
-        features = self.fuzzifier.extract_features(snapshot)
-        memberships = self.fuzzifier.fuzzify(features)
+        features_df = self.fuzzifier.extract_features(snapshot)
+        memberships = self.fuzzifier.fuzzify(features_df)
+        
+        # Inject Neural CDE Factor (11th Factor)
+        if model_outputs:
+            model_confidence = model_outputs.get("confidence", 0.5)
+            prob_profit = model_outputs.get("prob_profit", 0.5)
+            memberships["neural_cde"] = {
+                "favorable": fe.calculate_model_membership(model_confidence, prob_profit)
+            }
         
         # --- Stage 3: Inference ---
         confidence = self.inference.evaluate(memberships)

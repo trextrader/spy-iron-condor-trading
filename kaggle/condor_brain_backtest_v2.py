@@ -379,7 +379,8 @@ def estimate_condor_pnl(spot, short_call, long_call, short_put, long_put, credit
     
     return net_pnl
 
-def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None):
+def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None, 
+                 use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False):
     print("Starting Backtest Simulation...")
     
     # Pre-process Features (Robust Norm same as training)
@@ -821,14 +822,20 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 entry_factors.append(f"ProbProfit WEAK ({prob_profit:.2f}) +0")
             
             # Factor 3: Rule Engine Signal (0-30 points)
-            if net_rule_signal > 0.5:
-                entry_score += 30
-                entry_factors.append(f"Rules BULLISH ({net_rule_signal:.2f}) +30")
-            elif net_rule_signal >= 0:
-                entry_score += 15
-                entry_factors.append(f"Rules NEUTRAL ({net_rule_signal:.2f}) +15")
+            if use_trade_rules:
+                if net_rule_signal > 0.5:
+                    entry_score += 30
+                    entry_factors.append(f"Rules BULLISH ({net_rule_signal:.2f}) +30")
+                elif net_rule_signal >= 0:
+                    entry_score += 15
+                    entry_factors.append(f"Rules NEUTRAL ({net_rule_signal:.2f}) +15")
+                else:
+                    entry_score += 0
+                    entry_factors.append(f"Rules BEARISH ({net_rule_signal:.2f}) +0")
             else:
-                entry_factors.append(f"Rules BEARISH ({net_rule_signal:.2f}) +0")
+                # Bypass rules: give neutral points to keep score consistent
+                entry_score += 15
+                entry_factors.append("Rules BYPASSED (Manual Toggle) +15")
             
             # Factor 4: Direction alignment (0-10 points)
             max_loss_pct = all_outputs['max_loss_pct'] if all_outputs['max_loss_pct'] is not None else 1.0
@@ -854,7 +861,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 gate_reasons.append(f"LOW_CONF ({confidence:.4f})")
             if prob_profit < PROB_ENTRY_MIN:
                 gate_reasons.append(f"LOW_PROB ({prob_profit:.4f})")
-            if blocked:
+            if blocked and use_trade_rules:
                 gate_reasons.append("RULE_BLOCK")
             if recent_exit:
                 gate_reasons.append("RECENT_EXIT")
@@ -933,12 +940,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 
                 # Position Sizing
                 pos_size_pct = 100.0
-                if 'position_size_mult' in df.columns:
+                if use_fuzzy_sizing and 'position_size_mult' in df.columns:
                     dampener = df['position_size_mult'].iloc[i]
                     pos_size_pct = dampener * 100
                     reasoning.append(f"     Chaos Dampener:  {dampener:.4f} (Adjusts Size)")
                 else:
-                    reasoning.append(f"     Chaos Dampener:  1.00 (No Adjustment)")
+                    reasoning.append(f"     Chaos Dampener:  1.00 (BYPASSED or Unavailable)")
                 
                 reasoning.append(f"     Final Sizing:    {pos_size_pct:.1f}% of Max Allocation")
                 
@@ -1502,6 +1509,12 @@ def main():
     parser.add_argument("--model", type=str, default=None, help="Path to model checkpoint (.pth)")
     parser.add_argument("--ruleset", type=str, default=None, help="Path to ruleset YAML")
     parser.add_argument("--rules-only", action="store_true", help="Run in logic-only mode without neural model")
+    
+    # New Toggles for Hybrid Logic
+    parser.add_argument("--use-fuzzy-sizing", action="store_true", default=False, help="Enable 11-factor fuzzy position sizing")
+    parser.add_argument("--use-trade-rules", action="store_true", default=False, help="Enable rule-based entry/exit logic")
+    parser.add_argument("--use-diffusion", action="store_true", default=False, help="Enable diffusion-based parameter refinement")
+    
     args = parser.parse_args()
 
     # --- GPU CHECK ---
@@ -1661,9 +1674,12 @@ def main():
         feature_cols,
         DEVICE,
         ruleset,
-        model_path=MODEL_PATH,
-        data_path=DATA_PATH,
+        model_path=model_path,
+        data_path=use_data_path,
         norm_stats=norm_stats,
+        use_fuzzy_sizing=args.use_fuzzy_sizing,
+        use_trade_rules=args.use_trade_rules,
+        use_diffusion=args.use_diffusion
     )
     
     # 5. Report

@@ -67,8 +67,8 @@ class CompositeCondorLoss(nn.Module):
         Compute composite loss.
         
         Args:
-            y_pred: Model predictions (B, 8) for IC parameters
-            y_true: Ground truth targets (B, 8)
+            y_pred: Model predictions (B, 10) for IC parameters
+            y_true: Ground truth targets (B, 10)
             returns: Realized returns (B,) or (B, T) for Sharpe/DD computation
             weights: Current position weights (B, K) for turnover
             last_weights: Previous position weights (B, K) for turnover

@@ -13,14 +13,20 @@ from typing import Dict
 
 class InferenceEngine:
     def __init__(self, weights: Dict[str, float] = None):
-        # Default Weights for Iron Condor Suitability
-        # These prioritize Mean Reversion (RSI/ADX) + IV Rank (Premium)
+        # 11-Factor Hybrid Weights (Neural CDE + 10 Technical Factors)
+        # Neural CDE is the primary driver (~30%), technically confirmed by audit.
         self.weights = weights or {
-            "adx": 0.20,       # Trend Strength (Low is good)
-            "rsi": 0.20,       # Overbought/Sold (Neutral is good)
-            "iv_rank": 0.30,   # Implied Volatility (High is good)
-            "mtf": 0.15,       # Multi-Timeframe Consensus
-            "vol_regime": 0.15 # VIX/Bollinger Stability
+            "neural_cde": 0.30,  # Continuous-time model confidence
+            "mtf": 0.10,         # Multi-timeframe consensus
+            "iv_rank": 0.10,     # Vol percentile
+            "vix": 0.08,         # Market regime
+            "rsi": 0.08,         # Momentum
+            "adx": 0.08,         # Trend strength
+            "bbands": 0.07,      # Volatility bands
+            "stoch": 0.06,       # Oscillator
+            "volume": 0.05,      # Liquidity
+            "sma_dist": 0.04,    # Equilibrium
+            "psar": 0.04         # Reversal
         }
 
     def evaluate(self, memberships: Dict[str, Dict[str, float]]) -> float:
@@ -40,12 +46,17 @@ class InferenceEngine:
         # Mapping of indicator -> key for "Favorable Condition"
         # e.g. for ADX, we want "ranging"
         favorable_keys = {
+            "neural_cde": "favorable",
             "adx": "ranging",
             "rsi": "neutral",
-            "iv_rank": "high",   # We want High IV to sell premium
-            "mtf": "neutral",    # or 'aligned' depending on definition. 
-            # Note: MTF logic in fuzzy_engine might return different keys.
-            # We need to align Fuzzifier output keys with Inference expectations.
+            "iv_rank": "high",   
+            "mtf": "neutral",    
+            "vix": "stable",
+            "bbands": "neutral",
+            "stoch": "neutral",
+            "volume": "high",
+            "sma_dist": "neutral",
+            "psar": "favorable"
         }
 
         for indicator, w in self.weights.items():

@@ -139,8 +139,21 @@ def compute_position_size(
     return max(q, 0)
 
 # =============================================================================
-# Helper Functions for Membership Calculation
+# Helper Functions for Membership Calculation (V2.2 Dynamic Schema)
 # =============================================================================
+
+def calculate_model_membership(confidence: float, prob_profit: float) -> float:
+    """
+    Neural CDE Model membership (11th factor).
+    Maps model certainty and projected probability to favorability [0, 1].
+    """
+    # High confidence (>0.7) and High probability (>0.55) is ideal
+    conf_score = min(1.0, confidence / 0.8)
+    prob_score = max(0.0, (prob_profit - 0.5) / 0.2) if prob_profit >= 0.5 else 0.0
+    
+    # Combined score (geometric mean for strictness)
+    return np.sqrt(conf_score * prob_score) if conf_score > 0 and prob_score > 0 else 0.0
+
 
 def calculate_mtf_membership(mtf_snapshot) -> float:
     """
@@ -242,51 +255,54 @@ def calculate_rsi_membership(rsi: float, neutral_min: float = 40.0, neutral_max:
         return max(0.0, (100 - rsi) / (100 - neutral_max))
 
 
-def calculate_adx_membership(adx: float, threshold_low: float = 25.0, threshold_high: float = 40.0) -> float:
+def calculate_adx_membership(adx_adaptive: float, threshold_low: float = 25.0, threshold_high: float = 40.0) -> float:
     """
-    ADX membership for range-bound market detection.
+    Adaptive ADX membership for range-bound market detection.
     
     Low ADX (< 25) = 1.0 (weak trend, ideal for IC)
     High ADX (> 40) = 0.0 (strong trend, avoid IC)
     """
-    if adx is None or np.isnan(adx):
+    if adx_adaptive is None or np.isnan(adx_adaptive):
         return 0.5  # Neutral default
     
     # Weak trend: Perfect for IC
-    if adx <= threshold_low:
+    if adx_adaptive <= threshold_low:
         return 1.0
     
     # Moderate trend: Linear decay
-    elif adx <= threshold_high:
-        return 1.0 - ((adx - threshold_low) / (threshold_high - threshold_low))
+    elif adx_adaptive <= threshold_high:
+        return 1.0 - ((adx_adaptive - threshold_low) / (threshold_high - threshold_low))
     
     # Strong trend: Avoid
     else:
         return 0.0
 
 
-def calculate_bbands_membership(bb_position: float, bb_width: float = None, squeeze_threshold: float = 0.02) -> float:
+def calculate_bbands_membership(bb_percentile: float, bw_expansion_rate: float, squeeze_threshold: float = 0.02) -> float:
     """
-    Bollinger Bands membership for volatility regime.
+    Bollinger Bands membership using V2.2 dynamic expansion features.
     
     Favorable conditions:
-    - Price in middle 60% of bands (position 0.2-0.8)
-    - Compressed bands (width < 2%)
+    - Price in middle 60% of bands (percentile 20-80)
+    - Low expansion rate (compression = low breakout risk)
     """
-    if bb_position is None or np.isnan(bb_position):
+    if bb_percentile is None or np.isnan(bb_percentile):
         return 0.5
     
-    # Position score: Prefer middle (0.5 = perfect)
-    position_score = max(0.0, 1.0 - abs(bb_position - 0.5) * 2)
+    # Position score: Prefer middle (50% = perfect)
+    # Convert percentile 0-100 to 0-1
+    pos_norm = bb_percentile / 100.0
+    position_score = max(0.0, 1.0 - abs(pos_norm - 0.5) * 2)
     
-    # Squeeze score: Prefer narrow bands
-    if bb_width is None or np.isnan(bb_width):
-        squeeze_score = 0.5
+    # Expansion score: Prefer low/negative expansion (compression)
+    if bw_expansion_rate is None or np.isnan(bw_expansion_rate):
+        expansion_score = 0.5
     else:
-        squeeze_score = max(0.0, 1.0 - (bb_width / (squeeze_threshold * 2)))
+        # expansion_rate > 0.05 is high breakout risk
+        expansion_score = max(0.0, 1.0 - (bw_expansion_rate / 0.1))
     
     # Combined score: Position matters more (70/30 split)
-    return (position_score * 0.7 + squeeze_score * 0.3)
+    return (position_score * 0.7 + expansion_score * 0.3)
 
 
 def calculate_stoch_membership(stoch_k: float, neutral_min: float = 30.0, neutral_max: float = 70.0) -> float:

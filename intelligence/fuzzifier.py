@@ -2,7 +2,8 @@
 intelligence/fuzzifier.py
 
 Feature extraction + fuzzification into linguistic membership degrees.
-Uses real indicators (ADX/RSI/IV Rank) from analytics module.
+Uses V2.2 Dynamic indicators (Adaptive ADX/RSI/BBands) from the production registry.
+Bridges Neural CDE outputs with the MTFuzz™ Sizing Engine.
 """
 
 from __future__ import annotations
@@ -12,73 +13,64 @@ import pandas as pd
 
 from core.config import StrategyConfig
 from core.dto import MarketSnapshot
-from analytics.indicators import adx_wilder, dynamic_rsi_series, iv_rank
+from intelligence.features.dynamic_features import compute_all_dynamic_features, compute_all_primitive_features_v22
+import intelligence.fuzzy_engine as fe
 
 
 @dataclass
 class Fuzzifier:
     cfg: StrategyConfig
 
-    def _atm_iv(self, chain: pd.DataFrame, spot: float) -> float:
-        if chain is None or len(chain) == 0 or "strike" not in chain.columns:
-            return np.nan
-        if "iv" not in chain.columns:
-            return np.nan
-        idx = (chain["strike"] - spot).abs().idxmin()
-        iv = chain.loc[idx, "iv"]
-        try:
-            return float(iv)
-        except Exception:
-            return np.nan
-
-    def extract_features(self, snapshot: MarketSnapshot) -> dict[str, float]:
+    def extract_features(self, snapshot: MarketSnapshot) -> pd.DataFrame:
+        """
+        Compute full V2.2 feature set (52 features) from MarketSnapshot.
+        Optimized for real-time production flow.
+        """
         bars: pd.DataFrame = snapshot.bars
-        chain: pd.DataFrame = snapshot.option_chain
+        
+        # Guard: Need minimum history for dynamic windowing (64 bars)
+        if bars is None or len(bars) < 64:
+             return pd.DataFrame()
 
-        # ADX/RSI from 5m bars
-        adx_series = adx_wilder(bars["high"], bars["low"], bars["close"], period=14)
-        rsi_series = dynamic_rsi_series(bars["close"], period=14)
+        # Step 1: Compute V2.1 Dynamic Features (16 cols)
+        df = compute_all_dynamic_features(bars.copy(), inplace=True)
+        
+        # Step 2: Inject Snapshot Metadata (VIX, IVR)
+        df["vix"] = snapshot.vix if snapshot.vix is not None else 15.0
+        
+        # IV Rank handling: If not in snapshot, fallback to mid-rank
+        if "ivr" not in df.columns:
+            df["ivr"] = 50.0 
 
-        adx_val = float(adx_series.iloc[-1])
-        rsi_val = float(rsi_series.iloc[-1])
+        # Step 3: Compute V2.2 Primitive Features (20 cols)
+        # This completes the 52-feature matrix required by the CDE Backbone
+        df = compute_all_primitive_features_v22(df, inplace=True)
+        
+        return df
 
-        # IV Rank: build a rolling ATM IV series from history of snapshots if available.
-        # For a mock provider, we approximate using current ATM IV only; rank needs history.
-        # We'll derive a short rolling history using last M bars by reusing current chain slice ATM IV.
-        M = int(getattr(self.cfg, "iv_rank_lookback_bars", 78 * 20))  # ~20 days of 5m bars by default
-        atm_iv_now = self._atm_iv(chain, snapshot.spot)
-
-        # Create a simple series of length=min(M,len(bars)) filled with atm_iv_now
-        # (Replace this later with a stored IV series per bar when you have it.)
-        n = min(M, len(bars))
-        iv_series = pd.Series([atm_iv_now] * n)
-        ivr = iv_rank(iv_series, window=max(2, min(n, 252))).iloc[-1]
-        ivr_val = float(ivr) if np.isfinite(ivr) else 50.0
-
-        return {"adx": adx_val, "rsi": rsi_val, "iv_rank": ivr_val}
-
-    def fuzzify(self, features: dict[str, float]) -> dict[str, dict[str, float]]:
+    def fuzzify(self, features_df: pd.DataFrame) -> dict[str, dict[str, float]]:
         """
-        Convert crisp inputs into membership degrees.
-        Returns nested dict like memberships['adx']['ranging'] = 0.7
+        Convert V2.2 crisp features into linguistic membership degrees.
+        Maps the technical 'puzzle pieces' to the Fuzzy Sizing Engine.
         """
-        adx = features["adx"]
-        rsi = features["rsi"]
-        ivr = features["iv_rank"]
+        if features_df is None or features_df.empty:
+            return {}
 
-        # Minimal deterministic memberships (replace with skfuzzy membership functions later)
-        adx_ranging = max(0.0, min(1.0, (30.0 - adx) / 15.0))
-        adx_trending = 1.0 - adx_ranging
-
-        rsi_neutral = max(0.0, 1.0 - abs(rsi - 50.0) / 25.0)
-        rsi_overbought = max(0.0, min(1.0, (rsi - 65.0) / 20.0))
-        rsi_oversold = max(0.0, min(1.0, (35.0 - rsi) / 20.0))
-
-        iv_low = max(0.0, min(1.0, (40.0 - ivr) / 20.0))
-        iv_high = 1.0 - iv_low
-
+        last = features_df.iloc[-1]
+        
+        # Map features to membership functions defined in fuzzy_engine.py
         return {
-            "adx": {"ranging": adx_ranging, "trending": adx_trending},
-            "rsi": {"oversold": rsi_oversold, "neutral": rsi_neutral, "overbought": rsi_overbought},
-            "iv_rank": {"low": iv_low, "high": iv_high},
+            "mtf": {"neutral": last.get("mtf_consensus", 0.5)},
+            "iv_rank": {"high": last.get("ivr", 50.0) / 100.0},
+            "vix": {"stable": fe.calculate_regime_membership(last.get("vix", 15.0))},
+            "rsi": {"neutral": fe.calculate_rsi_membership(last.get("rsi_dyn", 50.0))},
+            "adx": {"ranging": fe.calculate_adx_membership(last.get("adx_adaptive", 25.0))},
+            "bbands": {"neutral": fe.calculate_bbands_membership(
+                last.get("bb_percentile", 50.0), 
+                last.get("bw_expansion_rate", 0.0)
+            )},
+            "stoch": {"neutral": fe.calculate_stoch_membership(last.get("stoch_k_dyn", 50.0))},
+            "volume": {"high": fe.calculate_volume_membership(last.get("volume_ratio", 1.0))},
+            "sma_dist": {"neutral": fe.calculate_sma_distance_membership(last.get("ret_z", 0.0) * 0.01)},
+            "psar": {"favorable": fe.calculate_psar_membership(last.get("psar_adaptive", 0.0))}
         }
