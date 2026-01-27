@@ -109,6 +109,9 @@ def run_live_loop(executor, model, metadata, device):
             now = datetime.now(pytz.UTC)
             seconds = now.second
             # Live Countdown
+            sleep_sec = 62 - seconds
+            if sleep_sec < 0: sleep_sec += 60
+            
             while sleep_sec > 0:
                 sys.stdout.write(f"\r⏳ Waiting {sleep_sec}s for next bar (Recording Live Chains)...   ")
                 sys.stdout.flush()
