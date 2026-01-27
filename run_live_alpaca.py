@@ -66,6 +66,32 @@ class TradeLogger:
 # Initialize Logger Global
 trade_logger = TradeLogger()
 
+class FeatureLogger:
+    def __init__(self, feature_cols, log_dir="data/live"):
+        self.log_path = os.path.join(log_dir, "feature_log.csv")
+        self.cols = feature_cols
+        os.makedirs(log_dir, exist_ok=True)
+        if not os.path.exists(self.log_path):
+            with open(self.log_path, "w") as f:
+                header = "timestamp," + ",".join(self.cols) + "\n"
+                f.write(header)
+
+    def log_features(self, timestamp, df_row):
+        # df_row is a Series or dict
+        vals = []
+        for c in self.cols:
+            val = df_row.get(c, 0.0)
+            if isinstance(val, (int, float, np.float32, np.float64)):
+                vals.append(f"{val:.4f}")
+            else:
+                vals.append(str(val))
+                
+        line = f"{timestamp}," + ",".join(vals) + "\n"
+        with open(self.log_path, "a") as f:
+            f.write(line)
+
+feature_logger = FeatureLogger(FEATURE_COLS_V22)
+
 # --- CONFIG ---
 SYMBOL = "SPY"
 TIMEFRAME = "1Min"
@@ -292,22 +318,18 @@ def run_live_loop(executor, model, metadata, device):
                         df[col] = fill_val
 
             # Log Volume (if not already handled)
-            # compute_all_dynamic_features handles some log return stuff, but let's ensure volume is consistent if model trained on log volume
-            # Actually, standard V2.2 pipeline uses 'volume' raw but scales it? 
-            # Let's check `canonical_feature_registry`. 
-            # V2.2 registry uses robust scaling on raw volume usually.
-            # But line 134 in original code was: df['volume'] = np.log1p(df['volume'])
-            # If `compute_all_primitive_features` uses volume, we should be careful not to double log.
-            # The primitive computation uses raw volume for ratios. 
-            # So valid flow: Raw -> Primitives -> Log (if model expects log) -> Scale.
-            # But wait, `normalization_policy` says "robust_z" on inputs.
-            # If the model was trained on log1p(volume), we must do it HERE, AFTER primitives.
-            # Assuming training pipeline does log1p before scaling? 
-            # Implementation Check: The user's snippet had explicit `df['volume'] = np.log1p(df['volume'])`.
-            # We will keep it but AFTER primitives calculation to be safe (primitives expect raw volume for ratios).
-            
             df_model_input = df.copy()
             df_model_input['volume'] = np.log1p(df_model_input['volume'])
+            
+            # --- LOG FEATURES FOR ACCOUNTABILITY ---
+            # User wants to see RSI, Gamma, etc.
+            try:
+                latest_row = df_model_input.iloc[-1]
+                feature_logger.log_features(now, latest_row)
+            except Exception as e_flog:
+                print(f"Feature Log Error: {e_flog}")
+
+            # 3. Scaling
             
             # 3. Scaling
             # Extract exactly the columns needed in order
