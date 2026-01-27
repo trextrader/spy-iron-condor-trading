@@ -1582,6 +1582,8 @@ def main():
     # Align feature schema with training (52 base + 4 rule consensus)
     feature_cols = FEATURE_COLS_V22 + RULE_FEATURES
 
+    norm_stats = {}
+
     if args.rules_only:
         print("🛠️ RULES-ONLY MODE: Initializing Dummy CondorBrain...")
         n_layers, d_model, model_input_dim = 1, 32, len(feature_cols)
@@ -1589,264 +1591,262 @@ def main():
         model = CondorBrain(d_model=d_model, n_layers=n_layers, input_dim=model_input_dim).to(DEVICE)
     else:
         print(f"Loading Model from {model_path}...")
-        if os.path.exists(model_path):
-            # Set weights_only=False to support numpy/legacy checkpoints
-            checkpoint = torch.load(model_path, map_location=DEVICE, weights_only=False)
-            state_dict = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
-            if isinstance(checkpoint, dict):
-                ckpt_feature_cols = checkpoint.get("feature_cols")
-                if ckpt_feature_cols:
-                    feature_cols = list(ckpt_feature_cols)
-            # Dynamic Attributes
-            model_input_dim = checkpoint.get("input_dim", len(feature_cols)) if isinstance(checkpoint, dict) else len(feature_cols)
+        if not os.path.exists(model_path):
+            print(f"Model not found at {model_path}.")
+            return
             
-            # Extract model config if available
-            ckpt_config = {}
-            if isinstance(checkpoint, dict):
-                if "model_config" in checkpoint:
-                    ckpt_config = checkpoint["model_config"]
-                elif "config" in checkpoint:
-                    ckpt_config = checkpoint["config"]
-                    
-            # Default to 12 layers, 512 dim if not specified
-            n_layers = int(ckpt_config.get("n_layers", ckpt_config.get("layers", 12)))
-            d_model = int(ckpt_config.get("d_model", ckpt_config.get("dim", 512)))
+        # Set weights_only=False to support numpy/legacy checkpoints
+        checkpoint = torch.load(model_path, map_location=DEVICE, weights_only=False)
+        state_dict = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
+        if isinstance(checkpoint, dict):
+            ckpt_feature_cols = checkpoint.get("feature_cols")
+            if ckpt_feature_cols:
+                feature_cols = list(ckpt_feature_cols)
+        # Dynamic Attributes
+        model_input_dim = checkpoint.get("input_dim", len(feature_cols)) if isinstance(checkpoint, dict) else len(feature_cols)
+        
+        # Extract model config if available
+        ckpt_config = {}
+        if isinstance(checkpoint, dict):
+            if "model_config" in checkpoint:
+                ckpt_config = checkpoint["model_config"]
+            elif "config" in checkpoint:
+                ckpt_config = checkpoint["config"]
+                
+        # Default to 12 layers, 512 dim if not specified
+        n_layers = int(ckpt_config.get("n_layers", ckpt_config.get("layers", 12)))
+        d_model = int(ckpt_config.get("d_model", ckpt_config.get("dim", 512)))
 
-            if model_input_dim != len(feature_cols):
-                print(f"⚠️ input_dim mismatch: checkpoint={model_input_dim} vs features={len(feature_cols)}; using checkpoint value.")
-            
-            print(f"Initializing CondorBrain: d_model={d_model}, n_layers={n_layers}, input_dim={model_input_dim}")
-            
-            # V2.2 Model
-            model = CondorBrain(
-                d_model=d_model, n_layers=n_layers,
-                input_dim=model_input_dim,
-                use_vol_gated_attn=True, use_topk_moe=True, moe_n_experts=3, moe_k=1,
-                use_diffusion=True,
-                diffusion_steps=50,      # Match training
-                diffusion_horizon=1,     # Match training (was 32)
-                diffusion_input_dim=10   # Match training (targets=10)
-            ).to(DEVICE)
-            
-            try:
-                model.load_state_dict(state_dict, strict=False)
-                print("Model loaded.")
-            except Exception as e:
-                print(f"Model load failed: {e}")
-                return
-            
-        # 4. Backtest
-        norm_stats = {}
+        if model_input_dim != len(feature_cols):
+            print(f"⚠️ input_dim mismatch: checkpoint={model_input_dim} vs features={len(feature_cols)}; using checkpoint value.")
+        
+        print(f"Initializing CondorBrain: d_model={d_model}, n_layers={n_layers}, input_dim={model_input_dim}")
+        
+        # V2.2 Model
+        model = CondorBrain(
+            d_model=d_model, n_layers=n_layers,
+            input_dim=model_input_dim,
+            use_vol_gated_attn=True, use_topk_moe=True, moe_n_experts=3, moe_k=1,
+            use_diffusion=True,
+            diffusion_steps=50,      # Match training
+            diffusion_horizon=1,     # Match training (was 32)
+            diffusion_input_dim=10   # Match training (targets=10)
+        ).to(DEVICE)
+        
+        try:
+            model.load_state_dict(state_dict, strict=False)
+            print("Model loaded.")
+        except Exception as e:
+            print(f"Model load failed: {e}")
+            return
+        
         if isinstance(checkpoint, dict):
             if "median" in checkpoint and "mad" in checkpoint:
                 norm_stats["median"] = checkpoint["median"]
                 norm_stats["mad"] = checkpoint["mad"]
 
-        generate_contract_snapshot(
-            os.path.join(REPORTS_DIR, "..", "audit", "contract_snapshot.json"),
-            repo_root if "repo_root" in globals() else os.getcwd(),
-            feature_cols=feature_cols,
-            checkpoint_path=model_path,
-            extra={"mode": "backtest", "data_path": DATA_PATH},
-        )
+    # 4. Backtest
+    generate_contract_snapshot(
+        os.path.join(REPORTS_DIR, "..", "audit", "contract_snapshot.json"),
+        repo_root if "repo_root" in globals() else os.getcwd(),
+        feature_cols=feature_cols,
+        checkpoint_path=model_path,
+        extra={"mode": "backtest", "data_path": DATA_PATH},
+    )
 
-        equity, trades = run_backtest(
-            df,
-            rule_signals,
-            model,
-            feature_cols,
-            DEVICE,
-            ruleset,
-            model_path=MODEL_PATH,
-            data_path=DATA_PATH,
-            norm_stats=norm_stats,
-        )
+    equity, trades = run_backtest(
+        df,
+        rule_signals,
+        model,
+        feature_cols,
+        DEVICE,
+        ruleset,
+        model_path=MODEL_PATH,
+        data_path=DATA_PATH,
+        norm_stats=norm_stats,
+    )
+    
+    # 5. Report
+    print(f"Final Capital: ${equity[-1]:,.2f}")
+    print(f"Trades: {len(trades)}")
+    
+    # Calculate metrics for enhanced chart
+    equity_arr = np.array(equity)
+    starting_balance = equity_arr[0]
+    
+    # Calculate running max and drawdown
+    running_max = np.maximum.accumulate(equity_arr)
+    drawdown = (equity_arr - running_max) / running_max * 100  # Percentage
+    max_drawdown = np.min(drawdown)
+    
+    # Calculate total return
+    total_return = (equity_arr[-1] - starting_balance) / starting_balance * 100
+    
+    # Create figure with 3 subplots
+    fig, axes = plt.subplots(3, 1, figsize=(14, 10), gridspec_kw={'height_ratios': [3, 1, 1]})
+    fig.suptitle(f"Iron Condor V2.2 Backtest Results - {len(trades)} Trades", fontsize=14, fontweight='bold')
+    
+    # --- Subplot 1: Equity Curve with Balance Reference ---
+    ax1 = axes[0]
+    ax1.plot(equity_arr, label='Equity', color='#2E86AB', linewidth=1.5)
+    ax1.axhline(y=starting_balance, color='#E94F37', linestyle='--', linewidth=1, label=f'Starting Balance (${starting_balance:,.0f})')
+    ax1.fill_between(range(len(equity_arr)), starting_balance, equity_arr, 
+                        where=equity_arr >= starting_balance, alpha=0.3, color='green', label='Profit Zone')
+    ax1.fill_between(range(len(equity_arr)), starting_balance, equity_arr, 
+                        where=equity_arr < starting_balance, alpha=0.3, color='red', label='Loss Zone')
+    ax1.set_ylabel('Capital ($)', fontsize=10)
+    ax1.set_title(f'Equity Curve | Final: ${equity_arr[-1]:,.2f} | Return: {total_return:+.2f}%', fontsize=11)
+    ax1.legend(loc='upper left', fontsize=8)
+    ax1.grid(True, alpha=0.3)
+    ax1.set_xlim(0, len(equity_arr))
+    
+    # --- Subplot 2: Drawdown ---
+    ax2 = axes[1]
+    ax2.fill_between(range(len(drawdown)), 0, drawdown, color='#E94F37', alpha=0.7)
+    ax2.axhline(y=max_drawdown, color='darkred', linestyle='--', linewidth=1, label=f'Max DD: {max_drawdown:.2f}%')
+    ax2.set_ylabel('Drawdown (%)', fontsize=10)
+    ax2.set_title(f'Drawdown | Max: {max_drawdown:.2f}%', fontsize=11)
+    ax2.legend(loc='lower left', fontsize=8)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_xlim(0, len(equity_arr))
+    ax2.set_ylim(min(drawdown) * 1.1, 5)
+    
+    # --- Subplot 3: Trade P&L Markers ---
+    ax3 = axes[2]
+    # Mark trade points and P&L
+    closes = [t for t in trades if t.get('action') == 'CLOSE']
+    trade_bars = []
+    trade_pnls = []
+    for t in closes:
+        pnl_pct = t.get('pnl_pct', 0)
+        if pnl_pct != 0:
+            trade_bars.append(t.get('idx', 0))
+            trade_pnls.append(pnl_pct)
+    
+    colors = ['green' if p > 0 else 'red' for p in trade_pnls]
+    ax3.bar(trade_bars, trade_pnls, color=colors, alpha=0.7, width=max(1, len(equity_arr)//200))
+    ax3.axhline(y=0, color='black', linewidth=0.5)
+    ax3.set_ylabel('Trade P&L (%)', fontsize=10)
+    ax3.set_xlabel('Bar Index', fontsize=10)
+    win_count = sum(1 for p in trade_pnls if p > 0)
+    total_count = len(trade_pnls)
+    win_rate = win_count / total_count * 100 if total_count > 0 else 0
+    ax3.set_title(f'Individual Trade P&L | Win Rate: {win_rate:.1f}% ({win_count}/{total_count})', fontsize=11)
+    ax3.grid(True, alpha=0.3)
+    ax3.set_xlim(0, len(equity_arr))
+    
+    plt.tight_layout()
+    plot_path = os.path.join(REPORTS_DIR, "backtest_v2_result.png")
+    plt.savefig(plot_path, dpi=150)
+    plt.close()
+    print(f"Saved enhanced plot to {plot_path}")
+    
+    # Save Trades CSV
+    if trades:
+        csv_path = os.path.join(REPORTS_DIR, "trades_v2.csv")
+        pd.DataFrame(trades).to_csv(csv_path, index=False)
+        print(f"Saved trades to {csv_path}")
+
+        try:
+            attribution_path = os.path.join(REPORTS_DIR, "decision_factor_attribution.csv")
+            if os.path.exists(DECISION_TRACE_PATH):
+                generate_attribution_csv(DECISION_TRACE_PATH, attribution_path)
+                validate_decision_factor_attribution(attribution_path)
+                validate_decision_trace(DECISION_TRACE_PATH)
+                print(f"Saved decision factor attribution to {attribution_path}")
+            else:
+                print("⚠️ decision_trace.jsonl not found; skipping attribution export.")
+        except Exception as e:
+            print(f"⚠️ Attribution export/validation failed: {e}")
         
-        # 5. Report
-        print(f"Final Capital: ${equity[-1]:,.2f}")
-        print(f"Trades: {len(trades)}")
+        # 6. FACTOR ATTRIBUTION ANALYSIS
+        print("\n" + "=" * 80)
+        print("FACTOR ATTRIBUTION ANALYSIS")
+        print("=" * 80)
         
-        # Calculate metrics for enhanced chart
-        equity_arr = np.array(equity)
-        starting_balance = equity_arr[0]
-        
-        # Calculate running max and drawdown
-        running_max = np.maximum.accumulate(equity_arr)
-        drawdown = (equity_arr - running_max) / running_max * 100  # Percentage
-        max_drawdown = np.min(drawdown)
-        
-        # Calculate total return
-        total_return = (equity_arr[-1] - starting_balance) / starting_balance * 100
-        
-        # Create figure with 3 subplots
-        fig, axes = plt.subplots(3, 1, figsize=(14, 10), gridspec_kw={'height_ratios': [3, 1, 1]})
-        fig.suptitle(f"Iron Condor V2.2 Backtest Results - {len(trades)} Trades", fontsize=14, fontweight='bold')
-        
-        # --- Subplot 1: Equity Curve with Balance Reference ---
-        ax1 = axes[0]
-        ax1.plot(equity_arr, label='Equity', color='#2E86AB', linewidth=1.5)
-        ax1.axhline(y=starting_balance, color='#E94F37', linestyle='--', linewidth=1, label=f'Starting Balance (${starting_balance:,.0f})')
-        ax1.fill_between(range(len(equity_arr)), starting_balance, equity_arr, 
-                         where=equity_arr >= starting_balance, alpha=0.3, color='green', label='Profit Zone')
-        ax1.fill_between(range(len(equity_arr)), starting_balance, equity_arr, 
-                         where=equity_arr < starting_balance, alpha=0.3, color='red', label='Loss Zone')
-        ax1.set_ylabel('Capital ($)', fontsize=10)
-        ax1.set_title(f'Equity Curve | Final: ${equity_arr[-1]:,.2f} | Return: {total_return:+.2f}%', fontsize=11)
-        ax1.legend(loc='upper left', fontsize=8)
-        ax1.grid(True, alpha=0.3)
-        ax1.set_xlim(0, len(equity_arr))
-        
-        # --- Subplot 2: Drawdown ---
-        ax2 = axes[1]
-        ax2.fill_between(range(len(drawdown)), 0, drawdown, color='#E94F37', alpha=0.7)
-        ax2.axhline(y=max_drawdown, color='darkred', linestyle='--', linewidth=1, label=f'Max DD: {max_drawdown:.2f}%')
-        ax2.set_ylabel('Drawdown (%)', fontsize=10)
-        ax2.set_title(f'Drawdown | Max: {max_drawdown:.2f}%', fontsize=11)
-        ax2.legend(loc='lower left', fontsize=8)
-        ax2.grid(True, alpha=0.3)
-        ax2.set_xlim(0, len(equity_arr))
-        ax2.set_ylim(min(drawdown) * 1.1, 5)
-        
-        # --- Subplot 3: Trade P&L Markers ---
-        ax3 = axes[2]
-        # Mark trade points and P&L
+        # Separate opens and closes
+        opens = [t for t in trades if t.get('action') == 'OPEN']
         closes = [t for t in trades if t.get('action') == 'CLOSE']
-        trade_bars = []
-        trade_pnls = []
-        for t in closes:
-            pnl_pct = t.get('pnl_pct', 0)
-            if pnl_pct != 0:
-                trade_bars.append(t.get('idx', 0))
-                trade_pnls.append(pnl_pct)
         
-        colors = ['green' if p > 0 else 'red' for p in trade_pnls]
-        ax3.bar(trade_bars, trade_pnls, color=colors, alpha=0.7, width=max(1, len(equity_arr)//200))
-        ax3.axhline(y=0, color='black', linewidth=0.5)
-        ax3.set_ylabel('Trade P&L (%)', fontsize=10)
-        ax3.set_xlabel('Bar Index', fontsize=10)
-        win_count = sum(1 for p in trade_pnls if p > 0)
-        total_count = len(trade_pnls)
-        win_rate = win_count / total_count * 100 if total_count > 0 else 0
-        ax3.set_title(f'Individual Trade P&L | Win Rate: {win_rate:.1f}% ({win_count}/{total_count})', fontsize=11)
-        ax3.grid(True, alpha=0.3)
-        ax3.set_xlim(0, len(equity_arr))
+        # Match opens with closes to get P&L
+        trade_results = []
+        for i, open_t in enumerate(opens):
+            if i < len(closes):
+                close_t = closes[i]
+                # Simple P&L: if spot stayed inside strikes, profitable
+                entry_spot = open_t.get('spot', 0)
+                exit_spot = close_t.get('spot', 0)
+                short_call = open_t.get('short_call', entry_spot + 10)
+                short_put = open_t.get('short_put', entry_spot - 10)
+                
+                # Profitable if spot stayed within short strikes throughout
+                profitable = short_put < exit_spot < short_call
+                
+                trade_results.append({
+                    'trade_num': i + 1,
+                    'entry_score': open_t.get('entry_score', 0),
+                    'conf': open_t.get('conf', 0),
+                    'prob': open_t.get('prob', 0),
+                    'rules': open_t.get('rules', 0),
+                    'profitable': profitable,
+                    'reason': close_t.get('reason', 'Unknown'),
+                    'dte_entry': open_t.get('dte', None),
+                    'dte_remaining': close_t.get('dte_remaining', None),
+                    'short_call': open_t.get('short_call', None),
+                    'long_call': open_t.get('long_call', None),
+                    'short_put': open_t.get('short_put', None),
+                    'long_put': open_t.get('long_put', None),
+                    'width': open_t.get('width', None),
+                    'credit': open_t.get('credit', None),
+                    'max_loss': open_t.get('max_loss', None)
+                })
         
-        plt.tight_layout()
-        plot_path = os.path.join(REPORTS_DIR, "backtest_v2_result.png")
-        plt.savefig(plot_path, dpi=150)
-        plt.close()
-        print(f"Saved enhanced plot to {plot_path}")
-        
-        # Save Trades CSV
-        if trades:
-            csv_path = os.path.join(REPORTS_DIR, "trades_v2.csv")
-            pd.DataFrame(trades).to_csv(csv_path, index=False)
-            print(f"Saved trades to {csv_path}")
-
-            try:
-                attribution_path = os.path.join(REPORTS_DIR, "decision_factor_attribution.csv")
-                if os.path.exists(DECISION_TRACE_PATH):
-                    generate_attribution_csv(DECISION_TRACE_PATH, attribution_path)
-                    validate_decision_factor_attribution(attribution_path)
-                    validate_decision_trace(DECISION_TRACE_PATH)
-                    print(f"Saved decision factor attribution to {attribution_path}")
-                else:
-                    print("⚠️ decision_trace.jsonl not found; skipping attribution export.")
-            except Exception as e:
-                print(f"⚠️ Attribution export/validation failed: {e}")
+        if trade_results:
+            results_df = pd.DataFrame(trade_results)
+            winners = results_df[results_df['profitable'] == True]
+            losers = results_df[results_df['profitable'] == False]
             
-            # 6. FACTOR ATTRIBUTION ANALYSIS
-            print("\n" + "=" * 80)
-            print("FACTOR ATTRIBUTION ANALYSIS")
-            print("=" * 80)
+            print(f"\n📊 TRADE SUMMARY:")
+            print(f"   Total Trades: {len(trade_results)}")
+            print(f"   Winners: {len(winners)} ({100*len(winners)/len(trade_results):.1f}%)")
+            print(f"   Losers: {len(losers)} ({100*len(losers)/len(trade_results):.1f}%)")
             
-            # Separate opens and closes
-            opens = [t for t in trades if t.get('action') == 'OPEN']
-            closes = [t for t in trades if t.get('action') == 'CLOSE']
+            print(f"\n📈 WINNING TRADES - Factor Averages:")
+            if not winners.empty:
+                print(f"   Avg Entry Score: {winners['entry_score'].mean():.1f}")
+                print(f"   Avg Confidence:  {winners['conf'].mean():.4f}")
+                print(f"   Avg Prob Profit: {winners['prob'].mean():.4f}")
+                print(f"   Avg Rule Signal: {winners['rules'].mean():.2f}")
+            else:
+                print("   (No winning trades)")
             
-            # Match opens with closes to get P&L
-            trade_results = []
-            for i, open_t in enumerate(opens):
-                if i < len(closes):
-                    close_t = closes[i]
-                    # Simple P&L: if spot stayed inside strikes, profitable
-                    entry_spot = open_t.get('spot', 0)
-                    exit_spot = close_t.get('spot', 0)
-                    short_call = open_t.get('short_call', entry_spot + 10)
-                    short_put = open_t.get('short_put', entry_spot - 10)
-                    
-                    # Profitable if spot stayed within short strikes throughout
-                    profitable = short_put < exit_spot < short_call
-                    
-                    trade_results.append({
-                        'trade_num': i + 1,
-                        'entry_score': open_t.get('entry_score', 0),
-                        'conf': open_t.get('conf', 0),
-                        'prob': open_t.get('prob', 0),
-                        'rules': open_t.get('rules', 0),
-                        'profitable': profitable,
-                        'reason': close_t.get('reason', 'Unknown'),
-                        'dte_entry': open_t.get('dte', None),
-                        'dte_remaining': close_t.get('dte_remaining', None),
-                        'short_call': open_t.get('short_call', None),
-                        'long_call': open_t.get('long_call', None),
-                        'short_put': open_t.get('short_put', None),
-                        'long_put': open_t.get('long_put', None),
-                        'width': open_t.get('width', None),
-                        'credit': open_t.get('credit', None),
-                        'max_loss': open_t.get('max_loss', None)
-                    })
+            print(f"\n📉 LOSING TRADES - Factor Averages:")
+            if not losers.empty:
+                print(f"   Avg Entry Score: {losers['entry_score'].mean():.1f}")
+                print(f"   Avg Confidence:  {losers['conf'].mean():.4f}")
+                print(f"   Avg Prob Profit: {losers['prob'].mean():.4f}")
+                print(f"   Avg Rule Signal: {losers['rules'].mean():.2f}")
+            else:
+                print("   (No losing trades)")
             
-            if trade_results:
-                results_df = pd.DataFrame(trade_results)
-                winners = results_df[results_df['profitable'] == True]
-                losers = results_df[results_df['profitable'] == False]
-                
-                print(f"\n📊 TRADE SUMMARY:")
-                print(f"   Total Trades: {len(trade_results)}")
-                print(f"   Winners: {len(winners)} ({100*len(winners)/len(trade_results):.1f}%)")
-                print(f"   Losers: {len(losers)} ({100*len(losers)/len(trade_results):.1f}%)")
-                
-                print(f"\n📈 WINNING TRADES - Factor Averages:")
-                if not winners.empty:
-                    print(f"   Avg Entry Score: {winners['entry_score'].mean():.1f}")
-                    print(f"   Avg Confidence:  {winners['conf'].mean():.4f}")
-                    print(f"   Avg Prob Profit: {winners['prob'].mean():.4f}")
-                    print(f"   Avg Rule Signal: {winners['rules'].mean():.2f}")
-                else:
-                    print("   (No winning trades)")
-                
-                print(f"\n📉 LOSING TRADES - Factor Averages:")
-                if not losers.empty:
-                    print(f"   Avg Entry Score: {losers['entry_score'].mean():.1f}")
-                    print(f"   Avg Confidence:  {losers['conf'].mean():.4f}")
-                    print(f"   Avg Prob Profit: {losers['prob'].mean():.4f}")
-                    print(f"   Avg Rule Signal: {losers['rules'].mean():.2f}")
-                else:
-                    print("   (No losing trades)")
-                
-                # Save factor analysis
-                analysis_path = os.path.join(REPORTS_DIR, "factor_attribution.csv")
-                results_df.to_csv(analysis_path, index=False)
-                print(f"\n💾 Saved factor attribution to {analysis_path}")
-                
-                # Key Insights
-                print("\n🔑 KEY INSIGHTS:")
-                if not winners.empty and not losers.empty:
-                    if winners['entry_score'].mean() > losers['entry_score'].mean():
-                        print("   ✅ Higher entry scores correlate with winning trades")
-                    if winners['conf'].mean() > losers['conf'].mean():
-                        print("   ✅ Higher model confidence correlates with winning trades")
-                    if winners['prob'].mean() > losers['prob'].mean():
-                        print("   ✅ Higher prob_profit correlates with winning trades")
-                    if winners['rules'].mean() > losers['rules'].mean():
-                        print("   ✅ Higher rule signals correlate with winning trades")
-                
-            print("=" * 80)
-        
-    else:
-        print(f"Model not found at {model_path}.")
-
+            # Save factor analysis
+            analysis_path = os.path.join(REPORTS_DIR, "factor_attribution.csv")
+            results_df.to_csv(analysis_path, index=False)
+            print(f"\n💾 Saved factor attribution to {analysis_path}")
+            
+            # Key Insights
+            print("\n🔑 KEY INSIGHTS:")
+            if not winners.empty and not losers.empty:
+                if winners['entry_score'].mean() > losers['entry_score'].mean():
+                    print("   ✅ Higher entry scores correlate with winning trades")
+                if winners['conf'].mean() > losers['conf'].mean():
+                    print("   ✅ Higher model confidence correlates with winning trades")
+                if winners['prob'].mean() > losers['prob'].mean():
+                    print("   ✅ Higher prob_profit correlates with winning trades")
+                if winners['rules'].mean() > losers['rules'].mean():
+                    print("   ✅ Higher rule signals correlate with winning trades")
+            
+        print("=" * 80)
 if __name__ == "__main__":
     main()
 
