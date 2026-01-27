@@ -220,11 +220,8 @@ def find_closest_contract(client, symbol, contract_type, target_strike, ideal_da
         contracts = res.option_contracts
     except ImportError:
         # Fallback to OptionChainRequest (older SDK or different version)
-        # Note: OptionChainRequest typically returns a snapshot map, not list of contracts with greeks directly in same way?
-        # Actually, get_option_chain logic might differ.
-        # Let's try minimal fallback: Just fail or try basic listing.
-        print("Warning: OptionContractsRequest not found. Trying OptionChainRequest...")
-        return None  # Abort if library mismatch to avoid crashes
+        print("Warning: OptionContractsRequest not found. Please run `pip install alpaca-py -U`")
+        return None
     except Exception as e:
         print(f"Contract Search Error: {e}")
         return None
@@ -556,7 +553,9 @@ def run_live_loop(executor, model, metadata, device):
 ╚══════════════════════════════════════════════════════════════════════════════╝"""
                     print(entry_msg)
                     
+                    
                     # EXECUTE
+                    t_ids = None # Initialize to prevent UnboundLocalError
                     if osi_legs and executor:
                         try:
                             t_ids = executor.submit_iron_condor(SYMBOL, osi_legs, quantity=1)
