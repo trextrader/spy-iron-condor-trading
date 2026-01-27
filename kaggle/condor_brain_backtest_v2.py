@@ -452,7 +452,11 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     model.eval()
     
     # Iterate
-    print(f"Simulating {len(df)} bars...")
+    num_bars = len(df)
+    if limit is not None:
+        num_bars = min(num_bars, limit + SEQ_LEN)
+    
+    print(f"Simulating {num_bars} bars...")
     print("=" * 80)
     print("TRADE DECISION LOG (First 50 bars after warmup)")
     print("=" * 80)
@@ -733,7 +737,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     MAX_LOGS = 50  # Console only
     
     # Start from SEQ_LEN
-    for i in tqdm(range(SEQ_LEN, len(df) - 1)):
+    for i in tqdm(range(SEQ_LEN, num_bars - 1)):
         # 1. State
         if i >= len(X_tensor): break
         x_seq = X_tensor[i-SEQ_LEN : i].unsqueeze(0) # [1, 256, 52]
@@ -1339,8 +1343,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         for line in log_lines:
             log_file.write(line + "\n")
         
-        # Print to console (first 50 only)
-        if logged_count < MAX_LOGS:
+        # Print to console (always log if limit is set, otherwise first 50)
+        show_console = (limit is not None) or (logged_count < MAX_LOGS)
+        if show_console:
             for line in log_lines:
                 print(line)
             logged_count += 1
@@ -1514,6 +1519,7 @@ def main():
     parser.add_argument("--use-fuzzy-sizing", action="store_true", default=False, help="Enable 11-factor fuzzy position sizing")
     parser.add_argument("--use-trade-rules", action="store_true", default=False, help="Enable rule-based entry/exit logic")
     parser.add_argument("--use-diffusion", action="store_true", default=False, help="Enable diffusion-based parameter refinement")
+    parser.add_argument("--limit", type=int, default=None, help="Limit the number of bars to simulate")
     
     args = parser.parse_args()
 
@@ -1679,7 +1685,8 @@ def main():
         norm_stats=norm_stats,
         use_fuzzy_sizing=args.use_fuzzy_sizing,
         use_trade_rules=args.use_trade_rules,
-        use_diffusion=args.use_diffusion
+        use_diffusion=args.use_diffusion,
+        limit=args.limit
     )
     
     # 5. Report
