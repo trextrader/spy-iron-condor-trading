@@ -198,30 +198,40 @@ def calculate_live_greeks(contracts, current_spot):
         'iv': float(np.mean(ivs)) if ivs else 0.0,
         'svr': float(np.std(ivs)) if len(ivs) > 1 else 0.0 # Spread of Vol or similar
     }
+
 def find_closest_contract(client, symbol, contract_type, target_strike, ideal_date):
     """
     Finds the contract closest to target_strike and ideal_date.
     ideal_date: datetime object
     """
-    from alpaca.data.requests import OptionContractsRequest
-    
-    req = OptionContractsRequest(
-        underlying_symbols=[symbol],
-        status='active',
-        expiration_date_gte=ideal_date.date(),
-        expiration_date_lte=(ideal_date + pd.Timedelta(days=5)).date(),
-        type=contract_type, # 'call' or 'put'
-        strike_price_gte=target_strike - 2,
-        strike_price_lte=target_strike + 2,
-        limit=10
-    )
-    
     try:
+        from alpaca.data.requests import OptionContractsRequest
+        req = OptionContractsRequest(
+            underlying_symbols=[symbol],
+            status='active',
+            expiration_date_gte=ideal_date.date(),
+            expiration_date_lte=(ideal_date + pd.Timedelta(days=5)).date(),
+            type=contract_type, # 'call' or 'put'
+            strike_price_gte=target_strike - 2,
+            strike_price_lte=target_strike + 2,
+            limit=10
+        )
         res = client.get_option_contracts(req)
         contracts = res.option_contracts
+    except ImportError:
+        # Fallback to OptionChainRequest (older SDK or different version)
+        # Note: OptionChainRequest typically returns a snapshot map, not list of contracts with greeks directly in same way?
+        # Actually, get_option_chain logic might differ.
+        # Let's try minimal fallback: Just fail or try basic listing.
+        print("Warning: OptionContractsRequest not found. Trying OptionChainRequest...")
+        return None  # Abort if library mismatch to avoid crashes
+    except Exception as e:
+        print(f"Contract Search Error: {e}")
+        return None
+
+    try:
         if not contracts:
             return None
-            
         best = min(contracts, key=lambda x: abs(float(x.strike_price) - target_strike))
         return best.symbol
     except Exception as e:
@@ -287,53 +297,63 @@ def run_live_loop(executor, model, metadata, device):
                     # Let's use a wide net: 650-750 for now (hardcoded based on ~695 spot) 
                     # OR better: use the `active_trade` spot if available, else roughly 695.
                     center_strike = 695 
+                    
                     if 'active_trade' in locals() and active_trade:
                         center_strike = active_trade['entry_spot']
                     
-                    from alpaca.data.requests import OptionContractsRequest
-                    
-                    timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
-                    chain_dir = os.path.join("data", "live", "chains")
-                    os.makedirs(chain_dir, exist_ok=True)
-                    chain_path = os.path.join(chain_dir, f"spy_chain_{timestamp_str}.csv")
-                    
-                    # Fetch Calls & Puts
-                    # We limit to near term (next 7 days) and near money (+/- 25 strikes)
-                    # This is enough to reconstruct the decision surface.
-                    start_date = datetime.now().date()
-                    req_c = OptionContractsRequest(
-                        underlying_symbols=[SYMBOL],
-                        status='active',
-                        expiration_date_gte=start_date,
-                        expiration_date_lte=start_date + pd.Timedelta(days=7),
-                        type='call',
-                        limit=1000
-                    )
-                    req_p = OptionContractsRequest(
-                        underlying_symbols=[SYMBOL],
-                        status='active',
-                        expiration_date_gte=start_date,
-                        expiration_date_lte=start_date + pd.Timedelta(days=7),
-                        type='put',
-                        limit=1000
-                    )
-                    
+                    all_contracts = []
                     try:
+                        from alpaca.data.requests import OptionContractsRequest
+                        
+                        timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        chain_dir = os.path.join("data", "live", "chains")
+                        os.makedirs(chain_dir, exist_ok=True)
+                        chain_path = os.path.join(chain_dir, f"spy_chain_{timestamp_str}.csv")
+                        
+                        # Fetch Calls & Puts
+                        start_date = datetime.now().date()
+                        # Use global pd
+                        req_c = OptionContractsRequest(
+                            underlying_symbols=[SYMBOL],
+                            status='active',
+                            expiration_date_gte=start_date,
+                            expiration_date_lte=start_date + pd.Timedelta(days=7),
+                            type='call',
+                            limit=1000
+                        )
+                        req_p = OptionContractsRequest(
+                            underlying_symbols=[SYMBOL],
+                            status='active',
+                            expiration_date_gte=start_date,
+                            expiration_date_lte=start_date + pd.Timedelta(days=7),
+                            type='put',
+                            limit=1000
+                        )
+                        
                         res_c = run_live_loop.opt_client.get_option_contracts(req_c)
                         res_p = run_live_loop.opt_client.get_option_contracts(req_p)
                         
                         all_contracts = res_c.option_contracts + res_p.option_contracts
-                        # Convert to DataFrame for saving
-                        if all_contracts:
-                            import pandas as pd
-                            chain_df = pd.DataFrame([c.model_dump() for c in all_contracts])
-                            # Filter fields to save space
-                            cols = ['symbol', 'strike_price', 'expiration_date', 'type', 'open_interest', 'style']
-                            chain_df = chain_df[[c for c in cols if c in chain_df.columns]]
-                            chain_df.to_csv(chain_path, index=False)
-                            # print(f"  [Recorder] Saved {len(chain_df)} contracts to {chain_path}")
+                        
+                    except ImportError:
+                        print(" [Recorder Warning] OptionContractsRequest missing (old SDK?). Skipping chain record.")
                     except Exception as e_chain:
                         print(f"  [Recorder Warning] fetching chain failed: {e_chain}")
+
+                    # Convert to DataFrame for saving
+                    if all_contracts:
+                        chain_df = pd.DataFrame([c.model_dump() for c in all_contracts])
+                        # Filter fields to save space
+                        cols = ['symbol', 'strike_price', 'expiration_date', 'type', 'open_interest', 'style', 'implied_volatility', 'greeks']
+                        chain_df = chain_df[[c for c in cols if c in chain_df.columns]]
+                        chain_df.to_csv(chain_path, index=False)
+                        
+                        # USER REQUEST: Console output
+                        # Print symbols compactly
+                        syms = [c.symbol for c in all_contracts]
+                        print(f"\n📚 Option Chain Recorded ({len(syms)} Contracts):")
+                        print(" ".join(syms)) # Print all symbols separated by space
+                        print("-" * 50)
 
 
             except Exception as e_rec:
