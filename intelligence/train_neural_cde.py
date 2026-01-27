@@ -135,6 +135,16 @@ def main():
         avg_loss = trainer.train_epoch(X, Y)
         print(f"Epoch {epoch+1}/{args.epochs} | Loss: {avg_loss:.6f}")
         
+        # Save Checkpoint
+        ckpt_path = f"models/neural_cde_proto_e{epoch+1}.pth"
+        torch.save({
+            'state_dict': model.state_dict(),
+            'config': vars(args),
+            'epoch': epoch + 1,
+            'loss': avg_loss
+        }, ckpt_path)
+        print(f"💾 Saved {ckpt_path}")
+        
     # 4. Save
     save_path = "models/neural_cde_proto.pth"
     torch.save({
