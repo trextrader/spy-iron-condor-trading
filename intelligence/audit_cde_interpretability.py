@@ -21,7 +21,11 @@ def load_cde_model(ckpt_path, input_dim=52):
     print(f"Loading {ckpt_path}...")
     ckpt = torch.load(ckpt_path, map_location=DEVICE)
     
-    config = ckpt.get('config', {})
+    global SEQ_LEN
+    SEQ_LEN = ckpt.get('seq_len', 256)
+    print(f"Set SEQ_LEN to {SEQ_LEN}")
+    
+    config = ckpt.get('model_config', ckpt.get('config', {}))
     d_model = config.get('d_model', 128)
     n_layers = config.get('n_layers', 2)
     use_topk = config.get('use_topk_moe', False)
@@ -66,11 +70,16 @@ def analyze_permutation_importance(model, dataset, feature_names, n_samples=1000
     # Collect batch
     for idx in indices:
         # data is raw (N, D), slice sequence manually
-        x_seq = dataset[idx : idx+32] # SEQ_LEN is 32 globally
+        x_seq = dataset[idx : idx+SEQ_LEN] 
+        if len(x_seq) < SEQ_LEN:
+            # Pad or skip
+            continue
         batch_X.append(torch.tensor(x_seq, dtype=torch.float32))
         
-    X_base = torch.stack(batch_X).to(DEVICE) # (B, T, D)
-    
+    if not batch_X:
+        print("⚠️ Error: No sequences could be collected. Data too short?")
+        return {}
+        
     X_base = torch.stack(batch_X).to(DEVICE) # (B, T, D)
     
     # Baseline forward pass
