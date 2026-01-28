@@ -773,7 +773,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         x_seq = X_tensor[i-SEQ_LEN : i].unsqueeze(0) 
         
         # Extract ALL policy outputs for logging
-        # Policy head: [call_off, put_off, width, te, prob_profit, expected_roi, max_loss_pct, confidence]
+        # Policy head (10 outputs): [call_off, put_off, width, te, prob_profit, expected_roi, max_loss_pct, confidence, entry_logit, exit_logit]
         all_outputs = {
             'call_off': pol[0] if len(pol) > 0 else None,
             'put_off': pol[1] if len(pol) > 1 else None,
@@ -783,6 +783,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             'expected_roi': pol[5] if len(pol) > 5 else None,
             'max_loss_pct': pol[6] if len(pol) > 6 else None,
             'confidence': pol[7] if len(pol) > 7 else None,
+            'entry_logit': pol[8] if len(pol) > 8 else None,  # NEW: Explicit entry signal from model
+            'exit_logit': pol[9] if len(pol) > 9 else None,   # NEW: Explicit exit signal from model
         }
         
         def _sigmoid(v):
@@ -875,9 +877,28 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 entry_factors.append(f"MaxLoss MED ({max_loss_pct:.2f}) +5")
             else:
                 entry_factors.append(f"MaxLoss HIGH ({max_loss_pct:.2f}) +0")
-            
-            # Entry threshold: 40+ points (fuzzy, not all-or-nothing)
-            ENTRY_THRESHOLD = 40
+
+            # Factor 5: Model Entry Logit (0-20 points) - NEW: Use trained entry signal
+            entry_logit = all_outputs.get('entry_logit')
+            if entry_logit is not None:
+                entry_prob = 1.0 / (1.0 + np.exp(-entry_logit))  # sigmoid
+                if entry_prob > 0.7:
+                    entry_score += 20
+                    entry_factors.append(f"EntryLogit HIGH ({entry_prob:.2f}) +20")
+                elif entry_prob > 0.5:
+                    entry_score += 12
+                    entry_factors.append(f"EntryLogit MED ({entry_prob:.2f}) +12")
+                elif entry_prob > 0.3:
+                    entry_score += 5
+                    entry_factors.append(f"EntryLogit LOW ({entry_prob:.2f}) +5")
+                else:
+                    entry_factors.append(f"EntryLogit WEAK ({entry_prob:.2f}) +0")
+            else:
+                # Legacy 8-output model fallback
+                entry_factors.append("EntryLogit N/A (legacy model) +0")
+
+            # Entry threshold: 50+ points (adjusted for 5 factors, fuzzy, not all-or-nothing)
+            ENTRY_THRESHOLD = 50
             
             # Hard gates to avoid degenerate churn
             blocked = rule_block > 0
@@ -1096,8 +1117,11 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             entry_dte = open_trade.get('dte') if open_trade else trade_dte
             remaining_dte = entry_dte - days_held if entry_dte else 0
             
-            # Exit conditions: 1) Expiration, 2) Rule block/exit, 3) Low confidence, 4) Bearish rules
+            # Exit conditions: 1) Expiration, 2) Rule block/exit, 3) Model exit logit, 4) Low confidence, 5) Bearish rules
             exit_reason = None
+            exit_logit = all_outputs.get('exit_logit')
+            exit_prob = 1.0 / (1.0 + np.exp(-exit_logit)) if exit_logit is not None else 0.0  # sigmoid
+
             if remaining_dte <= 0:
                 exit_reason = f"EXPIRATION (DTE={remaining_dte:.1f})"
             elif bars_held < MIN_HOLD_BARS:
@@ -1106,9 +1130,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 exit_reason = "RULE_BLOCK"
             elif rule_exit > 0.5:
                 exit_reason = f"Rule Exit ({rule_exit:.2f})"
+            elif exit_logit is not None and exit_prob > 0.7:
+                # NEW: Model explicitly signals exit
+                exit_reason = f"Model Exit Signal ({exit_prob:.2f})"
             elif confidence < 0.3:
                 exit_reason = f"Low Confidence ({confidence:.4f})"
-            elif net_rule_signal < 0:
+            elif net_rule_signal < -0.3:
                 exit_reason = f"Bearish Rules ({net_rule_signal:.2f})"
             
             if exit_reason:
@@ -1348,10 +1375,14 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         
         # LOG: ALL bars to file, first N to console
         spot = df['close'].iloc[i]
+        entry_logit_val = all_outputs.get('entry_logit')
+        exit_logit_val = all_outputs.get('exit_logit')
+        entry_exit_str = f"{entry_logit_val:.3f} / {exit_logit_val:.3f}" if entry_logit_val is not None else "N/A (legacy)"
         log_lines = [
             f"\n--- Bar {i} | Spot: ${spot:.2f} | Position: {position} ---",
-            f"  Model Outputs: {pol[:8]}",
+            f"  Model Outputs (10): {pol[:10]}",
             f"  Confidence: {confidence:.4f} | Prob_Profit: {prob_profit:.4f}",
+            f"  Entry/Exit Logits: {entry_exit_str}",
             f"  Rule Signal: {net_rule_signal:.2f}",
         ]
         if action == 1:
@@ -1643,8 +1674,8 @@ def main():
     if args.rules_only:
         print("🛠️ RULES-ONLY MODE: Initializing Dummy CondorBrain...")
         n_layers, d_model, model_input_dim = 1, 32, len(feature_cols)
-        # Minimal dummy model for compatibility
-        model = CondorBrain(d_model=d_model, n_layers=n_layers, input_dim=model_input_dim).to(DEVICE)
+        # Minimal dummy model for compatibility (with CDE backbone)
+        model = CondorBrain(d_model=d_model, n_layers=n_layers, input_dim=model_input_dim, use_cde=True).to(DEVICE)
     else:
         print(f"Loading Model from {model_path}...")
         if not os.path.exists(model_path):
@@ -1678,10 +1709,11 @@ def main():
         
         print(f"Initializing CondorBrain: d_model={d_model}, n_layers={n_layers}, input_dim={model_input_dim}")
         
-        # V2.2 Model
+        # V2.2 Model with Neural CDE backbone
         model = CondorBrain(
             d_model=d_model, n_layers=n_layers,
             input_dim=model_input_dim,
+            use_cde=True,            # Explicit: Use Neural CDE backbone (default, but be explicit)
             use_vol_gated_attn=True, use_topk_moe=True, moe_n_experts=3, moe_k=1,
             use_diffusion=True,
             diffusion_steps=50,      # Match training
