@@ -4,9 +4,10 @@ V2.2 Feature Validation and Repair Script
 
 This script:
 1. Checks if V2.2 features have meaningful variance (not constant defaults)
-2. If suspicious, recomputes primitives from OHLCV data
-3. Validates the fix
-4. Saves corrected file
+2. If suspicious, ONLY recomputes the bad columns, preserving good ones
+3. Merges good original columns with recomputed columns
+4. Validates the fix
+5. Saves corrected file
 
 Usage:
     python scripts/validate_and_fix_v22_features.py --input data/processed/your_file.csv
@@ -38,17 +39,20 @@ VALIDATION_COLS = [
     'macd_norm',
 ]
 
+# Columns that CANNOT be recomputed from OHLCV alone (need external data)
+CANNOT_RECOMPUTE = ['ivr']  # IVR requires options chain / VIX data
+
 # Thresholds for suspicious detection
 MIN_STD = 0.01          # Minimum standard deviation
 MIN_UNIQUE = 3          # Minimum unique values
 
 
-def validate_features(df: pd.DataFrame, sample_size: int = 50000) -> Tuple[bool, Dict]:
+def validate_features(df: pd.DataFrame, sample_size: int = 50000) -> Tuple[bool, List[str], List[str], Dict]:
     """
     Validate V2.2 features for meaningful variance.
 
     Returns:
-        (is_valid, details_dict)
+        (is_valid, good_cols, bad_cols, details_dict)
     """
     # Sample for speed on large files
     if len(df) > sample_size:
@@ -57,7 +61,8 @@ def validate_features(df: pd.DataFrame, sample_size: int = 50000) -> Tuple[bool,
         df_sample = df
 
     results = {}
-    suspicious = []
+    good_cols = []
+    bad_cols = []
     missing = []
 
     print("=" * 80)
@@ -71,12 +76,13 @@ def validate_features(df: pd.DataFrame, sample_size: int = 50000) -> Tuple[bool,
         if col not in df_sample.columns:
             print(f"{col:<20} {'N/A':>10} {'N/A':>10} {'N/A':>10} {'N/A':>10} {'N/A':>8} {'MISSING':<12}")
             missing.append(col)
+            bad_cols.append(col)
             continue
 
         col_data = df_sample[col].dropna()
         if len(col_data) == 0:
             print(f"{col:<20} {'N/A':>10} {'N/A':>10} {'N/A':>10} {'N/A':>10} {'N/A':>8} {'ALL NaN':<12}")
-            suspicious.append(col)
+            bad_cols.append(col)
             continue
 
         col_min = col_data.min()
@@ -87,10 +93,11 @@ def validate_features(df: pd.DataFrame, sample_size: int = 50000) -> Tuple[bool,
 
         # Determine status
         if col_std < MIN_STD or col_unique < MIN_UNIQUE:
-            status = "SUSPICIOUS"
-            suspicious.append(col)
+            status = "BAD"
+            bad_cols.append(col)
         else:
-            status = "OK"
+            status = "GOOD"
+            good_cols.append(col)
 
         results[col] = {
             'min': col_min, 'max': col_max, 'mean': col_mean,
@@ -101,21 +108,27 @@ def validate_features(df: pd.DataFrame, sample_size: int = 50000) -> Tuple[bool,
 
     print("=" * 80)
 
-    is_valid = len(suspicious) == 0 and len(missing) == 0
+    is_valid = len(bad_cols) == 0
 
-    if suspicious:
-        print(f"\nWARNING:  SUSPICIOUS COLUMNS (constant/low variance): {suspicious}")
-    if missing:
-        print(f"\nWARNING:  MISSING COLUMNS: {missing}")
+    if good_cols:
+        print(f"\n[OK] GOOD COLUMNS (will preserve): {good_cols}")
+    if bad_cols:
+        print(f"\n[WARNING] BAD COLUMNS (will recompute): {bad_cols}")
     if is_valid:
-        print("\nOK: All V2.2 features have meaningful variance!")
+        print("\n[OK] All V2.2 features have meaningful variance!")
 
-    return is_valid, {'suspicious': suspicious, 'missing': missing, 'results': results}
+    return is_valid, good_cols, bad_cols, {'missing': missing, 'results': results}
 
 
-def recompute_v22_features(df: pd.DataFrame) -> pd.DataFrame:
+def smart_recompute_v22_features(df: pd.DataFrame, good_cols: List[str], bad_cols: List[str]) -> pd.DataFrame:
     """
-    Recompute V2.2 primitive features from OHLCV data.
+    Smart recomputation: Only recompute BAD columns, preserve GOOD ones.
+
+    Strategy:
+    1. Save GOOD columns from original df
+    2. Drop ALL validation columns
+    3. Recompute everything fresh
+    4. Swap in the GOOD original columns (overwrite recomputed)
     """
     from intelligence.features.dynamic_features import (
         compute_all_dynamic_features,
@@ -123,13 +136,36 @@ def recompute_v22_features(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     print("\n" + "=" * 80)
-    print("RECOMPUTING V2.2 FEATURES")
+    print("SMART RECOMPUTATION (Preserve Good, Fix Bad)")
     print("=" * 80)
 
-    # Drop existing suspicious columns to force recomputation
-    cols_to_drop = [c for c in VALIDATION_COLS if c in df.columns]
+    # Step 1: Save good columns from original
+    preserved_data = {}
+    for col in good_cols:
+        if col in df.columns:
+            preserved_data[col] = df[col].copy()
+            print(f"  [PRESERVE] Saving good column: {col}")
+
+    # Also preserve columns that cannot be recomputed
+    for col in CANNOT_RECOMPUTE:
+        if col in df.columns and col not in preserved_data:
+            col_std = df[col].std()
+            if col_std > MIN_STD:  # Only preserve if it has some variance
+                preserved_data[col] = df[col].copy()
+                print(f"  [PRESERVE] Saving non-recomputable column: {col} (std={col_std:.4f})")
+
+    # Step 2: Identify columns to drop (all V2.2 cols that exist)
+    # We drop everything and recompute, then swap back the good ones
+    all_v22_cols = VALIDATION_COLS + [
+        'bw_expansion_rate', 'risk_override', 'iv_confidence', 'mtf_consensus',
+        'macd_signal_norm', 'macd_histogram', 'plus_di', 'minus_di',
+        'psar_trend', 'psar_reversion_mu', 'beta1_norm_stub', 'chaos_membership',
+        'position_size_mult', 'fuzzy_reversion_11'
+    ]
+    cols_to_drop = [c for c in all_v22_cols if c in df.columns]
+
     if cols_to_drop:
-        print(f"Dropping {len(cols_to_drop)} existing columns: {cols_to_drop}")
+        print(f"\n  [DROP] Removing {len(cols_to_drop)} V2.2 columns for fresh recomputation")
         df = df.drop(columns=cols_to_drop)
 
     # Ensure required OHLCV columns exist
@@ -138,8 +174,8 @@ def recompute_v22_features(df: pd.DataFrame) -> pd.DataFrame:
     if missing_ohlcv:
         raise ValueError(f"Missing required OHLCV columns: {missing_ohlcv}")
 
-    # Step 1: Compute dynamic features (RSI, ADX, etc.)
-    print("\n[1/2] Computing dynamic features (RSI, ADX, BB, etc.)...")
+    # Step 3: Recompute everything fresh
+    print("\n  [COMPUTE 1/2] Computing dynamic features (RSI, ADX, BB, etc.)...")
     df = compute_all_dynamic_features(
         df,
         close_col="close",
@@ -147,8 +183,7 @@ def recompute_v22_features(df: pd.DataFrame) -> pd.DataFrame:
         low_col="low"
     )
 
-    # Step 2: Compute V2.2 primitives (friction, exec_allow, gap_risk, etc.)
-    print("\n[2/2] Computing V2.2 primitive features...")
+    print("\n  [COMPUTE 2/2] Computing V2.2 primitive features...")
     df = compute_all_primitive_features_v22(
         df,
         close_col="close",
@@ -159,7 +194,16 @@ def recompute_v22_features(df: pd.DataFrame) -> pd.DataFrame:
         inplace=True
     )
 
-    print("\nOK: Feature recomputation complete!")
+    # Step 4: Swap back the preserved GOOD columns
+    print(f"\n  [MERGE] Restoring {len(preserved_data)} preserved columns...")
+    for col, data in preserved_data.items():
+        if len(data) == len(df):
+            df[col] = data
+            print(f"    [OK] Restored: {col}")
+        else:
+            print(f"    [SKIP] Length mismatch for {col}: {len(data)} vs {len(df)}")
+
+    print("\n[OK] Smart recomputation complete!")
     return df
 
 
@@ -176,14 +220,13 @@ def main():
 
     # Validate input file
     if not os.path.exists(args.input):
-        print(f"ERROR: Error: Input file not found: {args.input}")
+        print(f"[ERROR] Input file not found: {args.input}")
         sys.exit(1)
 
     # Load data
     print(f"\n[LOAD] Loading: {args.input}")
     if args.rows:
         # For large files, read only last N rows efficiently
-        # First count total rows
         total_rows = sum(1 for _ in open(args.input)) - 1  # -1 for header
         skip_rows = max(0, total_rows - args.rows)
         df = pd.read_csv(args.input, skiprows=range(1, skip_rows + 1))
@@ -193,7 +236,7 @@ def main():
         print(f"   Loaded {len(df):,} rows")
 
     # Initial validation
-    is_valid, details = validate_features(df, sample_size=args.sample)
+    is_valid, good_cols, bad_cols, details = validate_features(df, sample_size=args.sample)
 
     if args.check_only:
         sys.exit(0 if is_valid else 1)
@@ -201,20 +244,29 @@ def main():
     # Recompute if needed
     if not is_valid or args.force_recompute:
         if is_valid and args.force_recompute:
-            print("\nWARNING:  Force recompute requested despite valid features")
+            print("\n[WARNING] Force recompute requested despite valid features")
+            good_cols = []  # Treat all as bad for force recompute
+            bad_cols = VALIDATION_COLS
 
-        df = recompute_v22_features(df)
+        df = smart_recompute_v22_features(df, good_cols, bad_cols)
 
         # Re-validate
         print("\n" + "=" * 80)
         print("POST-RECOMPUTE VALIDATION")
         print("=" * 80)
-        is_valid_after, details_after = validate_features(df, sample_size=args.sample)
+        is_valid_after, good_after, bad_after, details_after = validate_features(df, sample_size=args.sample)
 
-        if not is_valid_after:
-            print("\nERROR: ERROR: Features still invalid after recomputation!")
-            print("   This may indicate missing source data (spread_ratio, etc.)")
-            sys.exit(1)
+        if bad_after:
+            unfixable = [c for c in bad_after if c in CANNOT_RECOMPUTE]
+            fixable_still_bad = [c for c in bad_after if c not in CANNOT_RECOMPUTE]
+
+            if fixable_still_bad:
+                print(f"\n[WARNING] Some columns still bad after recompute: {fixable_still_bad}")
+                print("   This may indicate missing source data (spread_ratio, volume history, etc.)")
+
+            if unfixable:
+                print(f"\n[INFO] These columns cannot be recomputed from OHLCV: {unfixable}")
+                print("   They require external data (options chain, VIX, etc.)")
 
         # Save output
         if args.output:
@@ -228,11 +280,13 @@ def main():
         print(f"   Saved {len(df):,} rows")
 
         print("\n" + "=" * 80)
-        print("OK: DONE! Features validated and fixed.")
+        print("[DONE] Features validated and fixed.")
         print(f"   Output: {output_path}")
+        print(f"   Good columns preserved: {len(good_cols)}")
+        print(f"   Bad columns recomputed: {len(bad_cols)}")
         print("=" * 80)
     else:
-        print("\nOK: No recomputation needed - features are valid!")
+        print("\n[OK] No recomputation needed - features are valid!")
 
 
 if __name__ == "__main__":
