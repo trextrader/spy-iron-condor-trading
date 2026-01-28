@@ -84,9 +84,14 @@ def robust_zscore_transform(X: np.ndarray, med: np.ndarray, scale: np.ndarray, c
     return X.astype(np.float32)
 
 def clamp_targets(y: np.ndarray) -> np.ndarray:
-    """Clamp targets to reasonable ranges to prevent BF16 overflow."""
+    """Clamp targets to reasonable ranges to prevent BF16 overflow.
+
+    Target ordering (10 heads):
+        [0] call_offset, [1] put_offset, [2] wing_width, [3] dte,
+        [4] pop, [5] roi, [6] max_loss, [7] confidence,
+        [8] entry_logit, [9] exit_logit
+    """
     y = safe_nan_to_num(y)
-    # Target ordering: call_offset, put_offset, wing_width, dte, pop, roi, max_loss, confidence
     y[:, 0] = np.clip(y[:, 0], -100.0, 100.0)  # call offset
     y[:, 1] = np.clip(y[:, 1], -100.0, 100.0)  # put offset
     y[:, 2] = np.clip(y[:, 2], 0.5, 50.0)       # wing width
@@ -95,6 +100,10 @@ def clamp_targets(y: np.ndarray) -> np.ndarray:
     y[:, 5] = np.clip(y[:, 5], -5.0, 5.0)       # expected roi
     y[:, 6] = np.clip(y[:, 6], 0.0, 5.0)        # max loss
     y[:, 7] = np.clip(y[:, 7], 0.0, 1.0)        # confidence
+    # FIX: Add entry/exit logit clamping (indices 8-9) to prevent BF16 overflow
+    if y.shape[1] >= 10:
+        y[:, 8] = np.clip(y[:, 8], -5.0, 5.0)  # entry_logit
+        y[:, 9] = np.clip(y[:, 9], -5.0, 5.0)  # exit_logit
     return y.astype(np.float32)
 
 def debug_tensor_stats(name: str, X: np.ndarray):
@@ -297,42 +306,32 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     print("[CondorBrain] Robust-normalizing features (median/MAD)...")
     med, scale = robust_zscore_fit(X)
     X = robust_zscore_transform(X, med, scale, clip_val=10.0)
-    
+
+    # FIX #4: LEAKAGE PROTECTION - Zero out forward-looking columns
+    # target_spot and max_dd_60m contain future information that would cause data leakage
+    leakage_cols = ['target_spot', 'max_dd_60m']
+    for col_name in leakage_cols:
+        if col_name in FEATURE_COLS:
+            col_idx = FEATURE_COLS.index(col_name)
+            X[:, col_idx] = 0.0
+            print(f"[LEAKAGE] Masked column '{col_name}' (index {col_idx}) to 0.0")
+
     # Debug output
     debug_tensor_stats("X_scaled", X)
     debug_tensor_stats("y_clamped", y)
     
-    return X, y, regime, med, scale
-    
-    # Sanity check: confirm dtypes and ranges
-    
-    # 2026-01-26: Explicitly CLAMP targets to safe range (prevent FP16/BF16 instability)
-    y = np.nan_to_num(y, nan=0.0, posinf=10.0, neginf=-10.0)
-    y[:, 0] = np.clip(y[:, 0], -100.0, 100.0) # offset
-    y[:, 1] = np.clip(y[:, 1], -100.0, 100.0) # offset
-    y[:, 2] = np.clip(y[:, 2], 0.5, 50.0)     # width
-    y[:, 3] = np.clip(y[:, 3], 0.0, 120.0)    # dte
-    y[:, 4] = np.clip(y[:, 4], 0.0, 1.0)      # profitable
-    y[:, 5] = np.clip(y[:, 5], -5.0, 5.0)     # roi
-    y[:, 6] = np.clip(y[:, 6], 0.0, 5.0)      # max loss
-    y[:, 7] = np.clip(y[:, 7], 0.0, 1.0)      # confidence
-    
-    # NEW (targets[8], targets[9]) = entry/exit logits
-    if y.shape[1] > 8:
-        y[:, 8] = np.clip(y[:, 8], -5.0, 5.0)
-        y[:, 9] = np.clip(y[:, 9], -5.0, 5.0)
-
+    # Final sanity checks (moved BEFORE return to ensure execution)
     print(f"[SANITY] X dtype: {X.dtype}, min/max: {X.min():.4f}/{X.max():.4f}")
     print(f"[SANITY] y dtype: {y.dtype}, min/max: {y.min():.4f}/{y.max():.4f}")
-    
+
     # Verify clean
     if np.isnan(X).any() or np.isinf(X).any():
         raise RuntimeError("[CRITICAL ERROR] X still contains NaN/Inf after sanitization!")
     if np.isnan(y).any() or np.isinf(y).any():
         raise RuntimeError("[CRITICAL ERROR] y still contains NaN/Inf after sanitization!")
-    
-    print(f"[CondorBrain] Features: {X.shape}, Targets: {y.shape}")
-    return X, y, regime
+
+    print(f"[CondorBrain] Features: {X.shape}, Targets: {y.shape} (10 heads)")
+    return X, y, regime, med, scale
 
 
 
@@ -494,31 +493,55 @@ def parse_args():
 
 def train_condor_brain(args):
     """Training with proven in-memory pattern."""
-    
-    if not HAS_MAMBA:
-        print("[Error] mamba-ssm not available.")
-        return
-    
+
+    # FIX: CDE-aware backbone availability check
+    if args.cde:
+        if not HAS_CDE:
+            print("[Error] Neural CDE not available. Check intelligence/models/neural_cde.py")
+            return
+        print("[CondorBrain] Using Neural CDE backbone (continuous-time dynamics)")
+    else:
+        # Legacy Mamba path (requires mamba-ssm)
+        try:
+            from mamba_ssm import Mamba
+            HAS_MAMBA = True
+        except ImportError:
+            HAS_MAMBA = False
+        if not HAS_MAMBA:
+            print("[Error] mamba-ssm not available and --no-cde was specified.")
+            return
+        print("[CondorBrain] Using Mamba-2 backbone (legacy mode)")
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"[CondorBrain] Device: {device}")
-    
-    # Probe kernel availability early (your throughput depends on this)
+
+    # Probe kernel availability (only relevant info for current backend)
     kinfo = probe_fast_kernels()
-    print(f"[CondorBrain] Kernel probe: "
-          f"selective_scan_cuda={'YES' if kinfo['mamba_selective_scan_cuda'] else 'NO'}, "
-          f"causal_conv1d={'YES' if kinfo['causal_conv1d'] else 'NO'}")
+    print(f"[CondorBrain] CUDA available: {kinfo['cuda_available']}, BF16 supported: {kinfo['bf16_supported']}")
     
-    if args.require_fused_kernels:
+    # FIX: Only check fused kernels for non-CDE (Mamba) mode
+    if args.require_fused_kernels and not args.cde:
+        try:
+            import mamba_ssm.ops.selective_scan_interface
+            has_selective_scan = True
+        except ImportError:
+            has_selective_scan = False
+        try:
+            import causal_conv1d
+            has_causal_conv1d = True
+        except ImportError:
+            has_causal_conv1d = False
+
         missing = []
-        if not kinfo["mamba_selective_scan_cuda"]:
+        if not has_selective_scan:
             missing.append("mamba_ssm selective_scan_cuda")
-        if not kinfo["causal_conv1d"]:
+        if not has_causal_conv1d:
             missing.append("causal_conv1d")
         if missing:
             raise RuntimeError(
-                "[CRITICAL] Missing fused CUDA kernels: "
+                "[CRITICAL] Missing fused CUDA kernels for Mamba: "
                 + ", ".join(missing)
-                + ". Install/compile these or throughput will be severely limited."
+                + ". Install/compile these or use --cde for Neural CDE backend."
             )
     
     # Detect GPU capabilities
@@ -1352,6 +1375,7 @@ def train_condor_brain(args):
                     "moe_k": int(args.moe_k),
                     "use_diffusion": bool(args.diffusion),
                     "diffusion_steps": int(args.diffusion_steps),
+                    "use_cde": bool(args.cde),  # FIX: Record CDE backbone flag
                 },
                 "training_config": {
                     "epochs": int(args.epochs),
@@ -1396,6 +1420,7 @@ def train_condor_brain(args):
                 "n_layers": int(args.layers),
                 "use_diffusion": bool(args.diffusion),
                 "diffusion_steps": int(args.diffusion_steps),
+                "use_cde": bool(args.cde),  # FIX: Record CDE backbone flag
             },
             "training_config": {
                 "epochs": int(args.epochs),
