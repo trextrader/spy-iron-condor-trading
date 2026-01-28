@@ -168,11 +168,31 @@ def load_data_and_features(data_path, rows=None):
     
     # Compute missing V2.2 features (dynamic + primitives) on unique spot bars, then merge back.
     missing_v22 = [c for c in FEATURE_COLS_V22 if c not in df.columns]
+
+    # SMART CHECK: Also detect if existing V2.2 columns have suspicious constant values
+    # These key features should have variance if properly computed
+    validation_cols = ['exec_allow', 'friction_ratio', 'gap_risk_score', 'rsi_dyn', 'adx_adaptive']
+    suspicious_cols = []
+    for col in validation_cols:
+        if col in df.columns:
+            col_std = df[col].std()
+            col_unique = df[col].nunique()
+            if col_std < 0.001 or col_unique <= 2:
+                suspicious_cols.append(f"{col}(std={col_std:.4f}, unique={col_unique})")
+
+    if suspicious_cols and not missing_v22:
+        print(f"⚠️ V2.2 columns exist but have SUSPICIOUS constant values:")
+        for s in suspicious_cols:
+            print(f"   - {s}")
+        print(f"   FORCING RECOMPUTATION of primitives...")
+        # Force recomputation by pretending these are missing
+        missing_v22 = validation_cols
+
     if not missing_v22:
-        print("✅ V2.2 Features already present. Skipping dynamic/primitive computation.")
+        print("✅ V2.2 Features already present with valid variance. Skipping computation.")
         return df
 
-    print(f"⚠️ Missing {len(missing_v22)} V2.2 features; computing on spot bars...")
+    print(f"⚠️ Missing/Invalid {len(missing_v22)} V2.2 features; computing on spot bars...")
 
     # Determine datetime column for spot keying
     dt_col = None
