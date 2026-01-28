@@ -104,11 +104,11 @@ def validate_features(df: pd.DataFrame, sample_size: int = 50000) -> Tuple[bool,
     is_valid = len(suspicious) == 0 and len(missing) == 0
 
     if suspicious:
-        print(f"\n⚠️  SUSPICIOUS COLUMNS (constant/low variance): {suspicious}")
+        print(f"\nWARNING:  SUSPICIOUS COLUMNS (constant/low variance): {suspicious}")
     if missing:
-        print(f"\n⚠️  MISSING COLUMNS: {missing}")
+        print(f"\nWARNING:  MISSING COLUMNS: {missing}")
     if is_valid:
-        print("\n✅ All V2.2 features have meaningful variance!")
+        print("\nOK: All V2.2 features have meaningful variance!")
 
     return is_valid, {'suspicious': suspicious, 'missing': missing, 'results': results}
 
@@ -159,7 +159,7 @@ def recompute_v22_features(df: pd.DataFrame) -> pd.DataFrame:
         inplace=True
     )
 
-    print("\n✅ Feature recomputation complete!")
+    print("\nOK: Feature recomputation complete!")
     return df
 
 
@@ -176,11 +176,11 @@ def main():
 
     # Validate input file
     if not os.path.exists(args.input):
-        print(f"❌ Error: Input file not found: {args.input}")
+        print(f"ERROR: Error: Input file not found: {args.input}")
         sys.exit(1)
 
     # Load data
-    print(f"\n📂 Loading: {args.input}")
+    print(f"\n[LOAD] Loading: {args.input}")
     if args.rows:
         # For large files, read only last N rows efficiently
         # First count total rows
@@ -201,7 +201,7 @@ def main():
     # Recompute if needed
     if not is_valid or args.force_recompute:
         if is_valid and args.force_recompute:
-            print("\n⚠️  Force recompute requested despite valid features")
+            print("\nWARNING:  Force recompute requested despite valid features")
 
         df = recompute_v22_features(df)
 
@@ -212,7 +212,7 @@ def main():
         is_valid_after, details_after = validate_features(df, sample_size=args.sample)
 
         if not is_valid_after:
-            print("\n❌ ERROR: Features still invalid after recomputation!")
+            print("\nERROR: ERROR: Features still invalid after recomputation!")
             print("   This may indicate missing source data (spread_ratio, etc.)")
             sys.exit(1)
 
@@ -223,16 +223,16 @@ def main():
             base, ext = os.path.splitext(args.input)
             output_path = f"{base}_v22fixed{ext}"
 
-        print(f"\n💾 Saving to: {output_path}")
+        print(f"\n[SAVE] Saving to: {output_path}")
         df.to_csv(output_path, index=False)
         print(f"   Saved {len(df):,} rows")
 
         print("\n" + "=" * 80)
-        print("✅ DONE! Features validated and fixed.")
+        print("OK: DONE! Features validated and fixed.")
         print(f"   Output: {output_path}")
         print("=" * 80)
     else:
-        print("\n✅ No recomputation needed - features are valid!")
+        print("\nOK: No recomputation needed - features are valid!")
 
 
 if __name__ == "__main__":
