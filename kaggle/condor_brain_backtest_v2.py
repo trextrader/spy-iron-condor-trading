@@ -108,9 +108,15 @@ ENTRY_BETA_R = 0.25
 EXIT_EVAL_HOLD_BARS = 30
 EXIT_RISK_LAMBDA = 0.5
 SIZING_RISK_LAMBDA = 0.5
-CONF_ENTRY_MIN = 0.4
-PROB_ENTRY_MIN = 0.45
+CONF_ENTRY_MIN = 0.35      # Lowered from 0.4 - model outputs ~0.5-0.65
+PROB_ENTRY_MIN = 0.40      # Lowered from 0.45 - main blocker for entries
 MIN_HOLD_BARS = 30
+
+# === DEBUG INFERENCE FLAGS ===
+DEBUG_INFERENCE = True      # Set to True to see detailed feature/model output analysis
+DEBUG_SAMPLE_EVERY = 500    # Print debug info every N bars (reduce noise)
+DEBUG_FIRST_N = 20          # Always print first N bars for initial analysis
+DEBUG_LOG_FILE = "debug_inference.log"  # Output file for debug logs
 MIN_BARS_BETWEEN_TRADES = 5
 
 def _sha256_file(path):
@@ -759,6 +765,31 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     all_policy_outputs = np.concatenate(all_policy_outputs, axis=0)
     print(f"✅ Pre-computation complete. Starting simulation loop...")
 
+    # === DEBUG: Open log file and create helper ===
+    debug_log = None
+    if DEBUG_INFERENCE:
+        debug_log = open(DEBUG_LOG_FILE, 'w', encoding='utf-8')
+        debug_log.write(f"DEBUG INFERENCE LOG - {pd.Timestamp.now()}\n")
+        debug_log.write(f"Model: {model_path}\n")
+        debug_log.write(f"Data rows: {len(df)}\n")
+        debug_log.write("=" * 80 + "\n\n")
+        print(f"📝 Debug output will be written to: {DEBUG_LOG_FILE}")
+
+    def debug_print(msg):
+        """Print to console and write to debug log file."""
+        print(msg)
+        if debug_log:
+            debug_log.write(msg + "\n")
+
+    # === DEBUG: Feature statistics collection ===
+    if DEBUG_INFERENCE:
+        debug_stats = {
+            'prob_profit': [], 'confidence': [], 'entry_prob': [], 'exit_prob': [],
+            'ivr': [], 'rsi': [], 'adx': [], 'friction_ratio': [], 'exec_allow': [], 'gap_risk': [],
+            'gate_reasons': {},  # Count of each gate reason
+            'total_bars': 0, 'bars_with_position_0': 0, 'bars_blocked': 0
+        }
+
     # Start from SEQ_LEN
     for i in tqdm(range(SEQ_LEN, num_bars - 1), desc="Simulating"):
         # 1. State
@@ -797,7 +828,92 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             prob_profit = float(_sigmoid(prob_profit))
         if confidence < 0.0 or confidence > 1.0:
             confidence = float(_sigmoid(confidence))
-        
+
+        # === DEBUG INFERENCE OUTPUT ===
+        if DEBUG_INFERENCE and (i < SEQ_LEN + DEBUG_FIRST_N or (i - SEQ_LEN) % DEBUG_SAMPLE_EVERY == 0):
+            # Extract key features that influence entry decisions (training targets)
+            bar_idx = i
+
+            # Key features from V2.2 schema that drive entry_target in training
+            ivr_val = float(df['ivr'].iloc[i]) if 'ivr' in df.columns else None
+            rsi_val = float(df['rsi_dyn'].iloc[i]) if 'rsi_dyn' in df.columns else (float(df['rsi'].iloc[i]) if 'rsi' in df.columns else None)
+            adx_val = float(df['adx_adaptive'].iloc[i]) if 'adx_adaptive' in df.columns else (float(df['adx'].iloc[i]) if 'adx' in df.columns else None)
+            friction_val = float(df['friction_ratio'].iloc[i]) if 'friction_ratio' in df.columns else None
+            exec_allow_val = float(df['exec_allow'].iloc[i]) if 'exec_allow' in df.columns else None
+            gap_risk_val = float(df['gap_risk_score'].iloc[i]) if 'gap_risk_score' in df.columns else None
+
+            # Model outputs
+            entry_logit = all_outputs.get('entry_logit')
+            exit_logit = all_outputs.get('exit_logit')
+            entry_prob = _sigmoid(entry_logit) if entry_logit is not None else None
+            exit_prob = _sigmoid(exit_logit) if exit_logit is not None else None
+
+            # Calculate what training would have produced for entry_target
+            # (Based on train_condor_brain.py:243-255)
+            expected_entry_score = 0.0
+            score_breakdown = []
+            if rsi_val is not None:
+                rsi_neutral = 40 < rsi_val < 60
+                expected_entry_score += 1.0 if rsi_neutral else -0.5
+                score_breakdown.append(f"RSI({'NEUTRAL' if rsi_neutral else 'EXTREME'}): {1.0 if rsi_neutral else -0.5:+.1f}")
+            if ivr_val is not None:
+                ivr_ok = ivr_val > 30 if ivr_val <= 1.5 else ivr_val > 30  # Handle 0-1 vs 0-100 scale
+                expected_entry_score += 0.5 if ivr_ok else -0.5
+                score_breakdown.append(f"IVR({ivr_val:.1f}): {0.5 if ivr_ok else -0.5:+.1f}")
+            if adx_val is not None:
+                adx_low = adx_val < 30
+                expected_entry_score += 0.5 if adx_low else -0.3
+                score_breakdown.append(f"ADX({adx_val:.1f}): {0.5 if adx_low else -0.3:+.1f}")
+            if exec_allow_val is not None:
+                exec_ok = exec_allow_val > 0.5
+                expected_entry_score += 0.5 if exec_ok else -2.0
+                score_breakdown.append(f"EXEC({exec_allow_val:.1f}): {0.5 if exec_ok else -2.0:+.1f}")
+            if friction_val is not None:
+                friction_ok = friction_val < 1.0
+                expected_entry_score += 0.3 if friction_ok else -1.0
+                score_breakdown.append(f"FRICTION({friction_val:.2f}): {0.3 if friction_ok else -1.0:+.1f}")
+            if gap_risk_val is not None:
+                gap_ok = gap_risk_val < 0.8
+                expected_entry_score += 0.2 if gap_ok else -1.5
+                score_breakdown.append(f"GAP({gap_risk_val:.2f}): {0.2 if gap_ok else -1.5:+.1f}")
+
+            expected_entry_prob = _sigmoid(expected_entry_score)
+
+            debug_print(f"\n{'='*80}")
+            debug_print(f"[DEBUG BAR {bar_idx}] INFERENCE ANALYSIS (Position={position})")
+            debug_print(f"{'='*80}")
+            debug_print(f"  KEY INPUT FEATURES (from data):")
+            debug_print(f"     IVR:            {ivr_val if ivr_val is not None else 'N/A':>10}")
+            debug_print(f"     RSI:            {rsi_val if rsi_val is not None else 'N/A':>10}")
+            debug_print(f"     ADX:            {adx_val if adx_val is not None else 'N/A':>10}")
+            debug_print(f"     friction_ratio: {friction_val if friction_val is not None else 'N/A':>10}")
+            debug_print(f"     exec_allow:     {exec_allow_val if exec_allow_val is not None else 'N/A':>10}")
+            debug_print(f"     gap_risk_score: {gap_risk_val if gap_risk_val is not None else 'N/A':>10}")
+            debug_print(f"")
+            debug_print(f"  MODEL OUTPUTS:")
+            debug_print(f"     prob_profit:    {prob_profit:>10.4f}  (threshold: {PROB_ENTRY_MIN})")
+            debug_print(f"     confidence:     {confidence:>10.4f}  (threshold: {CONF_ENTRY_MIN})")
+            debug_print(f"     entry_logit:    {entry_logit if entry_logit is not None else 'N/A':>10}")
+            debug_print(f"     entry_prob:     {entry_prob if entry_prob is not None else 'N/A':>10.4f}" if entry_prob else f"     entry_prob:     {'N/A':>10}")
+            debug_print(f"     exit_logit:     {exit_logit if exit_logit is not None else 'N/A':>10}")
+            debug_print(f"")
+            debug_print(f"  EXPECTED ENTRY SCORE (based on training formula):")
+            for s in score_breakdown:
+                debug_print(f"     {s}")
+            debug_print(f"     ─────────────────────────────")
+            debug_print(f"     TOTAL LOGIT:    {expected_entry_score:>10.2f}")
+            debug_print(f"     EXPECTED PROB:  {expected_entry_prob:>10.4f}")
+            debug_print(f"")
+            debug_print(f"  COMPARISON:")
+            if entry_prob is not None:
+                diff = entry_prob - expected_entry_prob
+                debug_print(f"     Model entry_prob:    {entry_prob:.4f}")
+                debug_print(f"     Expected entry_prob: {expected_entry_prob:.4f}")
+                debug_print(f"     Difference:          {diff:+.4f} ({'Model MORE aggressive' if diff > 0 else 'Model MORE conservative'})")
+            else:
+                debug_print(f"     Model entry_prob:    N/A (legacy 8-output model?)")
+            debug_print(f"{'='*80}\n")
+
         # 3. Rule Signal Check
         net_rule_signal = 0.0
         rule_long = float(df["rule_long_consensus"].iloc[i]) if "rule_long_consensus" in df.columns else 0.0
@@ -839,13 +955,14 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 entry_factors.append(f"Confidence WEAK ({confidence:.2f}) +0")
             
             # Factor 2: Probability of Profit (0-30 points)
-            if prob_profit > 0.6:
+            # Thresholds calibrated: model outputs prob_profit ~0.40-0.55 typically
+            if prob_profit > 0.55:         # Lowered from 0.6
                 entry_score += 30
                 entry_factors.append(f"ProbProfit HIGH ({prob_profit:.2f}) +30")
             elif prob_profit > 0.45:
                 entry_score += 20
                 entry_factors.append(f"ProbProfit MED ({prob_profit:.2f}) +20")
-            elif prob_profit > 0.3:
+            elif prob_profit > 0.38:       # Lowered from 0.3 to catch more signals
                 entry_score += 10
                 entry_factors.append(f"ProbProfit LOW ({prob_profit:.2f}) +10")
             else:
@@ -879,16 +996,17 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 entry_factors.append(f"MaxLoss HIGH ({max_loss_pct:.2f}) +0")
 
             # Factor 5: Model Entry Logit (0-20 points) - NEW: Use trained entry signal
+            # Thresholds calibrated to model's actual output distribution (centered ~0.5)
             entry_logit = all_outputs.get('entry_logit')
             if entry_logit is not None:
                 entry_prob = 1.0 / (1.0 + np.exp(-entry_logit))  # sigmoid
-                if entry_prob > 0.7:
+                if entry_prob > 0.55:      # Lowered from 0.7 - model rarely exceeds 0.6
                     entry_score += 20
                     entry_factors.append(f"EntryLogit HIGH ({entry_prob:.2f}) +20")
-                elif entry_prob > 0.5:
+                elif entry_prob > 0.48:    # Lowered from 0.5 - captures model's "positive" signals
                     entry_score += 12
                     entry_factors.append(f"EntryLogit MED ({entry_prob:.2f}) +12")
-                elif entry_prob > 0.3:
+                elif entry_prob > 0.40:    # Lowered from 0.3
                     entry_score += 5
                     entry_factors.append(f"EntryLogit LOW ({entry_prob:.2f}) +5")
                 else:
@@ -897,8 +1015,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 # Legacy 8-output model fallback
                 entry_factors.append("EntryLogit N/A (legacy model) +0")
 
-            # Entry threshold: 50+ points (adjusted for 5 factors, fuzzy, not all-or-nothing)
-            ENTRY_THRESHOLD = 50
+            # Entry threshold: 40+ points (calibrated to model's conservative output distribution)
+            # Original 50 was too strict given model outputs confidence ~0.5-0.65, prob ~0.4-0.55
+            ENTRY_THRESHOLD = 40
             
             # Hard gates to avoid degenerate churn
             blocked = rule_block > 0
@@ -914,6 +1033,43 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 gate_reasons.append("RULE_BLOCK")
             if recent_exit:
                 gate_reasons.append("RECENT_EXIT")
+
+            # === DEBUG: Collect statistics for summary ===
+            if DEBUG_INFERENCE:
+                debug_stats['total_bars'] += 1
+                debug_stats['bars_with_position_0'] += 1
+                debug_stats['prob_profit'].append(prob_profit)
+                debug_stats['confidence'].append(confidence)
+                entry_logit_val = all_outputs.get('entry_logit')
+                if entry_logit_val is not None:
+                    debug_stats['entry_prob'].append(_sigmoid(entry_logit_val))
+                exit_logit_val = all_outputs.get('exit_logit')
+                if exit_logit_val is not None:
+                    debug_stats['exit_prob'].append(_sigmoid(exit_logit_val))
+                # Collect feature values
+                if 'ivr' in df.columns:
+                    debug_stats['ivr'].append(float(df['ivr'].iloc[i]))
+                if 'rsi_dyn' in df.columns:
+                    debug_stats['rsi'].append(float(df['rsi_dyn'].iloc[i]))
+                elif 'rsi' in df.columns:
+                    debug_stats['rsi'].append(float(df['rsi'].iloc[i]))
+                if 'adx_adaptive' in df.columns:
+                    debug_stats['adx'].append(float(df['adx_adaptive'].iloc[i]))
+                elif 'adx' in df.columns:
+                    debug_stats['adx'].append(float(df['adx'].iloc[i]))
+                if 'friction_ratio' in df.columns:
+                    debug_stats['friction_ratio'].append(float(df['friction_ratio'].iloc[i]))
+                if 'exec_allow' in df.columns:
+                    debug_stats['exec_allow'].append(float(df['exec_allow'].iloc[i]))
+                if 'gap_risk_score' in df.columns:
+                    debug_stats['gap_risk'].append(float(df['gap_risk_score'].iloc[i]))
+                # Count gate reasons
+                if gate_reasons:
+                    debug_stats['bars_blocked'] += 1
+                    for reason in gate_reasons:
+                        # Extract reason type (before the parenthesis)
+                        reason_type = reason.split('(')[0].strip()
+                        debug_stats['gate_reasons'][reason_type] = debug_stats['gate_reasons'].get(reason_type, 0) + 1
 
             if not gate_reasons:
                 action = 1
@@ -1130,8 +1286,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                 exit_reason = "RULE_BLOCK"
             elif rule_exit > 0.5:
                 exit_reason = f"Rule Exit ({rule_exit:.2f})"
-            elif exit_logit is not None and exit_prob > 0.7:
-                # NEW: Model explicitly signals exit
+            elif exit_logit is not None and exit_prob > 0.55:
+                # Model explicitly signals exit (threshold lowered from 0.7 to match output distribution)
                 exit_reason = f"Model Exit Signal ({exit_prob:.2f})"
             elif confidence < 0.3:
                 exit_reason = f"Low Confidence ({confidence:.4f})"
@@ -1558,7 +1714,92 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         tb_writer.close()
         print(f"TensorBoard logs saved to: {os.path.join(REPORTS_DIR, 'tensorboard')}")
     print("=" * 80)
-        
+
+    # === DEBUG: Print Feature & Model Output Summary ===
+    if DEBUG_INFERENCE and debug_stats['total_bars'] > 0:
+        debug_print("\n" + "=" * 80)
+        debug_print("DEBUG INFERENCE SUMMARY")
+        debug_print("=" * 80)
+
+        debug_print(f"\n  SIMULATION STATS:")
+        debug_print(f"    Total bars analyzed (position=0): {debug_stats['bars_with_position_0']:,}")
+        debug_print(f"    Bars blocked (no entry):          {debug_stats['bars_blocked']:,}")
+        debug_print(f"    Bars with entry:                  {debug_stats['bars_with_position_0'] - debug_stats['bars_blocked']:,}")
+        block_rate = debug_stats['bars_blocked'] / max(1, debug_stats['bars_with_position_0']) * 100
+        debug_print(f"    Block rate:                       {block_rate:.1f}%")
+
+        debug_print(f"\n  GATE REASON BREAKDOWN:")
+        if debug_stats['gate_reasons']:
+            sorted_reasons = sorted(debug_stats['gate_reasons'].items(), key=lambda x: -x[1])
+            for reason, count in sorted_reasons:
+                pct = count / debug_stats['bars_blocked'] * 100 if debug_stats['bars_blocked'] > 0 else 0
+                debug_print(f"    {reason:<20}: {count:>8,} ({pct:>5.1f}%)")
+        else:
+            debug_print(f"    (No blocks recorded)")
+
+        def _debug_print_dist(name, values, threshold=None, threshold_name="threshold"):
+            if values:
+                arr = np.array(values)
+                below = np.sum(arr < threshold) if threshold else 0
+                pct_below = below / len(arr) * 100 if threshold else 0
+                debug_print(f"    {name:<18}: min={arr.min():.4f}, mean={arr.mean():.4f}, max={arr.max():.4f}, std={arr.std():.4f}")
+                if threshold:
+                    debug_print(f"      Below {threshold_name} ({threshold}): {below:,} ({pct_below:.1f}%)")
+            else:
+                debug_print(f"    {name:<18}: N/A (not in data)")
+
+        debug_print(f"\n  MODEL OUTPUT DISTRIBUTIONS:")
+        _debug_print_dist("prob_profit", debug_stats['prob_profit'], PROB_ENTRY_MIN, "PROB_ENTRY_MIN")
+        _debug_print_dist("confidence", debug_stats['confidence'], CONF_ENTRY_MIN, "CONF_ENTRY_MIN")
+        _debug_print_dist("entry_prob", debug_stats['entry_prob'], 0.48, "MED threshold")
+        _debug_print_dist("exit_prob", debug_stats['exit_prob'])
+
+        debug_print(f"\n  KEY INPUT FEATURE DISTRIBUTIONS:")
+        _debug_print_dist("ivr", debug_stats['ivr'], 30, "IVR>30 gate")
+        _debug_print_dist("rsi", debug_stats['rsi'])
+        _debug_print_dist("adx", debug_stats['adx'], 30, "ADX<30 gate")
+        _debug_print_dist("friction_ratio", debug_stats['friction_ratio'], 1.0, "friction<1.0 gate")
+        _debug_print_dist("exec_allow", debug_stats['exec_allow'], 0.5, "exec>0.5 gate")
+        _debug_print_dist("gap_risk", debug_stats['gap_risk'], 0.8, "gap<0.8 gate")
+
+        # Diagnosis
+        debug_print(f"\n  DIAGNOSIS:")
+        issues = []
+        if debug_stats['prob_profit']:
+            prob_mean = np.mean(debug_stats['prob_profit'])
+            if prob_mean < PROB_ENTRY_MIN:
+                issues.append(f"prob_profit mean ({prob_mean:.4f}) is BELOW threshold ({PROB_ENTRY_MIN})")
+        if debug_stats['confidence']:
+            conf_mean = np.mean(debug_stats['confidence'])
+            if conf_mean < CONF_ENTRY_MIN:
+                issues.append(f"confidence mean ({conf_mean:.4f}) is BELOW threshold ({CONF_ENTRY_MIN})")
+        if debug_stats['exec_allow']:
+            exec_blocked = np.sum(np.array(debug_stats['exec_allow']) <= 0.5) / len(debug_stats['exec_allow']) * 100
+            if exec_blocked > 50:
+                issues.append(f"exec_allow blocks {exec_blocked:.1f}% of bars (friction gate)")
+        if debug_stats['gap_risk']:
+            gap_blocked = np.sum(np.array(debug_stats['gap_risk']) >= 0.8) / len(debug_stats['gap_risk']) * 100
+            if gap_blocked > 20:
+                issues.append(f"gap_risk blocks {gap_blocked:.1f}% of bars")
+        if debug_stats['friction_ratio']:
+            friction_blocked = np.sum(np.array(debug_stats['friction_ratio']) >= 1.0) / len(debug_stats['friction_ratio']) * 100
+            if friction_blocked > 30:
+                issues.append(f"friction_ratio blocks {friction_blocked:.1f}% of bars")
+
+        if issues:
+            for issue in issues:
+                debug_print(f"    WARNING: {issue}")
+        else:
+            debug_print(f"    OK: No obvious issues detected. Check ENTRY_THRESHOLD or scoring logic.")
+
+        debug_print("=" * 80 + "\n")
+
+    # Close debug log file
+    if debug_log:
+        debug_log.write(f"\nLog closed at {pd.Timestamp.now()}\n")
+        debug_log.close()
+        print(f"Debug log saved to: {DEBUG_LOG_FILE}")
+
     return equity_curve, trades
 
 def main():
