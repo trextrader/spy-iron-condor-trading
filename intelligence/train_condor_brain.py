@@ -1390,6 +1390,13 @@ def train_condor_brain(args):
             save_time = time.time() - save_start
             loss_type = "val_loss" if run_val else "train_loss"
             print(f"  ✓ Saved best model ({loss_type}={save_loss:.4f}) in {save_time:.1f}s")
+
+            # Also save as epoch_best_MMDDYY.pth for easy identification
+            best_date_str = time.strftime("%m%d%y")
+            best_model_name = f"epoch_best_{best_date_str}.pth"
+            best_path = os.path.join(os.path.dirname(args.output) or 'models', best_model_name)
+            torch.save(ckpt, best_path)
+            print(f"  ✓ Saved as best checkpoint: {best_path}")
         elif args.early_stop and run_val:
             patience_counter += 1
             print(f"  [Early Stop] No improvement. Patience: {patience_counter}/{args.patience}")
@@ -1401,7 +1408,8 @@ def train_condor_brain(args):
         
         # === PER-EPOCH CHECKPOINTING (Requested) ===
         # Save a unique checkpoint for EVERY epoch, regardless of improvement
-        date_str = time.strftime("%m%d%Y")
+        # Format: epoch_n_MMDDYY.pth (e.g., epoch_1_012826.pth)
+        date_str = time.strftime("%m%d%y")  # MMDDYY format
         epoch_model_name = f"epoch_{epoch+1}_{date_str}.pth"
         epoch_path = os.path.join(os.path.dirname(args.output) or 'models', epoch_model_name)
         
