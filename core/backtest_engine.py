@@ -21,7 +21,7 @@ from intelligence.fuzzy_engine import (
     calculate_adx_membership,
     calculate_bbands_membership,
     calculate_stoch_membership,
-    calculate_volume_membership,
+    calculate_cmf_membership,  # Replaces calculate_volume_membership
     calculate_sma_distance_membership,
     calculate_psar_membership,
     calculate_atr_stop_multiplier
@@ -616,7 +616,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             from intelligence.fuzzy_engine import (
                 calculate_mtf_membership, calculate_iv_membership, calculate_regime_membership,
                 calculate_rsi_membership, calculate_adx_membership, calculate_bbands_membership,
-                calculate_volume_membership, calculate_sma_distance_membership, calculate_stoch_membership
+                calculate_cmf_membership, calculate_sma_distance_membership, calculate_stoch_membership
             )
 
             # Existing indicators
@@ -633,7 +633,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             stoch_k = snapshot_5m.get('stoch_k', None)
             bb_position = snapshot_5m.get('bb_position', None)
             bb_width = snapshot_5m.get('bb_width', None)
-            volume_ratio = snapshot_5m.get('volume_ratio', None)
+            cmf = snapshot_5m.get('cmf', None)  # Chaikin Money Flow (replaces volume_ratio)
             sma_distance = snapshot_5m.get('sma_distance', None)
             psar_pos = snapshot_5m.get('psar_position', None)
 
@@ -693,15 +693,12 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
             else:
                 mu_bbands = 0.5
 
-            # Volume Filter
+            # Volume Filter (CMF-based)
             if self.s_cfg.use_volume_filter:
-                mu_volume = calculate_volume_membership(
-                    volume_ratio,
-                    self.s_cfg.volume_min_ratio
-                )
+                mu_volume = calculate_cmf_membership(cmf)
                 if mu_volume < 0.3:
                     if self.verbose:
-                        print(f"  [Filter] Low volume ({volume_ratio}), skip entry")
+                        print(f"  [Filter] Negative money flow (CMF={cmf}), skip entry")
                     return
             else:
                 mu_volume = 0.5
@@ -845,7 +842,7 @@ def run_backtest_headless(s_cfg: StrategyConfig, r_cfg: RunConfig, preloaded_df=
                 bb_position=bb_position,
                 bb_width=bb_width,
                 stoch_k=stoch_k,
-                volume_ratio=volume_ratio,
+                cmf=cmf,  # Chaikin Money Flow (replaces volume_ratio)
                 sma_distance=sma_distance,
                 psar_position=psar_pos, # Pass the pos from earlier calc
                 # Neural Forecast

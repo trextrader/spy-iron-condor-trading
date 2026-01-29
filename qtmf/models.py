@@ -28,7 +28,9 @@ class TradeIntent:
     bb_position: Optional[float] = None
     bb_width: Optional[float] = None
     stoch_k: Optional[float] = None
-    volume_ratio: Optional[float] = None
+    cmf: Optional[float] = None  # Chaikin Money Flow [-1, 1] (replaces volume_ratio)
+    pressure_up: Optional[float] = None  # Bullish pressure [0, 1] (replaces bid)
+    pressure_down: Optional[float] = None  # Bearish pressure [0, 1] (replaces ask)
     sma_distance: Optional[float] = None
     psar_position: Optional[float] = None  # -1=below (bullish), +1=above (bearish), 0=neutral
     

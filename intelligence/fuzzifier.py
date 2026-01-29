@@ -70,7 +70,7 @@ class Fuzzifier:
                 last.get("bw_expansion_rate", 0.0)
             )},
             "stoch": {"neutral": fe.calculate_stoch_membership(last.get("stoch_k_dyn", 50.0))},
-            "volume": {"high": fe.calculate_volume_membership(last.get("volume_ratio", 1.0))},
+            "volume": {"high": fe.calculate_cmf_membership(last.get("cmf", 0.0))},
             "sma_dist": {"neutral": fe.calculate_sma_distance_membership(last.get("ret_z", 0.0) * 0.01)},
             "psar": {"favorable": fe.calculate_psar_membership(last.get("psar_adaptive", 0.0))}
         }

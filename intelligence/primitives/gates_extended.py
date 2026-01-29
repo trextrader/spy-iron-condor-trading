@@ -80,23 +80,26 @@ def compute_regime_score_gate(
 
 
 def compute_liquidity_gate(
-    volume_ratio: pd.Series,
-    min_ratio: float = 1.0,
+    cmf: pd.Series,
+    min_cmf: float = 0.0,
     threshold: float = None,
 ) -> dict:
     """
-    G007 – Liquidity Gate (volume-based)
-    
+    G007 - Liquidity Gate (CMF-based, replaces volume_ratio)
+
+    CMF >= min_cmf indicates sufficient buying pressure / accumulation.
+    Default min_cmf=0.0 means neutral or positive money flow is acceptable.
+
     Returns:
         {
             "liquidity_ok": bool Series
         }
     """
     if threshold is not None:
-        min_ratio = threshold
-        
-    vr = volume_ratio.fillna(1.0)
-    liquidity_ok = (vr >= min_ratio)
+        min_cmf = threshold
+
+    c = cmf.fillna(0.0)
+    liquidity_ok = (c >= min_cmf)
     return {"liquidity_ok": liquidity_ok}
 
 

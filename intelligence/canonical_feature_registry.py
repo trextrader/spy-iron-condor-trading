@@ -328,7 +328,9 @@ FEATURE_COLS_V22: List[str] = [
     # P001-P007: Bands, Microstructure, Regime
     "bb_percentile",        # P002: Bandwidth percentile rank
     "bw_expansion_rate",    # P002: Bandwidth expansion rate
-    "volume_ratio",         # P003: Volume / SMA_20(Volume)
+    "cmf",                  # P003: Chaikin Money Flow [-1, 1] (replaces volume_ratio)
+    "pressure_up",          # P003c: Bullish pressure (replaces bid)
+    "pressure_down",        # P003c: Bearish pressure (replaces ask)
     "friction_ratio",       # P004: Spread / AvgRange
     "exec_allow",           # P004: Friction gate output
     "gap_risk_score",       # P005: Composite gap risk
@@ -363,7 +365,9 @@ NEUTRAL_FILL_VALUES_V22: Dict[str, float] = {
     # Primitives
     "bb_percentile": 50.0,      # Mid-percentile = neutral
     "bw_expansion_rate": 0.0,   # No expansion
-    "volume_ratio": 1.0,        # Average volume
+    "cmf": 0.0,                 # Neutral money flow (replaces volume_ratio)
+    "pressure_up": 0.0,         # No bullish pressure (replaces bid)
+    "pressure_down": 0.0,       # No bearish pressure (replaces ask)
     "friction_ratio": 0.5,      # Mid-friction
     "exec_allow": 1.0,          # Allow by default
     "gap_risk_score": 0.0,      # No gap risk

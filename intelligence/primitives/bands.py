@@ -82,11 +82,71 @@ def compute_volume_ratio(
 ) -> pd.Series:
     """
     P003 - Volume Ratio (Rules A1, C1, D2)
+    DEPRECATED: Use compute_chaikin_money_flow instead.
 
     Returns Series: volume_ratio
     """
     sma_vol = volume.rolling(window).mean()
     return volume / sma_vol
+
+
+def compute_chaikin_money_flow(
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+    volume: pd.Series,
+    window: int = 20,
+) -> pd.Series:
+    """
+    P003b - Chaikin Money Flow (CMF) - Replaces volume_ratio
+
+    CMF = Sum(MF_Volume, n) / Sum(Volume, n)
+    where MF_Multiplier = ((Close - Low) - (High - Close)) / (High - Low)
+          MF_Volume = MF_Multiplier * Volume
+
+    Returns Series: cmf in [-1, 1]
+        > 0 = buying pressure (accumulation)
+        < 0 = selling pressure (distribution)
+    """
+    eps = 1e-9
+    # Money Flow Multiplier: +1 if close=high, -1 if close=low
+    mf_multiplier = ((close - low) - (high - close)) / (high - low + eps)
+    mf_multiplier = mf_multiplier.clip(-1.0, 1.0)
+
+    # Money Flow Volume
+    mf_volume = mf_multiplier * volume
+
+    # CMF = rolling sum of MF_Volume / rolling sum of Volume
+    cmf = mf_volume.rolling(window).sum() / (volume.rolling(window).sum() + eps)
+
+    return cmf.clip(-1.0, 1.0)
+
+
+def compute_directional_pressure(
+    open_: pd.Series,
+    high: pd.Series,
+    low: pd.Series,
+    close: pd.Series,
+) -> pd.DataFrame:
+    """
+    P003c - Directional Pressure (synthetic bid/ask pressure from OHLC)
+
+    pressure_up   = max(0, Close - Open) / (High - Low + eps)  -- bullish (replaces bid)
+    pressure_down = max(0, Open - Close) / (High - Low + eps)  -- bearish (replaces ask)
+
+    Returns DataFrame with columns:
+        ['pressure_up', 'pressure_down']
+    """
+    eps = 1e-9
+    range_ = high - low + eps
+
+    pressure_up = np.maximum(0, close - open_) / range_
+    pressure_down = np.maximum(0, open_ - close) / range_
+
+    return pd.DataFrame({
+        "pressure_up": pressure_up.clip(0, 1),
+        "pressure_down": pressure_down.clip(0, 1),
+    })
 
 
 def compute_spread_friction_ratio(

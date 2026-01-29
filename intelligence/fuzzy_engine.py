@@ -325,16 +325,31 @@ def calculate_stoch_membership(stoch_k: float, neutral_min: float = 30.0, neutra
 
 def calculate_volume_membership(volume_ratio: float, min_ratio: float = 0.8) -> float:
     """
-    Volume confirmation membership.
-    
-    High volume relative to average = better liquidity = 1.0
-    Low volume = poor fills = 0.0
+    DEPRECATED: Use calculate_cmf_membership instead.
+    Kept for backward compatibility.
     """
     if volume_ratio is None or np.isnan(volume_ratio):
         return 0.5
-    
-    # Linear scale: 0 at ratio=0, 1.0 at ratio=min_ratio
     return min(1.0, max(0.0, volume_ratio / min_ratio))
+
+
+def calculate_cmf_membership(cmf: float) -> float:
+    """
+    Chaikin Money Flow membership (replaces volume_ratio).
+
+    CMF > 0 = accumulation (buying pressure) = favorable
+    CMF < 0 = distribution (selling pressure) = unfavorable
+
+    Maps CMF [-1, 1] to membership [0, 1]:
+        CMF = +1 -> 1.0 (strong buying)
+        CMF =  0 -> 0.5 (neutral)
+        CMF = -1 -> 0.0 (strong selling)
+    """
+    if cmf is None or np.isnan(cmf):
+        return 0.5
+
+    # Linear mapping: [-1, 1] -> [0, 1]
+    return min(1.0, max(0.0, (cmf + 1.0) / 2.0))
 
 
 def calculate_sma_distance_membership(sma_distance: float, max_distance: float = 0.02) -> float:

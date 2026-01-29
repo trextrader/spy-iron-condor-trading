@@ -346,19 +346,22 @@ def compute_bb_squeeze_signal(
 
 
 def compute_volume_spike_signal(
-    volume_ratio: pd.Series,
-    threshold: float = 1.5,
+    cmf: pd.Series,
+    threshold: float = 0.3,
 ) -> dict:
     """
-    S008 - Volume Spike Signal (C1/D2)
+    S008 - Volume Spike Signal (C1/D2) - Now uses CMF
+
+    CMF >= threshold indicates strong buying pressure (accumulation).
+    Default threshold 0.3 = moderately strong accumulation.
 
     Returns:
         {
             "vol_spike": bool Series
         }
     """
-    vr = volume_ratio.fillna(1.0)
-    spike = vr >= threshold
+    c = cmf.fillna(0.0)
+    spike = c >= threshold
     return {"vol_spike": spike, "signal": spike}
 
 

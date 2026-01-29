@@ -143,17 +143,27 @@ class MTFSyncEngine:
         
         # ATR as percentage of close
         df['atr_pct'] = df['atr_14'] / df['close'].replace(0, np.nan)
-        
-        # Volume Ratio (current volume / 20-period average)
-        df['volume_ratio'] = df['volume'] / df['volume_ma_20'].replace(0, np.nan)
-        
+
+        # === CHAIKIN MONEY FLOW (replaces volume_ratio) ===
+        eps = 1e-9
+        mf_multiplier = ((df['close'] - df['low']) - (df['high'] - df['close'])) / (df['high'] - df['low'] + eps)
+        mf_multiplier = mf_multiplier.clip(-1.0, 1.0)
+        mf_volume = mf_multiplier * df['volume']
+        df['cmf'] = (mf_volume.rolling(20).sum() / (df['volume'].rolling(20).sum() + eps)).clip(-1.0, 1.0)
+
+        # === DIRECTIONAL PRESSURE (replaces bid/ask) ===
+        range_ = df['high'] - df['low'] + eps
+        df['pressure_up'] = (df['close'] - df['open']).clip(lower=0) / range_
+        df['pressure_down'] = (df['open'] - df['close']).clip(lower=0) / range_
+
         # === HANDLE NaN VALUES ===
         df = df.ffill()
-        
+
         # Fill remaining NaNs with neutral defaults
         defaults = {
             'rsi_14': 50.0, 'adx_14': 20.0, 'stoch_k': 50.0, 'stoch_d': 50.0,
-            'bb_position': 0.5, 'bb_width': 0.02, 'volume_ratio': 1.0,
+            'bb_position': 0.5, 'bb_width': 0.02,
+            'cmf': 0.0, 'pressure_up': 0.0, 'pressure_down': 0.0,
             'sma_distance': 0.0, 'atr_pct': 0.01, 'psar_position': 0.0
         }
         for col, default in defaults.items():

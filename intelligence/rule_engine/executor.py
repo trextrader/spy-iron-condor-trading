@@ -33,7 +33,7 @@ PRIMITIVE_REGISTRY = {
     "P006": prim.compute_psar_flip_membership, # YAML P006
     
     # Vol / Risk
-    "P007": prim.compute_volume_ratio, # YAML P007
+    "P007": prim.compute_chaikin_money_flow, # YAML P007 (replaces compute_volume_ratio)
     "P008": prim.compute_iv_confidence, # YAML P008
     
     # Topology

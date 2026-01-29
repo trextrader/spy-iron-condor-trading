@@ -530,6 +530,7 @@ def compute_all_dynamic_features(
 def compute_all_primitive_features_v22(
     df: pd.DataFrame,
     close_col: str = "close",
+    open_col: str = "open",
     high_col: str = "high",
     low_col: str = "low",
     volume_col: str = "volume",
@@ -539,13 +540,13 @@ def compute_all_primitive_features_v22(
 ) -> pd.DataFrame:
     """
     Compute all 20 V2.2 primitive features and add to DataFrame.
-    
+
     This extends V2.1 (32 features) with 20 primitive outputs = 52 total.
     Must be called AFTER compute_all_dynamic_features().
-    
+
     Args:
         df: DataFrame with V2.1 features already computed
-        close_col, high_col, low_col, volume_col: Column names
+        close_col, open_col, high_col, low_col, volume_col: Column names
         spread_col: Spread ratio column (for friction gate)
         lag_minutes_col: IV lag column (for IV confidence)
         inplace: If True, add columns to df
@@ -556,7 +557,8 @@ def compute_all_primitive_features_v22(
     from intelligence.primitives import (
         compute_dynamic_bollinger_bands,
         compute_bandwidth_percentile_and_expansion,
-        compute_volume_ratio,
+        compute_chaikin_money_flow,
+        compute_directional_pressure,
         compute_spread_friction_ratio,
         compute_gap_risk_score,
         compute_iv_confidence,
@@ -573,10 +575,11 @@ def compute_all_primitive_features_v22(
         df = df.copy()
     
     close = df[close_col]
+    open_ = df[open_col] if open_col in df.columns else close
     high = df[high_col]
     low = df[low_col]
     volume = df[volume_col] if volume_col in df.columns else pd.Series(0, index=df.index)
-    
+
     print("   Computing V2.2 primitive features...")
     
     # === Get existing V2.1 features ===
@@ -599,13 +602,20 @@ def compute_all_primitive_features_v22(
     df["bb_percentile"] = bw_result["bw_percentile"].astype(np.float32)
     df["bw_expansion_rate"] = bw_result["expansion_rate"].fillna(0).astype(np.float32)
     
-    # P003: Volume ratio
-    df["volume_ratio"] = compute_volume_ratio(volume, window=20).fillna(1.0).astype(np.float32)
-    
+    # P003: Chaikin Money Flow (replaces volume_ratio)
+    cmf = compute_chaikin_money_flow(high, low, close, volume, window=20)
+    df["cmf"] = cmf.fillna(0.0).astype(np.float32)
+
+    # P003c: Directional Pressure (replaces bid/ask)
+    pressure = compute_directional_pressure(open_, high, low, close)
+    df["pressure_up"] = pressure["pressure_up"].astype(np.float32)
+    df["pressure_down"] = pressure["pressure_down"].astype(np.float32)
+
     # P004: Spread friction (if spread available)
+    # Use CMF scaled to [0.1, 10] for vol_ratio input (backward compat for friction calc)
+    vol_ratio_scaled = ((cmf + 1) / 2 * 9.9 + 0.1).fillna(1.0)
     if spread_col in df.columns:
         spread = df[spread_col]
-        # Create placeholder event flag (0 = no event)
         event_flag = pd.Series(0.0, index=df.index)
         friction_result = compute_spread_friction_ratio(
             spread=spread,
@@ -613,7 +623,7 @@ def compute_all_primitive_features_v22(
             low=low,
             n=20,
             atr_norm=atr_pct,
-            vol_ratio=df["volume_ratio"],
+            vol_ratio=vol_ratio_scaled,
             bandwidth=bandwidth,
             event_flag=event_flag,
             theta0=1.0, a=0.1, b=0.1, c=0.1, d=0.2,
@@ -718,7 +728,8 @@ def compute_all_primitive_features_v22(
     mu_psar = df["psar_reversion_mu"]
     mu_bb = pd.Series(0.5, index=df.index)  # Placeholder
     mu_bbsqueeze = 1 - df["bb_percentile"] / 100
-    mu_vol = df["volume_ratio"].clip(0, 2) / 2
+    # CMF is [-1, 1], scale to [0, 1] for fuzzy membership
+    mu_vol = (df["cmf"] + 1) / 2
     
     df["fuzzy_reversion_11"] = compute_fuzzy_reversion_score_11(
         mu_mtf=mu_mtf, mu_ivr=mu_ivr, mu_vix=mu_vix,

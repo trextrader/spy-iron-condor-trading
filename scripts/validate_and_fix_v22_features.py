@@ -31,10 +31,15 @@ VALIDATION_SCHEMA = {
     'rsi_dyn':          {'type': 'float',  'bounds': [0, 100], 'require_var': True, 'min_std': 0.1},
     'adx_adaptive':     {'type': 'float',  'bounds': [0, 100], 'require_var': True, 'min_std': 0.1},
     'ivr':              {'type': 'float',  'bounds': [0, 100], 'require_var': True, 'min_std': 0.1, 'no_recompute': True},
-    'volume_ratio':     {'type': 'float',  'bounds': [0, 10], 'require_var': True, 'min_std': 0.01},
+    'cmf':              {'type': 'float',  'bounds': [-1, 1], 'require_var': True, 'min_std': 0.01},  # Replaces volume_ratio
+    'pressure_up':      {'type': 'float',  'bounds': [0, 1], 'require_var': True, 'min_std': 0.01},  # Replaces bid
+    'pressure_down':    {'type': 'float',  'bounds': [0, 1], 'require_var': True, 'min_std': 0.01},  # Replaces ask
     'bb_percentile':    {'type': 'float',  'bounds': [0, 100], 'require_var': True, 'min_std': 0.1},
     'macd_norm':        {'type': 'float',  'require_var': True, 'min_std': 0.01},
 }
+
+# Columns to drop (replaced by new features)
+DEPRECATED_COLS = ['volume_ratio', 'bid', 'ask']
 
 VALIDATION_COLS = list(VALIDATION_SCHEMA.keys())
 
@@ -115,15 +120,21 @@ def forensic_repair(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     print("\n[REPAIR] Starting memory-safe forensic recomputation...")
-    
-    # 🕵️ MEMORY SAVER 1: Extract original columns into a dict of Series (not a copy of the whole DF)
+
+    # Drop deprecated columns (replaced by cmf, pressure_up, pressure_down)
+    for col in DEPRECATED_COLS:
+        if col in df.columns:
+            print(f"   [DROP] Removing deprecated column: {col}")
+            df.drop(columns=[col], inplace=True)
+
+    # MEMORY SAVER 1: Extract original columns into a dict of Series (not a copy of the whole DF)
     # Then drop them from df to clear space.
     preserved_data = {}
     for col in VALIDATION_COLS:
         if col in df.columns:
             preserved_data[col] = df[col].values # Save as raw numpy array for max efficiency
             df.drop(columns=[col], inplace=True)
-            
+
     # Also drop legacy helper cols that will be recomputed
     for col in ['bandwidth', 'log_return', 'vol_ewma']:
         if col in df.columns:

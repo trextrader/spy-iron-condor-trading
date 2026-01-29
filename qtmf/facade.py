@@ -19,7 +19,7 @@ from intelligence.fuzzy_engine import (
     calculate_adx_membership,
     calculate_bbands_membership,
     calculate_stoch_membership,
-    calculate_volume_membership,
+    calculate_cmf_membership,  # Replaces calculate_volume_membership
     calculate_sma_distance_membership,
     calculate_psar_membership,  # 10th factor
 )
@@ -104,7 +104,9 @@ def benchmark_and_size(
             bb_position=trade_intent.get("bb_position"),
             bb_width=trade_intent.get("bb_width"),
             stoch_k=trade_intent.get("stoch_k"),
-            volume_ratio=trade_intent.get("volume_ratio"),
+            cmf=trade_intent.get("cmf"),  # Chaikin Money Flow (replaces volume_ratio)
+            pressure_up=trade_intent.get("pressure_up"),  # Replaces bid
+            pressure_down=trade_intent.get("pressure_down"),  # Replaces ask
             sma_distance=trade_intent.get("sma_distance"),
             psar_position=trade_intent.get("psar_position"),  # 10th factor
             neural_forecast=trade_intent.get("neural_forecast"),
@@ -207,8 +209,7 @@ def benchmark_and_size(
         float(extras.get('stoch_neutral_min', 30.0)),
         float(extras.get('stoch_neutral_max', 70.0))) if ti.stoch_k is not None else 0.5
         
-    vol_mu = calculate_volume_membership(ti.volume_ratio,
-        float(extras.get('volume_min_ratio', 0.8))) if ti.volume_ratio is not None else 0.5
+    vol_mu = calculate_cmf_membership(ti.cmf) if ti.cmf is not None else 0.5
         
     sma_mu = calculate_sma_distance_membership(ti.sma_distance,
         float(extras.get('sma_max_distance', 0.02))) if ti.sma_distance is not None else 0.5
