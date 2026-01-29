@@ -492,15 +492,22 @@ def compute_all_dynamic_features(
     bars["consolidation_score"] = consol
     bars["breakout_score"] = breakout
     
-    # 2. Merge bar-features back to the full dataset
+    # 2. Map bar-features back to the full dataset (Memory Efficient Broadcast)
     spot_cols = [
         "log_return", "vol_ewma", "ret_z", "atr_pct", "kappa_proxy", "vol_energy",
         "rsi_dyn", "adx_adaptive", "psar_adaptive", "bb_mu_dyn", "bb_sigma_dyn",
         "bb_lower_dyn", "bb_upper_dyn", "stoch_k_dyn", "consolidation_score", "breakout_score"
     ]
     
-    print(f"   Broadcasting {len(spot_cols)} spot features back to options rows...")
-    df = df.merge(bars[[time_col] + spot_cols], on=time_col, how='left')
+    print(f"   Broadcasting {len(spot_cols)} spot features via Map (Memory Optimized)...")
+    bars_indexed = bars.set_index(time_col)
+    
+    for col in spot_cols:
+        df[col] = df[time_col].map(bars_indexed[col]).astype(np.float32)
+    
+    # Clean up bar frame to free memory
+    del bars
+    del bars_indexed
     
     # Spread Ratio (Keep row-specific if bid/ask exists per option, 
     # but here it likely comes from spot if OHLCV based)

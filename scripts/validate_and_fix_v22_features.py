@@ -107,72 +107,68 @@ def validate_columns(df: pd.DataFrame, sample_size: int = 50000) -> Dict:
     print("-" * 100)
     return report
 
-def forensic_repair(df_in: pd.DataFrame) -> pd.DataFrame:
-    """Alignment-safe recomputation and winner-selection."""
+def forensic_repair(df: pd.DataFrame) -> pd.DataFrame:
+    """Memory-safe recomputation and winner-selection for 10M rows."""
     from intelligence.features.dynamic_features import (
         compute_all_dynamic_features,
         compute_all_primitive_features_v22
     )
 
-    print("\n[REPAIR] Starting forensic recomputation...")
+    print("\n[REPAIR] Starting memory-safe forensic recomputation...")
     
-    # 1. Generate Row Keys for alignment
-    print("   Generating row keys for input...")
-    df_in['__row_key__'] = get_row_key(df_in)
+    # 🕵️ MEMORY SAVER 1: Extract original columns into a dict of Series (not a copy of the whole DF)
+    # Then drop them from df to clear space.
+    preserved_data = {}
+    for col in VALIDATION_COLS:
+        if col in df.columns:
+            preserved_data[col] = df[col].values # Save as raw numpy array for max efficiency
+            df.drop(columns=[col], inplace=True)
+            
+    # Also drop legacy helper cols that will be recomputed
+    for col in ['bandwidth', 'log_return', 'vol_ewma']:
+        if col in df.columns:
+            df.drop(columns=[col], inplace=True)
+
+    # Recompute fresh (this now uses the map-optimized engine)
+    df = compute_all_dynamic_features(df)
+    df = compute_all_primitive_features_v22(df)
     
-    # 2. Recompute everything from scratch
-    df_out = df_in.copy()
-    
-    # Drop existing V2.2 columns to force clean recompute
-    v22_cols = [c for c in df_out.columns if c in VALIDATION_COLS or c in ['bandwidth', 'log_return', 'vol_ewma']]
-    df_out = df_out.drop(columns=v22_cols)
-    
-    df_out = compute_all_dynamic_features(df_out)
-    df_out = compute_all_primitive_features_v22(df_out)
-    
-    # Add keys to output
-    df_out['__row_key__'] = get_row_key(df_out)
-    
-    # 3. Winning Column Selection
+    # 🕵️ MEMORY SAVER 2: Winner Selection (Column-by-Column Interrogation)
     print("\n[MERGE] Performing Alignment-Safe Winner Selection...")
-    final_df = df_out.copy()
-    
-    # Index for fast lookup
-    in_indexed = df_in.set_index('__row_key__')
     
     for col in VALIDATION_COLS:
-        if schema := VALIDATION_SCHEMA.get(col):
-            if schema.get('no_recompute', False):
-                if col in df_in.columns:
-                    print(f"   [RESTORE] {col:<20} (No-recompute type)")
-                    final_df[col] = df_in[col].values # Assuming same order, but let's be safe:
-                    # final_df[col] = final_df['__row_key__'].map(in_indexed[col]) # More robust but slower
-                continue
-
-        if col in df_in.columns and col in final_df.columns:
-            s_in = df_in[col].std()
-            s_out = final_df[col].std()
-            u_in = df_in[col].nunique()
-            u_out = final_df[col].nunique()
+        if col not in df.columns:
+            if col in preserved_data:
+                df[col] = preserved_data[col] # Restore if missing
+            continue
             
-            # Winner logic: More unique values or significantly better variance
-            is_new_better = (u_out > u_in + 2) or (s_out > s_in * 1.2 and u_out >= u_in)
+        if col in preserved_data:
+            # Stats on the recomputed version
+            s_new = df[col].std()
+            u_new = df[col].nunique()
             
-            # Special case: If new is constant but old wasn't, old wins
-            if u_out == 1 and u_in > 1:
-                is_new_better = False
+            # Stats on the preserved version
+            s_orig = np.nanstd(preserved_data[col])
+            u_orig = len(np.unique(preserved_data[col][~np.isnan(preserved_data[col])]))
+            
+            # Winner logic
+            is_new_better = (u_new > u_orig + 2) or (s_new > s_orig * 1.2 and u_new >= u_orig)
+            if u_new == 1 and u_orig > 1: is_new_better = False
 
             if not is_new_better:
-                print(f"   [KEEP: ORIG] {col:<17} (U:{u_in} vs {u_out})")
-                final_df[col] = df_in[col].values 
+                print(f"   [KEEP: ORIG] {col:<17} (U:{u_orig} vs {u_new})")
+                df[col] = preserved_data[col]
             else:
-                pct_diff = (final_df[col] != df_in[col]).mean() * 100
-                print(f"   [UPGRADE: NEW] {col:<15} (U:{u_in}->{u_out}) | Delta: {pct_diff:.1f}% rows changed")
+                print(f"   [UPGRADE: NEW] {col:<15} (U:{u_orig}->{u_new})")
+            
+            # 🕵️ MEMORY SAVER 3: Delete the reference immediately
+            del preserved_data[col]
 
-    return final_df.drop(columns=['__row_key__'])
+    return df
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Institutional Forensic Validator V2.3")
+    parser = argparse.ArgumentParser(description="Institutional Forensic Validator V2.3 (1.0M -> 10M Scale)")
     parser.add_argument("--input", "-i", required=True)
     parser.add_argument("--output", "-o", default=None)
     parser.add_argument("--check-only", action="store_true")
@@ -182,8 +178,12 @@ def main():
         print(f"Error: {args.input} not found.")
         sys.exit(1)
 
-    print(f"\n[START] Auditing: {args.input}")
+    print(f"\n[START] Auditing (Memory Optimized): {args.input}")
+    
+    # 🕵️ MEMORY SAVER 4: Use float32 on load to halve memory footprint
     df = pd.read_csv(args.input)
+    for col in df.select_dtypes(include=[np.float64]).columns:
+        df[col] = df[col].astype(np.float32)
     
     report_pre = validate_columns(df)
     has_fails = any(v['is_fail'] for v in report_pre.values())
@@ -191,17 +191,17 @@ def main():
     if has_fails and not args.check_only:
         print("\n[🚨] FAILS DETECTED. Commencing Forensic Repair...")
         start_t = time.time()
-        df_fixed = forensic_repair(df)
+        df = forensic_repair(df)
         end_t = time.time()
         
         print(f"\n[DONE] Repair took {end_t - start_t:.1f}s")
         
         print("\n[RE-AUDIT] Verifying Fix...")
-        validate_columns(df_fixed)
+        validate_columns(df)
         
         out_path = args.output or args.input.replace(".csv", "_fixed.csv")
         print(f"\n[SAVE] Exporting to: {out_path}")
-        df_fixed.to_csv(out_path, index=False)
+        df.to_csv(out_path, index=False)
     else:
         if has_fails:
             print("\n[🚨] Fails detected but --check-only is set. Exiting with error.")
