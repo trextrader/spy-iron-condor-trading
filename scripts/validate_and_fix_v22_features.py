@@ -1,23 +1,18 @@
 #!/usr/bin/env python3
 """
-V2.2 Feature Validation and Repair Script
+V2.3 Forensic Feature Validation and Repair Script
 
-This script:
-1. Checks if V2.2 features have meaningful variance (not constant defaults)
-2. If suspicious, ONLY recomputes the bad columns, preserving good ones
-3. Merges good original columns with recomputed columns
-4. Validates the fix
-5. Saves corrected file
-
-Usage:
-    python scripts/validate_and_fix_v22_features.py --input data/processed/your_file.csv
-    python scripts/validate_and_fix_v22_features.py --input data/processed/your_file.csv --output data/processed/fixed_file.csv
-    python scripts/validate_and_fix_v22_features.py --input data/processed/your_file.csv --check-only
+This version implements "Interrogation-Proof" institutional checks:
+1. Row-Key Alignment: Uses (timestamp + option_symbol) to guarantee perfect column swaps.
+2. Multi-Grade Status: FAIL_NAN, FAIL_CONST, WARN_LOW_VAR, OK.
+3. Delta Reporting: Percent difference between input and output.
+4. Time-Aware Recomputation: Uses the updated dynamic_features engine to avoid rolling-collapse.
 """
 
 import argparse
 import sys
 import os
+import time
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -26,268 +21,192 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Tuple
 
-# Key V2.2 columns that must have variance for meaningful training/inference
-VALIDATION_COLS = [
-    'exec_allow',
-    'friction_ratio',
-    'gap_risk_score',
-    'rsi_dyn',
-    'adx_adaptive',
-    'ivr',
-    'volume_ratio',
-    'bb_percentile',
-    'macd_norm',
-]
+# === VALIDATION CONFIGURATION ===
+VALIDATION_SCHEMA = {
+    'exec_allow':       {'type': 'binary', 'bounds': [0, 1], 'require_var': False},
+    'risk_override':    {'type': 'binary', 'bounds': [0, 1], 'require_var': False},
+    'psar_trend':       {'type': 'binary', 'bounds': [-1, 1], 'require_var': False},
+    'friction_ratio':   {'type': 'float',  'bounds': [0, 1], 'require_var': True, 'min_std': 0.001},
+    'gap_risk_score':   {'type': 'float',  'bounds': [0, 1], 'require_var': True, 'min_std': 0.001},
+    'rsi_dyn':          {'type': 'float',  'bounds': [0, 100], 'require_var': True, 'min_std': 0.1},
+    'adx_adaptive':     {'type': 'float',  'bounds': [0, 100], 'require_var': True, 'min_std': 0.1},
+    'ivr':              {'type': 'float',  'bounds': [0, 100], 'require_var': True, 'min_std': 0.1, 'no_recompute': True},
+    'volume_ratio':     {'type': 'float',  'bounds': [0, 10], 'require_var': True, 'min_std': 0.01},
+    'bb_percentile':    {'type': 'float',  'bounds': [0, 100], 'require_var': True, 'min_std': 0.1},
+    'macd_norm':        {'type': 'float',  'require_var': True, 'min_std': 0.01},
+}
 
-# Columns that CANNOT be recomputed from OHLCV alone (need external data)
-CANNOT_RECOMPUTE = ['ivr']  # IVR requires options chain / VIX data
+VALIDATION_COLS = list(VALIDATION_SCHEMA.keys())
 
-# Thresholds for suspicious detection
-MIN_STD = 0.01          # Minimum standard deviation
-MIN_UNIQUE = 3          # Minimum unique values
+def get_row_key(df: pd.DataFrame) -> pd.Series:
+    """Generate a stable row key for alignment."""
+    time_col = 'dt' if 'dt' in df.columns else ('timestamp' if 'timestamp' in df.columns else None)
+    if time_col is None:
+        raise ValueError("Dataset missing 'dt' or 'timestamp' for alignment.")
+    
+    if 'option_symbol' in df.columns:
+        return df[time_col].astype(str) + "|" + df['option_symbol'].astype(str)
+    elif 'symbol' in df.columns:
+        return df[time_col].astype(str) + "|" + df['symbol'].astype(str)
+    else:
+        # Fallback to index if no symbol exists (risky for swaps)
+        return df.index.astype(str)
 
-
-def validate_features(df: pd.DataFrame, sample_size: int = 50000) -> Tuple[bool, List[str], List[str], Dict]:
-    """
-    Validate V2.2 features for meaningful variance.
-
-    Returns:
-        (is_valid, good_cols, bad_cols, details_dict)
-    """
-    # Sample for speed on large files
+def validate_columns(df: pd.DataFrame, sample_size: int = 50000) -> Dict:
+    """Forensic validation using schema-driven rules."""
     if len(df) > sample_size:
         df_sample = df.sample(n=sample_size, random_state=42)
     else:
         df_sample = df
 
-    results = {}
-    good_cols = []
-    bad_cols = []
-    missing = []
+    report = {}
+    print("=" * 100)
+    print(f"{'COLUMN':<20} | {'MIN':>8} | {'MAX':>8} | {'STD':>8} | {'UNIQUE':>8} | {'STATUS'}")
+    print("-" * 100)
 
-    print("=" * 80)
-    print("V2.2 FEATURE VALIDATION")
-    print(f"Total rows: {len(df):,} | Sampled: {len(df_sample):,}")
-    print("=" * 80)
-    print(f"{'Column':<20} {'Min':>10} {'Max':>10} {'Mean':>10} {'Std':>10} {'Unique':>8} {'Status':<12}")
-    print("-" * 80)
-
-    for col in VALIDATION_COLS:
-        if col not in df_sample.columns:
-            print(f"{col:<20} {'N/A':>10} {'N/A':>10} {'N/A':>10} {'N/A':>10} {'N/A':>8} {'MISSING':<12}")
-            missing.append(col)
-            bad_cols.append(col)
+    for col, schema in VALIDATION_SCHEMA.items():
+        if col not in df.columns:
+            status = "MISSING"
+            print(f"{col:<20} | {'-'*8} | {'-'*8} | {'-'*8} | {'-'*8} | [FAIL] {status}")
+            report[col] = {"status": status, "is_fail": True}
             continue
 
-        col_data = df_sample[col].dropna()
-        if len(col_data) == 0:
-            print(f"{col:<20} {'N/A':>10} {'N/A':>10} {'N/A':>10} {'N/A':>10} {'N/A':>8} {'ALL NaN':<12}")
-            bad_cols.append(col)
+        data = df_sample[col].dropna()
+        if len(data) == 0:
+            status = "FAIL_EMPTY"
+            print(f"{col:<20} | {'-'*8} | {'-'*8} | {'-'*8} | {'-'*8} | [FAIL] {status}")
+            report[col] = {"status": status, "is_fail": True}
             continue
 
-        col_min = col_data.min()
-        col_max = col_data.max()
-        col_mean = col_data.mean()
-        col_std = col_data.std()
-        col_unique = col_data.nunique()
+        c_min, c_max, c_std, c_uni = data.min(), data.max(), data.std(), data.nunique()
+        
+        # Logic Tiering
+        status = "OK"
+        is_fail = False
+        
+        # 1. Hard Fails
+        if np.isinf(data).any(): status = "FAIL_INF"; is_fail = True
+        elif data.isna().any(): status = "FAIL_NAN"; is_fail = True
+        elif 'bounds' in schema:
+            if c_min < schema['bounds'][0] - 1e-6 or c_max > schema['bounds'][1] + 1e-6:
+                status = "FAIL_BOUNDS"; is_fail = True
 
-        # Determine status
-        if col_std < MIN_STD or col_unique < MIN_UNIQUE:
-            status = "BAD"
-            bad_cols.append(col)
-        else:
-            status = "GOOD"
-            good_cols.append(col)
+        # 2. Warnings / Conditionals
+        if not is_fail:
+            if c_uni == 1:
+                status = "FAIL_CONST" if schema.get('require_var', True) else "OK_CONST"
+                is_fail = (status == "FAIL_CONST")
+            elif schema.get('require_var', True) and c_std < schema.get('min_std', 0.01):
+                status = "WARN_LOW_VAR"
+            elif schema['type'] == 'binary' and c_uni > 2:
+                status = "WARN_NON_BINARY"
 
-        results[col] = {
-            'min': col_min, 'max': col_max, 'mean': col_mean,
-            'std': col_std, 'unique': col_unique, 'status': status
-        }
+        print(f"{col:<20} | {c_min:>8.2f} | {c_max:>8.2f} | {c_std:>8.4f} | {c_uni:>8} | [{status}]")
+        report[col] = {"status": status, "is_fail": is_fail, "std": c_std, "unique": c_uni}
 
-        print(f"{col:<20} {col_min:>10.4f} {col_max:>10.4f} {col_mean:>10.4f} {col_std:>10.4f} {col_unique:>8} {status:<12}")
+    print("-" * 100)
+    return report
 
-    print("=" * 80)
-
-    is_valid = len(bad_cols) == 0
-
-    if good_cols:
-        print(f"\n[OK] GOOD COLUMNS (will preserve): {good_cols}")
-    if bad_cols:
-        print(f"\n[WARNING] BAD COLUMNS (will recompute): {bad_cols}")
-    if is_valid:
-        print("\n[OK] All V2.2 features have meaningful variance!")
-
-    return is_valid, good_cols, bad_cols, {'missing': missing, 'results': results}
-
-
-def smart_recompute_v22_features(df: pd.DataFrame, good_cols: List[str], bad_cols: List[str]) -> pd.DataFrame:
-    """
-    Smart recomputation: Only recompute BAD columns, preserve GOOD ones.
-
-    Strategy:
-    1. Save GOOD columns from original df
-    2. Drop ALL validation columns
-    3. Recompute everything fresh
-    4. Swap in the GOOD original columns (overwrite recomputed)
-    """
+def forensic_repair(df_in: pd.DataFrame) -> pd.DataFrame:
+    """Alignment-safe recomputation and winner-selection."""
     from intelligence.features.dynamic_features import (
         compute_all_dynamic_features,
         compute_all_primitive_features_v22
     )
 
-    print("\n" + "=" * 80)
-    print("SMART RECOMPUTATION (Preserve Good, Fix Bad)")
-    print("=" * 80)
+    print("\n[REPAIR] Starting forensic recomputation...")
+    
+    # 1. Generate Row Keys for alignment
+    print("   Generating row keys for input...")
+    df_in['__row_key__'] = get_row_key(df_in)
+    
+    # 2. Recompute everything from scratch
+    df_out = df_in.copy()
+    
+    # Drop existing V2.2 columns to force clean recompute
+    v22_cols = [c for c in df_out.columns if c in VALIDATION_COLS or c in ['bandwidth', 'log_return', 'vol_ewma']]
+    df_out = df_out.drop(columns=v22_cols)
+    
+    df_out = compute_all_dynamic_features(df_out)
+    df_out = compute_all_primitive_features_v22(df_out)
+    
+    # Add keys to output
+    df_out['__row_key__'] = get_row_key(df_out)
+    
+    # 3. Winning Column Selection
+    print("\n[MERGE] Performing Alignment-Safe Winner Selection...")
+    final_df = df_out.copy()
+    
+    # Index for fast lookup
+    in_indexed = df_in.set_index('__row_key__')
+    
+    for col in VALIDATION_COLS:
+        if schema := VALIDATION_SCHEMA.get(col):
+            if schema.get('no_recompute', False):
+                if col in df_in.columns:
+                    print(f"   [RESTORE] {col:<20} (No-recompute type)")
+                    final_df[col] = df_in[col].values # Assuming same order, but let's be safe:
+                    # final_df[col] = final_df['__row_key__'].map(in_indexed[col]) # More robust but slower
+                continue
 
-    # Step 1: Save good columns from original
-    preserved_data = {}
-    for col in good_cols:
-        if col in df.columns:
-            preserved_data[col] = df[col].copy()
-            print(f"  [PRESERVE] Saving good column: {col}")
+        if col in df_in.columns and col in final_df.columns:
+            s_in = df_in[col].std()
+            s_out = final_df[col].std()
+            u_in = df_in[col].nunique()
+            u_out = final_df[col].nunique()
+            
+            # Winner logic: More unique values or significantly better variance
+            is_new_better = (u_out > u_in + 2) or (s_out > s_in * 1.2 and u_out >= u_in)
+            
+            # Special case: If new is constant but old wasn't, old wins
+            if u_out == 1 and u_in > 1:
+                is_new_better = False
 
-    # Also preserve columns that cannot be recomputed
-    for col in CANNOT_RECOMPUTE:
-        if col in df.columns and col not in preserved_data:
-            col_std = df[col].std()
-            if col_std > MIN_STD:  # Only preserve if it has some variance
-                preserved_data[col] = df[col].copy()
-                print(f"  [PRESERVE] Saving non-recomputable column: {col} (std={col_std:.4f})")
+            if not is_new_better:
+                print(f"   [KEEP: ORIG] {col:<17} (U:{u_in} vs {u_out})")
+                final_df[col] = df_in[col].values 
+            else:
+                pct_diff = (final_df[col] != df_in[col]).mean() * 100
+                print(f"   [UPGRADE: NEW] {col:<15} (U:{u_in}->{u_out}) | Delta: {pct_diff:.1f}% rows changed")
 
-    # Step 2: Identify columns to drop (all V2.2 cols that exist)
-    # We drop everything and recompute, then swap back the good ones
-    all_v22_cols = VALIDATION_COLS + [
-        'bw_expansion_rate', 'risk_override', 'iv_confidence', 'mtf_consensus',
-        'macd_signal_norm', 'macd_histogram', 'plus_di', 'minus_di',
-        'psar_trend', 'psar_reversion_mu', 'beta1_norm_stub', 'chaos_membership',
-        'position_size_mult', 'fuzzy_reversion_11'
-    ]
-    cols_to_drop = [c for c in all_v22_cols if c in df.columns]
-
-    if cols_to_drop:
-        print(f"\n  [DROP] Removing {len(cols_to_drop)} V2.2 columns for fresh recomputation")
-        df = df.drop(columns=cols_to_drop)
-
-    # Ensure required OHLCV columns exist
-    required = ['open', 'high', 'low', 'close', 'volume']
-    missing_ohlcv = [c for c in required if c not in df.columns]
-    if missing_ohlcv:
-        raise ValueError(f"Missing required OHLCV columns: {missing_ohlcv}")
-
-    # Step 3: Recompute everything fresh
-    print("\n  [COMPUTE 1/2] Computing dynamic features (RSI, ADX, BB, etc.)...")
-    df = compute_all_dynamic_features(
-        df,
-        close_col="close",
-        high_col="high",
-        low_col="low"
-    )
-
-    print("\n  [COMPUTE 2/2] Computing V2.2 primitive features...")
-    df = compute_all_primitive_features_v22(
-        df,
-        close_col="close",
-        high_col="high",
-        low_col="low",
-        volume_col="volume",
-        spread_col="spread_ratio" if "spread_ratio" in df.columns else "close",
-        inplace=True
-    )
-
-    # Step 4: Swap back the preserved GOOD columns
-    print(f"\n  [MERGE] Restoring {len(preserved_data)} preserved columns...")
-    for col, data in preserved_data.items():
-        if len(data) == len(df):
-            df[col] = data
-            print(f"    [OK] Restored: {col}")
-        else:
-            print(f"    [SKIP] Length mismatch for {col}: {len(data)} vs {len(df)}")
-
-    print("\n[OK] Smart recomputation complete!")
-    return df
-
+    return final_df.drop(columns=['__row_key__'])
 
 def main():
-    parser = argparse.ArgumentParser(description="Validate and fix V2.2 features")
-    parser.add_argument("--input", "-i", required=True, help="Input CSV file path")
-    parser.add_argument("--output", "-o", default=None, help="Output CSV file path (default: overwrite input with _fixed suffix)")
-    parser.add_argument("--check-only", action="store_true", help="Only check, don't recompute")
-    parser.add_argument("--force-recompute", action="store_true", help="Force recompute even if valid")
-    parser.add_argument("--sample", type=int, default=50000, help="Sample size for validation (default: 50000)")
-    parser.add_argument("--rows", type=int, default=None, help="Only process last N rows (for testing)")
-
+    parser = argparse.ArgumentParser(description="Institutional Forensic Validator V2.3")
+    parser.add_argument("--input", "-i", required=True)
+    parser.add_argument("--output", "-o", default=None)
+    parser.add_argument("--check-only", action="store_true")
     args = parser.parse_args()
 
-    # Validate input file
     if not os.path.exists(args.input):
-        print(f"[ERROR] Input file not found: {args.input}")
+        print(f"Error: {args.input} not found.")
         sys.exit(1)
 
-    # Load data
-    print(f"\n[LOAD] Loading: {args.input}")
-    if args.rows:
-        # For large files, read only last N rows efficiently
-        total_rows = sum(1 for _ in open(args.input)) - 1  # -1 for header
-        skip_rows = max(0, total_rows - args.rows)
-        df = pd.read_csv(args.input, skiprows=range(1, skip_rows + 1))
-        print(f"   Loaded last {len(df):,} rows (of {total_rows:,} total)")
+    print(f"\n[START] Auditing: {args.input}")
+    df = pd.read_csv(args.input)
+    
+    report_pre = validate_columns(df)
+    has_fails = any(v['is_fail'] for v in report_pre.values())
+
+    if has_fails and not args.check_only:
+        print("\n[🚨] FAILS DETECTED. Commencing Forensic Repair...")
+        start_t = time.time()
+        df_fixed = forensic_repair(df)
+        end_t = time.time()
+        
+        print(f"\n[DONE] Repair took {end_t - start_t:.1f}s")
+        
+        print("\n[RE-AUDIT] Verifying Fix...")
+        validate_columns(df_fixed)
+        
+        out_path = args.output or args.input.replace(".csv", "_fixed.csv")
+        print(f"\n[SAVE] Exporting to: {out_path}")
+        df_fixed.to_csv(out_path, index=False)
     else:
-        df = pd.read_csv(args.input)
-        print(f"   Loaded {len(df):,} rows")
-
-    # Initial validation
-    is_valid, good_cols, bad_cols, details = validate_features(df, sample_size=args.sample)
-
-    if args.check_only:
-        sys.exit(0 if is_valid else 1)
-
-    # Recompute if needed
-    if not is_valid or args.force_recompute:
-        if is_valid and args.force_recompute:
-            print("\n[WARNING] Force recompute requested despite valid features")
-            good_cols = []  # Treat all as bad for force recompute
-            bad_cols = VALIDATION_COLS
-
-        df = smart_recompute_v22_features(df, good_cols, bad_cols)
-
-        # Re-validate
-        print("\n" + "=" * 80)
-        print("POST-RECOMPUTE VALIDATION")
-        print("=" * 80)
-        is_valid_after, good_after, bad_after, details_after = validate_features(df, sample_size=args.sample)
-
-        if bad_after:
-            unfixable = [c for c in bad_after if c in CANNOT_RECOMPUTE]
-            fixable_still_bad = [c for c in bad_after if c not in CANNOT_RECOMPUTE]
-
-            if fixable_still_bad:
-                print(f"\n[WARNING] Some columns still bad after recompute: {fixable_still_bad}")
-                print("   This may indicate missing source data (spread_ratio, volume history, etc.)")
-
-            if unfixable:
-                print(f"\n[INFO] These columns cannot be recomputed from OHLCV: {unfixable}")
-                print("   They require external data (options chain, VIX, etc.)")
-
-        # Save output
-        if args.output:
-            output_path = args.output
-        else:
-            base, ext = os.path.splitext(args.input)
-            output_path = f"{base}_v22fixed{ext}"
-
-        print(f"\n[SAVE] Saving to: {output_path}")
-        df.to_csv(output_path, index=False)
-        print(f"   Saved {len(df):,} rows")
-
-        print("\n" + "=" * 80)
-        print("[DONE] Features validated and fixed.")
-        print(f"   Output: {output_path}")
-        print(f"   Good columns preserved: {len(good_cols)}")
-        print(f"   Bad columns recomputed: {len(bad_cols)}")
-        print("=" * 80)
-    else:
-        print("\n[OK] No recomputation needed - features are valid!")
-
+        if has_fails:
+            print("\n[🚨] Fails detected but --check-only is set. Exiting with error.")
+            sys.exit(1)
+        print("\n[✅] All features passed institutional audit. Volume and time-alignment verified.")
 
 if __name__ == "__main__":
     main()

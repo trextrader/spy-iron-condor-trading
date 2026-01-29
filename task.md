@@ -86,6 +86,11 @@
 
 ## Phase 10: Meta-Forecaster (Hybrid Ensemble)
 - [x] Implement `MetaForecaster` class (Algorithm Spec: Methods 1-7, Epsilon Logic)
+- [x] **Live Execution Engine (`run_live_alpaca.py`)** <!-- id: 2 -->
+    - [x] Refactor for 11-Factor Hybrid Logic <!-- id: 3 -->
+    - [x] Implement "Eagle" style live logging <!-- id: 4 -->
+    - [x] Integrate Neural CDE Backbone (V2.2) <!-- id: 9 -->
+    - [x] Add Data Recorder for Live Option Chains <!-- id: 10 -->
 - [ ] Integrate Meta-Forecaster into Backtest Engine (PAUSED: Sync with Training)
 - [x] Verify ensemble switching logic (Local Unit Test Passed)
 
@@ -98,7 +103,22 @@
 - [ ] Add run manifest generation (`artifacts/audit/run_manifest.json`)
 - [ ] Add audit packet generator (`artifacts/audit/Accountability_Audit_Packet.pdf`)
 - [ ] Implement backtest/live output contract match test
-- [ ] Integrate audit tools into training workflow
+- [x] **Standardize Config Imports** <!-- id: 5 -->
+    - [x] Resolve `ModuleNotFoundError` by pointing to root `config.py` <!-- id: 6 -->
+    - [x] Update standard run scripts to use new config path <!-- id: 7 -->
+    - [x] Clean up `core/config.py` redundancy <!-- id: 8 -->
+- [ ] Add audit tools into training workflow
+- [x] **Full Accountability Audit** (Completed)
+    - [x] **Trade Logger**: Log `(timestamp, spot, score, confidence, prob, action, legs, trade_id)` to `data/live/trade_log.csv`.
+    - [x] **Option Chain Recorder**: Save snapshot `data/live/chains/SPY_YYYYMMDD_HHMM.csv`.
+    - [x] **Feature Logger**: Log actual model input vector `(timestamp, f1...f52)` to `data/live/feature_log.csv`.
+    - [x] **Verify OHLCV data integrity**
+    - [x] **Integrate Live Greeks** (Delta, Theta, Gamma, Vega, IV) into model input.
+    - [x] **Fix `run_live_alpaca.py`** syntax and logic errors.
+- [x] **Final System Handover** (Completed)
+  - [x] **User Verification**: Real Money/Paper Execution Confirmed on Alpaca.
+  - [x] **Data Integrity**: Option Chains recording to `data/live/chains/`.
+  - [x] **System Stable**: Live loop running without crashes.
 - [ ] Add time/session alignment contract + tests
 - [ ] Add execution & PnL accounting parity tests
 - [ ] Add risk gate precedence matrix + docs
@@ -141,3 +161,53 @@ Key alignment requirements:
 3. Model config metadata (layers/heads/input_dim) must match deployed checkpoints.
 
 If this document conflicts with the master spec, the master spec governs implementation.
+
+## Phase 12: Scaling Live Concurrency
+- [x] **Refactor `run_live_alpaca.py` for Concurrency**
+    - [x] Change `active_trade` (Dict) to `active_trades` (List[Dict]).
+    - [x] Implement `MAX_CONCURRENT_TRADES = 4` config.
+    - [x] Update Entry Logic: Allow entry if `len(active_trades) < MAX`.
+    - [x] Update Exit Logic: Iterate loop to manage each trade independently.
+    - [x] Update PnL Display: Show aggregate or per-trade PnL.
+- [x] **Implement State Persistence (Restart Safety)**
+    - [x] Add `save_state(active_trades)` using JSON.
+    - [x] Add `load_state()` on startup.
+    - [x] Handle `datetime` serialization.
+- [x] **Fix Execution Discrepancy (Bug Fix)**
+    - [x] Implement `close_iron_condor` in `PaperExecutor`.
+    - [x] Hook multi-leg exit signals in `run_live_alpaca.py`.
+    - [x] Add safety: only clear state if exchange confirms order.
+    - [x] Restore 7-trade portfolio to `bot_state.json`.
+
+## Phase 13: Operational Hardening (Market Hours)
+- [x] **Implement Market Hours Gate**
+    - [x] Add `is_market_session()` helper (9:35-16:10 ET).
+    - [x] Update main loop to "Sleep" until next open if outside window.
+    - [x] Add explicit "Market Closed" terminal message.
+
+## Phase 14: Execution Hardening (Alpha-v1)
+- [x] **Implement Friction Gate (Slippage Protection)**
+    - [x] Add `slippage_model` to executor (simulate spread/fill lag).
+    - [x] Add `entry_friction_buffer` to Fuzzy Score.
+- [x] **Implement Fuzzy Position Sizing**
+    - [x] Scale `qty` based on `entry_score` (e.g., Score 40=1x, Score 90=4x).
+    - [x] Limit total buying power exposure per slot.
+- [x] **Diffusion Staging (Generative Optimization)**
+    - [x] Enable `diffusion_head` for wing-width trajectory refinement.
+    - [x] Verify diffusion noise schedule against live volatility.
+
+## Phase 15: Staged Testing & "Cut Loose" Protocol
+- [ ] **Component-a-Day Staged Rollout**
+    - [ ] Day 1: Test Friction Gate (24h run).
+    - [ ] Day 2: Test Fuzzy Sizing (24h run).
+    - [ ] Day 3: Test Diffusion Head (24h run).
+    - [ ] Day 4-7: **Gaussian Sync** (Integrate with Gaussian Strategy Team hooks).
+- [ ] **The "Cut Loose" Phase (2-3 Weeks)**
+    - [ ] Protocol: 14-day DTE Condors max.
+    - [ ] Initial Day requirement: 14DTE trades must enter early in test cycle.
+    - [ ] Non-stop 24/5 monitoring (Paper).
+    - [ ] Governance: MAX 4 CONCURRENT Condors (Strict limit).
+- [ ] **Post-Analysis Audit**
+    - [ ] Evaluate Win Rate vs Spread PnL.
+    - [ ] Final Debugging for Architecture Alignment.
+    - [ ] HANDOVER: Live Production (Real Money).

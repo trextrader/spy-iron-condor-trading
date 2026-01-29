@@ -7,11 +7,12 @@ import torch
 import argparse
 from datetime import datetime
 import pytz
+import json
 
 # Add path
 sys.path.insert(0, os.getcwd())
 
-from execution.alpaca_executor import AlpacaExecutor
+from execution.paper_executor import PaperExecutor
 from intelligence.condor_brain import CondorBrain
 from intelligence.features.dynamic_features import compute_all_dynamic_features, compute_all_primitive_features_v22
 from intelligence.rule_engine.dsl_parser import RuleDSLParser
@@ -145,45 +146,20 @@ def calculate_live_greeks(contracts, current_spot):
     """
     Aggregates Greeks from a list of Alpaca option contracts.
     Returns a dict of {delta, gamma, theta, vega, iv}.
-    Logic:
-      - Filter for meaningful volume/open_interest (if possible) within ATM range.
-      - Simple average of ATM +/- 5 strikes (Call + Put combined? Or typically model expects blended).
-      - Note: Alpaca 'OptionContract' model has 'greeks' field which is a struct.
     """
     if not contracts:
         return None
         
-    # Filter for ATM range (Spot +/- 2%)
-    valid_contracts = []
-    
-    # We want near-term (<= 7 days) and ATM.
-    # The list passed in `contracts` is already filtered by date and strike range presumably.
-    
     deltas, gammas, thetas, vegas, ivs = [], [], [], [], []
     
     for c in contracts:
-        # Check if greeks data exists
         if hasattr(c, 'greeks') and c.greeks:
             g = c.greeks
-            # Filter bad data
-            if g.delta is not None: deltas.append(abs(g.delta)) # ABS Delta for exposure sizing, but model might want directional?
-            # Actually, standard feature 'delta' usually refers to directional (Calls + Puts -)? 
-            # OR is it 'market_greeks'?
-            # Let's assume the model trains on "ATM Delta" which for a CALL is ~0.5.
-            # V2.2 Feature registry usually has 'delta' as part of the market state...
-            # If the feature is just 'delta', it's ambiguous.
-            # However, `canonical_feature_registry` V2.2 likely has 'put_call_volume_ratio' etc.
-            # Let's check the list. It includes `delta`, `gamma`, `vega`, `theta`, `iv`.
-            # These are likely "ATM Contract Average" or "Portfolio Delta"? 
-            # In single-asset CDE models, these are usually "ATM Implied stats".
-            # So: Avg(Abs(Delta_Call), Abs(Delta_Put)) -> ~0.5 usually.
-            # Gamma: Sum or Avg? Avg.
-            
+            if g.delta is not None: deltas.append(abs(g.delta)) 
             if g.gamma is not None: gammas.append(g.gamma)
             if g.theta is not None: thetas.append(g.theta)
             if g.vega is not None: vegas.append(g.vega)
         
-        # IV is often top-level or in greeks? Alpaca has it in `implied_volatility`
         if c.implied_volatility is not None:
             ivs.append(c.implied_volatility)
 
@@ -196,13 +172,12 @@ def calculate_live_greeks(contracts, current_spot):
         'theta': float(np.mean(thetas)) if thetas else 0.0,
         'vega': float(np.mean(vegas)) if vegas else 0.0,
         'iv': float(np.mean(ivs)) if ivs else 0.0,
-        'svr': float(np.std(ivs)) if len(ivs) > 1 else 0.0 # Spread of Vol or similar
+        'svr': float(np.std(ivs)) if len(ivs) > 1 else 0.0 
     }
 
 def find_closest_contract(client, symbol, contract_type, target_strike, ideal_date):
     """
     Finds the contract closest to target_strike and ideal_date.
-    ideal_date: datetime object
     """
     try:
         from alpaca.data.requests import OptionContractsRequest
@@ -211,7 +186,7 @@ def find_closest_contract(client, symbol, contract_type, target_strike, ideal_da
             status='active',
             expiration_date_gte=ideal_date.date(),
             expiration_date_lte=(ideal_date + pd.Timedelta(days=5)).date(),
-            type=contract_type, # 'call' or 'put'
+            type=contract_type,
             strike_price_gte=target_strike - 2,
             strike_price_lte=target_strike + 2,
             limit=10
@@ -219,7 +194,6 @@ def find_closest_contract(client, symbol, contract_type, target_strike, ideal_da
         res = client.get_option_contracts(req)
         contracts = res.option_contracts
     except ImportError:
-        # Fallback to OptionChainRequest (older SDK or different version)
         try:
              # Try generic strategy using OptionChainRequest
              from alpaca.data.requests import OptionChainRequest
@@ -231,25 +205,11 @@ def find_closest_contract(client, symbol, contract_type, target_strike, ideal_da
                  strike_price_gte=target_strike - 2,
                  strike_price_lte=target_strike + 2
              )
-             # get_option_chain returns Dict[symbol, Snapshot]
              chain_map = client.get_option_chain(req)
              contracts = []
              for sym, snap in chain_map.items():
-                 # Mock an object with .symbol and .strike_price to match expected interface
-                 # Snapshot has .latest_quote, .greeks etc. 
-                 # We need to parse symbol to get strike? Or snapshot has it?
-                 # Snapshot object usually doesn't have strike directly unless in metadata.
-                 # ACTUALLY: The keys are symbols. We can parse the OSI symbol.
-                 # SPY250101C00500000
-                 # For safety, let's just skip if we can't easily get strike.
-                 # But wait, we need it. 
-                 # Let's trust the filter did its job. We just need to find "closest to target".
-                 # We can parse strike from symbol string.
                  try:
-                     # Parse OSI
-                     # SPY   25  01  01  C  00500000
-                     # 012345678901234567890
-                     # Strike is last 8 chars / 1000
+                     # Parse OSI Strike
                      strike = float(sym[-8:]) / 1000.0
                      contracts.append(type('obj', (object,), {'symbol': sym, 'strike_price': strike}))
                  except: 
@@ -270,6 +230,113 @@ def find_closest_contract(client, symbol, contract_type, target_strike, ideal_da
         print(f"Contract Search Error: {e}")
         return None
 
+def save_state(active_trades, filename="data/live/bot_state.json"):
+    """Persists active trades to JSON for restart safety."""
+    state = []
+    for trade in active_trades:
+        t = trade.copy()
+        # Convert datetime to ISO string for JSON
+        if 'entry_time' in t and isinstance(t['entry_time'], datetime):
+            t['entry_time'] = t['entry_time'].isoformat()
+        
+        # Convert UUID objects to strings (Alpaca returns UUIDs)
+        if 'trade_ids' in t and t['trade_ids']:
+            t['trade_ids'] = [str(tid) for tid in t['trade_ids']]
+            
+        state.append(t)
+    
+    try:
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        with open(filename, "w") as f:
+            json.dump(state, f, indent=4)
+        print(f"💾 Bot State Saved: {len(state)} active trades.")
+    except Exception as e:
+        print(f"❌ Failed to save bot state: {e}")
+
+def load_state(filename="data/live/bot_state.json"):
+    """Restores active trades from JSON."""
+    if not os.path.exists(filename):
+        return []
+    try:
+        with open(filename, "r") as f:
+            state = json.load(f)
+        
+        # Convert ISO strings back to datetime
+        for t in state:
+            if 'entry_time' in t:
+                # Ensure UTC aware if it was saved as such
+                dt = datetime.fromisoformat(t['entry_time'])
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=pytz.UTC)
+                t['entry_time'] = dt
+        
+        print(f"📢 Restored {len(state)} active trades from {filename}")
+        return state
+    except Exception as e:
+        print(f"⚠️ Failed to load bot state: {e}")
+        return []
+
+# --- FUZZY GOVERNANCE CONFIG ---
+FUZZY_WEIGHTS = {
+    "neural_conf": 0.35,
+    "prob_profit": 0.35,
+    "ivr": 0.10,
+    "trend": 0.10,
+    "rsi": 0.10
+}
+
+def calculate_memberships(df, confidence, prob_profit):
+    """Maps latest row and model outputs to fuzzy domain."""
+    row = df.iloc[-1]
+    
+    # 1. Neural & Prob
+    m_neural = min(1.0, confidence / 0.8)
+    m_prob = max(0.0, (prob_profit - 0.45) / 0.2) if prob_profit >= 0.45 else 0.0
+    
+    # 2. IVR (if available)
+    ivr = row.get('ivr', 0.5)
+    m_ivr = min(1.0, ivr / 60.0) if ivr > 0 else 0.5
+    
+    # 3. Trend (ADX/PSAR)
+    adx = row.get('adx_adaptive', 20.0)
+    m_trend = max(0.0, 1.0 - (adx / 40.0)) # Lower ADX = Better for Condor
+    
+    # 4. RSI (Neutral check)
+    rsi = row.get('rsi_dyn', 50.0)
+    # Neutral 40-60 is ideal
+    m_rsi = 1.0 - (abs(rsi - 50.0) / 50.0)
+    
+    return {
+        "neural_conf": m_neural,
+        "prob_profit": m_prob,
+        "ivr": m_ivr,
+        "trend": m_trend,
+        "rsi": m_rsi
+    }
+
+def is_market_session():
+    """
+    Checks if we are within the SPY option trading window:
+    9:35 AM - 4:10 PM ET (Monday-Friday).
+    """
+    tz_et = pytz.timezone("US/Eastern")
+    now_et = datetime.now(tz_et)
+    
+    # Check Weekend
+    if now_et.weekday() >= 5:
+        return False, "Weekend"
+    
+    # Define bounds
+    open_time = now_et.replace(hour=9, minute=35, second=0, microsecond=0)
+    close_time = now_et.replace(hour=16, minute=10, second=0, microsecond=0)
+    
+    if now_et < open_time:
+        return False, "Pre-Market"
+    if now_et > close_time:
+        return False, "Post-Market"
+        
+    return True, "Open"
+
 def run_live_loop(executor, model, metadata, device):
     print(f"[{datetime.now()}] Starting Live Loop for {SYMBOL}...")
     
@@ -286,11 +353,20 @@ def run_live_loop(executor, model, metadata, device):
     capital = 100000.0
     starting_capital = 100000.0
     
-    active_trade = None 
+    active_trades = load_state()
+    MAX_CONCURRENT_TRADES = 4
     
     # Loop
     while True:
         try:
+            # --- MARKET HOURS GATE ---
+            session_open, reason = is_market_session()
+            if not session_open:
+                sys.stdout.write(f"\r💤 Market Closed ({reason}). Sleeping 60s...       ")
+                sys.stdout.flush()
+                time.sleep(60)
+                continue
+
             now = datetime.now(pytz.UTC)
             seconds = now.second
             # Live Countdown
@@ -306,10 +382,6 @@ def run_live_loop(executor, model, metadata, device):
             
             # --- LIVE DATA RECORDER START ---
             try:
-                # 1. Fetch Option Chain Snapshot (WideNet: ATM +/- 5 strikes for speed/relevance in V1)
-                # User asked for "all spy call and put symbols". 
-                # A full chain fetch is expensive (bandwidth/time). 
-                # We will fetch a "Trading Window" snapshot for accountability.
                 if not hasattr(run_live_loop, 'opt_client'):
                      try:
                          from alpaca.data.historical import OptionHistoricalDataClient
@@ -320,19 +392,11 @@ def run_live_loop(executor, model, metadata, device):
                          run_live_loop.opt_client = None
 
                 if run_live_loop.opt_client:
-                    # Logic: Fetch contracts expiring in next 7 days, +/- 20 strikes from spot
-                    # We need a rough spot reference.
-                    # Since we haven't fetched 'df' yet for this new bar, we use the last known price or just a wide net.
-                    # Let's use a try-except to get a quick quote or just assume previous close?
-                    # Better: Just run this AFTER fetching df? 
-                    # No, user wants it during the wait or parallel.
-                    # Let's use a wide net: 650-750 for now (hardcoded based on ~695 spot) 
-                    # OR better: use the `active_trade` spot if available, else roughly 695.
                     center_strike = 695 
+                    if active_trades:
+                        center_strike = active_trades[-1]['entry_spot']
                     
-                    if 'active_trade' in locals() and active_trade:
-                        center_strike = active_trade['entry_spot']
-                    
+                    chain_path = None
                     all_contracts = []
                     try:
                         from alpaca.data.requests import OptionContractsRequest
@@ -342,9 +406,7 @@ def run_live_loop(executor, model, metadata, device):
                         os.makedirs(chain_dir, exist_ok=True)
                         chain_path = os.path.join(chain_dir, f"spy_chain_{timestamp_str}.csv")
                         
-                        # Fetch Calls & Puts
                         start_date = datetime.now().date()
-                        # Use global pd
                         req_c = OptionContractsRequest(
                             underlying_symbols=[SYMBOL],
                             status='active',
@@ -368,7 +430,6 @@ def run_live_loop(executor, model, metadata, device):
                         all_contracts = res_c.option_contracts + res_p.option_contracts
                         
                     except ImportError:
-                        # Fallback for Recorder
                         try:
                            from alpaca.data.requests import OptionChainRequest
                            req_chain = OptionChainRequest(
@@ -376,36 +437,27 @@ def run_live_loop(executor, model, metadata, device):
                                expiration_date_gte=datetime.now().date(),
                                expiration_date_lte=datetime.now().date() + pd.Timedelta(days=7),
                            )
-                           # get_option_chain returns Dict[symbol, Snapshot]
                            res_chain = run_live_loop.opt_client.get_option_chain(req_chain)
-                           # Convert values to list for saving
-                           # Snapshot has greeks, iv, quote. perfect.
                            all_contracts = list(res_chain.values())
-                           # We need to attach 'symbol' to the object if it's missing (it's the key)
                            for sym, snap in res_chain.items():
                                if not hasattr(snap, 'symbol'):
-                                   snap.symbol = sym # Inject symbol if missing
+                                   snap.symbol = sym
                         except Exception as e_fb:
                             print(f" [Recorder Warning] Fallback chain fetch failed: {e_fb}")
 
                     except Exception as e_chain:
                         print(f"  [Recorder Warning] fetching chain failed: {e_chain}")
 
-                    # Convert to DataFrame for saving
                     if all_contracts:
                         chain_df = pd.DataFrame([c.model_dump() for c in all_contracts])
-                        # Filter fields to save space
                         cols = ['symbol', 'strike_price', 'expiration_date', 'type', 'open_interest', 'style', 'implied_volatility', 'greeks']
                         chain_df = chain_df[[c for c in cols if c in chain_df.columns]]
                         chain_df.to_csv(chain_path, index=False)
                         
-                        # USER REQUEST: Console output
-                        # Print symbols compactly
                         syms = [c.symbol for c in all_contracts]
                         print(f"\n📚 Option Chain Recorded ({len(syms)} Contracts):")
-                        print(" ".join(syms)) # Print all symbols separated by space
+                        print(" ".join(syms)) 
                         print("-" * 50)
-
 
             except Exception as e_rec:
                 print(f" [Data Recorder Error] {e_rec}")
@@ -416,20 +468,6 @@ def run_live_loop(executor, model, metadata, device):
             df = fetch_live_data(data_client, SYMBOL, lookback_bars=LOOKBACK_BARS)
 
             # --- INJECT LIVE GREEKS ---
-            # If we successfully fetched contracts, use them to populate Greek columns
-            # The model expects consistent time-series, so we ideally append these values to the end.
-            # But `df` is historical bars. Current Greeks apply to "NOW" (last row).
-            # We will fill the *last row* with current Greeks.
-            # Note: This means historical rows in `df` will have 0.0 or older values?
-            # Yes, unless we fetch historical Greeks (impossible efficiently).
-            # The Neural CDE is robust to this if `lag_minutes` handles it, BUT...
-            # If the model relies on the Trajectory of Greeks, having only the last point non-zero is an issue.
-            # HOWEVER, `gamma` and `iv` are state variables. CDE interpolates.
-            # For live trading, we often assume "Last Known State" propagates or we just provide the current state.
-            # Let's fill the Enture Column with the current value? No, that destroys trends.
-            # Compromise: Fill the last 5-10 bars with the current Greek value to simulate "recent state".
-            # Or better: `compute_all_primitive_features` might require them.
-            
             current_greeks = None
             if 'all_contracts' in locals() and all_contracts:
                  current_greeks = calculate_live_greeks(all_contracts, df['close'].iloc[-1])
@@ -437,22 +475,12 @@ def run_live_loop(executor, model, metadata, device):
                      print(f"  [Greeks] IV: {current_greeks['iv']:.2f} | Gamma: {current_greeks['gamma']:.4f}")
             
             if current_greeks:
-                # We apply these values to the LAST ROW (Current Market State)
-                # And importantly: The model uses a window.
-                # If historical values are 0, the derivative is huge.
-                # FIX: We should likely forward-fill or back-fill for the immediate window if history is missing.
-                # But we can't invent history.
-                # Simplest robust approach for now: 
-                # Set the columns in the DF. 
-                # If they don't exist, init with current value (flat line assumption is better than 0).
                 for k, v in current_greeks.items():
                     if k not in df.columns:
-                        df[k] = v # Init whole column with current value (Flat Trend)
+                        df[k] = v 
                     else:
                         df.iloc[-1, df.columns.get_loc(k)] = v
             # ---------------------------
-
-# ... (Previous code) ...
 
             
             if len(df) < 256:
@@ -460,38 +488,30 @@ def run_live_loop(executor, model, metadata, device):
                 continue
                 
             # 2. V2.2 Feature Preparation
-            # A) Compute Dynamic Features (Indicators)
             df = compute_all_dynamic_features(df, inplace=True)
             
-            # B) Compute Primitive Features (Vol-gated logic)
-            # Ensure required columns for primitives exist
             if 'lag_minutes' not in df.columns:
-                 df['lag_minutes'] = 0.0 # Live data is fresh
+                 df['lag_minutes'] = 0.0 
             
             df = compute_all_primitive_features_v22(df, inplace=True)
             
             # C) Handle Targets & Missing Columns
-            # The model expects valid columns for 'target_spot' and 'max_dd_60m' even if unused for inference
-            # We fill them with 0.0 (safe placeholder)
             for col in FEATURE_COLS_V22:
                 if col not in df.columns:
-                    # Special handling for targets -> 0.0
                     if col in ['target_spot', 'max_dd_60m', 'target_profit']:
                         df[col] = 0.0
                     elif col in ['delta', 'gamma', 'vega', 'theta', 'iv']:
-                        # If we missed calculating it (e.g. data fail), use fill value
                          df[col] = get_neutral_fill_value_v22(col)
                     else:
                         # Fallback for others (e.g. from V2.2 defaults)
                         fill_val = get_neutral_fill_value_v22(col)
                         df[col] = fill_val
 
-            # Log Volume (if not already handled)
+            # Log Volume
             df_model_input = df.copy()
             df_model_input['volume'] = np.log1p(df_model_input['volume'])
             
             # --- LOG FEATURES FOR ACCOUNTABILITY ---
-            # User wants to see RSI, Gamma, etc.
             try:
                 latest_row = df_model_input.iloc[-1]
                 feature_logger.log_features(now, latest_row)
@@ -499,9 +519,6 @@ def run_live_loop(executor, model, metadata, device):
                 print(f"Feature Log Error: {e_flog}")
 
             # 3. Scaling
-            
-            # 3. Scaling
-            # Extract exactly the columns needed in order
             features = df_model_input[FEATURE_COLS_V22].values.astype(np.float32)
             features = np.nan_to_num(features, nan=0.0)
             X_scaled = apply_scaling(features, metadata['median'], metadata['scale'])
@@ -519,7 +536,7 @@ def run_live_loop(executor, model, metadata, device):
             prob_profit = float(preds[4])
             confidence = float(preds[7])
             
-            # Rules consenso (Dummy if not in df)
+            # Rules consenso
             rule_consensus = 0.0
             if 'rule_long_consensus' in df.columns:
                 rule_consensus = df['rule_long_consensus'].iloc[-1] - df['rule_short_consensus'].iloc[-1]
@@ -542,58 +559,136 @@ def run_live_loop(executor, model, metadata, device):
             
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Spot: ${spot:.2f} | Score: {entry_score}/100 | Conf: {confidence:.4f} | Prob: {prob_profit:.4f}")
 
+            # ---------------------------------------------------------
+            # 5. Execution Logic (Multi-Trade Concurrency)
+            # ---------------------------------------------------------
+            
+            # A) MANAGEMENT: Check ALL active trades for Exit Signals
+            for i, trade in enumerate(active_trades[:]): # Iterate copy
+                exit_reason = None
+                
+                # Update Trade Duration
+                trade_duration = (now - trade['entry_time']).total_seconds() / 60.0
+                
+                # Rule 1: Neural Confidence Drop
+                if confidence < 0.35:
+                    exit_reason = f"Low Confidence ({confidence:.2f})"
+                
+                # Rule 2: Spot Breach (Gamma Risk) - Using stored strikes
+                elif spot > trade['short_call'] or spot < trade['short_put']:
+                    exit_reason = f"Strike Breach (Spot {spot:.2f})"
+                
+                # Rule 3: Time Exit
+                elif trade_duration > 1440: # 24 Hours (increased from 2h)
+                    exit_reason = "Time Limit (24h)"
 
+                if exit_reason:
+                    print(f"📉 CLOSING Trade #{i+1} ({trade['legs'][0]['option_symbol'] if trade['legs'] else 'N/A'}): {exit_reason}")
+                    
+                    success = True
+                    if executor:
+                        try:
+                            # Actually call the close method
+                            success = executor.close_iron_condor(trade['legs'], trade['qty'])
+                        except Exception as e:
+                            print(f"   ❌ Close Failed: {e}")
+                            success = False
 
-            # 5. Execution Logic
-            if active_trade is None:
+                    if success:
+                        realized_pnl = 50.0 if "Breach" not in exit_reason else -100.0 # Mock PnL
+                        if realized_pnl > 0: running_stats['winners'] += 1
+                        else: running_stats['losers'] += 1
+                        
+                        capital += realized_pnl
+                        active_trades.remove(trade)
+                        save_state(active_trades) # Update Persistence
+                        print(f"   ✅ Trade Closed. PnL: ${realized_pnl:.2f}")
+                    else:
+                        print("   ⚠️ Exit Command Failed. Keeping trade in state for retry.")
+                else:
+                    # Logging Pulse
+                    pnl_delta = (spot - trade['entry_spot'])
+                    print(f"  [Trade #{i+1}] PnL Delta: ${pnl_delta:.2f} (Held {int(trade_duration)}m)")
+
+            # B) ENTRY: Look for NEW Trades (If slots available)
+            if len(active_trades) < MAX_CONCURRENT_TRADES:
+                
                 if entry_score >= ENTRY_THRESHOLD and confidence > 0.4:
                     trade_num = running_stats['total_trades'] + 1
                     call_off, put_off, width, dte = preds[0], preds[1], preds[2], preds[3]
                     width = width if width > 1.0 else 5.0
-                    dte = dte if dte > 1.0 else 14.0 # Default min DTE
+                    dte = dte if dte > 1.0 else 14.0 
                     
-                    # Target Strikes
                     target_short_call = spot + (call_off * spot * 0.01)
                     target_short_put = spot - (put_off * spot * 0.01)
                     target_long_call = target_short_call + width
                     target_long_put = target_short_put - width
                     
-                    # Target Date
                     target_date = datetime.now() + pd.Timedelta(days=dte)
                     
-                    # Try to resolve OSI Symbols
-                    # Check if we have opt_client from recorder loop, else init
-                    if not hasattr(run_live_loop, 'opt_client'):
-                         try:
-                             from alpaca.data.historical import OptionHistoricalDataClient
-                             ak = os.getenv('APCA_API_KEY_ID')
-                             sk = os.getenv('APCA_API_SECRET_KEY')
-                             run_live_loop.opt_client = OptionHistoricalDataClient(ak, sk)
-                         except:
-                             print("❌ Failed to init OptionClient for execution.")
-                             run_live_loop.opt_client = None
-
-                    osi_legs = []
-                    if run_live_loop.opt_client:
-                        print(f"🔎 Solving Contracts (DTE={dte:.1f}d)...")
-                        sc_sym = find_closest_contract(run_live_loop.opt_client, SYMBOL, 'call', target_short_call, target_date)
-                        lc_sym = find_closest_contract(run_live_loop.opt_client, SYMBOL, 'call', target_long_call, target_date)
-                        sp_sym = find_closest_contract(run_live_loop.opt_client, SYMBOL, 'put', target_short_put, target_date)
-                        lp_sym = find_closest_contract(run_live_loop.opt_client, SYMBOL, 'put', target_long_put, target_date)
+                    # Check Duplicates
+                    is_duplicate = False
+                    for trade in active_trades:
+                        if abs(trade['short_call'] - target_short_call) < 1.0:
+                            is_duplicate = True
+                            print(f"⚠️ Skipping Duplicate Strike Setup (${target_short_call:.2f})")
+                            break
+                    
+                    if not is_duplicate:
+                        # --- FUZZY POSITION SIZING (Phase 14) ---
+                        memberships = calculate_memberships(df, confidence, prob_profit)
                         
-                        if all([sc_sym, lc_sym, sp_sym, lp_sym]):
-                            osi_legs = [
-                                {'option_symbol': sc_sym, 'side': 'sell'},
-                                {'option_symbol': lc_sym, 'side': 'buy'},
-                                {'option_symbol': sp_sym, 'side': 'sell'},
-                                {'option_symbol': lp_sym, 'side': 'buy'}
-                            ]
-                        else:
-                            print(f"⚠️ Could not resolve all legs: SC={sc_sym}, LC={lc_sym}, SP={sp_sym}, LP={lp_sym}")
+                        # Max loss per contract (assuming 5-wide condor = $500)
+                        max_loss = width * 100.0 if width > 0 else 500.0
+                        
+                        # Use fuzzy sizer
+                        qty = fe.compute_position_size(
+                            equity=capital,
+                            max_loss_per_contract=max_loss,
+                            memberships=memberships,
+                            weights=FUZZY_WEIGHTS,
+                            realized_vol=df['vol_ewma'].iloc[-1],
+                            low_vol=0.05,
+                            high_vol=0.30,
+                            risk_fraction=0.02
+                        )
+                        
+                        # Institutional Floor
+                        if qty < 1: qty = 1
+                        
+                        print(f"📊 [Fuzzy Sizer] Score: {entry_score} -> Suggested Qty: {qty} (Risked: ${qty*max_loss:.2f})")
 
-                    entry_msg = f"""
+                        if not hasattr(run_live_loop, 'opt_client'):
+                             try:
+                                 from alpaca.data.historical import OptionHistoricalDataClient
+                                 ak = os.getenv('APCA_API_KEY_ID')
+                                 sk = os.getenv('APCA_API_SECRET_KEY')
+                                 run_live_loop.opt_client = OptionHistoricalDataClient(ak, sk)
+                             except:
+                                 print("❌ Failed to init OptionClient for execution.")
+                                 run_live_loop.opt_client = None
+
+                        osi_legs = []
+                        if run_live_loop.opt_client:
+                            print(f"🔎 Solving Contracts (DTE={dte:.1f}d)...")
+                            sc_sym = find_closest_contract(run_live_loop.opt_client, SYMBOL, 'call', target_short_call, target_date)
+                            lc_sym = find_closest_contract(run_live_loop.opt_client, SYMBOL, 'call', target_long_call, target_date)
+                            sp_sym = find_closest_contract(run_live_loop.opt_client, SYMBOL, 'put', target_short_put, target_date)
+                            lp_sym = find_closest_contract(run_live_loop.opt_client, SYMBOL, 'put', target_long_put, target_date)
+                            
+                            if all([sc_sym, lc_sym, sp_sym, lp_sym]):
+                                osi_legs = [
+                                    {'option_symbol': sc_sym, 'side': 'sell'},
+                                    {'option_symbol': lc_sym, 'side': 'buy'},
+                                    {'option_symbol': sp_sym, 'side': 'sell'},
+                                    {'option_symbol': lp_sym, 'side': 'buy'}
+                                ]
+                            else:
+                                print(f"⚠️ Could not resolve all legs: SC={sc_sym}, LC={lc_sym}, SP={sp_sym}, LP={lp_sym}")
+
+                        entry_msg = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║ 🦅 IRON CONDOR #{trade_num} ENTRY @ {datetime.now().strftime('%H:%M:%S')}
+║ 🦅 IRON CONDOR #{len(active_trades)+1} ENTRY @ {datetime.now().strftime('%H:%M:%S')}
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║ SPOT:          ${spot:.2f}
 ║ FUZZY SCORE:   {entry_score}/100 (threshold: {ENTRY_THRESHOLD})
@@ -603,70 +698,53 @@ def run_live_loop(executor, model, metadata, device):
 ║   Width:       ${width:.2f}  |  DTE: {dte:.1f} days
 ╠─────────────────────────── EXECUTION ────────────────────────────────────────╣
 ║   Resolved:    {len(osi_legs) == 4}
+║   Quantity:    {qty}
 ║   Short Legs:  {osi_legs[0]['option_symbol'] if osi_legs else 'N/A'} / {osi_legs[2]['option_symbol'] if osi_legs else 'N/A'}
 ╚══════════════════════════════════════════════════════════════════════════════╝"""
-                    print(entry_msg)
-                    
-                    
-                    # EXECUTE
-                    t_ids = None # Initialize to prevent UnboundLocalError
-                    if osi_legs and executor:
-                        try:
-                            t_ids = executor.submit_iron_condor(SYMBOL, osi_legs, quantity=1)
-                            print(f"🚀 SUBMITTED TO ALPACA! Trade IDs: {t_ids}")
-                        except Exception as e:
-                            print(f"❌ EXECUTION FAILED: {e}")
-                    else:
-                        print("⚠️ DRY RUN (No executor or unresolved legs)")
-                    
-                    # LOGGING
-                    trade_logger.log_entry(spot, entry_score, confidence, prob_profit, osi_legs, t_ids)
+                        print(entry_msg)
+                        
+                        # --- FRICTION GATE (Phase 14) ---
+                        # In a real environment, we'd fetch Bid/Ask for the spread.
+                        # For now, we use a proxy check on the 'spread_ratio' feature.
+                        friction_ratio = df['spread_ratio'].iloc[-1]
+                        MAX_ALLOWED_FRICTION = 0.05 # Revert if spread > 5% of mid
+                        
+                        if friction_ratio > MAX_ALLOWED_FRICTION:
+                             print(f"🛑 [Friction Gate] Rejected! Spread Ratio {friction_ratio:.4f} > {MAX_ALLOWED_FRICTION} (Low Liquidity)")
+                             osi_legs = [] # Invalidate legs to prevent entry
+                        
+                        # EXECUTE
+                        t_ids = None 
+                        if osi_legs and executor:
+                            try:
+                                t_ids = executor.submit_iron_condor(SYMBOL, osi_legs, quantity=qty)
+                                print(f"🚀 SUBMITTED TO ALPACA! Quantity: {qty} | Trade IDs: {t_ids}")
+                            except Exception as e:
+                                print(f"❌ EXECUTION FAILED: {e}")
+                        else:
+                            print("⚠️ DRY RUN (No executor or unresolved legs)")
+                        
+                        # LOGGING
+                        trade_logger.log_entry(spot, entry_score, confidence, prob_profit, osi_legs, t_ids)
 
-                    active_trade = {
-                        'entry_spot': spot, 
-                        'short_call': target_short_call, 
-                        'short_put': target_short_put, 
-                        'entry_time': now, 
-                        'qty': 1,
-                        'legs': osi_legs
-                    }
-                    running_stats['total_trades'] += 1
-            else:
-                exit_reason = None
-                if confidence < 0.3: exit_reason = "Low Confidence"
-                elif rule_consensus < -0.3: exit_reason = "Bearish Rule Signal"
-                
-                # Live PnL Delta
-                pnl_delta = (spot - active_trade['entry_spot'])
-                
-                if exit_reason:
-                    realized_pnl = 500.0 # Mock win for demo logic
-                    if realized_pnl > 0: running_stats['winners'] += 1
-                    else: running_stats['losers'] += 1
-                    capital += realized_pnl
-                    running_stats['total_pnl_dollar'] = capital - starting_capital
-                    running_stats['peak_capital'] = max(running_stats['peak_capital'], capital)
-                    dd = ((running_stats['peak_capital'] - capital) / running_stats['peak_capital']) * 100
-                    running_stats['max_dd_pct'] = max(running_stats['max_dd_pct'], dd)
-                    
-                    win_rate = (running_stats['winners'] / running_stats['total_trades']) * 100
-                    
-                    exit_msg = f"""
-╔══════════════════════════════════════════════════════════════════════════════╗
-║ 🔔 IRON CONDOR EXIT @ {datetime.now().strftime('%H:%M:%S')}
-╠══════════════════════════════════════════════════════════════════════════════╣
-║ Spot Price:    ${spot:.2f} (Entry: ${active_trade['entry_spot']:.2f})
-║ Exit Reason:   {exit_reason}
-║ Result:        ✅ WIN (PnL: ${realized_pnl:,.0f})
-╠─────────────────────────── PERFORMANCE METRICS ──────────────────────────────╣
-║ 1) Win Rate:   {win_rate:.1f}% ({running_stats['winners']}W | {running_stats['losers']}L)
-║ 2) Net P&L:    ${running_stats['total_pnl_dollar']:,.2f}
-║ 3) Drawdown:   {running_stats['max_dd_pct']:.2f}%
-╚══════════════════════════════════════════════════════════════════════════════╝"""
-                    print(exit_msg)
-                    active_trade = None
-                else:
-                    print(f"  [Active Trade] Running PnL Delta: ${pnl_delta:.2f} (Held {int((now-active_trade['entry_time']).total_seconds()/60)}m)")
+                        new_trade = {
+                            'entry_spot': spot, 
+                            'short_call': target_short_call, 
+                            'short_put': target_short_put, 
+                            'entry_time': now, 
+                            'qty': qty,
+                            'legs': osi_legs,
+                            'trade_ids': t_ids
+                        }
+                        active_trades.append(new_trade)
+                        save_state(active_trades) # Update Persistence
+                        running_stats['total_trades'] += 1
+            
+            # Update Running Stats
+            running_stats['total_pnl_dollar'] = capital - starting_capital
+            running_stats['peak_capital'] = max(running_stats['peak_capital'], capital)
+            dd = ((running_stats['peak_capital'] - capital) / running_stats['peak_capital']) * 100
+            running_stats['max_dd_pct'] = max(running_stats['max_dd_pct'], dd)
 
         except KeyboardInterrupt:
             break
@@ -704,8 +782,15 @@ if __name__ == "__main__":
         sys.exit(1)
         
     try:
+        # Initialize Trading Client explicitly
+        from alpaca.trading.client import TradingClient
+        ak = os.getenv('APCA_API_KEY_ID')
+        sk = os.getenv('APCA_API_SECRET_KEY')
+        trading_client = TradingClient(ak, sk, paper=args.paper)
         print(f"Initializing Alpaca (Paper={args.paper})...")
-        executor = AlpacaExecutor(paper=args.paper)
+
+        # Use PaperExecutor with the real client for validation
+        executor = PaperExecutor(run_config=None, trading_client=trading_client)
         
         print(f"Loading model {args.model}...")
         ckpt = torch.load(args.model, map_location=DEVICE, weights_only=False)

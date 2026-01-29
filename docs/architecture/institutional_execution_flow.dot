@@ -16,9 +16,9 @@ digraph InstitutionalWorkflow {
         label = <<b>1. REAL-TIME DATA HARVESTING</b>>;
         fillcolor = "#ECEFF1"; style = "filled,dashed"; color = "#455A64";
         
-        feed_spot [label="Real-Time SPY Feed\n(Alpaca Markets API)", fillcolor="#E1F5FE", color="#0288D1"];
-        feed_options [label="Option Surface (1M)\n(Alpaca / OPRA Sync)", fillcolor="#E8F5E9", color="#388E3C"];
-        sync_engine [label="Sync Engine\n(V2.2 Lag-Aware Alignment)", fillcolor="#FFF9C4", color="#FBC02D"];
+        feed_spot [label="Real-Time SPY Feed\n(Alpaca / OPRA)", fillcolor="#E1F5FE", color="#0288D1"];
+        feed_options [label="Option Surface (1M)\n(512-Strikes)", fillcolor="#E8F5E9", color="#388E3C"];
+        sync_engine [label="Sync Engine\n(Lag-Aware Alignment)", fillcolor="#FFF9C4", color="#FBC02D"];
         
         feed_spot -> sync_engine;
         feed_options -> sync_engine;
@@ -29,9 +29,9 @@ digraph InstitutionalWorkflow {
         label = <<b>2. AGENTIC INTELLIGENCE HUB</b>>;
         fillcolor = "#E8EAF6"; style = "filled,rounded"; color = "#3F51B5";
         
-        cde_core [label="Neural CDE Backbone\n(Continuous-Time Dynamics)", fillcolor="#C5CAE9", color="#1A237E", shape=hexagon];
-        heads [label="Multi-Head Policy Decoder\n(Entry, Expiry, ProbProfit)", fillcolor="#E0F2F1", color="#00897B"];
-        moe_gate [label="Top-K Expert Mixture\n(Regime-Specialized)", fillcolor="#FFF3E0", color="#FB8C00"];
+        cde_core [label="Neural CDE Backbone\n(Latent State h_t)", fillcolor="#C5CAE9", color="#1A237E", shape=hexagon];
+        heads [label="Multi-Head Decoder\n(Policy Engine)", fillcolor="#E0F2F1", color="#00897B"];
+        moe_gate [label="Top-K Expert Mixture\n(Regime Logic)", fillcolor="#FFF3E0", color="#FB8C00"];
         
         cde_core -> heads;
         cde_core -> moe_gate [style=dotted];
@@ -42,9 +42,9 @@ digraph InstitutionalWorkflow {
         label = <<b>3. INSTITUTIONAL RISK &amp; SIZING</b>>;
         fillcolor = "#F1F8E9"; style = "filled,rounded"; color = "#2E7D32";
         
-        fuzzy_sizer [label="11-Factor Hybrid Sizer\n(Neural CDE + 10 Factors)", fillcolor="#81C784", color="#2E7D32"];
+        fuzzy_sizer [label="Hybrid Fuzzy Sizer\n(Quantor-MTFuzz™)", fillcolor="#81C784", color="#2E7D32"];
         expected_shortfall [label="Expected Shortfall (ES)\n& CVaR Calculation", fillcolor="#A5D6A7", color="#2E7D32"];
-        sizing_logic [label="Dynamic Scaling Unit\n(V2.2 Predictive Adjustment)", fillcolor="#4CAF50", fontcolor=white];
+        sizing_logic [label="Dynamic Scaling Unit\n(Risk-Parity Σ)", fillcolor="#4CAF50", fontcolor=white];
         
         heads -> fuzzy_sizer;
         moe_gate -> fuzzy_sizer;
@@ -52,14 +52,14 @@ digraph InstitutionalWorkflow {
         expected_shortfall -> sizing_logic;
     }
 
-    // --- PHASE 4: EXECUTION & LIQUIDITY ---
+    // --- PHASE 4: PRECISION EXECUTION ---
     subgraph cluster_execution {
         label = <<b>4. PRECISION EXECUTION</b>>;
         fillcolor = "#FFF3E0"; style = "filled,rounded"; color = "#E65100";
         
-        strike_select [label="Leg Selection Engine\n(4-Leg Iron Condor)", fillcolor="#FFCC80", color="#EF6C00"];
-        order_mgr [label="Smart Order Manager\n(VIX-Gated Twap/TWAP)", fillcolor="#FFB74D", color="#E65100"];
-        broker_facade [label="Broker Facade\n(Alpaca / IBKR / Sim)", fillcolor="#FF9800", fontcolor=white];
+        strike_select [label="Leg Selector Engine\n(4-Leg Condor)", fillcolor="#FFCC80", color="#EF6C00"];
+        order_mgr [label="Smart Order Manager\n(Friction Gate)", fillcolor="#FFB74D", color="#E65100"];
+        broker_facade [label="Broker Facade\n(Live / Paper)", fillcolor="#FF9800", fontcolor=white];
         
         sizing_logic -> strike_select;
         strike_select -> order_mgr;
@@ -71,8 +71,8 @@ digraph InstitutionalWorkflow {
         label = <<b>5. POST-TRADE &amp; PERFORMANCE</b>>;
         fillcolor = "#FCE4EC"; style = "filled,rounded"; color = "#880E4F";
         
-        log_db [label="Trade Log DB\n(SQLite/JSON)", fillcolor="#F8BBD0", color="#AD1457"];
-        alpha_report [label="Alpha Factors Analysis\n(Performance Attribution)", fillcolor="#F48FB1", color="#880E4F"];
+        log_db [label="Trade Log DB\n(JSON/SQLite)", fillcolor="#F8BBD0", color="#AD1457"];
+        alpha_report [label="Alpha Attribution\n(Surrogate Rules)", fillcolor="#F48FB1", color="#880E4F"];
         tensorboard [label="Training Monitor\n(Visual Validation)", fillcolor="#F06292", fontcolor=white];
         
         broker_facade -> log_db [label="Execution Ack"];

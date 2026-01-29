@@ -9,7 +9,9 @@ Full technical details available in [Scientific Specification](docs/scientific_s
 - **📊 Advanced Monitoring:** Real-time TensorBoard logging for per-head loss, regime expert activations, and 45-day price trajectories.
 - **🔥 Production Sweep:** Automated hyperparameter tuning infrastructure capable of training 100M+ parameter models.
 
-## 🆕 New in v2.2 (Backtesting & Analytics)
+## 🆕 New in v2.2 (Execution Hardening & Ph.D. Thesis)
+> [!IMPORTANT]
+> Full technical derivations and execution hardening details are available in the [Institutional Engineering Thesis v2.2](file:///C:/Users/astou/.gemini/antigravity/brain/744e41ea-70fb-4b4e-b54c-744f8b163fe5/dev_report_v2_2.md) and the [Deployment Guide](file:///C:/Users/astou/.gemini/antigravity/brain/744e41ea-70fb-4b4e-b54c-744f8b163fe5/DEPLOYMENT_v2_2.md).
 
 ### Fuzzy Logic Trade Entry
 Replaces binary thresholds with **multi-factor scoring (0-100 points)**:

@@ -1,0 +1,102 @@
+digraph QuantorArchitecture {
+  rankdir=TD;
+  bgcolor="#0b0f14";
+  splines=true;
+  nodesep=0.35;
+  ranksep=0.55;
+
+  graph [fontname="Inter", fontsize=12, pad="0.35"];
+  node  [fontname="Inter", fontsize=11, shape=box, style="rounded,filled", penwidth=1.2];
+  edge  [fontname="Inter", fontsize=10, color="#94a3b8", fontcolor="#cbd5e1", penwidth=1.0];
+
+  // ---------- CLUSTERS ----------
+  subgraph cluster_harvest {
+    label="1. HARVEST";
+    labelloc="t";
+    fontsize=12;
+    fontcolor="#e2e8f0";
+    color="#334155";
+    style="rounded,filled";
+    fillcolor="#0f172a";
+
+    spot   [label="SPY Feed\n(Alpaca/OPRA)", fillcolor="#111827", fontcolor="#e5e7eb", color="#3b82f6"];
+    opts   [label="Options (1M)\n(512 Strikes)", fillcolor="#111827", fontcolor="#e5e7eb", color="#22c55e"];
+    sync   [label="Sync Engine\n(Lag-Aware)", fillcolor="#111827", fontcolor="#e5e7eb", color="#f59e0b"];
+
+    spot -> sync;
+    opts -> sync;
+  }
+
+  subgraph cluster_intel {
+    label="2. INTELLIGENCE";
+    labelloc="t";
+    fontsize=12;
+    fontcolor="#e2e8f0";
+    color="#334155";
+    style="rounded,filled";
+    fillcolor="#0f172a";
+
+    cde    [label="Neural CDE Backbone\n(Latent State h_t)", fillcolor="#111827", fontcolor="#e5e7eb", color="#a855f7"];
+    heads  [label="Decoder\n(Policy Engine)", fillcolor="#111827", fontcolor="#e5e7eb", color="#38bdf8"];
+    moe    [label="Top-K MoE\n(Regime Logic)", fillcolor="#111827", fontcolor="#e5e7eb", color="#f472b6"];
+
+    sync -> cde [label=" Path X(s)", fontcolor="#cbd5e1", color="#64748b"];
+    cde  -> heads [label=" Latent Spline", fontcolor="#cbd5e1", color="#64748b"];
+    cde  -> moe   [label=" Regime Prob", fontcolor="#cbd5e1", color="#64748b"];
+  }
+
+  subgraph cluster_risk {
+    label="3. RISK/SIZE";
+    labelloc="t";
+    fontsize=12;
+    fontcolor="#e2e8f0";
+    color="#334155";
+    style="rounded,filled";
+    fillcolor="#0f172a";
+
+    fuzzy  [label="Fuzzy Sizer\n(MTFuzz™)", fillcolor="#111827", fontcolor="#e5e7eb", color="#10b981"];
+    sizing [label="Scaling Unit\n(Risk-Parity Σ)", fillcolor="#111827", fontcolor="#e5e7eb", color="#f97316"];
+
+    heads -> fuzzy;
+    moe   -> fuzzy;
+    fuzzy -> sizing [label=" Exp Shortfall", fontcolor="#cbd5e1", color="#64748b"];
+  }
+
+  subgraph cluster_exec {
+    label="4. EXECUTION";
+    labelloc="t";
+    fontsize=12;
+    fontcolor="#e2e8f0";
+    color="#334155";
+    style="rounded,filled";
+    fillcolor="#0f172a";
+
+    select [label="Leg Selector\n(4-Leg Condor)", fillcolor="#111827", fontcolor="#e5e7eb", color="#60a5fa"];
+    order  [label="Order Mgr\n(Friction Gate)", fillcolor="#111827", fontcolor="#e5e7eb", color="#f59e0b"];
+    broker [label="Broker Facade\n(Live/Paper)", fillcolor="#111827", fontcolor="#e5e7eb", color="#22c55e"];
+
+    sizing -> select;
+    select -> order;
+    order  -> broker;
+  }
+
+  subgraph cluster_audit {
+    label="5. AUDIT";
+    labelloc="t";
+    fontsize=12;
+    fontcolor="#e2e8f0";
+    color="#334155";
+    style="rounded,filled";
+    fillcolor="#0f172a";
+
+    log   [label="Trade Log DB\n(JSON/SQLite)", fillcolor="#111827", fontcolor="#e5e7eb", color="#38bdf8"];
+    alpha [label="Alpha Analysis\n(Surrogate Rules)", fillcolor="#111827", fontcolor="#e5e7eb", color="#a855f7"];
+
+    broker -> log [label=" Fill Acknowledgment", fontcolor="#cbd5e1", color="#64748b"];
+    log    -> alpha;
+  }
+
+  // ---------- FEEDBACK LOOPS ----------
+  sync  -> cde   [style="dashed", color="#475569"];
+  alpha -> cde   [style="dashed", color="#475569"];
+}

@@ -70,8 +70,8 @@ digraph SPYIronCondorSystem {
             color="#3d5a80";
             fontcolor="#3d5a80";
             
-            sync_engine [label="SyncEngine\ndata_factory/sync_engine.py\n(Lag-Aware Alignment)", shape=box, fillcolor="#2d5a8a", fontcolor=white];
-            time_align [label="TimeAligner\n(Spot ↔ Options)", shape=box, fillcolor="#2d5a8a", fontcolor=white];
+            sync_engine [label="Sync Engine\n(Lag-Aware)", shape=box, fillcolor="#2d5a8a", fontcolor=white];
+            time_align [label="Time Aligner\n(Spot ↔ Options)", shape=box, fillcolor="#2d5a8a", fontcolor=white];
         }
         
         subgraph cluster_transform {
@@ -80,9 +80,9 @@ digraph SPYIronCondorSystem {
             color="#3d5a80";
             fontcolor="#3d5a80";
             
-            feature_eng [label="Feature Pipeline\n24 Institutional Features", shape=box, fillcolor="#3d6a9a", fontcolor=white];
-            greeks_calc [label="Greeks Calculator\nΔ, Γ, Θ, ν, IV", shape=box, fillcolor="#3d6a9a", fontcolor=white];
-            technicals [label="Technicals\nRSI, ATR, ADX, BB, PSAR", shape=box, fillcolor="#3d6a9a", fontcolor=white];
+            feature_eng [label="Feature Pipeline\n(52 Features)", shape=box, fillcolor="#3d6a9a", fontcolor=white];
+            greeks_calc [label="Greeks Calc\nΔ, Γ, Θ, ν, IV", shape=box, fillcolor="#3d6a9a", fontcolor=white];
+            technicals [label="Technicals\n(RSI, ATR, ADX)", shape=box, fillcolor="#3d6a9a", fontcolor=white];
         }
         
         // New: Manifold & TDA
@@ -179,7 +179,7 @@ digraph SPYIronCondorSystem {
         
         optimizer [label="FusedAdamW\n+ GradScaler (BF16)", shape=box, fillcolor="#5c4a1a", fontcolor=white];
         
-        training_monitor [label="TrainingMonitor\nPer-Head Tracking\nTensorBoard", shape=box, fillcolor="#5c4a1a", fontcolor=white];
+        training_monitor [label="Training Monitor\n(TensorBoard)", shape=box, fillcolor="#5c4a1a", fontcolor=white];
         
         model_checkpoint [label="Model Checkpoint\ncondor_brain_*.pth", shape=folder, fillcolor="#7c6a3a", fontcolor=white];
     }
@@ -280,7 +280,7 @@ digraph SPYIronCondorSystem {
         trade_log [label="TradeLog\nAll Transactions", shape=cylinder, fillcolor="#1a4a4a", fontcolor=white];
         equity_curve [label="EquityCurve\nDaily NAV", shape=box, fillcolor="#1a4a4a", fontcolor=white];
         
-        metrics [label="Performance Metrics\nSharpe, Sortino, MDD\nProfit Factor, E-Ratio", shape=box, fillcolor="#2a5a5a", fontcolor=white];
+        metrics [label="Performance Metrics\nSharpe, MDD, E-Ratio", shape=box, fillcolor="#2a5a5a", fontcolor=white];
         
         reports_csv [label="Reports (CSV)\nreports/*.csv", shape=folder, fillcolor="#3a6a6a", fontcolor=white];
         tensorboard [label="TensorBoard\nruns/condor_brain/", shape=box, fillcolor="#2a5a5a", fontcolor=white];

@@ -437,55 +437,81 @@ def compute_all_dynamic_features(
     if not inplace:
         df = df.copy()
     
-    close = df[close_col]
-    high = df[high_col]
-    low = df[low_col]
+    # 🕵️ FORENSIC FIX: Data has ~100 rows per timestamp. 
+    # Standard .rolling() will collapse on spot data because it sees the same value repeated.
+    # We must compute spot features on a per-minute basis, then merge back.
     
-    print("   Computing dynamic features...")
+    print("   Building bar-level frame for time-aware spot features...")
+    time_col = 'dt' if 'dt' in df.columns else ('timestamp' if 'timestamp' in df.columns else None)
+    if time_col is None:
+        raise ValueError("Missing 'dt' or 'timestamp' column for time-aware grouping.")
+
+    # 1. Extract unique bars
+    bars = df.groupby(time_col, as_index=False).agg({
+        close_col: 'first',
+        high_col: 'first',
+        low_col: 'first',
+        'volume': 'first' if 'volume' in df.columns else 'first' # placeholder
+    }).sort_values(time_col)
     
-    # Core kinematics
-    df["log_return"] = compute_log_return(close)
-    df["vol_ewma"] = compute_vol_ewma(close)
-    # Vol-normalized return (dimensionless, regime-stable)
-    df["ret_z"] = (df["log_return"] / (df["vol_ewma"] + 1e-12)).astype(np.float32)
-    df["atr_pct"] = compute_atr_pct(high, low, close)
+    close_bar = bars[close_col]
+    high_bar = bars[high_col]
+    low_bar = bars[low_col]
+    vol_bar = bars['volume'] if 'volume' in bars.columns else pd.Series(0, index=bars.index)
+    
+    print("   Computing dynamic features on bar-frame (across time)...")
+    
+    # Core kinematics on BARS
+    bars["log_return"] = compute_log_return(close_bar)
+    bars["vol_ewma"] = compute_vol_ewma(close_bar)
+    bars["ret_z"] = (bars["log_return"] / (bars["vol_ewma"] + 1e-12)).astype(np.float32)
+    bars["atr_pct"] = compute_atr_pct(high_bar, low_bar, close_bar)
     
     # Curvature & energy
-    kappa, vol_energy = compute_curvature_features(close)
-    df["kappa_proxy"] = kappa
-    df["vol_energy"] = vol_energy
+    kappa, vol_energy = compute_curvature_features(close_bar)
+    bars["kappa_proxy"] = kappa
+    bars["vol_energy"] = vol_energy
     
-    # Dynamic oscillators
-    df["rsi_dyn"] = compute_dynamic_rsi(close, vol_energy)
-    df["adx_adaptive"] = compute_adaptive_adx(high, low, close, vol_energy=vol_energy)
-    df["psar_adaptive"] = compute_dynamic_psar(high, low, close, df["atr_pct"])
+    # Oscillators
+    bars["rsi_dyn"] = compute_dynamic_rsi(close_bar, vol_energy)
+    bars["adx_adaptive"] = compute_adaptive_adx(high_bar, low_bar, close_bar, vol_energy=vol_energy)
+    bars["psar_adaptive"] = compute_dynamic_psar(high_bar, low_bar, close_bar, bars["atr_pct"])
     
-    # Dynamic Bollinger
-    bb_mu, bb_sigma, bb_lower, bb_upper = compute_dynamic_bollinger(close, vol_energy)
-    df["bb_mu_dyn"] = bb_mu
-    df["bb_sigma_dyn"] = bb_sigma
-    df["bb_lower_dyn"] = bb_lower
-    df["bb_upper_dyn"] = bb_upper
+    # Bollinger
+    bb_mu, bb_sigma, bb_lower, bb_upper = compute_dynamic_bollinger(close_bar, vol_energy)
+    bars["bb_mu_dyn"] = bb_mu
+    bars["bb_sigma_dyn"] = bb_sigma
+    bars["bb_lower_dyn"] = bb_lower
+    bars["bb_upper_dyn"] = bb_upper
     
-    # Dynamic Stochastic
-    df["stoch_k_dyn"] = compute_dynamic_stochastic(high, low, close, vol_energy)
+    # Stochastic
+    bars["stoch_k_dyn"] = compute_dynamic_stochastic(high_bar, low_bar, close_bar, vol_energy)
     
-    # Consolidation & Breakout
-    consol, breakout = compute_consolidation_breakout(close, bb_sigma, bb_upper, bb_lower)
-    df["consolidation_score"] = consol
-    df["breakout_score"] = breakout
+    # Consolidation
+    consol, breakout = compute_consolidation_breakout(close_bar, bb_sigma, bb_upper, bb_lower)
+    bars["consolidation_score"] = consol
+    bars["breakout_score"] = breakout
     
-    # Spread Ratio (Critical for Primitives)
+    # 2. Merge bar-features back to the full dataset
+    spot_cols = [
+        "log_return", "vol_ewma", "ret_z", "atr_pct", "kappa_proxy", "vol_energy",
+        "rsi_dyn", "adx_adaptive", "psar_adaptive", "bb_mu_dyn", "bb_sigma_dyn",
+        "bb_lower_dyn", "bb_upper_dyn", "stoch_k_dyn", "consolidation_score", "breakout_score"
+    ]
+    
+    print(f"   Broadcasting {len(spot_cols)} spot features back to options rows...")
+    df = df.merge(bars[[time_col] + spot_cols], on=time_col, how='left')
+    
+    # Spread Ratio (Keep row-specific if bid/ask exists per option, 
+    # but here it likely comes from spot if OHLCV based)
     if "ask" in df.columns and "bid" in df.columns:
-        # Avoid zero division
         mid = (df["ask"] + df["bid"]) / 2.0
         mid = mid.replace(0, 1.0) 
         df["spread_ratio"] = (df["ask"] - df["bid"]) / mid
     elif "spread_ratio" not in df.columns:
-        # Default if missing (e.g. OHLCV only)
-        df["spread_ratio"] = 0.0001 # 1bp default
+        df["spread_ratio"] = 0.0001
     
-    print(f"   [OK] Added dynamic features + spread_ratio")
+    print(f"   [OK] Added time-aligned dynamic features + spread_ratio")
     
     return df
 
