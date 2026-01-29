@@ -419,7 +419,7 @@ class FuzzyMeasure:
             'adx': calculate_adx_membership(state.adx),
             'bbands': calculate_bbands_membership(state.bb_position, state.bb_width),
             'stoch': calculate_stoch_membership(state.stoch_k),
-            'volume': calculate_volume_membership(state.volume_ratio),
+            'volume': calculate_volume_membership(state.cmf),
             'sma': calculate_sma_distance_membership(state.sma_distance),
             'psar': calculate_psar_membership(state.psar_position)
         }
@@ -906,7 +906,7 @@ class GovernanceLayer:
             'adx': calculate_adx_membership(state.adx),
             'bbands': calculate_bbands_membership(state.bb_position, state.bb_width),
             'stoch': calculate_stoch_membership(state.stoch_k),
-            'volume': calculate_volume_membership(state.volume_ratio),
+            'volume': calculate_volume_membership(state.cmf),
             'sma': calculate_sma_distance_membership(state.sma_distance),
             'psar': calculate_psar_membership(state.psar_position)
         }

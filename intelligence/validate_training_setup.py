@@ -121,10 +121,11 @@ def validate_model() -> dict:
 
         # Try instantiating model
         import torch
+        from intelligence.canonical_feature_registry import INPUT_DIM_V22
         model = CondorBrain(
             d_model=128,  # Small for validation
             n_layers=2,
-            input_dim=52,
+            input_dim=INPUT_DIM_V22,  # V2.2 canonical
             use_cde=True,
             use_topk_moe=False
         )
@@ -133,7 +134,7 @@ def validate_model() -> dict:
         print(f"[OK] Model instantiated: {n_params:,} parameters")
 
         # Test forward pass
-        x = torch.randn(2, 256, 52)
+        x = torch.randn(2, 256, INPUT_DIM_V22)
         with torch.no_grad():
             out = model(x, return_regime=True)
 

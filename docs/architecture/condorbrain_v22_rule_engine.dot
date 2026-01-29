@@ -137,7 +137,7 @@ digraph CondorBrain_V22_RuleEngine_Architecture {
         color="#00cc66";
 
         n_prim_entry [label="compute_all_primitive_features_v22(df)\n20 primitive outputs"];
-        n_v22_vector [label="V2.2 Feature Vector\n52 Features (32 + 20)"];
+        n_v22_vector [label="V2.2 Feature Vector\n54 Features (32 + 22)"];
         n_neutral_fill [label="NEUTRAL_FILL_VALUES_V22\napply_semantic_nan_fill"];
     }
 
@@ -151,7 +151,7 @@ digraph CondorBrain_V22_RuleEngine_Architecture {
         fontcolor="white";
 
         n_reg_v21 [label="FEATURE_COLS_V21\n32 features", fillcolor="#888888", fontcolor="white"];
-        n_reg_v22 [label="FEATURE_COLS_V22\n52 features", fillcolor="#777777", fontcolor="white"];
+        n_reg_v22 [label="FEATURE_COLS_V22\n54 features", fillcolor="#777777", fontcolor="white"];
         n_reg_meta [label="FEATURE_REGISTRY_V22\nprimitive_integration=True", fillcolor="#555555", fontcolor="white"];
     }
 

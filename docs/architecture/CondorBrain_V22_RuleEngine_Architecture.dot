@@ -96,7 +96,7 @@ digraph CondorBrainPortraitWhite {
         prim_p1     [label="bandwidth"];
         prim_p2     [label="bb_percentile"];
         prim_p3     [label="bw_expansion_rate"];
-        prim_p4     [label="volume_ratio"];
+        prim_p4     [label="cmf"];
         prim_p5     [label="friction_ratio"];
         prim_p6     [label="exec_allow"];
         prim_p7     [label="gap_risk_score"];

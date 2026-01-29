@@ -8,11 +8,12 @@ sys.path.append(os.getcwd())
 from intelligence.condor_brain import CondorBrain
 
 def test_cde_integration():
-    print("🚀 Testing CondorBrain with Neural CDE Backbone...")
-    
+    from intelligence.canonical_feature_registry import INPUT_DIM_V22
+    print("Testing CondorBrain with Neural CDE Backbone...")
+
     bs = 2
     seq_len = 32
-    input_dim = 52
+    input_dim = INPUT_DIM_V22  # V2.2 canonical
     d_model = 32 # Small for speed
     
     try:

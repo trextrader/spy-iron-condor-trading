@@ -22,7 +22,10 @@ def safe_nan_to_num(X: np.ndarray) -> np.ndarray:
     """Replace NaN/Inf with 0 to prevent Neural CDE explosion."""
     return np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
-def load_cde_model(ckpt_path, input_dim=52):
+def load_cde_model(ckpt_path, input_dim=None):
+    from intelligence.canonical_feature_registry import INPUT_DIM_V22
+    if input_dim is None:
+        input_dim = INPUT_DIM_V22  # V2.2 canonical default
     print(f"Loading {ckpt_path}...")
     ckpt = torch.load(ckpt_path, map_location=DEVICE)
     

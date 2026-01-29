@@ -11,8 +11,8 @@
 
 This document specifies a **precise engineering design** for integrating:
 
-1) **Robust Pricing–Hedging Duality (Hou–Oblój)**
-2) **Passerini–Vázquez HJB Optimal Trading**
+1) **Robust Pricingï¿½Hedging Duality (Houï¿½Oblï¿½j)**
+2) **Passeriniï¿½Vï¿½zquez HJB Optimal Trading**
 3) **Execution Cost & Fill Probability**
 4) **Fuzzy-Measure Position Sizing**
 5) **Computational Physics Features (curvature, energy, topology)**
@@ -76,9 +76,19 @@ Sizing (Fuzzy Measure) ? Execution (Order Router) ? Risk Tracking
 
 ### 4.1 SSOT for Features
 
-**Decision:** Use **V2.2** schema (52 features) from `intelligence/canonical_feature_registry.py`.
+**Decision:** Use **V2.2** schema (54 features: 32 V2.1 base + 22 V2.2 primitives) from `intelligence/canonical_feature_registry.py`.
 
-This prevents mismatches between training/inference/backtest/mamba input, which currently use mixed 24/32/52 feature sets.
+This prevents mismatches between training/inference/backtest/mamba input, which currently use mixed 24/32/54 feature sets.
+
+### 4.1.1 V2.2 Column Replacements
+
+The following columns were replaced in V2.2:
+
+| Deprecated Column | V2.2 Replacement | Formula / Description |
+|-------------------|------------------|----------------------|
+| `volume_ratio` | `cmf` | Chaikin Money Flow: `sum((close-low)-(high-close))/(high-low)*vol, 20) / sum(vol, 20)` |
+| `bid` | `pressure_up` | Bullish pressure: `max(0, close-open) / (high-low+eps)` |
+| `ask` | `pressure_down` | Bearish pressure: `max(0, open-close) / (high-low+eps)` |
 
 ### 4.2 Required Implementation Tasks
 
@@ -97,7 +107,7 @@ if not validate_feature_cols(df.columns.tolist()):
 
 ---
 
-## 5) Robust Pricing–Hedging Duality Integration
+## 5) Robust Pricingï¿½Hedging Duality Integration
 
 ### 5.1 Mathematical Core
 
@@ -116,7 +126,7 @@ I \subset \Omega, \quad I = \{\omega: \text{constraints on paths} \}
 V_{X,\mathcal{P},I}(G) = \sup_{\mathbb{P} \in \mathcal{M}^I} \mathbb{E}_{\mathbb{P}}[G]
 \]
 
-**Pricing–Hedging Duality:**
+**Pricingï¿½Hedging Duality:**
 \[
 V(G) = \sup_{\mathbb{P} \in \mathcal{M}^I} \mathbb{E}_{\mathbb{P}}[G]
 \]
@@ -1128,9 +1138,9 @@ Recommended profiles (documented, not hardcoded):
 
 | Profile | d_model | n_layers | input_dim | seq_len | Notes |
 |---|---:|---:|---:|---:|---|
-| Train-Research | 1024 | 32 | 52 | 240 | Max capacity, H100/A100 |
-| Train-Prod | 512 | 12â€“24 | 52 | 240 | Balanced throughput |
-| Inference-Prod | 512 | 12 | 52 | 240 | Low-latency |
+| Train-Research | 1024 | 32 | 54 | 240 | Max capacity, H100/A100 |
+| Train-Prod | 512 | 12â€“24 | 54 | 240 | Balanced throughput |
+| Inference-Prod | 512 | 12 | 54 | 240 | Low-latency |
 
 All docs must reflect deployed checkpoint metadata. If there is a mismatch, **checkpoint metadata is authoritative**.
 

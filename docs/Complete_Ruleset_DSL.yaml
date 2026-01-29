@@ -508,7 +508,7 @@ RULE_SPREAD:
   
   requires:
     primitives: ["P001", "P007", "G001", "G002", "G010"]
-    features: ["spread_ratio", "avg_range", "vol_ewma", "bw_percentile", "volume_ratio"]
+    features: ["spread_ratio", "avg_range", "vol_ewma", "bw_percentile", "cmf"]
     timeframes: ["1m"]
   
   primitives:

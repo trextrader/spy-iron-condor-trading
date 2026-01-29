@@ -185,21 +185,32 @@ AF(t) = min(AF_max, AF(t-1) + AF_step · ATR_scale(t))
 
 ---
 
-### P007: Volume Ratio
+### P007: Chaikin Money Flow (CMF)
 
-**Description**: Volume relative to rolling mean, regime-aware.
+> **V2.2 Migration Note**: `volume_ratio` was **deprecated** in V2.2 and replaced by `cmf` (Chaikin Money Flow), which provides superior institutional flow detection.
+
+**Description**: Accumulation/distribution pressure based on where price closes within the high-low range, weighted by volume.
 
 **Formula**:
 ```
-VolumeRatio(t) = Volume(t) / SMA_20(Volume)
-VolumeRatio_dynamic(t) = VolumeRatio(t) / (1 + γ · VolEnergy(t))
+Money Flow Multiplier = ((Close - Low) - (High - Close)) / (High - Low + eps)
+Money Flow Volume = MFM × Volume
+CMF(t) = SUM(Money_Flow_Volume, 20) / SUM(Volume, 20)
 ```
+
+**Range**: [-1, +1]
+- CMF > 0: Buying pressure (accumulation)
+- CMF < 0: Selling pressure (distribution)
 
 **Parameters**:
 - `period`: SMA period (default: 20)
-- `γ`: Vol dampening (default: 0.3)
+- `eps`: Numerical stability (default: 1e-10)
 
-**Output**: `{volume_ratio, spike_flag}`
+**Output**: `{cmf}` (replaces deprecated `volume_ratio`)
+
+**V2.2 Companion Features**:
+- `pressure_up`: `max(0, close-open) / (high-low+eps)` - Bullish directional pressure
+- `pressure_down`: `max(0, open-close) / (high-low+eps)` - Bearish directional pressure
 
 **References**: Rule A1, C1, D2, E1
 

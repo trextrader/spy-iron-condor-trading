@@ -80,7 +80,7 @@ digraph SPYIronCondorSystem {
             color="#3d5a80";
             fontcolor="#3d5a80";
             
-            feature_eng [label="Feature Pipeline\n(52 Features)", shape=box, fillcolor="#3d6a9a", fontcolor=white];
+            feature_eng [label="Feature Pipeline\n(54 Features)", shape=box, fillcolor="#3d6a9a", fontcolor=white];
             greeks_calc [label="Greeks Calc\nΔ, Γ, Θ, ν, IV", shape=box, fillcolor="#3d6a9a", fontcolor=white];
             technicals [label="Technicals\n(RSI, ATR, ADX)", shape=box, fillcolor="#3d6a9a", fontcolor=white];
         }
@@ -110,7 +110,7 @@ digraph SPYIronCondorSystem {
             color="#27ae60";
 
             // Initial Encoder
-            init_encoder [label="Initial Encoder\nZ₀ = softplus(W·X₀)\n52 → 512 dims", shape=box, fillcolor="#1e4a1e", fontcolor=white];
+            init_encoder [label="Initial Encoder\nZ₀ = softplus(W·X₀)\n54 → 512 dims", shape=box, fillcolor="#1e4a1e", fontcolor=white];
 
             // CDE Integration Loop
             control_incr [label="Control Increments\ndX_t = X_{t+1} - X_t", shape=parallelogram, fillcolor="#2d5a2d", fontcolor=white];

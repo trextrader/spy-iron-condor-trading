@@ -9,7 +9,7 @@ This document visualizes the **CondorBrain v3.0** model architecture. It feature
 ```mermaid
 graph TD
     subgraph Inputs
-    Input[Input Tensor<br/>(Batch, Seq=256, Feat=52)]
+    Input[Input Tensor<br/>(Batch, Seq=256, Feat=54)]
     Norm[Robust Normalization<br/>(Median/MAD)]
     X0[First Observation X₀]
     end
@@ -153,8 +153,8 @@ If this document conflicts with the master spec, the master spec governs impleme
 
 This document describes the *conceptual* architecture. Deployed configurations may differ by profile. The authoritative model metadata comes from checkpoint fields:
 
-- `feature_cols` (V2.2: 52 features)
-- `input_dim` (52)
+- `feature_cols` (V2.2: 54 features)
+- `input_dim` (54)
 - `seq_len` (256)
 - `model_config.use_cde` (True)
 

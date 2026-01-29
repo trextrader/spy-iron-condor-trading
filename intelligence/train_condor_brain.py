@@ -474,6 +474,12 @@ def parse_args():
     parser.add_argument("--no-cde", dest="cde", action="store_false",
                         help="Disable Neural CDE backbone and use Mamba/Linear.")
 
+    # NEW: Export epoch plots and metrics to files
+    parser.add_argument("--export-epoch-plots", action="store_true",
+                        help="Export plots and metrics to epoch folders (epoch_1/, epoch_2/, etc.).")
+    parser.add_argument("--export-dir", type=str, default="training_exports",
+                        help="Base directory for epoch exports (default: training_exports).")
+
     args = parser.parse_args()
     
     # Parse loss lambdas
@@ -1439,6 +1445,68 @@ def train_condor_brain(args):
         torch.save(ckpt_epoch, epoch_path)
         print(f"  [Checkpoint] Saved epoch model: {epoch_path}")
 
+        # === EXPORT EPOCH PLOTS AND METRICS TO FILES ===
+        if args.export_epoch_plots:
+            epoch_export_dir = os.path.join(args.export_dir, f"epoch_{epoch+1}")
+            os.makedirs(epoch_export_dir, exist_ok=True)
+
+            # Export metrics CSV
+            metrics_csv_path = os.path.join(epoch_export_dir, "metrics.csv")
+            metrics_data = {
+                'epoch': epoch + 1,
+                'train_loss': train_loss,
+                'val_loss': val_loss if run_val else None,
+                'best_val_loss': best_loss,
+                'learning_rate': scheduler.get_last_lr()[0],
+                'is_best': is_best if 'is_best' in dir() else (save_loss < best_loss),
+            }
+            # Add head losses if available
+            if 'head_losses' in dir() and head_losses:
+                for h_name, h_val in head_losses.items():
+                    metrics_data[f'head_{h_name}'] = h_val
+            pd.DataFrame([metrics_data]).to_csv(metrics_csv_path, index=False)
+
+            # Export loss history plot
+            try:
+                import matplotlib
+                matplotlib.use('Agg')  # Non-interactive backend
+                import matplotlib.pyplot as plt
+
+                fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+                # Loss curves
+                axes[0].plot(range(1, epoch+2), train_losses[:epoch+1], 'b-', label='Train Loss', linewidth=2)
+                if val_losses and len(val_losses) > 0:
+                    axes[0].plot(range(1, epoch+2), val_losses[:epoch+1], 'r-', label='Val Loss', linewidth=2)
+                axes[0].axhline(y=best_loss, color='g', linestyle='--', alpha=0.7, label=f'Best: {best_loss:.4f}')
+                axes[0].set_xlabel('Epoch')
+                axes[0].set_ylabel('Loss')
+                axes[0].set_title(f'Training Progress (Epoch {epoch+1})')
+                axes[0].legend()
+                axes[0].grid(True, alpha=0.3)
+
+                # Head losses bar chart (if available)
+                if 'head_losses' in dir() and head_losses:
+                    heads = list(head_losses.keys())
+                    values = list(head_losses.values())
+                    axes[1].bar(heads, values, color='steelblue')
+                    axes[1].set_xlabel('Output Head')
+                    axes[1].set_ylabel('Loss')
+                    axes[1].set_title(f'Per-Head Losses (Epoch {epoch+1})')
+                    axes[1].tick_params(axis='x', rotation=45)
+                else:
+                    axes[1].text(0.5, 0.5, 'Head losses not available', ha='center', va='center')
+                    axes[1].set_title('Per-Head Losses')
+
+                plt.tight_layout()
+                plot_path = os.path.join(epoch_export_dir, "training_curves.png")
+                plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+                plt.close(fig)
+
+                print(f"  [Export] Epoch {epoch+1} plots/metrics saved to: {epoch_export_dir}/")
+            except Exception as e:
+                print(f"  [Export] Warning: Could not save plots: {e}")
+
         # Clear cache periodically
         if device.type == 'cuda' and epoch % 10 == 0:
             torch.cuda.empty_cache()
@@ -1466,8 +1534,60 @@ def train_condor_brain(args):
     # Close TensorBoard writer
     if tb_writer is not None:
         tb_writer.close()
-        print(f"\n\ud83d\udcca TensorBoard logs saved to: {args.tb_logdir}")
-        print(f"\ud83c\udf10 View with: tensorboard --logdir={args.tb_logdir} --port={args.tb_port}")
+        print(f"\n📊 TensorBoard logs saved to: {args.tb_logdir}")
+        print(f"🌐 View with: tensorboard --logdir={args.tb_logdir} --port={args.tb_port}")
+
+    # Export final training summary if epoch exports enabled
+    if args.export_epoch_plots:
+        summary_dir = os.path.join(args.export_dir, "summary")
+        os.makedirs(summary_dir, exist_ok=True)
+
+        # Full loss history CSV
+        history_df = pd.DataFrame({
+            'epoch': range(1, len(train_losses) + 1),
+            'train_loss': train_losses,
+            'val_loss': val_losses if val_losses else [None] * len(train_losses),
+        })
+        history_df.to_csv(os.path.join(summary_dir, "loss_history.csv"), index=False)
+
+        # Best model info
+        best_info = {
+            'best_epoch': best_epoch,
+            'best_val_loss': best_loss,
+            'total_epochs': len(train_losses),
+            'model_path': args.output,
+            'd_model': args.d_model,
+            'n_layers': args.layers,
+            'use_cde': args.cde,
+        }
+        pd.DataFrame([best_info]).to_csv(os.path.join(summary_dir, "best_model_info.csv"), index=False)
+
+        # Final summary plot
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+
+            fig, ax = plt.subplots(figsize=(12, 6))
+            ax.plot(range(1, len(train_losses)+1), train_losses, 'b-', label='Train Loss', linewidth=2)
+            if val_losses:
+                ax.plot(range(1, len(val_losses)+1), val_losses, 'r-', label='Val Loss', linewidth=2)
+            ax.axvline(x=best_epoch, color='g', linestyle='--', alpha=0.7, label=f'Best Epoch: {best_epoch}')
+            ax.axhline(y=best_loss, color='g', linestyle=':', alpha=0.5)
+            ax.set_xlabel('Epoch', fontsize=12)
+            ax.set_ylabel('Loss', fontsize=12)
+            ax.set_title(f'CondorBrain Training Summary\nBest Val Loss: {best_loss:.4f} @ Epoch {best_epoch}', fontsize=14)
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(os.path.join(summary_dir, "training_summary.png"), dpi=200, bbox_inches='tight')
+            plt.close(fig)
+        except Exception as e:
+            print(f"[Export] Warning: Could not save summary plot: {e}")
+
+        print(f"\n📁 All epoch exports saved to: {args.export_dir}/")
+        print(f"   - epoch_1/ through epoch_{len(train_losses)}/")
+        print(f"   - summary/ (loss_history.csv, best_model_info.csv, training_summary.png)")
 
 
 # ============================================================================

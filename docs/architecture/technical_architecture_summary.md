@@ -6,7 +6,7 @@ The CondorIntelligence system is a 6-layer neural-symbolic pipeline designed for
 The pipeline begins at the **Input Manifold**, where 24 discrete market parameters are ingested:
 - **Spot Dynamics (5):** OHLCV data providing the price action baseline.
 - **Option Physics (5):** Black-Scholes-Merton Greeks (Delta, Gamma, Vega, Theta, Rho) capturing the surface curvature.
-- **Volatility Context (3):** IV Rank, VIX, and bid/ask spreads for regime assessment.
+- **Volatility Context (3):** IV Rank, VIX, and spread ratio for regime assessment.
 - **Technicals (11):** High-level indicators (RSI, ADX, Bollinger Bands, Parabolic SAR) for trend confirmation.
 
 ## 2. Tactical Preprocessing
@@ -53,4 +53,9 @@ If this document conflicts with the master spec, the master spec governs impleme
 
 ## Model Profile Alignment (Addendum)
 
-This summary references a 24-feature input manifold in places; production and training may use V2.2 (52) features. The authoritative schema is defined in `intelligence/canonical_feature_registry.py`, and checkpoints must embed their own `feature_cols` and `input_dim` metadata.
+This summary references a 24-feature input manifold in places; production and training use V2.2 (54 features: 32 V2.1 base + 22 V2.2 primitives). The authoritative schema is defined in `intelligence/canonical_feature_registry.py`, and checkpoints must embed their own `feature_cols` and `input_dim` metadata.
+
+**V2.2 Column Replacements:**
+- `volume_ratio` → `cmf` (Chaikin Money Flow)
+- `bid` → `pressure_up` (bullish directional pressure)
+- `ask` → `pressure_down` (bearish directional pressure)

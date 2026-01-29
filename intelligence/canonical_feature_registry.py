@@ -356,7 +356,7 @@ FEATURE_COLS_V22: List[str] = [
     "fuzzy_reversion_11",   # F001: 11-factor fuzzy score
 ]
 
-INPUT_DIM_V22: int = len(FEATURE_COLS_V22)  # Should be 52
+INPUT_DIM_V22: int = len(FEATURE_COLS_V22)  # 54 (32 V2.1 + 22 V2.2 primitives)
 VERSION_V22: str = "condorbrain_v2.2_primitives"
 
 # V2.2 Neutral Fill Values (additions)

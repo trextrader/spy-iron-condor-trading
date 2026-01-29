@@ -120,7 +120,7 @@ docs/trading_rules/
 | P004 | Volatility-Normalized ADX | `{adx_norm, +DI, -DI}` | A1, A2, A3, B1 |
 | P005 | Dynamic RSI | `{rsi_dynamic, divergence}` | A3, B1, B2, D1 |
 | P006 | Parabolic SAR | `{psar, position, flip_signal}` | B1, PSAR Reversion |
-| P007 | Volume Ratio | `{volume_ratio, spike_flag}` | A1, C1, D2, E1 |
+| P007 | CMF (replaces volume_ratio) | `{cmf}` | A1, C1, D2, E1 |
 | P008 | IV Confidence (Lag-Aware) | `{iv_confidence, stale_flag}` | A2, B1, C1, C2, D2, E2 |
 | P009 | Persistent Homology β₁ | `{beta1_norm, breakout_flag}` | C2, E3 |
 | P010 | Curvature Proxy | `{curvature}` | C2, E3, P005 |

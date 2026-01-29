@@ -60,9 +60,10 @@ def load_model(model_path: str) -> nn.Module:
         model_config = {}
 
     if input_dim is None:
-        # Fallback to hardcoded assumption if old checkpoint
-        print("[WARN] Checkpoint missing input_dim, assuming 52 (V2.2)")
-        input_dim = 52
+        # Fallback to canonical V2.2 if old checkpoint
+        from intelligence.canonical_feature_registry import INPUT_DIM_V22
+        print(f"[WARN] Checkpoint missing input_dim, assuming {INPUT_DIM_V22} (V2.2)")
+        input_dim = INPUT_DIM_V22
 
     # Robustly infer architecture from config or state_dict
     d_model = model_config.get("d_model", 512)
