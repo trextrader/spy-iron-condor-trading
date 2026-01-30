@@ -2407,7 +2407,7 @@ def format_markdown_report(results, config):
             lines.append(f"### {name}")
             lines.append(f"**R2 Score:** {results['models'][name].get('tree_r2', 0):.4f}")
             lines.append("```")
-            lines.append(rules[:2000] if len(rules) > 2000 else rules)  # Truncate if too long
+            lines.append(rules)  # Full tree rules
             lines.append("```")
             lines.append("")
 
