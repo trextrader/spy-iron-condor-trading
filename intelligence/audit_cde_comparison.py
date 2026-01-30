@@ -2329,79 +2329,152 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    print("=" * 80)
-    print("MULTI-MODEL NEURAL CDE INTERPRETABILITY AUDIT")
-    print("=" * 80)
-    print(f"\nModels: {len(model_paths)}")
+    print("=" * 80, flush=True)
+    print("MULTI-MODEL NEURAL CDE INTERPRETABILITY AUDIT", flush=True)
+    print("=" * 80, flush=True)
+
+    # =========================================================================
+    # ENVIRONMENT & HARDWARE DETECTION
+    # =========================================================================
+    print("\n[0/9] Detecting hardware environment...", flush=True)
+    print(f"  PyTorch version: {torch.__version__}", flush=True)
+    print(f"  NumPy version: {np.__version__}", flush=True)
+    print(f"  Pandas version: {pd.__version__}", flush=True)
+
+    print(f"\n  CUDA available: {torch.cuda.is_available()}", flush=True)
+    if torch.cuda.is_available():
+        print(f"  CUDA version: {torch.version.cuda}", flush=True)
+        print(f"  cuDNN version: {torch.backends.cudnn.version()}", flush=True)
+        print(f"  GPU count: {torch.cuda.device_count()}", flush=True)
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            mem_total = props.total_memory / 1e9
+            mem_alloc = torch.cuda.memory_allocated(i) / 1e9
+            mem_reserved = torch.cuda.memory_reserved(i) / 1e9
+            print(f"  GPU {i}: {props.name}", flush=True)
+            print(f"    - Compute capability: {props.major}.{props.minor}", flush=True)
+            print(f"    - Total memory: {mem_total:.1f} GB", flush=True)
+            print(f"    - Allocated: {mem_alloc:.2f} GB / Reserved: {mem_reserved:.2f} GB", flush=True)
+        print(f"  Current device: {torch.cuda.current_device()} ({torch.cuda.get_device_name()})", flush=True)
+        # Enable TF32 for faster computation on Ampere+
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        print(f"  TF32 enabled: {torch.backends.cuda.matmul.allow_tf32}", flush=True)
+    else:
+        print("  WARNING: Running on CPU - this will be slow!", flush=True)
+
+    print(f"\n  Device selected: {DEVICE}", flush=True)
+
+    print(f"\nModels: {len(model_paths)}", flush=True)
     for p in model_paths:
-        print(f"  - {p}")
-    print(f"Data: {data_path}")
-    print(f"Samples: {n_samples}")
-    print(f"Seed: {seed}")
-    print("")
+        exists = os.path.exists(p)
+        size = os.path.getsize(p) / 1e6 if exists else 0
+        print(f"  - {p} {'[OK, {:.1f}MB]'.format(size) if exists else '[NOT FOUND]'}", flush=True)
+    print(f"Data: {data_path}", flush=True)
+    data_exists = os.path.exists(data_path)
+    if data_exists:
+        data_size = os.path.getsize(data_path) / 1e6
+        print(f"  Data file: [OK, {data_size:.1f}MB]", flush=True)
+    else:
+        print(f"  Data file: [NOT FOUND]", flush=True)
+    print(f"Samples: {n_samples}", flush=True)
+    print(f"Seed: {seed}", flush=True)
+    print("", flush=True)
 
     # =========================================================================
     # LOAD DATA
     # =========================================================================
-    print("[1/9] Loading data...")
+    print("[1/9] Loading data...", flush=True)
+    print(f"  Reading CSV from: {data_path}", flush=True)
+    import time as _time
+    _t0 = _time.time()
     df = pd.read_csv(data_path)
-    print(f"  Loaded {len(df)} rows, {len(df.columns)} columns")
+    _elapsed = _time.time() - _t0
+    print(f"  Loaded {len(df):,} rows, {len(df.columns)} columns in {_elapsed:.1f}s", flush=True)
+    print(f"  Memory usage: {df.memory_usage(deep=True).sum() / 1e6:.1f} MB", flush=True)
 
     feature_names = FEATURE_COLS_V22
+    print(f"  Expected features: {len(feature_names)}", flush=True)
 
     # Select features (add missing as zeros)
+    print(f"  Selecting features...", flush=True)
     X_cols = []
+    missing_count = 0
     for col in feature_names:
         if col in df.columns:
             X_cols.append(df[col].values)
         else:
-            print(f"  [WARN] Missing feature: {col} - filling with zeros")
+            missing_count += 1
+            if missing_count <= 5:
+                print(f"  [WARN] Missing feature: {col} - filling with zeros", flush=True)
             X_cols.append(np.zeros(len(df)))
+    if missing_count > 5:
+        print(f"  [WARN] ... and {missing_count - 5} more missing features", flush=True)
 
+    print(f"  Stacking feature matrix...", flush=True)
     X = np.column_stack(X_cols).astype(np.float32)
     X = safe_nan_to_num(X)
+    print(f"  Feature matrix shape: {X.shape}, dtype: {X.dtype}", flush=True)
 
     # Robust scaling
-    print("[2/9] Applying robust scaling...")
+    print("\n[2/9] Applying robust scaling...", flush=True)
+    print(f"  Computing median...", flush=True)
     median = np.median(X, axis=0)
+    print(f"  Computing MAD...", flush=True)
     mad = np.median(np.abs(X - median), axis=0)
     scale = 1.4826 * mad + EPS
+    print(f"  Normalizing...", flush=True)
     X = (X - median) / scale
     X = np.clip(X, -10, 10)
     X = safe_nan_to_num(X)
+    print(f"  Scaling complete. Range: [{X.min():.2f}, {X.max():.2f}]", flush=True)
 
     # Leakage masking
+    print(f"  Masking leakage columns...", flush=True)
     leakage_cols = ['target_spot', 'max_dd_60m']
     for col in leakage_cols:
         if col in feature_names:
             idx = feature_names.index(col)
             X[:, idx] = 0
-            print(f"  Masked leakage column: {col}")
+            print(f"    Masked: {col}", flush=True)
 
-    print(f"  Final X shape: {X.shape}")
+    print(f"  Final X shape: {X.shape}", flush=True)
+    if torch.cuda.is_available():
+        print(f"  GPU memory after data prep: {torch.cuda.memory_allocated()/1e9:.2f} GB allocated", flush=True)
 
     # =========================================================================
     # LOAD MODELS
     # =========================================================================
-    print("\n[3/9] Loading models...")
+    print("\n[3/9] Loading models...", flush=True)
     models = {}
     seq_lens = {}
 
-    for path in model_paths:
+    for i, path in enumerate(model_paths):
         name = os.path.basename(path).replace('.pth', '')
-        model, ckpt, seq_len = load_cde_model(path)
-        models[name] = model
-        seq_lens[name] = seq_len
-        print(f"  Loaded {name}: seq_len={seq_len}")
+        print(f"  [{i+1}/{len(model_paths)}] Loading {name}...", flush=True)
+        try:
+            model, ckpt, seq_len = load_cde_model(path)
+            models[name] = model
+            seq_lens[name] = seq_len
+            n_params = sum(p.numel() for p in model.parameters())
+            print(f"    - seq_len: {seq_len}", flush=True)
+            print(f"    - parameters: {n_params:,}", flush=True)
+            print(f"    - config: d_model={ckpt.get('model_config', {}).get('d_model', 'N/A')}, n_layers={ckpt.get('model_config', {}).get('n_layers', 'N/A')}", flush=True)
+            if torch.cuda.is_available():
+                print(f"    - GPU memory: {torch.cuda.memory_allocated()/1e9:.2f} GB allocated", flush=True)
+        except Exception as e:
+            print(f"    ERROR loading {name}: {e}", flush=True)
+            raise
 
     # Use minimum seq_len for comparability
     T_common = min(seq_lens.values())
-    print(f"  Using T_common = {T_common}")
+    print(f"\n  All models loaded successfully!", flush=True)
+    print(f"  Using T_common = {T_common} (minimum across all models)", flush=True)
 
     # =========================================================================
     # PER-MODEL ANALYSIS
     # =========================================================================
-    print("\n[4/9] Running per-model analysis...")
+    print("\n[4/9] Running per-model analysis...", flush=True)
     results = {
         'models': {},
         'divergence': {},
@@ -2414,81 +2487,114 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
     }
 
     model_names = list(models.keys())
+    total_models = len(model_names)
 
-    for name, model in models.items():
-        print(f"\n  === {name} ===")
+    for model_idx, (name, model) in enumerate(models.items()):
+        print(f"\n  === Model {model_idx+1}/{total_models}: {name} ===", flush=True)
         seq_len = seq_lens[name]
+        print(f"    Sequence length: {seq_len}", flush=True)
 
         model_results = {'seq_len': seq_len}
+        import time as _time
 
         # Permutation importance
-        print(f"    Computing permutation importance...")
+        print(f"    [4a] Computing permutation importance ({n_samples} samples)...", flush=True)
+        _t0 = _time.time()
         imp_result = analyze_permutation_importance(model, X, feature_names, seq_len, n_samples)
         if isinstance(imp_result, tuple):
             model_results['importances'], model_results['per_head_importances'] = imp_result
         else:
             model_results['importances'] = imp_result
             model_results['per_head_importances'] = {}
+        print(f"         Done in {_time.time()-_t0:.1f}s. Found {len(model_results['importances'])} features.", flush=True)
 
         # Surrogate tree
-        print(f"    Training surrogate tree...")
+        print(f"    [4b] Training surrogate decision tree...", flush=True)
+        _t0 = _time.time()
         tree, r2, rules, tree_imp = train_surrogate_tree(model, X, feature_names, seq_len, n_samples)
         model_results['tree_object'] = tree
         model_results['tree_r2'] = r2
         model_results['tree_rules'] = rules
         model_results['tree_importances'] = tree_imp
+        print(f"         Done in {_time.time()-_t0:.1f}s. R²={r2:.4f}", flush=True)
 
         # Output statistics
-        print(f"    Computing output statistics...")
+        print(f"    [4c] Computing output statistics...", flush=True)
+        _t0 = _time.time()
         output_stats, raw_outputs = compute_output_statistics(model, X, seq_len, n_samples)
         model_results['output_stats'] = output_stats
         model_results['raw_outputs'] = raw_outputs
+        print(f"         Done in {_time.time()-_t0:.1f}s. Output shape: {raw_outputs.shape if raw_outputs is not None else 'N/A'}", flush=True)
 
         # Gradient saliency
         if not skip_gradients:
-            print(f"    Computing gradient saliency...")
+            print(f"    [4d] Computing gradient saliency ({min(500, n_samples)} samples)...", flush=True)
+            _t0 = _time.time()
             grads = compute_gradient_saliency(model, X, seq_len, min(500, n_samples))
             model_results['gradient_saliency'] = grads
+            print(f"         Done in {_time.time()-_t0:.1f}s.", flush=True)
+        else:
+            print(f"    [4d] Gradient saliency: SKIPPED", flush=True)
 
         # SHAP approximation
         if not skip_shap:
-            print(f"    Computing SHAP approximation...")
+            print(f"    [4e] Computing SHAP approximation ({min(200, n_samples)} samples)...", flush=True)
+            _t0 = _time.time()
             shap = compute_shap_approximation(model, X, feature_names, seq_len, min(200, n_samples))
             model_results['shap_values'] = shap
+            print(f"         Done in {_time.time()-_t0:.1f}s.", flush=True)
+        else:
+            print(f"    [4e] SHAP approximation: SKIPPED", flush=True)
 
         # Fisher Information
         if not skip_fisher:
-            print(f"    Estimating Fisher Information...")
+            print(f"    [4f] Estimating Fisher Information ({min(300, n_samples)} samples)...", flush=True)
+            _t0 = _time.time()
             fisher_diag, fisher_layer = estimate_fisher_information(model, X, seq_len, min(300, n_samples))
             model_results['fisher_layer'] = fisher_layer
+            print(f"         Done in {_time.time()-_t0:.1f}s.", flush=True)
+        else:
+            print(f"    [4f] Fisher Information: SKIPPED", flush=True)
 
         # Hessian spectrum
         if not skip_hessian:
-            print(f"    Estimating Hessian spectrum...")
+            print(f"    [4g] Estimating Hessian spectrum ({min(100, n_samples)} samples) - THIS IS SLOW...", flush=True)
+            _t0 = _time.time()
             hessian_eigs = estimate_hessian_spectrum(model, X, seq_len, min(100, n_samples))
             model_results['hessian_eigenvalues'] = hessian_eigs
+            print(f"         Done in {_time.time()-_t0:.1f}s.", flush=True)
+        else:
+            print(f"    [4g] Hessian spectrum: SKIPPED", flush=True)
 
         results['models'][name] = model_results
+
+        if torch.cuda.is_available():
+            print(f"    GPU memory: {torch.cuda.memory_allocated()/1e9:.2f} GB / {torch.cuda.memory_reserved()/1e9:.2f} GB reserved", flush=True)
 
     # =========================================================================
     # MUTUAL INFORMATION
     # =========================================================================
     if not skip_mi:
-        print("\n[5/9] Computing mutual information matrix...")
+        print("\n[5/9] Computing mutual information matrix...", flush=True)
+        _t0 = _time.time()
         mi_matrix = compute_mutual_information(X, feature_names, T_common, n_samples)
         results['mutual_information'] = mi_matrix
+        print(f"       Done in {_time.time()-_t0:.1f}s.", flush=True)
     else:
-        print("\n[5/9] Skipping mutual information (--skip-mi)")
+        print("\n[5/9] Skipping mutual information (--skip-mi)", flush=True)
 
     # =========================================================================
     # PAIRWISE COMPARISONS
     # =========================================================================
-    print("\n[6/9] Computing pairwise comparisons...")
+    n_pairs = len(model_names) * (len(model_names) - 1) // 2
+    print(f"\n[6/9] Computing pairwise comparisons ({n_pairs} pairs)...", flush=True)
 
+    pair_idx = 0
     for i, name1 in enumerate(model_names):
         for name2 in model_names[i+1:]:
+            pair_idx += 1
             pair = f"{name1} vs {name2}"
-            print(f"  {pair}")
+            print(f"  [{pair_idx}/{n_pairs}] {pair}", flush=True)
 
             # Divergence metrics
             imp1 = results['models'][name1].get('importances', {})
@@ -2528,7 +2634,7 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
     # =========================================================================
     # TECHNICAL ASSESSMENT
     # =========================================================================
-    print("\n[7/9] Generating technical assessment...")
+    print("\n[7/9] Generating technical assessment...", flush=True)
 
     for name in model_names:
         # Get divergence data for this model
@@ -2548,113 +2654,132 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
     # =========================================================================
     # VISUALIZATION
     # =========================================================================
-    print("\n[8/9] Generating visualizations...")
+    print("\n[8/9] Generating visualizations...", flush=True)
 
     output_dir = os.path.dirname(output_path)
     plots_dir = os.path.join(output_dir, 'plots')
     os.makedirs(plots_dir, exist_ok=True)
+    print(f"  Output directory: {plots_dir}", flush=True)
 
+    plot_count = 0
     try:
         plot_importance_comparison(results, feature_names, plots_dir)
-        print("  - importance_comparison.png")
+        plot_count += 1
+        print(f"  [{plot_count}] importance_comparison.png", flush=True)
     except Exception as e:
-        print(f"  [WARN] importance_comparison failed: {e}")
+        print(f"  [WARN] importance_comparison failed: {e}", flush=True)
 
     try:
         plot_importance_heatmap(results, feature_names, plots_dir)
-        print("  - importance_heatmap_*.png")
+        plot_count += 1
+        print(f"  [{plot_count}] importance_heatmap_*.png", flush=True)
     except Exception as e:
-        print(f"  [WARN] importance_heatmap failed: {e}")
+        print(f"  [WARN] importance_heatmap failed: {e}", flush=True)
 
     try:
         plot_divergence_metrics(results, plots_dir)
-        print("  - divergence_metrics.png")
+        plot_count += 1
+        print(f"  [{plot_count}] divergence_metrics.png", flush=True)
     except Exception as e:
-        print(f"  [WARN] divergence_metrics failed: {e}")
+        print(f"  [WARN] divergence_metrics failed: {e}", flush=True)
 
     try:
         plot_output_stability(results, plots_dir)
-        print("  - stability_*.png")
+        plot_count += 1
+        print(f"  [{plot_count}] stability_*.png", flush=True)
     except Exception as e:
-        print(f"  [WARN] output_stability failed: {e}")
+        print(f"  [WARN] output_stability failed: {e}", flush=True)
 
     if not skip_gradients:
         try:
             plot_gradient_saliency(results, feature_names, plots_dir)
-            print("  - gradient_saliency.png")
+            plot_count += 1
+            print(f"  [{plot_count}] gradient_saliency.png", flush=True)
         except Exception as e:
-            print(f"  [WARN] gradient_saliency failed: {e}")
+            print(f"  [WARN] gradient_saliency failed: {e}", flush=True)
 
         try:
             plot_gradient_alignment(results, plots_dir)
-            print("  - gradient_alignment.png")
+            plot_count += 1
+            print(f"  [{plot_count}] gradient_alignment.png", flush=True)
         except Exception as e:
-            print(f"  [WARN] gradient_alignment failed: {e}")
+            print(f"  [WARN] gradient_alignment failed: {e}", flush=True)
 
     if not skip_fisher:
         try:
             plot_fisher_comparison(results, plots_dir)
-            print("  - fisher_comparison_*.png")
+            plot_count += 1
+            print(f"  [{plot_count}] fisher_comparison_*.png", flush=True)
         except Exception as e:
-            print(f"  [WARN] fisher_comparison failed: {e}")
+            print(f"  [WARN] fisher_comparison failed: {e}", flush=True)
 
     if not skip_hessian:
         try:
             plot_hessian_spectrum(results, plots_dir)
-            print("  - hessian_spectrum.png")
+            plot_count += 1
+            print(f"  [{plot_count}] hessian_spectrum.png", flush=True)
         except Exception as e:
-            print(f"  [WARN] hessian_spectrum failed: {e}")
+            print(f"  [WARN] hessian_spectrum failed: {e}", flush=True)
 
     if not skip_shap:
         try:
             plot_shap_comparison(results, feature_names, plots_dir)
-            print("  - shap_comparison.png")
+            plot_count += 1
+            print(f"  [{plot_count}] shap_comparison.png", flush=True)
         except Exception as e:
-            print(f"  [WARN] shap_comparison failed: {e}")
+            print(f"  [WARN] shap_comparison failed: {e}", flush=True)
 
     if not skip_mi:
         try:
             plot_mutual_information(results, feature_names, plots_dir)
-            print("  - mutual_information.png")
+            plot_count += 1
+            print(f"  [{plot_count}] mutual_information.png", flush=True)
         except Exception as e:
-            print(f"  [WARN] mutual_information failed: {e}")
+            print(f"  [WARN] mutual_information failed: {e}", flush=True)
 
     try:
         plot_decision_trees(results, feature_names, plots_dir)
-        print("  - decision_tree_*.png")
+        plot_count += 1
+        print(f"  [{plot_count}] decision_tree_*.png", flush=True)
     except Exception as e:
-        print(f"  [WARN] decision_trees failed: {e}")
+        print(f"  [WARN] decision_trees failed: {e}", flush=True)
 
     try:
         plot_output_distributions(results, plots_dir)
-        print("  - output_dist_*.png")
+        plot_count += 1
+        print(f"  [{plot_count}] output_dist_*.png", flush=True)
     except Exception as e:
-        print(f"  [WARN] output_distributions failed: {e}")
+        print(f"  [WARN] output_distributions failed: {e}", flush=True)
 
     try:
         plot_pairwise_matrix(results, plots_dir)
-        print("  - pairwise_matrix.png")
+        plot_count += 1
+        print(f"  [{plot_count}] pairwise_matrix.png", flush=True)
     except Exception as e:
-        print(f"  [WARN] pairwise_matrix failed: {e}")
+        print(f"  [WARN] pairwise_matrix failed: {e}", flush=True)
 
     try:
         model_scores = plot_model_radar_comparison(results, plots_dir)
-        print("  - model_radar.png")
+        plot_count += 1
+        print(f"  [{plot_count}] model_radar.png", flush=True)
     except Exception as e:
-        print(f"  [WARN] model_radar failed: {e}")
+        print(f"  [WARN] model_radar failed: {e}", flush=True)
         model_scores = {}
 
     try:
         rankings = plot_ranking_summary(results, plots_dir)
         results['rankings'] = rankings
-        print("  - ranking_summary.png")
+        plot_count += 1
+        print(f"  [{plot_count}] ranking_summary.png", flush=True)
     except Exception as e:
-        print(f"  [WARN] ranking_summary failed: {e}")
+        print(f"  [WARN] ranking_summary failed: {e}", flush=True)
+
+    print(f"\n  Total plots generated: {plot_count}", flush=True)
 
     # =========================================================================
     # REPORT GENERATION
     # =========================================================================
-    print("\n[9/9] Writing reports...")
+    print("\n[9/9] Writing reports...", flush=True)
 
     config = {
         'n_samples': n_samples,
@@ -2671,13 +2796,15 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
     }
 
     # Markdown report
+    print(f"  Writing Markdown report...", flush=True)
     md_report = format_markdown_report(results, config)
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(md_report)
-    print(f"  Markdown: {output_path}")
+    print(f"  Markdown: {output_path}", flush=True)
 
     # JSON report
     json_path = output_path.replace('.md', '.json')
+    print(f"  Writing JSON report...", flush=True)
 
     # Prepare JSON-safe results (remove non-serializable objects)
     json_results = convert_numpy_for_json(results)
@@ -2699,32 +2826,32 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
 
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(json_results, f, indent=2, default=str)
-    print(f"  JSON: {json_path}")
+    print(f"  JSON: {json_path}", flush=True)
 
     # =========================================================================
     # SUMMARY
     # =========================================================================
-    print("\n" + "=" * 80)
-    print("AUDIT COMPLETE")
-    print("=" * 80)
+    print("\n" + "=" * 80, flush=True)
+    print("AUDIT COMPLETE", flush=True)
+    print("=" * 80, flush=True)
 
-    print("\n### Quick Summary ###")
+    print("\n### Quick Summary ###", flush=True)
     if results['rankings']:
-        print(f"Best Model: {results['rankings'][0][0]}")
+        print(f"Best Model: {results['rankings'][0][0]}", flush=True)
 
     for name in model_names:
         pros = results['models'][name].get('pros', [])
         cons = results['models'][name].get('cons', [])
-        print(f"\n{name}:")
-        print(f"  Pros: {len(pros)}")
+        print(f"\n{name}:", flush=True)
+        print(f"  Pros: {len(pros)}", flush=True)
         for p in pros[:2]:
-            print(f"    + {p[:80]}...")
-        print(f"  Cons: {len(cons)}")
+            print(f"    + {p[:80]}...", flush=True)
+        print(f"  Cons: {len(cons)}", flush=True)
         for c in cons[:2]:
-            print(f"    - {c[:80]}...")
+            print(f"    - {c[:80]}...", flush=True)
 
-    print(f"\nFull report: {output_path}")
-    print(f"Plots: {plots_dir}/")
+    print(f"\nFull report: {output_path}", flush=True)
+    print(f"Plots: {plots_dir}/", flush=True)
 
     return results
 
