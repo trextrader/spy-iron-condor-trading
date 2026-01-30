@@ -2588,39 +2588,10 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
     print("[1/9] Loading data...", flush=True)
     print(f"  Reading CSV from: {data_path}", flush=True)
     import time as _time
-
-    # Check file size for progress estimation
-    file_size_mb = os.path.getsize(data_path) / 1e6
-    print(f"  File size: {file_size_mb:.1f} MB", flush=True)
-
-    if file_size_mb > 1000:
-        print(f"  ⚠️  Large file detected - loading with progress indicator...", flush=True)
-        print(f"  (This may take 2-5 minutes for a {file_size_mb/1000:.1f}GB file)", flush=True)
-
-        # Chunked loading with progress
-        _t0 = _time.time()
-        chunk_size = 500_000  # rows per chunk
-        chunks = []
-        chunk_num = 0
-
-        for chunk in pd.read_csv(data_path, chunksize=chunk_size):
-            chunk_num += 1
-            chunks.append(chunk)
-            elapsed = _time.time() - _t0
-            rows_loaded = chunk_num * chunk_size
-            print(f"    Chunk {chunk_num}: ~{rows_loaded:,} rows loaded ({elapsed:.1f}s elapsed)", flush=True)
-
-        df = pd.concat(chunks, ignore_index=True)
-        del chunks  # Free memory
-        _elapsed = _time.time() - _t0
-        print(f"  ✓ Concatenation complete", flush=True)
-    else:
-        print(f"  Loading (please wait)...", flush=True)
-        _t0 = _time.time()
-        df = pd.read_csv(data_path)
-        _elapsed = _time.time() - _t0
-
-    print(f"  ✓ Loaded {len(df):,} rows, {len(df.columns)} columns in {_elapsed:.1f}s", flush=True)
+    _t0 = _time.time()
+    df = pd.read_csv(data_path)
+    _elapsed = _time.time() - _t0
+    print(f"  Loaded {len(df):,} rows, {len(df.columns)} columns in {_elapsed:.1f}s", flush=True)
     print(f"  Memory usage: {df.memory_usage(deep=True).sum() / 1e6:.1f} MB", flush=True)
 
     feature_names = FEATURE_COLS_V22
