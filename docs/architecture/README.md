@@ -13,6 +13,7 @@ This directory contains the visual specifications for the CondorBrain system. Be
 - **[cde_engine_logic.png](cde_engine_logic.png)**: Internal schematic of the Neural CDE engine, showing the explicit Euler integration and continuous vector fields.
 - **[condor_intelligence_flow_premium.png](condor_intelligence_flow_premium.png)**: Enhanced version of the intelligence flow including Topological Data Analysis (TDA) and Generative Diffusion components.
 - **[condor_intelligence_flow.png](condor_intelligence_flow.png)**: Standard logical flow through the Neural Intelligence Core, detailing the transformation from input tensors to trading signals.
+- **[audit_cde_comparison_flow.png](audit_cde_comparison_flow.png)**: Complete architecture diagram for the Multi-Model CDE Comparison Audit tool (`intelligence/audit_cde_comparison.py`). Shows the 9-stage pipeline from CLI input through data preprocessing, per-model analysis (permutation importance, gradient saliency, SHAP, Fisher, Hessian), pairwise comparisons (divergence, stability), technical assessment, 16 visualization types, and final report generation.
 
 ## 💧 Data Pipeline
 - **[pipeline_diagram.png](pipeline_diagram.png)**: Illustrates the ETL (Extract, Transform, Load) scripts and processes that fetch raw data from Alpaca/IVolatility and prepare it for the model.

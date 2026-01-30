@@ -1,0 +1,676 @@
+// Neural CDE Model Comparison Tool - Complete Architecture Flow
+// audit_cde_comparison.py
+// Generated: 2026-01-29
+
+digraph audit_cde_comparison {
+    // Global settings
+    rankdir=TB;
+    fontname="Helvetica";
+    fontsize=12;
+    bgcolor="#1a1a2e";
+    pad=0.5;
+    nodesep=0.6;
+    ranksep=0.8;
+    splines=ortho;
+
+    // Node defaults
+    node [
+        fontname="Helvetica",
+        fontsize=10,
+        style="filled,rounded",
+        penwidth=2
+    ];
+
+    // Edge defaults
+    edge [
+        fontname="Helvetica",
+        fontsize=9,
+        color="#4a4a6a",
+        penwidth=1.5
+    ];
+
+    // =========================================================================
+    // SUBGRAPH: INPUT STAGE
+    // =========================================================================
+    subgraph cluster_input {
+        label="1. INPUT STAGE";
+        labelloc=t;
+        fontsize=14;
+        fontcolor="#00d4ff";
+        style="rounded,dashed";
+        color="#00d4ff";
+        bgcolor="#1e1e3f";
+
+        cli_args [
+            label="CLI Arguments\n--models (2+)\n--data CSV\n--samples\n--output\n--skip-*",
+            shape=parallelogram,
+            fillcolor="#2d5a7b",
+            fontcolor="white"
+        ];
+
+        model_paths [
+            label="Model Paths\n(*.pth checkpoints)",
+            shape=folder,
+            fillcolor="#3d6a8b",
+            fontcolor="white"
+        ];
+
+        data_csv [
+            label="Data CSV\n(V2.2 Features)",
+            shape=note,
+            fillcolor="#3d6a8b",
+            fontcolor="white"
+        ];
+
+        cli_args -> model_paths [label="parse"];
+        cli_args -> data_csv [label="parse"];
+    }
+
+    // =========================================================================
+    // SUBGRAPH: DATA PREPROCESSING
+    // =========================================================================
+    subgraph cluster_preprocess {
+        label="2. DATA PREPROCESSING";
+        labelloc=t;
+        fontsize=14;
+        fontcolor="#ff6b6b";
+        style="rounded,dashed";
+        color="#ff6b6b";
+        bgcolor="#1e1e3f";
+
+        load_data [
+            label="Load CSV\npd.read_csv()",
+            shape=box,
+            fillcolor="#8b3d5a",
+            fontcolor="white"
+        ];
+
+        feature_select [
+            label="Feature Selection\nFEATURE_COLS_V22\n(53 features)",
+            shape=box,
+            fillcolor="#8b3d5a",
+            fontcolor="white"
+        ];
+
+        nan_clean [
+            label="NaN Cleanup\nsafe_nan_to_num()",
+            shape=box,
+            fillcolor="#8b3d5a",
+            fontcolor="white"
+        ];
+
+        scale_params [
+            label="Load Scaling\nmedian/MAD from ckpt",
+            shape=box,
+            fillcolor="#8b3d5a",
+            fontcolor="white"
+        ];
+
+        robust_scale [
+            label="Robust Scaling\n(X - median) / scale\nclip(-10, 10)",
+            shape=box,
+            fillcolor="#8b3d5a",
+            fontcolor="white"
+        ];
+
+        mask_leakage [
+            label="Mask Leakage\ntarget_spot=0\nmax_dd_60m=0",
+            shape=box,
+            fillcolor="#8b3d5a",
+            fontcolor="white"
+        ];
+
+        X_processed [
+            label="X_processed\n(N, 53) float32",
+            shape=cylinder,
+            fillcolor="#6b3d8b",
+            fontcolor="white"
+        ];
+
+        load_data -> feature_select -> nan_clean -> scale_params -> robust_scale -> mask_leakage -> X_processed;
+    }
+
+    // =========================================================================
+    // SUBGRAPH: PER-MODEL ANALYSIS
+    // =========================================================================
+    subgraph cluster_per_model {
+        label="3. PER-MODEL ANALYSIS (Loop)";
+        labelloc=t;
+        fontsize=14;
+        fontcolor="#ffd93d";
+        style="rounded,dashed";
+        color="#ffd93d";
+        bgcolor="#1e1e3f";
+
+        load_model [
+            label="load_cde_model()\nCondorBrain\nd_model, n_layers",
+            shape=box3d,
+            fillcolor="#5a8b3d",
+            fontcolor="white"
+        ];
+
+        // Analysis modules - arranged in 2 columns
+        subgraph cluster_analysis {
+            label="Analysis Modules";
+            labelloc=t;
+            fontsize=11;
+            fontcolor="#ffd93d";
+            color="#444466";
+            style="rounded";
+            bgcolor="#252545";
+
+            perm_importance [
+                label="Permutation\nImportance\n(n_samples)",
+                shape=box,
+                fillcolor="#7b5a2d",
+                fontcolor="white"
+            ];
+
+            gradient_saliency [
+                label="Gradient\nSaliency\nfeature + temporal",
+                shape=box,
+                fillcolor="#7b5a2d",
+                fontcolor="white"
+            ];
+
+            shap_approx [
+                label="SHAP\nApproximation\n(ablation-based)",
+                shape=box,
+                fillcolor="#7b5a2d",
+                fontcolor="white"
+            ];
+
+            fisher_info [
+                label="Fisher\nInformation\n(param sensitivity)",
+                shape=box,
+                fillcolor="#7b5a2d",
+                fontcolor="white"
+            ];
+
+            hessian_spectrum [
+                label="Hessian\nEigenspectrum\n(loss curvature)",
+                shape=box,
+                fillcolor="#7b5a2d",
+                fontcolor="white"
+            ];
+
+            surrogate_tree [
+                label="Surrogate\nDecision Tree\n(max_depth=4)",
+                shape=box,
+                fillcolor="#7b5a2d",
+                fontcolor="white"
+            ];
+
+            output_stats [
+                label="Output\nStatistics\nmean/std/skew/kurt",
+                shape=box,
+                fillcolor="#7b5a2d",
+                fontcolor="white"
+            ];
+        }
+
+        model_results [
+            label="Model Results Dict\nimportances\nper_head_importances\ngradient_saliency\nshap_values\nfisher_layer\nhessian_eigenvalues\ntree_r2, tree_rules\noutput_stats\nraw_outputs",
+            shape=note,
+            fillcolor="#3d7b5a",
+            fontcolor="white"
+        ];
+
+        load_model -> perm_importance;
+        load_model -> gradient_saliency;
+        load_model -> shap_approx;
+        load_model -> fisher_info;
+        load_model -> hessian_spectrum;
+        load_model -> surrogate_tree;
+        load_model -> output_stats;
+
+        perm_importance -> model_results;
+        gradient_saliency -> model_results;
+        shap_approx -> model_results;
+        fisher_info -> model_results;
+        hessian_spectrum -> model_results;
+        surrogate_tree -> model_results;
+        output_stats -> model_results;
+    }
+
+    // =========================================================================
+    // SUBGRAPH: GLOBAL DATA ANALYSIS
+    // =========================================================================
+    subgraph cluster_global {
+        label="4. GLOBAL DATA ANALYSIS";
+        labelloc=t;
+        fontsize=14;
+        fontcolor="#95e1d3";
+        style="rounded,dashed";
+        color="#95e1d3";
+        bgcolor="#1e1e3f";
+
+        mutual_info [
+            label="Mutual Information\nMatrix\n(53x53 pairwise MI)",
+            shape=box,
+            fillcolor="#2d7b7b",
+            fontcolor="white"
+        ];
+
+        mi_result [
+            label="MI Matrix\nnormalized [0,1]",
+            shape=cylinder,
+            fillcolor="#3d8b8b",
+            fontcolor="white"
+        ];
+
+        mutual_info -> mi_result;
+    }
+
+    // =========================================================================
+    // SUBGRAPH: PAIRWISE COMPARISONS
+    // =========================================================================
+    subgraph cluster_pairwise {
+        label="5. PAIRWISE COMPARISONS (n*(n-1)/2 pairs)";
+        labelloc=t;
+        fontsize=14;
+        fontcolor="#c9b1ff";
+        style="rounded,dashed";
+        color="#c9b1ff";
+        bgcolor="#1e1e3f";
+
+        // Divergence metrics
+        divergence_metrics [
+            label="Divergence Metrics\ncosine_similarity\njensen_shannon\nwasserstein_distance\nspearman_correlation\nkendall_tau\ntop5/top10_overlap",
+            shape=box,
+            fillcolor="#5a3d8b",
+            fontcolor="white"
+        ];
+
+        // Stability metrics
+        stability_metrics [
+            label="Stability Metrics\nmsd (energy)\ncorrelation (coherence)\nvariance_ratio (amplitude)\nks_statistic (dist shift)\nenergy_distance",
+            shape=box,
+            fillcolor="#5a3d8b",
+            fontcolor="white"
+        ];
+
+        // Gradient alignment
+        grad_alignment [
+            label="Gradient Alignment\nfeature_alignment\ntemporal_alignment\nfeature_diff",
+            shape=box,
+            fillcolor="#5a3d8b",
+            fontcolor="white"
+        ];
+
+        // Fisher comparison
+        fisher_compare [
+            label="Fisher Comparison\nlayer sensitivity ratios\nModel1/Model2",
+            shape=box,
+            fillcolor="#5a3d8b",
+            fontcolor="white"
+        ];
+
+        // Hessian comparison
+        hessian_compare [
+            label="Hessian Comparison\nspectral_ratio\ntrace_ratio\ncondition_numbers\neigenvalue_correlation",
+            shape=box,
+            fillcolor="#5a3d8b",
+            fontcolor="white"
+        ];
+
+        pairwise_results [
+            label="Pairwise Results\nresults['divergence']\nresults['stability']\nresults['gradient_alignment']\nresults['fisher_comparison']\nresults['hessian_comparison']",
+            shape=note,
+            fillcolor="#4a3d7b",
+            fontcolor="white"
+        ];
+
+        divergence_metrics -> pairwise_results;
+        stability_metrics -> pairwise_results;
+        grad_alignment -> pairwise_results;
+        fisher_compare -> pairwise_results;
+        hessian_compare -> pairwise_results;
+    }
+
+    // =========================================================================
+    // SUBGRAPH: TECHNICAL ASSESSMENT
+    // =========================================================================
+    subgraph cluster_assessment {
+        label="6. TECHNICAL ASSESSMENT";
+        labelloc=t;
+        fontsize=14;
+        fontcolor="#ff9a9e";
+        style="rounded,dashed";
+        color="#ff9a9e";
+        bgcolor="#1e1e3f";
+
+        pros_cons_gen [
+            label="generate_pros_cons()\nFeature diversity\nTrading signal usage\nInterpretability\nOutput stability\nGradient focus\nSHAP consistency",
+            shape=box,
+            fillcolor="#8b3d3d",
+            fontcolor="white"
+        ];
+
+        interpretation [
+            label="Interpretation Functions\ninterpret_divergence()\ninterpret_stability()\ninterpret_gradients()\ninterpret_hessian()\ninterpret_fisher()",
+            shape=box,
+            fillcolor="#8b3d3d",
+            fontcolor="white"
+        ];
+
+        assessment_result [
+            label="Technical Assessment\npros: []\ncons: []\ninterpretations: []",
+            shape=note,
+            fillcolor="#7b3d4a",
+            fontcolor="white"
+        ];
+
+        pros_cons_gen -> assessment_result;
+        interpretation -> assessment_result;
+    }
+
+    // =========================================================================
+    // SUBGRAPH: VISUALIZATION ENGINE
+    // =========================================================================
+    subgraph cluster_viz {
+        label="7. VISUALIZATION ENGINE (16 Plot Types)";
+        labelloc=t;
+        fontsize=14;
+        fontcolor="#6bcb77";
+        style="rounded,dashed";
+        color="#6bcb77";
+        bgcolor="#1e1e3f";
+
+        // Row 1 - Core importance plots
+        plot_imp_compare [
+            label="plot_importance_\ncomparison()\nbar + rank scatter",
+            shape=box,
+            fillcolor="#3d6b4a",
+            fontcolor="white"
+        ];
+
+        plot_imp_heatmap [
+            label="plot_importance_\nheatmap()\nper-head matrix",
+            shape=box,
+            fillcolor="#3d6b4a",
+            fontcolor="white"
+        ];
+
+        // Row 2 - Divergence & Stability
+        plot_divergence [
+            label="plot_divergence_\nmetrics()\n4-panel grid",
+            shape=box,
+            fillcolor="#3d6b4a",
+            fontcolor="white"
+        ];
+
+        plot_stability [
+            label="plot_output_\nstability()\n6-panel + radar",
+            shape=box,
+            fillcolor="#3d6b4a",
+            fontcolor="white"
+        ];
+
+        // Row 3 - Gradients
+        plot_grad_saliency [
+            label="plot_gradient_\nsaliency()\nfeature + temporal",
+            shape=box,
+            fillcolor="#3d6b4a",
+            fontcolor="white"
+        ];
+
+        plot_grad_align [
+            label="plot_gradient_\nalignment()\nalignment bars",
+            shape=box,
+            fillcolor="#3d6b4a",
+            fontcolor="white"
+        ];
+
+        // Row 4 - Advanced metrics
+        plot_fisher [
+            label="plot_fisher_\ncomparison()\nlayer ratios",
+            shape=box,
+            fillcolor="#3d6b4a",
+            fontcolor="white"
+        ];
+
+        plot_hessian [
+            label="plot_hessian_\nspectrum()\neigenvalue curves",
+            shape=box,
+            fillcolor="#3d6b4a",
+            fontcolor="white"
+        ];
+
+        plot_shap [
+            label="plot_shap_\ncomparison()\nbar + heatmap",
+            shape=box,
+            fillcolor="#3d6b4a",
+            fontcolor="white"
+        ];
+
+        plot_mi [
+            label="plot_mutual_\ninformation()\n25x25 heatmap",
+            shape=box,
+            fillcolor="#3d6b4a",
+            fontcolor="white"
+        ];
+
+        // Row 5 - Trees & Distributions
+        plot_trees [
+            label="plot_decision_\ntrees()\nsklearn tree viz",
+            shape=box,
+            fillcolor="#3d6b4a",
+            fontcolor="white"
+        ];
+
+        plot_dist [
+            label="plot_output_\ndistributions()\nhist + Q-Q plots",
+            shape=box,
+            fillcolor="#3d6b4a",
+            fontcolor="white"
+        ];
+
+        // Row 6 - Multi-model summary (3+ models)
+        plot_pairwise [
+            label="plot_pairwise_\nmatrix()\n2x3 + 2x2 grids",
+            shape=box,
+            fillcolor="#2d8b4a",
+            fontcolor="white"
+        ];
+
+        plot_radar [
+            label="plot_model_\nradar_comparison()\n6-axis quality",
+            shape=box,
+            fillcolor="#2d8b4a",
+            fontcolor="white"
+        ];
+
+        plot_ranking [
+            label="plot_ranking_\nsummary()\nbar + breakdown",
+            shape=box,
+            fillcolor="#2d8b4a",
+            fontcolor="white"
+        ];
+
+        plots_dir [
+            label="plots/\n*.png files",
+            shape=folder,
+            fillcolor="#4a8b3d",
+            fontcolor="white"
+        ];
+
+        plot_imp_compare -> plots_dir;
+        plot_imp_heatmap -> plots_dir;
+        plot_divergence -> plots_dir;
+        plot_stability -> plots_dir;
+        plot_grad_saliency -> plots_dir;
+        plot_grad_align -> plots_dir;
+        plot_fisher -> plots_dir;
+        plot_hessian -> plots_dir;
+        plot_shap -> plots_dir;
+        plot_mi -> plots_dir;
+        plot_trees -> plots_dir;
+        plot_dist -> plots_dir;
+        plot_pairwise -> plots_dir;
+        plot_radar -> plots_dir;
+        plot_ranking -> plots_dir;
+    }
+
+    // =========================================================================
+    // SUBGRAPH: REPORT GENERATION
+    // =========================================================================
+    subgraph cluster_report {
+        label="8. REPORT GENERATION";
+        labelloc=t;
+        fontsize=14;
+        fontcolor="#ffa07a";
+        style="rounded,dashed";
+        color="#ffa07a";
+        bgcolor="#1e1e3f";
+
+        format_markdown [
+            label="format_markdown_report()\n10 sections\npairwise matrices\nscore tables",
+            shape=box,
+            fillcolor="#8b5a3d",
+            fontcolor="white"
+        ];
+
+        json_export [
+            label="JSON Export\nconvert numpy\nserialize results",
+            shape=box,
+            fillcolor="#8b5a3d",
+            fontcolor="white"
+        ];
+
+        md_report [
+            label="model_comparison.md\n- Model Summary\n- Feature Rankings\n- Divergence Analysis\n- Stability Analysis\n- Gradient Saliency\n- Hessian Analysis\n- Fisher Analysis\n- Decision Trees\n- Pros/Cons\n- Recommendation",
+            shape=note,
+            fillcolor="#a06a4a",
+            fontcolor="white"
+        ];
+
+        json_report [
+            label="model_comparison.json\nRaw data for\nfurther analysis",
+            shape=note,
+            fillcolor="#a06a4a",
+            fontcolor="white"
+        ];
+
+        format_markdown -> md_report;
+        json_export -> json_report;
+    }
+
+    // =========================================================================
+    // SUBGRAPH: OUTPUT SUMMARY
+    // =========================================================================
+    subgraph cluster_output {
+        label="9. OUTPUT";
+        labelloc=t;
+        fontsize=14;
+        fontcolor="#00ff9f";
+        style="rounded,dashed";
+        color="#00ff9f";
+        bgcolor="#1e1e3f";
+
+        quick_summary [
+            label="Quick Summary\nConsole Output\nTop Pros/Cons",
+            shape=box,
+            fillcolor="#3d8b6b",
+            fontcolor="white"
+        ];
+
+        final_output [
+            label="OUTPUTS\n\nreports/model_comparison.md\nreports/model_comparison.json\nreports/plots/*.png\n(16+ visualization files)",
+            shape=folder,
+            fillcolor="#2d7b5a",
+            fontcolor="white"
+        ];
+
+        quick_summary -> final_output;
+    }
+
+    // =========================================================================
+    // MAIN FLOW CONNECTIONS
+    // =========================================================================
+
+    // Input to Preprocessing
+    data_csv -> load_data;
+    model_paths -> scale_params [style=dashed, label="1st ckpt"];
+
+    // Preprocessing to Analysis
+    X_processed -> load_model;
+    X_processed -> mutual_info;
+    model_paths -> load_model;
+
+    // Per-model to Pairwise
+    model_results -> divergence_metrics [label="importances"];
+    model_results -> stability_metrics [label="raw_outputs"];
+    model_results -> grad_alignment [label="gradients"];
+    model_results -> fisher_compare [label="fisher_layer"];
+    model_results -> hessian_compare [label="hessian_eigs"];
+
+    // Results to Assessment
+    model_results -> pros_cons_gen;
+    pairwise_results -> interpretation;
+    pairwise_results -> pros_cons_gen [style=dashed];
+
+    // Assessment to Visualization
+    assessment_result -> plot_imp_compare [style=dashed];
+    model_results -> plot_imp_compare;
+    model_results -> plot_imp_heatmap;
+    model_results -> plot_grad_saliency;
+    model_results -> plot_shap;
+    model_results -> plot_trees;
+    model_results -> plot_dist;
+
+    pairwise_results -> plot_divergence;
+    pairwise_results -> plot_stability;
+    pairwise_results -> plot_grad_align;
+    pairwise_results -> plot_fisher;
+    pairwise_results -> plot_hessian;
+    pairwise_results -> plot_pairwise;
+    pairwise_results -> plot_radar;
+    pairwise_results -> plot_ranking;
+
+    mi_result -> plot_mi;
+
+    // Visualization to Report
+    plots_dir -> md_report [style=dashed, label="embed"];
+
+    // All results to Report
+    model_results -> format_markdown;
+    pairwise_results -> format_markdown;
+    assessment_result -> format_markdown;
+    mi_result -> format_markdown [style=dashed];
+
+    model_results -> json_export;
+    pairwise_results -> json_export;
+
+    // Report to Output
+    md_report -> quick_summary;
+    json_report -> final_output;
+    plots_dir -> final_output;
+
+    // =========================================================================
+    // LEGEND
+    // =========================================================================
+    subgraph cluster_legend {
+        label="LEGEND";
+        labelloc=t;
+        fontsize=12;
+        fontcolor="white";
+        style="rounded";
+        color="#666699";
+        bgcolor="#252545";
+
+        node [shape=box, width=1.2, height=0.4];
+
+        leg_input [label="Input", fillcolor="#2d5a7b", fontcolor="white"];
+        leg_preprocess [label="Preprocess", fillcolor="#8b3d5a", fontcolor="white"];
+        leg_analysis [label="Analysis", fillcolor="#7b5a2d", fontcolor="white"];
+        leg_compare [label="Compare", fillcolor="#5a3d8b", fontcolor="white"];
+        leg_assess [label="Assess", fillcolor="#8b3d3d", fontcolor="white"];
+        leg_viz [label="Visualize", fillcolor="#3d6b4a", fontcolor="white"];
+        leg_report [label="Report", fillcolor="#8b5a3d", fontcolor="white"];
+        leg_output [label="Output", fillcolor="#3d8b6b", fontcolor="white"];
+
+        leg_input -> leg_preprocess -> leg_analysis -> leg_compare [style=invis];
+        leg_assess -> leg_viz -> leg_report -> leg_output [style=invis];
+    }
+}

@@ -1627,3 +1627,1180 @@ def plot_ranking_summary(results, output_dir):
     plt.close()
 
     return sorted_rankings
+
+
+# =============================================================================
+# TECHNICAL ASSESSMENT & PROS/CONS GENERATION (Section 11)
+# =============================================================================
+
+# Thresholds for deterministic rubric
+THRESHOLDS = {
+    'r2_high': 0.50,
+    'r2_low': 0.20,
+    'nf_threshold': 0.001,
+    'var_collapse': 0.001,
+    'top1_concentration': 40,
+    'extreme_concentration': 80,
+    'entropy_min': 2.5,
+    'spearman_drift': 0.20,
+    'top10_drift': 0.20,
+    'overlap_good': 0.60,
+    'corr_good': 0.90,
+    'corr_moderate': 0.70,
+    'var_ratio_low': 0.5,
+    'var_ratio_high': 2.0,
+}
+
+
+def generate_pros_cons(model_name, model_data, divergence_data, stability_data, feature_names):
+    """
+    Generate deterministic pros/cons based on rubric triggers (Spec Section 11).
+
+    Returns:
+        dict with 'pros' and 'cons' lists
+    """
+    pros = []
+    cons = []
+
+    imp = model_data.get('importances', {})
+    tree_r2 = model_data.get('tree_r2') or 0
+    output_stats = model_data.get('output_stats', {})
+    grads = model_data.get('gradient_saliency')
+    shap = model_data.get('shap_values', {})
+
+    # =========================================================================
+    # PROS TRIGGERS
+    # =========================================================================
+
+    # 1. High interpretability (surrogate fidelity)
+    if tree_r2 >= THRESHOLDS['r2_high']:
+        pros.append(f"High surrogate fidelity (R2={tree_r2:.3f} >= 0.50): decision tree rules are reliable summary")
+
+    # 2. Stable outputs
+    if output_stats:
+        all_vars = [s.get('std', 0) ** 2 for s in output_stats.values()]
+        nf_rate = model_data.get('nf_rate', 0)
+        if nf_rate <= THRESHOLDS['nf_threshold'] and all_vars and min(all_vars) > THRESHOLDS['var_collapse']:
+            pros.append("Stable finite outputs with healthy variance (no collapse/explosion detected)")
+
+    # 3. Consistent signal with peers
+    if divergence_data:
+        overlaps = [d.get('top10_overlap', 0) for d in divergence_data.values()]
+        if overlaps and np.mean(overlaps) >= THRESHOLDS['overlap_good']:
+            pros.append(f"Signal features consistent with peer checkpoints (avg top-10 overlap={np.mean(overlaps):.2f})")
+
+    # 4. Balanced attribution (not concentrated)
+    if imp:
+        top_val = max(imp.values())
+        imp_values = list(imp.values())
+        imp_probs = np.array(imp_values) / (sum(imp_values) + EPS)
+        imp_entropy = -np.sum(imp_probs * np.log(imp_probs + EPS))
+
+        if top_val <= THRESHOLDS['top1_concentration'] and imp_entropy >= THRESHOLDS['entropy_min']:
+            pros.append(f"Attribution not overly concentrated (top feature={top_val:.1f}%, entropy={imp_entropy:.2f})")
+
+    # 5. Good temporal gradient balance
+    if grads and 'temporal_saliency' in grads:
+        temporal = grads['temporal_saliency']
+        if len(temporal) > 10:
+            recent = np.mean(temporal[-int(len(temporal)*0.2):])
+            distant = np.mean(temporal[:int(len(temporal)*0.2)])
+            if distant > 0 and 0.3 < recent / (distant + EPS) < 3.0:
+                pros.append("Balanced temporal attention: model attends to both recent and historical context")
+
+    # 6. Trading-relevant features in top ranks
+    trading_features = {'rsi', 'adx', 'ivr', 'vix', 'atr', 'bb_squeeze', 'stoch_k', 'macd', 'cmf',
+                        'delta_pressure', 'gamma_exposure', 'volume_imbalance'}
+    if imp:
+        top10 = set(list(sorted(imp.keys(), key=lambda k: imp[k], reverse=True))[:10])
+        overlap = len(trading_features & set(f.lower() for f in top10))
+        if overlap >= 3:
+            pros.append(f"Trading-relevant features prominent ({overlap} in top-10): model learned domain signals")
+
+    # 7. SHAP-Permutation consistency
+    if shap and imp:
+        shap_imp = shap.get('mean_abs_shap', {})
+        if shap_imp:
+            shap_top5 = set(sorted(shap_imp.keys(), key=lambda k: shap_imp[k], reverse=True)[:5])
+            perm_top5 = set(sorted(imp.keys(), key=lambda k: imp[k], reverse=True)[:5])
+            consistency = len(shap_top5 & perm_top5) / 5
+            if consistency >= 0.6:
+                pros.append(f"Strong attribution consistency (SHAP vs Permutation top-5 overlap={consistency:.0%})")
+
+    # =========================================================================
+    # CONS TRIGGERS
+    # =========================================================================
+
+    # 1. Potential collapse
+    if imp:
+        top_val = max(imp.values())
+        if top_val >= THRESHOLDS['extreme_concentration']:
+            cons.append(f"Possible collapse: extreme attribution concentration (top feature={top_val:.1f}%)")
+
+    if output_stats:
+        all_vars = [s.get('std', 0) ** 2 for s in output_stats.values()]
+        if all_vars and min(all_vars) <= THRESHOLDS['var_collapse']:
+            cons.append("Possible collapse: near-constant outputs detected (variance near zero)")
+
+    # 2. Potential explosion
+    nf_rate = model_data.get('nf_rate', 0)
+    if nf_rate >= THRESHOLDS['nf_threshold']:
+        cons.append(f"Potential instability: non-finite output rate={nf_rate:.2%}")
+
+    if output_stats:
+        high_kurtosis = [s.get('kurtosis', 0) for s in output_stats.values() if abs(s.get('kurtosis', 0)) > 10]
+        if high_kurtosis:
+            cons.append(f"Heavy-tailed outputs detected ({len(high_kurtosis)} heads with |kurtosis| > 10)")
+
+    # 3. Major logic drift (vs peers)
+    if divergence_data:
+        spearman_vals = [d.get('spearman_correlation', 1) for d in divergence_data.values()]
+        overlap_vals = [d.get('top10_overlap', 1) for d in divergence_data.values()]
+
+        if spearman_vals and min(spearman_vals) <= THRESHOLDS['spearman_drift']:
+            cons.append(f"Major logic drift: Spearman correlation dropped to {min(spearman_vals):.2f}")
+
+        if overlap_vals and min(overlap_vals) <= THRESHOLDS['top10_drift']:
+            cons.append(f"Feature ranking shifted substantially (top-10 overlap={min(overlap_vals):.0%})")
+
+    # 4. Poor surrogate fidelity
+    if tree_r2 < THRESHOLDS['r2_low']:
+        cons.append(f"Surrogate tree not faithful (R2={tree_r2:.3f} < 0.20): decision boundary is complex or temporal")
+
+    # 5. Stability concerns
+    if stability_data:
+        for pair, metrics in stability_data.items():
+            for head, m in metrics.items():
+                if m.get('correlation', 1) < THRESHOLDS['corr_moderate']:
+                    cons.append(f"Output drift: {head} correlation={m['correlation']:.2f} (below 0.70 vs peer)")
+                    break
+                if m.get('variance_ratio', 1) < THRESHOLDS['var_ratio_low'] or m.get('variance_ratio', 1) > THRESHOLDS['var_ratio_high']:
+                    cons.append(f"Amplitude instability: {head} variance ratio={m['variance_ratio']:.2f}")
+                    break
+
+    # 6. Gradient instability
+    if grads and 'feature_saliency' in grads:
+        saliency = grads['feature_saliency']
+        if np.isnan(saliency).any() or np.isinf(saliency).any():
+            cons.append("Gradient instability detected: NaN/Inf in saliency maps")
+
+    return {'pros': pros, 'cons': cons}
+
+
+# =============================================================================
+# PHYSICS INTERPRETATION FUNCTIONS (Section 14)
+# =============================================================================
+
+def interpret_divergence(metrics):
+    """Interpret divergence metrics in domain terms."""
+    interpretations = []
+
+    cos = metrics.get('cosine_similarity', 0)
+    js = metrics.get('jensen_shannon_divergence', 0)
+    sp = metrics.get('spearman_correlation', 0)
+    top5 = metrics.get('top5_overlap', 0)
+
+    # Cosine similarity interpretation
+    if cos > 0.95:
+        interpretations.append(f"Near-identical importance direction (cosine={cos:.3f}): models learned same feature weighting")
+    elif cos > 0.80:
+        interpretations.append(f"Similar importance direction (cosine={cos:.3f}): minor reweighting of features")
+    elif cos > 0.50:
+        interpretations.append(f"Moderate directional shift (cosine={cos:.3f}): different feature emphasis emerging")
+    else:
+        interpretations.append(f"Major directional divergence (cosine={cos:.3f}): fundamentally different feature selection")
+
+    # Jensen-Shannon interpretation
+    if js < 0.1:
+        interpretations.append(f"Minimal information distance (JS={js:.3f}): importance distributions nearly identical")
+    elif js < 0.3:
+        interpretations.append(f"Moderate information distance (JS={js:.3f}): some mass shifted between features")
+    else:
+        interpretations.append(f"Large information distance (JS={js:.3f}): substantial redistribution of importance")
+
+    # Rank correlation
+    if sp > 0.9:
+        interpretations.append(f"Rank order preserved (Spearman={sp:.3f}): feature priority ordering unchanged")
+    elif sp > 0.6:
+        interpretations.append(f"Partial rank preservation (Spearman={sp:.3f}): some features swapped positions")
+    else:
+        interpretations.append(f"Rank structure disrupted (Spearman={sp:.3f}): feature priorities fundamentally reordered")
+
+    # Top-K interpretation
+    if top5 < 0.4:
+        interpretations.append(f"Signal shift warning: only {top5:.0%} of top-5 features overlap")
+
+    return interpretations
+
+
+def interpret_stability(metrics):
+    """Interpret stability metrics using physics analogies."""
+    interpretations = []
+
+    # Aggregate across heads
+    avg_corr = np.mean([m.get('correlation', 0) for m in metrics.values()])
+    avg_msd = np.mean([m.get('msd', 0) for m in metrics.values()])
+    avg_vr = np.mean([m.get('variance_ratio', 1) for m in metrics.values()])
+    avg_ks = np.mean([m.get('ks_statistic', 0) for m in metrics.values()])
+
+    # Coherence (correlation)
+    if avg_corr > 0.95:
+        interpretations.append(f"High coherence (avg correlation={avg_corr:.3f}): outputs move in lockstep")
+    elif avg_corr > 0.80:
+        interpretations.append(f"Good coherence (avg correlation={avg_corr:.3f}): outputs directionally aligned")
+    elif avg_corr > 0.50:
+        interpretations.append(f"Partial coherence (avg correlation={avg_corr:.3f}): some behavioral divergence")
+    else:
+        interpretations.append(f"Low coherence (avg correlation={avg_corr:.3f}): models responding differently to same inputs")
+
+    # Energy gap (MSD)
+    if avg_msd < 0.01:
+        interpretations.append(f"Minimal energy gap (MSD={avg_msd:.4f}): outputs nearly identical in magnitude")
+    elif avg_msd < 0.1:
+        interpretations.append(f"Small energy gap (MSD={avg_msd:.4f}): minor amplitude differences")
+    else:
+        interpretations.append(f"Large energy gap (MSD={avg_msd:.4f}): significant output magnitude differences")
+
+    # Amplitude stability (variance ratio)
+    if 0.8 < avg_vr < 1.25:
+        interpretations.append(f"Stable amplitude (variance ratio={avg_vr:.2f}): similar output volatility")
+    elif avg_vr < 0.5:
+        interpretations.append(f"Amplitude compression (variance ratio={avg_vr:.2f}): later model is quieter")
+    elif avg_vr > 2.0:
+        interpretations.append(f"Amplitude expansion (variance ratio={avg_vr:.2f}): later model is louder")
+
+    # Distribution shift (KS)
+    if avg_ks < 0.05:
+        interpretations.append(f"No distribution shift (KS={avg_ks:.3f}): output distributions match")
+    elif avg_ks < 0.15:
+        interpretations.append(f"Minor distribution shift (KS={avg_ks:.3f}): subtle statistical differences")
+    else:
+        interpretations.append(f"Significant distribution shift (KS={avg_ks:.3f}): structural change in output behavior")
+
+    return interpretations
+
+
+def interpret_gradients(alignment):
+    """Interpret gradient alignment."""
+    if alignment is None:
+        return ["Gradient analysis unavailable"]
+
+    interpretations = []
+
+    feat_align = alignment.get('feature_alignment', 0)
+    temp_align = alignment.get('temporal_alignment', 0)
+
+    if feat_align > 0.9:
+        interpretations.append(f"High feature attention alignment ({feat_align:.3f}): models focus on same features")
+    elif feat_align > 0.7:
+        interpretations.append(f"Moderate feature attention alignment ({feat_align:.3f}): similar but not identical focus")
+    else:
+        interpretations.append(f"Low feature attention alignment ({feat_align:.3f}): models attend to different features")
+
+    if temp_align > 0.9:
+        interpretations.append(f"Temporal attention aligned ({temp_align:.3f}): same recency bias")
+    elif temp_align > 0.7:
+        interpretations.append(f"Partially aligned temporal focus ({temp_align:.3f})")
+    else:
+        interpretations.append(f"Different temporal focus ({temp_align:.3f}): models weight history differently")
+
+    return interpretations
+
+
+def interpret_hessian(comparison):
+    """Interpret Hessian spectral comparison."""
+    if comparison is None:
+        return ["Hessian analysis unavailable"]
+
+    interpretations = []
+
+    spec_ratio = comparison.get('spectral_ratio', 1)
+    trace_ratio = comparison.get('trace_ratio', 1)
+    cond1 = comparison.get('condition_number_1', 1)
+    cond2 = comparison.get('condition_number_2', 1)
+
+    if spec_ratio > 2.0:
+        interpretations.append(f"Sharper loss landscape (spectral ratio={spec_ratio:.2f}): later model has steeper curvature")
+    elif spec_ratio < 0.5:
+        interpretations.append(f"Flatter loss landscape (spectral ratio={spec_ratio:.2f}): later model found broader minimum")
+    else:
+        interpretations.append(f"Similar loss curvature (spectral ratio={spec_ratio:.2f})")
+
+    if cond1 > 1e4 or cond2 > 1e4:
+        worse = "Model 1" if cond1 > cond2 else "Model 2"
+        interpretations.append(f"High condition number detected in {worse}: potential numerical instability")
+
+    return interpretations
+
+
+def interpret_fisher(comparison):
+    """Interpret Fisher Information comparison."""
+    if not comparison:
+        return ["Fisher analysis unavailable"]
+
+    interpretations = []
+
+    ratios = list(comparison.values())
+    if not ratios:
+        return interpretations
+
+    max_ratio = max(ratios)
+    min_ratio = min(ratios)
+
+    if max_ratio > 5.0:
+        layer = [k for k, v in comparison.items() if v == max_ratio][0]
+        interpretations.append(f"High parameter sensitivity in {layer} (ratio={max_ratio:.2f}x): fragile layer")
+
+    if min_ratio < 0.2:
+        layer = [k for k, v in comparison.items() if v == min_ratio][0]
+        interpretations.append(f"Reduced sensitivity in {layer} (ratio={min_ratio:.2f}x): layer may be undertrained")
+
+    spread = max_ratio / (min_ratio + EPS)
+    if spread > 10:
+        interpretations.append(f"Uneven sensitivity distribution (spread={spread:.1f}x): parameter importance concentrated")
+    else:
+        interpretations.append(f"Relatively uniform sensitivity (spread={spread:.1f}x)")
+
+    return interpretations
+
+
+# =============================================================================
+# REPORT GENERATION (Section 8)
+# =============================================================================
+
+def format_markdown_report(results, config):
+    """
+    Generate comprehensive markdown report (Spec Section 8.1).
+
+    10 sections as specified:
+    1. Executive Summary
+    2. Configuration & Preprocessing Contract
+    3. Per-Model Interpretability
+    4. Pairwise Divergence Analysis
+    5. Stability Analysis (Physics)
+    6. Gradient Saliency Analysis
+    7. Hessian & Fisher Analysis
+    8. Decision Tree Rules
+    9. Pros/Cons per Model
+    10. Final Recommendation & Ranking
+    """
+    lines = []
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    model_names = list(results['models'].keys())
+    n_models = len(model_names)
+
+    # =========================================================================
+    # HEADER
+    # =========================================================================
+    lines.append("# Multi-Model Neural CDE Interpretability Audit Report")
+    lines.append(f"\n**Generated:** {timestamp}")
+    lines.append(f"**Models Compared:** {n_models}")
+    lines.append(f"**Samples Used:** {config.get('n_samples', 'N/A')}")
+    lines.append(f"**Seed:** {config.get('seed', 'N/A')}")
+    lines.append("")
+
+    # =========================================================================
+    # 1. EXECUTIVE SUMMARY
+    # =========================================================================
+    lines.append("## 1. Executive Summary")
+    lines.append("")
+
+    # Quick verdict
+    rankings = results.get('rankings', [])
+    if rankings:
+        best = rankings[0][0]
+        lines.append(f"**Best Model:** `{best}`")
+
+        total_pros = sum(len(results['models'][n].get('pros', [])) for n in model_names)
+        total_cons = sum(len(results['models'][n].get('cons', [])) for n in model_names)
+        lines.append(f"**Overall Health:** {total_pros} strengths identified, {total_cons} concerns flagged")
+
+    # Key divergence summary
+    if results.get('divergence'):
+        pair = list(results['divergence'].keys())[0]
+        div = results['divergence'][pair]
+        lines.append(f"\n**Key Divergence ({pair}):**")
+        lines.append(f"- Cosine Similarity: {div.get('cosine_similarity', 0):.3f}")
+        lines.append(f"- Spearman Rank Correlation: {div.get('spearman_correlation', 0):.3f}")
+        lines.append(f"- Top-10 Feature Overlap: {div.get('top10_overlap', 0):.0%}")
+
+    lines.append("")
+
+    # =========================================================================
+    # 2. CONFIGURATION & PREPROCESSING CONTRACT
+    # =========================================================================
+    lines.append("## 2. Configuration & Preprocessing Contract")
+    lines.append("")
+    lines.append("### Feature Registry")
+    lines.append(f"- **Input Dimension:** {config.get('input_dim', INPUT_DIM_V22)}")
+    lines.append(f"- **Feature Schema:** V2.2 (FEATURE_COLS_V22)")
+    lines.append(f"- **Total Features:** {len(config.get('feature_names', []))}")
+
+    lines.append("\n### Sequence Configuration")
+    for name in model_names:
+        seq_len = results['models'][name].get('seq_len', 'N/A')
+        lines.append(f"- `{name}`: seq_len = {seq_len}")
+
+    lines.append("\n### Leakage Masking")
+    lines.append("- `target_spot` -> 0")
+    lines.append("- `max_dd_60m` -> 0")
+
+    lines.append("\n### Scaling")
+    lines.append("- Method: Robust Scaling (median/MAD)")
+    lines.append("- Clip Range: [-10, +10]")
+    lines.append("- NaN/Inf Handling: Replace with 0")
+    lines.append("")
+
+    # =========================================================================
+    # 3. PER-MODEL INTERPRETABILITY
+    # =========================================================================
+    lines.append("## 3. Per-Model Interpretability")
+    lines.append("")
+
+    for name in model_names:
+        data = results['models'][name]
+        lines.append(f"### {name}")
+        lines.append("")
+
+        # Top features
+        imp = data.get('importances', {})
+        if imp:
+            lines.append("**Top 10 Features (Permutation Importance):**")
+            lines.append("| Rank | Feature | Importance (%) |")
+            lines.append("|------|---------|----------------|")
+            top10 = sorted(imp.items(), key=lambda x: x[1], reverse=True)[:10]
+            for rank, (feat, val) in enumerate(top10, 1):
+                lines.append(f"| {rank} | {feat} | {val:.2f} |")
+            lines.append("")
+
+        # Surrogate tree
+        tree_r2 = data.get('tree_r2')
+        if tree_r2 is not None:
+            interp = "High" if tree_r2 >= 0.50 else "Moderate" if tree_r2 >= 0.20 else "Low"
+            lines.append(f"**Surrogate Tree R2:** {tree_r2:.4f} ({interp} interpretability)")
+            lines.append("")
+
+        # Output stats summary
+        output_stats = data.get('output_stats', {})
+        if output_stats:
+            lines.append("**Output Statistics (ROI Head):**")
+            if 'roi' in output_stats:
+                s = output_stats['roi']
+                lines.append(f"- Mean: {s['mean']:.4f}, Std: {s['std']:.4f}")
+                lines.append(f"- Skewness: {s['skew']:.3f}, Kurtosis: {s['kurtosis']:.3f}")
+            lines.append("")
+
+    # =========================================================================
+    # 4. PAIRWISE DIVERGENCE ANALYSIS
+    # =========================================================================
+    lines.append("## 4. Pairwise Divergence Analysis")
+    lines.append("")
+
+    for pair, metrics in results.get('divergence', {}).items():
+        lines.append(f"### {pair}")
+        lines.append("")
+
+        lines.append("**Similarity Metrics:**")
+        lines.append(f"- Cosine Similarity: {metrics.get('cosine_similarity', 0):.4f}")
+        lines.append(f"- Spearman Correlation: {metrics.get('spearman_correlation', 0):.4f} (p={metrics.get('spearman_pvalue', 1):.2e})")
+        lines.append(f"- Kendall Tau: {metrics.get('kendall_tau', 0):.4f}")
+
+        lines.append("\n**Distance Metrics:**")
+        lines.append(f"- Jensen-Shannon Divergence: {metrics.get('jensen_shannon_divergence', 0):.4f}")
+        lines.append(f"- Wasserstein Distance: {metrics.get('wasserstein_distance', 0):.4f}")
+
+        lines.append("\n**Top-K Feature Overlap:**")
+        lines.append(f"- Top-5 Overlap: {metrics.get('top5_overlap', 0):.0%}")
+        lines.append(f"- Top-10 Overlap: {metrics.get('top10_overlap', 0):.0%}")
+
+        # Interpretation
+        interp = interpret_divergence(metrics)
+        lines.append("\n**Interpretation:**")
+        for i in interp:
+            lines.append(f"- {i}")
+
+        # Largest shifts
+        shifts = metrics.get('largest_shifts', [])
+        if shifts:
+            lines.append("\n**Largest Importance Shifts:**")
+            lines.append("| Feature | Shift (%) |")
+            lines.append("|---------|-----------|")
+            for feat, shift in shifts[:5]:
+                lines.append(f"| {feat} | {shift:+.2f} |")
+
+        lines.append("")
+
+    # =========================================================================
+    # 5. STABILITY ANALYSIS (PHYSICS)
+    # =========================================================================
+    lines.append("## 5. Stability Analysis (Physics-Inspired)")
+    lines.append("")
+
+    for pair, metrics in results.get('stability', {}).items():
+        lines.append(f"### {pair}")
+        lines.append("")
+
+        lines.append("| Head | Correlation | MSD | Var Ratio | KS Stat | Wasserstein |")
+        lines.append("|------|-------------|-----|-----------|---------|-------------|")
+        for head, m in metrics.items():
+            lines.append(f"| {head} | {m.get('correlation', 0):.3f} | {m.get('msd', 0):.4f} | {m.get('variance_ratio', 0):.3f} | {m.get('ks_statistic', 0):.3f} | {m.get('wasserstein', 0):.4f} |")
+
+        # Interpretation
+        interp = interpret_stability(metrics)
+        lines.append("\n**Physics Interpretation:**")
+        for i in interp:
+            lines.append(f"- {i}")
+
+        lines.append("")
+
+    # =========================================================================
+    # 6. GRADIENT SALIENCY ANALYSIS
+    # =========================================================================
+    lines.append("## 6. Gradient Saliency Analysis")
+    lines.append("")
+
+    for name in model_names:
+        grads = results['models'][name].get('gradient_saliency')
+        if grads:
+            lines.append(f"### {name}")
+            saliency = grads['feature_saliency']
+            feature_names = config.get('feature_names', [])
+            if len(feature_names) == len(saliency):
+                top_idx = np.argsort(saliency)[::-1][:5]
+                lines.append("**Top-5 Gradient Saliency Features:**")
+                for idx in top_idx:
+                    lines.append(f"- {feature_names[idx]}: {saliency[idx]:.4f}")
+
+            temporal = grads['temporal_saliency']
+            recent_weight = np.mean(temporal[-int(len(temporal)*0.2):])
+            old_weight = np.mean(temporal[:int(len(temporal)*0.2)])
+            lines.append(f"\n**Temporal Focus:** Recent 20% weight={recent_weight:.4f}, Distant 20% weight={old_weight:.4f}")
+            lines.append("")
+
+    # Gradient alignment
+    for pair, align in results.get('gradient_alignment', {}).items():
+        if align:
+            lines.append(f"### Gradient Alignment: {pair}")
+            interp = interpret_gradients(align)
+            for i in interp:
+                lines.append(f"- {i}")
+            lines.append("")
+
+    # =========================================================================
+    # 7. HESSIAN & FISHER ANALYSIS
+    # =========================================================================
+    lines.append("## 7. Hessian & Fisher Analysis")
+    lines.append("")
+
+    lines.append("### Hessian Eigenspectrum")
+    for name in model_names:
+        eigs = results['models'][name].get('hessian_eigenvalues')
+        if eigs is not None and len(eigs) > 0:
+            lines.append(f"**{name}:** Top eigenvalue = {eigs[0]:.4e}, Trace approx = {sum(eigs):.4e}")
+    lines.append("")
+
+    for pair, comp in results.get('hessian_comparison', {}).items():
+        lines.append(f"**{pair}:**")
+        interp = interpret_hessian(comp)
+        for i in interp:
+            lines.append(f"- {i}")
+        lines.append("")
+
+    lines.append("### Fisher Information")
+    for pair, comp in results.get('fisher_comparison', {}).items():
+        lines.append(f"**{pair}:**")
+        interp = interpret_fisher(comp)
+        for i in interp:
+            lines.append(f"- {i}")
+        lines.append("")
+
+    # =========================================================================
+    # 8. DECISION TREE RULES
+    # =========================================================================
+    lines.append("## 8. Surrogate Decision Tree Rules")
+    lines.append("")
+
+    for name in model_names:
+        rules = results['models'][name].get('tree_rules')
+        if rules:
+            lines.append(f"### {name}")
+            lines.append(f"**R2 Score:** {results['models'][name].get('tree_r2', 0):.4f}")
+            lines.append("```")
+            lines.append(rules[:2000] if len(rules) > 2000 else rules)  # Truncate if too long
+            lines.append("```")
+            lines.append("")
+
+    # =========================================================================
+    # 9. PROS/CONS PER MODEL
+    # =========================================================================
+    lines.append("## 9. Technical Assessment: Pros & Cons")
+    lines.append("")
+
+    for name in model_names:
+        data = results['models'][name]
+        pros = data.get('pros', [])
+        cons = data.get('cons', [])
+
+        lines.append(f"### {name}")
+        lines.append("")
+
+        lines.append("**Strengths:**")
+        if pros:
+            for p in pros:
+                lines.append(f"- {p}")
+        else:
+            lines.append("- No significant strengths identified")
+        lines.append("")
+
+        lines.append("**Concerns:**")
+        if cons:
+            for c in cons:
+                lines.append(f"- {c}")
+        else:
+            lines.append("- No significant concerns identified")
+        lines.append("")
+
+    # =========================================================================
+    # 10. FINAL RECOMMENDATION & RANKING
+    # =========================================================================
+    lines.append("## 10. Final Recommendation & Ranking")
+    lines.append("")
+
+    if rankings:
+        lines.append("### Overall Ranking")
+        lines.append("| Rank | Model | Score | Breakdown |")
+        lines.append("|------|-------|-------|-----------|")
+        for rank, (name, info) in enumerate(rankings, 1):
+            breakdown_str = ", ".join(f"{k}:{v}" for k, v in info['breakdown'].items() if v != 0)
+            lines.append(f"| {rank} | {name} | {info['total']} | {breakdown_str} |")
+        lines.append("")
+
+        lines.append("### Recommendation")
+        best = rankings[0][0]
+        best_data = results['models'][best]
+        lines.append(f"**Recommended Model:** `{best}`")
+        lines.append("")
+        lines.append("**Rationale:**")
+        for p in best_data.get('pros', [])[:3]:
+            lines.append(f"- {p}")
+
+        if len(rankings) > 1:
+            runner_up = rankings[1][0]
+            lines.append(f"\n**Runner-up:** `{runner_up}`")
+
+    lines.append("")
+    lines.append("---")
+    lines.append(f"*Report generated by audit_cde_comparison.py*")
+
+    return "\n".join(lines)
+
+
+def convert_numpy_for_json(obj):
+    """Recursively convert numpy types for JSON serialization."""
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (np.int64, np.int32, np.int16, np.int8)):
+        return int(obj)
+    elif isinstance(obj, (np.float64, np.float32, np.float16)):
+        return float(obj)
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, dict):
+        return {k: convert_numpy_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_for_json(i) for i in obj]
+    elif isinstance(obj, tuple):
+        return tuple(convert_numpy_for_json(i) for i in obj)
+    else:
+        return obj
+
+
+# =============================================================================
+# MAIN ORCHESTRATION
+# =============================================================================
+
+def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model_comparison.md',
+              seed=42, skip_gradients=False, skip_hessian=False, skip_shap=False, skip_fisher=False,
+              skip_mi=False):
+    """
+    Main orchestration function for the audit (Spec Section 10).
+    """
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    print("=" * 80)
+    print("MULTI-MODEL NEURAL CDE INTERPRETABILITY AUDIT")
+    print("=" * 80)
+    print(f"\nModels: {len(model_paths)}")
+    for p in model_paths:
+        print(f"  - {p}")
+    print(f"Data: {data_path}")
+    print(f"Samples: {n_samples}")
+    print(f"Seed: {seed}")
+    print("")
+
+    # =========================================================================
+    # LOAD DATA
+    # =========================================================================
+    print("[1/9] Loading data...")
+    df = pd.read_csv(data_path)
+    print(f"  Loaded {len(df)} rows, {len(df.columns)} columns")
+
+    feature_names = FEATURE_COLS_V22
+
+    # Select features (add missing as zeros)
+    X_cols = []
+    for col in feature_names:
+        if col in df.columns:
+            X_cols.append(df[col].values)
+        else:
+            print(f"  [WARN] Missing feature: {col} - filling with zeros")
+            X_cols.append(np.zeros(len(df)))
+
+    X = np.column_stack(X_cols).astype(np.float32)
+    X = safe_nan_to_num(X)
+
+    # Robust scaling
+    print("[2/9] Applying robust scaling...")
+    median = np.median(X, axis=0)
+    mad = np.median(np.abs(X - median), axis=0)
+    scale = 1.4826 * mad + EPS
+    X = (X - median) / scale
+    X = np.clip(X, -10, 10)
+    X = safe_nan_to_num(X)
+
+    # Leakage masking
+    leakage_cols = ['target_spot', 'max_dd_60m']
+    for col in leakage_cols:
+        if col in feature_names:
+            idx = feature_names.index(col)
+            X[:, idx] = 0
+            print(f"  Masked leakage column: {col}")
+
+    print(f"  Final X shape: {X.shape}")
+
+    # =========================================================================
+    # LOAD MODELS
+    # =========================================================================
+    print("\n[3/9] Loading models...")
+    models = {}
+    seq_lens = {}
+
+    for path in model_paths:
+        name = os.path.basename(path).replace('.pth', '')
+        model, ckpt, seq_len = load_cde_model(path)
+        models[name] = model
+        seq_lens[name] = seq_len
+        print(f"  Loaded {name}: seq_len={seq_len}")
+
+    # Use minimum seq_len for comparability
+    T_common = min(seq_lens.values())
+    print(f"  Using T_common = {T_common}")
+
+    # =========================================================================
+    # PER-MODEL ANALYSIS
+    # =========================================================================
+    print("\n[4/9] Running per-model analysis...")
+    results = {
+        'models': {},
+        'divergence': {},
+        'stability': {},
+        'gradient_alignment': {},
+        'fisher_comparison': {},
+        'hessian_comparison': {},
+        'mutual_information': None,
+        'rankings': [],
+    }
+
+    model_names = list(models.keys())
+
+    for name, model in models.items():
+        print(f"\n  === {name} ===")
+        seq_len = seq_lens[name]
+
+        model_results = {'seq_len': seq_len}
+
+        # Permutation importance
+        print(f"    Computing permutation importance...")
+        imp_result = analyze_permutation_importance(model, X, feature_names, seq_len, n_samples)
+        if isinstance(imp_result, tuple):
+            model_results['importances'], model_results['per_head_importances'] = imp_result
+        else:
+            model_results['importances'] = imp_result
+            model_results['per_head_importances'] = {}
+
+        # Surrogate tree
+        print(f"    Training surrogate tree...")
+        tree, r2, rules, tree_imp = train_surrogate_tree(model, X, feature_names, seq_len, n_samples)
+        model_results['tree_object'] = tree
+        model_results['tree_r2'] = r2
+        model_results['tree_rules'] = rules
+        model_results['tree_importances'] = tree_imp
+
+        # Output statistics
+        print(f"    Computing output statistics...")
+        output_stats, raw_outputs = compute_output_statistics(model, X, seq_len, n_samples)
+        model_results['output_stats'] = output_stats
+        model_results['raw_outputs'] = raw_outputs
+
+        # Gradient saliency
+        if not skip_gradients:
+            print(f"    Computing gradient saliency...")
+            grads = compute_gradient_saliency(model, X, seq_len, min(500, n_samples))
+            model_results['gradient_saliency'] = grads
+
+        # SHAP approximation
+        if not skip_shap:
+            print(f"    Computing SHAP approximation...")
+            shap = compute_shap_approximation(model, X, feature_names, seq_len, min(200, n_samples))
+            model_results['shap_values'] = shap
+
+        # Fisher Information
+        if not skip_fisher:
+            print(f"    Estimating Fisher Information...")
+            fisher_diag, fisher_layer = estimate_fisher_information(model, X, seq_len, min(300, n_samples))
+            model_results['fisher_layer'] = fisher_layer
+
+        # Hessian spectrum
+        if not skip_hessian:
+            print(f"    Estimating Hessian spectrum...")
+            hessian_eigs = estimate_hessian_spectrum(model, X, seq_len, min(100, n_samples))
+            model_results['hessian_eigenvalues'] = hessian_eigs
+
+        results['models'][name] = model_results
+
+    # =========================================================================
+    # MUTUAL INFORMATION
+    # =========================================================================
+    if not skip_mi:
+        print("\n[5/9] Computing mutual information matrix...")
+        mi_matrix = compute_mutual_information(X, feature_names, T_common, n_samples)
+        results['mutual_information'] = mi_matrix
+    else:
+        print("\n[5/9] Skipping mutual information (--skip-mi)")
+
+    # =========================================================================
+    # PAIRWISE COMPARISONS
+    # =========================================================================
+    print("\n[6/9] Computing pairwise comparisons...")
+
+    for i, name1 in enumerate(model_names):
+        for name2 in model_names[i+1:]:
+            pair = f"{name1} vs {name2}"
+            print(f"  {pair}")
+
+            # Divergence metrics
+            imp1 = results['models'][name1].get('importances', {})
+            imp2 = results['models'][name2].get('importances', {})
+            div_metrics = compute_divergence_metrics(imp1, imp2, feature_names)
+            results['divergence'][pair] = div_metrics
+
+            # Stability metrics
+            out1 = results['models'][name1].get('raw_outputs')
+            out2 = results['models'][name2].get('raw_outputs')
+            if out1 is not None and out2 is not None:
+                stab_metrics = compute_stability_metrics(out1, out2)
+                results['stability'][pair] = stab_metrics
+
+            # Gradient alignment
+            if not skip_gradients:
+                grad1 = results['models'][name1].get('gradient_saliency')
+                grad2 = results['models'][name2].get('gradient_saliency')
+                grad_align = compute_gradient_alignment(grad1, grad2)
+                results['gradient_alignment'][pair] = grad_align
+
+            # Fisher comparison
+            if not skip_fisher:
+                f1 = results['models'][name1].get('fisher_layer', {})
+                f2 = results['models'][name2].get('fisher_layer', {})
+                fisher_comp = compare_fisher_information(f1, f2)
+                results['fisher_comparison'][pair] = fisher_comp
+
+            # Hessian comparison
+            if not skip_hessian:
+                h1 = results['models'][name1].get('hessian_eigenvalues')
+                h2 = results['models'][name2].get('hessian_eigenvalues')
+                if h1 is not None and h2 is not None:
+                    hess_comp = compare_hessian_spectra(h1, h2)
+                    results['hessian_comparison'][pair] = hess_comp
+
+    # =========================================================================
+    # TECHNICAL ASSESSMENT
+    # =========================================================================
+    print("\n[7/9] Generating technical assessment...")
+
+    for name in model_names:
+        # Get divergence data for this model
+        div_data = {}
+        stab_data = {}
+        for pair, metrics in results['divergence'].items():
+            if name in pair:
+                div_data[pair] = metrics
+        for pair, metrics in results['stability'].items():
+            if name in pair:
+                stab_data[pair] = metrics
+
+        assessment = generate_pros_cons(name, results['models'][name], div_data, stab_data, feature_names)
+        results['models'][name]['pros'] = assessment['pros']
+        results['models'][name]['cons'] = assessment['cons']
+
+    # =========================================================================
+    # VISUALIZATION
+    # =========================================================================
+    print("\n[8/9] Generating visualizations...")
+
+    output_dir = os.path.dirname(output_path)
+    plots_dir = os.path.join(output_dir, 'plots')
+    os.makedirs(plots_dir, exist_ok=True)
+
+    try:
+        plot_importance_comparison(results, feature_names, plots_dir)
+        print("  - importance_comparison.png")
+    except Exception as e:
+        print(f"  [WARN] importance_comparison failed: {e}")
+
+    try:
+        plot_importance_heatmap(results, feature_names, plots_dir)
+        print("  - importance_heatmap_*.png")
+    except Exception as e:
+        print(f"  [WARN] importance_heatmap failed: {e}")
+
+    try:
+        plot_divergence_metrics(results, plots_dir)
+        print("  - divergence_metrics.png")
+    except Exception as e:
+        print(f"  [WARN] divergence_metrics failed: {e}")
+
+    try:
+        plot_output_stability(results, plots_dir)
+        print("  - stability_*.png")
+    except Exception as e:
+        print(f"  [WARN] output_stability failed: {e}")
+
+    if not skip_gradients:
+        try:
+            plot_gradient_saliency(results, feature_names, plots_dir)
+            print("  - gradient_saliency.png")
+        except Exception as e:
+            print(f"  [WARN] gradient_saliency failed: {e}")
+
+        try:
+            plot_gradient_alignment(results, plots_dir)
+            print("  - gradient_alignment.png")
+        except Exception as e:
+            print(f"  [WARN] gradient_alignment failed: {e}")
+
+    if not skip_fisher:
+        try:
+            plot_fisher_comparison(results, plots_dir)
+            print("  - fisher_comparison_*.png")
+        except Exception as e:
+            print(f"  [WARN] fisher_comparison failed: {e}")
+
+    if not skip_hessian:
+        try:
+            plot_hessian_spectrum(results, plots_dir)
+            print("  - hessian_spectrum.png")
+        except Exception as e:
+            print(f"  [WARN] hessian_spectrum failed: {e}")
+
+    if not skip_shap:
+        try:
+            plot_shap_comparison(results, feature_names, plots_dir)
+            print("  - shap_comparison.png")
+        except Exception as e:
+            print(f"  [WARN] shap_comparison failed: {e}")
+
+    if not skip_mi:
+        try:
+            plot_mutual_information(results, feature_names, plots_dir)
+            print("  - mutual_information.png")
+        except Exception as e:
+            print(f"  [WARN] mutual_information failed: {e}")
+
+    try:
+        plot_decision_trees(results, feature_names, plots_dir)
+        print("  - decision_tree_*.png")
+    except Exception as e:
+        print(f"  [WARN] decision_trees failed: {e}")
+
+    try:
+        plot_output_distributions(results, plots_dir)
+        print("  - output_dist_*.png")
+    except Exception as e:
+        print(f"  [WARN] output_distributions failed: {e}")
+
+    try:
+        plot_pairwise_matrix(results, plots_dir)
+        print("  - pairwise_matrix.png")
+    except Exception as e:
+        print(f"  [WARN] pairwise_matrix failed: {e}")
+
+    try:
+        model_scores = plot_model_radar_comparison(results, plots_dir)
+        print("  - model_radar.png")
+    except Exception as e:
+        print(f"  [WARN] model_radar failed: {e}")
+        model_scores = {}
+
+    try:
+        rankings = plot_ranking_summary(results, plots_dir)
+        results['rankings'] = rankings
+        print("  - ranking_summary.png")
+    except Exception as e:
+        print(f"  [WARN] ranking_summary failed: {e}")
+
+    # =========================================================================
+    # REPORT GENERATION
+    # =========================================================================
+    print("\n[9/9] Writing reports...")
+
+    config = {
+        'n_samples': n_samples,
+        'seed': seed,
+        'input_dim': INPUT_DIM_V22,
+        'feature_names': feature_names,
+        'model_paths': model_paths,
+        'data_path': data_path,
+        'skip_gradients': skip_gradients,
+        'skip_hessian': skip_hessian,
+        'skip_shap': skip_shap,
+        'skip_fisher': skip_fisher,
+        'skip_mi': skip_mi,
+    }
+
+    # Markdown report
+    md_report = format_markdown_report(results, config)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(md_report)
+    print(f"  Markdown: {output_path}")
+
+    # JSON report
+    json_path = output_path.replace('.md', '.json')
+
+    # Prepare JSON-safe results (remove non-serializable objects)
+    json_results = convert_numpy_for_json(results)
+
+    # Remove tree objects (not serializable)
+    for name in json_results['models']:
+        json_results['models'][name].pop('tree_object', None)
+        json_results['models'][name].pop('raw_outputs', None)  # Too large
+        if 'gradient_saliency' in json_results['models'][name]:
+            gs = json_results['models'][name]['gradient_saliency']
+            if gs:
+                gs.pop('raw_grads', None)  # Too large
+        if 'shap_values' in json_results['models'][name]:
+            sv = json_results['models'][name]['shap_values']
+            if sv:
+                sv.pop('raw_shap', None)  # Too large
+
+    json_results['config'] = config
+
+    with open(json_path, 'w', encoding='utf-8') as f:
+        json.dump(json_results, f, indent=2, default=str)
+    print(f"  JSON: {json_path}")
+
+    # =========================================================================
+    # SUMMARY
+    # =========================================================================
+    print("\n" + "=" * 80)
+    print("AUDIT COMPLETE")
+    print("=" * 80)
+
+    print("\n### Quick Summary ###")
+    if results['rankings']:
+        print(f"Best Model: {results['rankings'][0][0]}")
+
+    for name in model_names:
+        pros = results['models'][name].get('pros', [])
+        cons = results['models'][name].get('cons', [])
+        print(f"\n{name}:")
+        print(f"  Pros: {len(pros)}")
+        for p in pros[:2]:
+            print(f"    + {p[:80]}...")
+        print(f"  Cons: {len(cons)}")
+        for c in cons[:2]:
+            print(f"    - {c[:80]}...")
+
+    print(f"\nFull report: {output_path}")
+    print(f"Plots: {plots_dir}/")
+
+    return results
+
+
+def main():
+    """CLI entry point."""
+    parser = argparse.ArgumentParser(
+        description="Multi-Model Neural CDE Interpretability Comparison Audit",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python intelligence/audit_cde_comparison.py \\
+      --models models/epoch_1.pth models/epoch_3.pth \\
+      --data data/processed/mamba_institutional_2024_1m_v22.csv \\
+      --samples 3000 \\
+      --output reports/model_comparison.md
+
+  python intelligence/audit_cde_comparison.py \\
+      --models models/*.pth \\
+      --data data/processed/dataset.csv \\
+      --skip-hessian --skip-mi \\
+      --output reports/quick_comparison.md
+        """
+    )
+
+    parser.add_argument('--models', nargs='+', required=True,
+                        help='Paths to model checkpoints (at least 2)')
+    parser.add_argument('--data', required=True,
+                        help='Path to data CSV (V2.2 features)')
+    parser.add_argument('--samples', type=int, default=3000,
+                        help='Number of samples for analysis (default: 3000)')
+    parser.add_argument('--output', default='reports/model_comparison.md',
+                        help='Output path for markdown report')
+    parser.add_argument('--seed', type=int, default=42,
+                        help='Random seed for reproducibility')
+    parser.add_argument('--skip-gradients', action='store_true',
+                        help='Skip gradient saliency analysis')
+    parser.add_argument('--skip-hessian', action='store_true',
+                        help='Skip Hessian eigenspectrum analysis')
+    parser.add_argument('--skip-shap', action='store_true',
+                        help='Skip SHAP approximation')
+    parser.add_argument('--skip-fisher', action='store_true',
+                        help='Skip Fisher Information estimation')
+    parser.add_argument('--skip-mi', action='store_true',
+                        help='Skip mutual information matrix')
+
+    args = parser.parse_args()
+
+    # Validate inputs
+    if len(args.models) < 2:
+        parser.error("At least 2 model paths required")
+
+    for path in args.models:
+        if not os.path.exists(path):
+            parser.error(f"Model not found: {path}")
+
+    if not os.path.exists(args.data):
+        parser.error(f"Data file not found: {args.data}")
+
+    # Create output directory
+    os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
+
+    # Run audit
+    run_audit(
+        model_paths=args.models,
+        data_path=args.data,
+        n_samples=args.samples,
+        output_path=args.output,
+        seed=args.seed,
+        skip_gradients=args.skip_gradients,
+        skip_hessian=args.skip_hessian,
+        skip_shap=args.skip_shap,
+        skip_fisher=args.skip_fisher,
+        skip_mi=args.skip_mi,
+    )
+
+
+if __name__ == '__main__':
+    main()
