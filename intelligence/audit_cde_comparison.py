@@ -550,3 +550,185 @@ def compute_output_statistics(model, X, seq_len, n_samples=2000):
         }
 
     return stats_dict, outputs
+
+
+# =============================================================================
+# DIVERGENCE & COMPARISON METRICS
+# =============================================================================
+
+def compute_divergence_metrics(imp1, imp2, feature_names):
+    """Compute mathematical divergence between two importance distributions."""
+    v1 = np.array([imp1.get(f, 0) for f in feature_names])
+    v2 = np.array([imp2.get(f, 0) for f in feature_names])
+
+    # Normalize to probability distributions
+    v1_norm = v1 / (v1.sum() + EPS)
+    v2_norm = v2 / (v2.sum() + EPS)
+
+    # Cosine similarity
+    cos_sim = 1 - cosine(v1_norm + EPS, v2_norm + EPS)
+
+    # Jensen-Shannon divergence
+    js_div = jensenshannon(v1_norm + EPS, v2_norm + EPS)
+
+    # Wasserstein distance (Earth Mover's Distance)
+    wass_dist = wasserstein_distance(v1_norm, v2_norm)
+
+    # Spearman rank correlation
+    rank1 = stats.rankdata(-v1)
+    rank2 = stats.rankdata(-v2)
+    spearman_r, spearman_p = stats.spearmanr(rank1, rank2)
+
+    # Kendall's Tau (rank correlation)
+    kendall_tau, kendall_p = stats.kendalltau(rank1, rank2)
+
+    # Top-K agreement
+    top5_1 = set(sorted(imp1.keys(), key=lambda k: imp1[k], reverse=True)[:5])
+    top5_2 = set(sorted(imp2.keys(), key=lambda k: imp2[k], reverse=True)[:5])
+    top5_overlap = len(top5_1 & top5_2) / 5.0
+
+    top10_1 = set(sorted(imp1.keys(), key=lambda k: imp1[k], reverse=True)[:10])
+    top10_2 = set(sorted(imp2.keys(), key=lambda k: imp2[k], reverse=True)[:10])
+    top10_overlap = len(top10_1 & top10_2) / 10.0
+
+    # Largest shifts
+    shifts = {f: (imp1.get(f, 0) - imp2.get(f, 0)) for f in feature_names}
+    top_shifts = sorted(shifts.items(), key=lambda x: abs(x[1]), reverse=True)[:10]
+
+    # Rank changes
+    rank_dict1 = {f: r for r, f in enumerate(sorted(imp1.keys(), key=lambda k: imp1[k], reverse=True), 1)}
+    rank_dict2 = {f: r for r, f in enumerate(sorted(imp2.keys(), key=lambda k: imp2[k], reverse=True), 1)}
+    rank_changes = {f: rank_dict1.get(f, 0) - rank_dict2.get(f, 0) for f in feature_names}
+    top_rank_changes = sorted(rank_changes.items(), key=lambda x: abs(x[1]), reverse=True)[:10]
+
+    return {
+        'cosine_similarity': cos_sim,
+        'jensen_shannon_divergence': js_div,
+        'wasserstein_distance': wass_dist,
+        'spearman_correlation': spearman_r,
+        'spearman_pvalue': spearman_p,
+        'kendall_tau': kendall_tau,
+        'kendall_pvalue': kendall_p,
+        'top5_overlap': top5_overlap,
+        'top10_overlap': top10_overlap,
+        'largest_shifts': top_shifts,
+        'largest_rank_changes': top_rank_changes,
+    }
+
+
+def compute_gradient_alignment(grads1, grads2):
+    """Compute alignment between gradient saliency maps."""
+    if grads1 is None or grads2 is None:
+        return None
+
+    s1 = grads1['feature_saliency']
+    s2 = grads2['feature_saliency']
+
+    # Normalize
+    s1_norm = s1 / (np.linalg.norm(s1) + EPS)
+    s2_norm = s2 / (np.linalg.norm(s2) + EPS)
+
+    # Cosine alignment
+    alignment = np.dot(s1_norm, s2_norm)
+
+    # Per-feature absolute difference
+    diff = np.abs(s1 - s2)
+
+    # Temporal alignment
+    t1 = grads1['temporal_saliency']
+    t2 = grads2['temporal_saliency']
+    t1_norm = t1 / (np.linalg.norm(t1) + EPS)
+    t2_norm = t2 / (np.linalg.norm(t2) + EPS)
+    temporal_alignment = np.dot(t1_norm, t2_norm)
+
+    return {
+        'feature_alignment': alignment,
+        'temporal_alignment': temporal_alignment,
+        'feature_diff': diff,
+    }
+
+
+def compute_stability_metrics(outputs1, outputs2):
+    """Physics-inspired stability analysis between two models' outputs."""
+    n = min(len(outputs1), len(outputs2))
+    o1, o2 = outputs1[:n], outputs2[:n]
+
+    metrics = {}
+
+    for i, head_name in enumerate(HEAD_NAMES[:o1.shape[1]]):
+        col1, col2 = o1[:, i], o2[:, i]
+
+        # Mean squared difference (energy)
+        msd = np.mean((col1 - col2) ** 2)
+
+        # Correlation (coherence)
+        corr, _ = stats.pearsonr(col1, col2)
+
+        # Variance ratio (amplitude stability)
+        var_ratio = np.var(col1) / (np.var(col2) + EPS)
+
+        # Distribution shift (Kolmogorov-Smirnov test)
+        ks_stat, ks_pval = stats.ks_2samp(col1, col2)
+
+        # Wasserstein distance between output distributions
+        wass = wasserstein_distance(col1, col2)
+
+        # Energy distance
+        energy_dist = 2 * np.mean(np.abs(col1[:, None] - col2[None, :])) - \
+                      np.mean(np.abs(col1[:, None] - col1[None, :])) - \
+                      np.mean(np.abs(col2[:, None] - col2[None, :]))
+
+        metrics[head_name] = {
+            'msd': float(msd),
+            'correlation': float(corr),
+            'variance_ratio': float(var_ratio),
+            'ks_statistic': float(ks_stat),
+            'ks_pvalue': float(ks_pval),
+            'wasserstein': float(wass),
+            'energy_distance': float(energy_dist),
+        }
+
+    return metrics
+
+
+def compare_fisher_information(fisher1, fisher2):
+    """Compare Fisher Information between models."""
+    common_layers = set(fisher1.keys()) & set(fisher2.keys())
+
+    ratios = {}
+    for layer in common_layers:
+        f1 = fisher1[layer]
+        f2 = fisher2[layer]
+        if f2 > EPS:
+            ratios[layer] = f1 / f2
+        else:
+            ratios[layer] = float('inf') if f1 > EPS else 1.0
+
+    return ratios
+
+
+def compare_hessian_spectra(eigs1, eigs2):
+    """Compare Hessian eigenvalue spectra."""
+    n = min(len(eigs1), len(eigs2))
+    e1, e2 = eigs1[:n], eigs2[:n]
+
+    # Spectral norm ratio (largest eigenvalue)
+    spectral_ratio = e1[0] / (e2[0] + EPS)
+
+    # Trace ratio (sum of eigenvalues)
+    trace_ratio = e1.sum() / (e2.sum() + EPS)
+
+    # Condition number (ratio of largest to smallest)
+    cond1 = e1[0] / (np.abs(e1[-1]) + EPS)
+    cond2 = e2[0] / (np.abs(e2[-1]) + EPS)
+
+    # Eigenvalue distribution correlation
+    corr, _ = stats.pearsonr(e1, e2)
+
+    return {
+        'spectral_ratio': spectral_ratio,
+        'trace_ratio': trace_ratio,
+        'condition_number_1': cond1,
+        'condition_number_2': cond2,
+        'eigenvalue_correlation': corr,
+    }
