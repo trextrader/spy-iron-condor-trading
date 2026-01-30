@@ -2246,11 +2246,11 @@ def format_markdown_report(results, config):
         # Top features
         imp = data.get('importances', {})
         if imp:
-            lines.append("**Top 10 Features (Permutation Importance):**")
+            lines.append("**All Features (Permutation Importance):**")
             lines.append("| Rank | Feature | Importance (%) |")
             lines.append("|------|---------|----------------|")
-            top10 = sorted(imp.items(), key=lambda x: x[1], reverse=True)[:10]
-            for rank, (feat, val) in enumerate(top10, 1):
+            all_sorted = sorted(imp.items(), key=lambda x: x[1], reverse=True)
+            for rank, (feat, val) in enumerate(all_sorted, 1):
                 lines.append(f"| {rank} | {feat} | {val:.2f} |")
             lines.append("")
 
@@ -2303,10 +2303,10 @@ def format_markdown_report(results, config):
         # Largest shifts
         shifts = metrics.get('largest_shifts', [])
         if shifts:
-            lines.append("\n**Largest Importance Shifts:**")
+            lines.append("\n**All Importance Shifts (sorted by magnitude):**")
             lines.append("| Feature | Shift (%) |")
             lines.append("|---------|-----------|")
-            for feat, shift in shifts[:5]:
+            for feat, shift in shifts:
                 lines.append(f"| {feat} | {shift:+.2f} |")
 
         lines.append("")
@@ -2347,10 +2347,12 @@ def format_markdown_report(results, config):
             saliency = grads['feature_saliency']
             feature_names = config.get('feature_names', [])
             if len(feature_names) == len(saliency):
-                top_idx = np.argsort(saliency)[::-1][:5]
-                lines.append("**Top-5 Gradient Saliency Features:**")
-                for idx in top_idx:
-                    lines.append(f"- {feature_names[idx]}: {saliency[idx]:.4f}")
+                sorted_idx = np.argsort(saliency)[::-1]
+                lines.append("**All Features (Gradient Saliency):**")
+                lines.append("| Rank | Feature | Saliency |")
+                lines.append("|------|---------|----------|")
+                for rank, idx in enumerate(sorted_idx, 1):
+                    lines.append(f"| {rank} | {feature_names[idx]} | {saliency[idx]:.4f} |")
 
             temporal = grads['temporal_saliency']
             recent_weight = np.mean(temporal[-int(len(temporal)*0.2):])
@@ -2461,8 +2463,8 @@ def format_markdown_report(results, config):
         best_data = results['models'][best]
         lines.append(f"**Recommended Model:** `{best}`")
         lines.append("")
-        lines.append("**Rationale:**")
-        for p in best_data.get('pros', [])[:3]:
+        lines.append("**Rationale (All Strengths):**")
+        for p in best_data.get('pros', []):
             lines.append(f"- {p}")
 
         if len(rankings) > 1:
