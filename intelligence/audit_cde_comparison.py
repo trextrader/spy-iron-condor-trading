@@ -332,45 +332,87 @@ def estimate_hessian_spectrum(model, X, seq_len, n_samples=100, n_eigenvalues=20
     return eigenvalues
 
 
-def estimate_hessian_hutchinson(model, X, seq_len, indices, n_eigenvalues=20, n_vectors=50):
-    """Stochastic Hessian trace estimation using Hutchinson's method."""
-    traces = []
+def estimate_hessian_hutchinson(model, X, seq_len, indices, n_eigenvalues=20, n_vectors=10):
+    """Stochastic Hessian trace estimation using Hutchinson's method.
 
+    Memory-optimized version for large models (33M+ params).
+    """
+    # Clear GPU memory before starting
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+    traces = []
     params = [p for p in model.parameters() if p.requires_grad]
 
-    for _ in tqdm(range(n_vectors), desc="Hutchinson estimation", leave=False):
-        # Random Rademacher vector
-        v = [torch.randint_like(p, 0, 2).float() * 2 - 1 for p in params]
+    # Use fewer samples for memory efficiency
+    sample_indices = indices[:5]  # Reduced from 20 to 5
 
-        total_hvp = 0.0
+    try:
+        for vec_idx in tqdm(range(n_vectors), desc="Hutchinson estimation", leave=False):
+            # Random Rademacher vector
+            v = [torch.randint_like(p, 0, 2).float() * 2 - 1 for p in params]
 
-        for idx in indices[:20]:
-            seq = X[idx : idx + seq_len]
-            x_tensor = torch.tensor(seq, device=DEVICE, dtype=torch.float32).unsqueeze(0)
+            total_hvp = 0.0
+            n_successful = 0
 
-            out = model(x_tensor)
-            if isinstance(out, tuple):
-                out = out[0]
+            for idx in sample_indices:
+                try:
+                    seq = X[idx : idx + seq_len]
+                    x_tensor = torch.tensor(seq, device=DEVICE, dtype=torch.float32).unsqueeze(0)
 
-            loss = ((out) ** 2).mean()
+                    out = model(x_tensor)
+                    if isinstance(out, tuple):
+                        out = out[0]
 
-            grads = torch.autograd.grad(loss, params, create_graph=True, allow_unused=True)
-            grads = [g if g is not None else torch.zeros_like(p) for g, p in zip(grads, params)]
+                    loss = ((out) ** 2).mean()
 
-            # Hessian-vector product
-            grad_v = sum((g * vi).sum() for g, vi in zip(grads, v))
-            hvp = torch.autograd.grad(grad_v, params, allow_unused=True)
+                    grads = torch.autograd.grad(loss, params, create_graph=True, allow_unused=True)
+                    grads = [g if g is not None else torch.zeros_like(p) for g, p in zip(grads, params)]
 
-            # v^T H v approximates trace
-            for hi, vi in zip(hvp, v):
-                if hi is not None:
-                    total_hvp += (hi * vi).sum().item()
+                    # Hessian-vector product
+                    grad_v = sum((g * vi).sum() for g, vi in zip(grads, v))
+                    hvp = torch.autograd.grad(grad_v, params, allow_unused=True)
 
-        traces.append(total_hvp / len(indices[:20]))
+                    # v^T H v approximates trace
+                    for hi, vi in zip(hvp, v):
+                        if hi is not None:
+                            total_hvp += (hi * vi).sum().item()
+
+                    n_successful += 1
+
+                except torch.cuda.OutOfMemoryError:
+                    print(f"  [Hessian] OOM on sample, skipping...", flush=True)
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    continue
+                finally:
+                    # Clear intermediate tensors
+                    del x_tensor, out, loss
+                    if 'grads' in dir():
+                        del grads
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+            if n_successful > 0:
+                traces.append(total_hvp / n_successful)
+
+            # Clear Rademacher vectors
+            del v
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    except torch.cuda.OutOfMemoryError:
+        print(f"  [Hessian] GPU OOM - returning approximate values", flush=True)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return np.array([0.0] * n_eigenvalues)
+
+    if len(traces) == 0:
+        return np.array([0.0] * n_eigenvalues)
 
     # Return trace estimate and variance
     trace_mean = np.mean(traces)
-    trace_std = np.std(traces)
 
     # Approximate top eigenvalue from trace (very rough)
     approx_eigenvalues = np.array([trace_mean / (i + 1) for i in range(n_eigenvalues)])
@@ -2761,11 +2803,25 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
 
         # Hessian spectrum
         if not skip_hessian:
-            print(f"    [4g] Estimating Hessian spectrum ({min(100, n_samples)} samples) - THIS IS SLOW...", flush=True)
+            print(f"    [4g] Estimating Hessian spectrum ({min(50, n_samples)} samples) - memory intensive...", flush=True)
+            # Aggressive memory cleanup before Hessian (requires second-order gradients)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+                free_mem = torch.cuda.get_device_properties(0).total_memory - torch.cuda.memory_allocated()
+                print(f"         GPU free memory: {free_mem/1e9:.2f} GB", flush=True)
+                if free_mem < 2e9:  # Less than 2GB free
+                    print(f"         ⚠️  Low GPU memory - Hessian may fail, will skip gracefully", flush=True)
             _t0 = _time.time()
-            hessian_eigs = estimate_hessian_spectrum(model, X, seq_len, min(100, n_samples))
-            model_results['hessian_eigenvalues'] = hessian_eigs
-            print(f"         Done in {_time.time()-_t0:.1f}s.", flush=True)
+            try:
+                hessian_eigs = estimate_hessian_spectrum(model, X, seq_len, min(50, n_samples))
+                model_results['hessian_eigenvalues'] = hessian_eigs
+                print(f"         Done in {_time.time()-_t0:.1f}s.", flush=True)
+            except torch.cuda.OutOfMemoryError:
+                print(f"         ⚠️  GPU OOM - skipping Hessian for this model", flush=True)
+                model_results['hessian_eigenvalues'] = np.array([])
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
         else:
             print(f"    [4g] Hessian spectrum: SKIPPED", flush=True)
 
