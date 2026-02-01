@@ -1028,16 +1028,16 @@ class PredicateCombiner(nn.Module):
             w = logic_weights[:, d-1].unsqueeze(0).unsqueeze(0)  # (1, 1, n_chains)
             combined = w * or_result + (1 - w) * and_result
 
-        # Take last timestep of chain values
-        chain_features = combined[:, -1, :]  # (batch, n_chains)
+        # preservation of sequence dimension for backbone augmentation
+        # combined: (batch, seq, n_chains)
+        temporal_features = self.temporal_proj(predicate_values)  # (batch, seq, d_model)
+        temporal_out, _ = self.temporal_attn(temporal_features, temporal_features, temporal_features) # (batch, seq, d_model)
 
-        # === Temporal Processing ===
-        temporal_embed = self.temporal_proj(predicate_values)  # (batch, seq, d_model)
-        temporal_out, _ = self.temporal_attn(temporal_embed, temporal_embed, temporal_embed)
-        temporal_features = temporal_out[:, -1, :]  # (batch, d_model)
-
-        # === Combine and Output ===
-        combined_features = torch.cat([temporal_features, chain_features], dim=-1)
+        # Concatenate on feature dim (preserves B and S)
+        # Result: (batch, seq, d_model + n_chains)
+        combined_features = torch.cat([temporal_out, combined], dim=-1)
+        
+        # Output proj is linear, can handle (B, S, D) -> (B, S, Out)
         return self.output_proj(combined_features)
 
     def get_logic_sets(self, predicate_names: List[str], threshold: float = 0.5) -> List[str]:

@@ -599,7 +599,7 @@ def train_condor_brain(args):
         df = pd.read_csv(args.local_data, nrows=args.max_rows)
     else:
         df = pd.read_csv(args.local_data)
-    print(f"[CondorBrain] Loaded {len(df):,} rows")
+    print(f"[CondorBrain] Loaded {len(df):,} rows", flush=True)
     
     # Prepare features
     X, y, regime, med, scale = prepare_features(df)
@@ -620,8 +620,8 @@ def train_condor_brain(args):
     B = int(args.batch_size)
     n_train_seq = len(X_train) - L
     n_val_seq = len(X_val) - L
-    print(f"[CondorBrain] Creating sequences (lookback={L})...")
-    print(f"[CondorBrain] Train: {n_train_seq:,} | Val: {n_val_seq:,}")
+    print(f"[CondorBrain] Creating sequences (lookback={L})...", flush=True)
+    print(f"[CondorBrain] Train: {n_train_seq:,} | Val: {n_val_seq:,}", flush=True)
     
     # ==========================================================================
     # FAST PATH: GPU DATASET + UNFOLD (ZERO-COPY VIEWS)
@@ -629,7 +629,7 @@ def train_condor_brain(args):
     use_gpu_dataset = args.gpu_dataset and device.type == "cuda"
     
     if use_gpu_dataset:
-        print("[CondorBrain] ✅ gpu-dataset ENABLED: data on GPU, using unfold() views (FASTEST)")
+        print("[CondorBrain] ✅ gpu-dataset ENABLED: data on GPU, using unfold() views (FASTEST)", flush=True)
         
         # Move data to GPU ONCE (no H2D in training loop!)
         # Move data to GPU ONCE (no H2D in training loop!)
@@ -681,7 +681,7 @@ def train_condor_brain(args):
             e = min(s + B, n_val_seq)
             return X_val_seq[s:e], y_val_t[s + L:e + L], r_val_t[s + L:e + L]
         
-        print(f"[CondorBrain] GPU tensors ready: {n_train_batches} train batches, {n_val_batches} val batches")
+        print(f"[CondorBrain] GPU tensors ready: {n_train_batches} train batches, {n_val_batches} val batches", flush=True)
     else:
         # Fallback: CPU DataLoader path (much slower)
         print("[CondorBrain] ⚠️ gpu-dataset DISABLED: using CPU loaders (slower)")
@@ -741,7 +741,7 @@ def train_condor_brain(args):
             print(f"[CondorBrain] torch.compile failed (continuing uncompiled): {e}")
     
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"[CondorBrain] Model parameters: {n_params:,}")
+    print(f"[CondorBrain] Model parameters: {n_params:,}", flush=True)
 
     # Loss function selection
     if args.composite_loss:
@@ -825,9 +825,9 @@ def train_condor_brain(args):
             run_name = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
             log_dir = f"{args.tb_logdir}/{run_name}"
             tb_writer = SummaryWriter(log_dir=log_dir)
-            print(f"[CondorBrain] 📊 TensorBoard enabled: {log_dir}")
-            print(f"[CondorBrain] 🚀 Start TensorBoard with: tensorboard --logdir={args.tb_logdir} --port={args.tb_port}")
-            print(f"[CondorBrain] 🌐 Then open: http://localhost:{args.tb_port}")
+            print(f"[CondorBrain] 📊 TensorBoard enabled: {log_dir}", flush=True)
+            print(f"[CondorBrain] 🚀 Start TensorBoard with: tensorboard --logdir={args.tb_logdir} --port={args.tb_port}", flush=True)
+            print(f"[CondorBrain] 🌐 Then open: http://localhost:{args.tb_port}", flush=True)
         except ImportError:
             print("[CondorBrain] ⚠️ tensorboard not installed, skipping")
             args.tensorboard = False
