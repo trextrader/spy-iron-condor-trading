@@ -17,7 +17,7 @@ fi
 echo "[OK] Found dataset."
 echo "[RUN] Starting training in background..."
 
-nohup python intelligence/train_condor_brain.py \
+nohup python -u intelligence/train_condor_brain.py \
   --local-data "$DATA_PATH" \
   --output models/cb_cde_discovery_v22.pth \
   --max-rows 50000 \

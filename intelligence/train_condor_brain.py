@@ -529,11 +529,11 @@ def train_condor_brain(args):
         print("[CondorBrain] Using Mamba-2 backbone (legacy mode)")
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"[CondorBrain] Device: {device}")
+    print(f"[CondorBrain] Device: {device}", flush=True)
 
     # Probe kernel availability (only relevant info for current backend)
     kinfo = probe_fast_kernels()
-    print(f"[CondorBrain] CUDA available: {kinfo['cuda_available']}, BF16 supported: {kinfo['bf16_supported']}")
+    print(f"[CondorBrain] CUDA available: {kinfo['cuda_available']}, BF16 supported: {kinfo['bf16_supported']}", flush=True)
     
     # FIX: Only check fused kernels for non-CDE (Mamba) mode
     if args.require_fused_kernels and not args.cde:
@@ -569,9 +569,9 @@ def train_condor_brain(args):
         gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
         compute_cap = torch.cuda.get_device_capability(0)
         
-        print(f"[CondorBrain] GPU: {gpu_name}")
-        print(f"[CondorBrain] GPU Memory: {gpu_mem:.1f} GB")
-        print(f"[CondorBrain] Compute Capability: {compute_cap[0]}.{compute_cap[1]}")
+        print(f"[CondorBrain] GPU: {gpu_name}", flush=True)
+        print(f"[CondorBrain] GPU Memory: {gpu_mem:.1f} GB", flush=True)
+        print(f"[CondorBrain] Compute Capability: {compute_cap[0]}.{compute_cap[1]}", flush=True)
         
         # H100 detection (compute capability 9.0+)
         is_h100 = compute_cap[0] >= 9 or 'H100' in gpu_name
@@ -1051,17 +1051,24 @@ def train_condor_brain(args):
             train_loss += loss.item() * args.accum_steps  # Un-scale for logging
             n_batches += 1
             
-            # Update throughput display every 20 batches to keep tqdm overhead low
-            if (batch_idx + 1) % 20 == 0:
+            # Update throughput display and LOG EXPLICITLY to stdout for background visibility
+            if (batch_idx + 1) % args.log_every == 0:
                 _now = time.time()
                 _dt = max(_now - _tp_last_t, 1e-6)
                 _batches = (batch_idx + 1) - _tp_last_i
                 _samples = _batches * int(args.batch_size)
                 _sps = _samples / _dt
                 _tps = _sps * int(args.lookback)
+                
+                # Update tqdm
                 pbar.set_postfix_str(
                     f"{_sps:,.0f} samp/s | {_tps/1e6:.2f}M tok/s | loss {loss.item():.4f}"
                 )
+                
+                # EXPLICIT LOG (to bypass tqdm non-printing in redirected logs)
+                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Epoch {epoch+1} Batch {batch_idx+1}/{n_train_batches} | "
+                      f"Loss: {loss.item():.5f} | Throughput: {_sps:,.0f} samp/s", flush=True)
+                
                 _tp_last_t = _now
                 _tp_last_i = (batch_idx + 1)
             
