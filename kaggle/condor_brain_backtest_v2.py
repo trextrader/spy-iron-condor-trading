@@ -909,8 +909,7 @@ def main():
             use_vol_gated_attn=True, use_topk_moe=True, moe_n_experts=3, moe_k=1,
             use_predicate_discovery=use_pred,
             n_predicate_slots=n_slots,
-            max_active_predicates=max_active
-        )
+            max_active_predicates=max_active,
             use_diffusion=True,
             diffusion_steps=50,      # Match training
             diffusion_horizon=1,     # Match training (was 32)
