@@ -245,12 +245,13 @@ def train_surrogate_tree(model, X, feature_cols, n_samples=5000):
     if len(targets) < 50:
          print(f"⚠️ Warning: Only {len(targets)} valid samples. Tree might be unstable.")
     
-    tree = DecisionTreeRegressor(max_depth=3, min_samples_leaf=50)
+    tree = DecisionTreeRegressor(max_depth=5, min_samples_leaf=20)
     tree.fit(input_states, targets)
     
     r2 = tree.score(input_states, targets)
-    print(f"Surrogate Tree R2 Score: {r2:.3f}")
+    print(f"✅ Surrogate Tree R2 Score: {r2:.3f} (How well rules explain NN)")
     
+    # We remove max_depth from export_text (or set it high) to show full tree
     rules = export_text(tree, feature_names=feature_cols)
     print("\n📜 Extracted Trading Rules (Surrogate):")
     print(rules)
