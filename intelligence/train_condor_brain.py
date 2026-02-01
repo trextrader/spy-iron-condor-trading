@@ -959,10 +959,20 @@ def train_condor_brain(args):
                 
                 # HARD CHECK: Fail immediately on NaN outputs (don't silently skip!)
                 if torch.isnan(outputs).any() or torch.isinf(outputs).any():
-                    print(f"[NaN ERROR] outputs contained NaN/Inf at batch {batch_idx}")
-                    print(f"  batch_x max: {torch.max(torch.abs(batch_x)).item():.4f}")
-                    print(f"  outputs max: {torch.max(torch.abs(outputs[~torch.isnan(outputs)])).item() if (~torch.isnan(outputs)).any() else 'ALL NaN'}")
-                    raise RuntimeError("Model produced NaN/Inf outputs - check data normalization!")
+                    print(f"[NaN ERROR] outputs contained NaN/Inf at batch {batch_idx}", flush=True)
+                    print(f"  batch_x max: {torch.max(torch.abs(batch_x)).item():.4f}", flush=True)
+                    
+                    # Diagnostic: Check the backbone input (which includes augmented predicates)
+                    # We can't easily peek inside the forward pass here without hooks, 
+                    # but we can check if the importance weights themselves are NaN
+                    if hasattr(model, 'predicate_selector'):
+                        imp, params = model.predicate_selector(return_params=True)
+                        print(f"  predicate_importance max: {torch.max(imp).item():.4f}", flush=True)
+                        if torch.isnan(imp).any():
+                            print("  [CRITICAL] Predicate importance weights contain NaNs!", flush=True)
+                    
+                    print(f"  outputs max: {torch.max(torch.abs(outputs[~torch.isnan(outputs)])).item() if (~torch.isnan(outputs)).any() else 'ALL NaN'}", flush=True)
+                    raise RuntimeError("Model produced NaN/Inf outputs - check data normalization or internal precision!")
                 
                 # Calculate loss (decomposed if supported)
                 if hasattr(criterion, 'forward_decomposed') and args.composite_loss:

@@ -513,45 +513,54 @@ def evaluate_predicates_gpu(
     max_lb = int(torch.max(active_params[:, [1, 4, 7, 10]]).item())
     max_lb = min(max_lb, seq_len - 1)
 
-    # Initialize output
-    result = torch.zeros(batch, seq_len, max_active, device=device, dtype=data.dtype)
+    # --- FP32 Internal Enforcement ---
+    # We cast to FP32 for arithmetic calculations because MUL/DIV in FP16 
+    # easily exceeds 65504 (overflow) leading to Infs and NaNs.
+    working_data = data.to(torch.float32)
+    working_eps = 1e-6 # Slightly larger for stability
+
+    # Initialize output in FP32
+    result = torch.zeros(batch, seq_len, max_active, device=device, dtype=torch.float32)
 
     # Optimized vectorized evaluation
     for t in range(max_lb, seq_len):
-        l_v1 = torch.zeros(batch, top_k, device=device, dtype=data.dtype)
-        r_v1 = torch.zeros(batch, top_k, device=device, dtype=data.dtype)
+        l_v1 = torch.zeros(batch, top_k, device=device, dtype=torch.float32)
+        r_v1 = torch.zeros(batch, top_k, device=device, dtype=torch.float32)
         for k in range(top_k):
-            # Using .item() because of lookback logic; clamp to 0 to prevent IndexError
             t_l1 = max(0, t - l_lb1[k].item())
             t_r1 = max(0, t - r_lb1[k].item())
-            l_v1[:, k] = data[:, t_l1, l_f1[k].item()]
-            r_v1[:, k] = data[:, t_r1, r_f1[k].item()]
+            l_v1[:, k] = working_data[:, t_l1, l_f1[k].item()]
+            r_v1[:, k] = working_data[:, t_r1, r_f1[k].item()]
         
-        # Compound logic
+        # Compound logic in FP32
         left_val = l_v1
         for k in range(top_k):
             if l_op[k] > 0:
                 t_l2 = max(0, t - l_lb2[k].item())
-                l_v2 = data[:, t_l2, l_f2[k].item()]
+                l_v2 = working_data[:, t_l2, l_f2[k].item()]
                 if l_op[k] == 1: left_val[:, k] += l_v2
                 elif l_op[k] == 2: left_val[:, k] -= l_v2
                 elif l_op[k] == 3: left_val[:, k] *= l_v2
-                elif l_op[k] == 4: left_val[:, k] /= (l_v2 + eps)
+                elif l_op[k] == 4: left_val[:, k] /= (l_v2 + working_eps)
         
+        # Stability Clip: Prevent extreme values from atomic arithmetic
+        left_val = torch.clamp(left_val, -1e4, 1e4)
+
         # Right val depends on template: Constant if THRESHOLD, Peer if RELATIVE/GENERAL
-        # Note: Index 4 is THRESHOLD template in the hard-coded evaluator logic
         right_val = r_v1.clone()
         for k in range(top_k):
-            # Check for THRESHOLD template (t_idx=4)
             if templates[k].item() == 4:
-                right_val[:, k] = thresholds[k].to(data.dtype)
+                right_val[:, k] = thresholds[k].to(torch.float32)
             elif r_op[k] > 0:
                 t_r2 = max(0, t - r_lb2[k].item())
-                r_v2 = data[:, t_r2, r_f2[k].item()]
+                r_v2 = working_data[:, t_r2, r_f2[k].item()]
                 if r_op[k] == 1: right_val[:, k] += r_v2
                 elif r_op[k] == 2: right_val[:, k] -= r_v2
                 elif r_op[k] == 3: right_val[:, k] *= r_v2
-                elif r_op[k] == 4: right_val[:, k] /= (r_v2 + eps)
+                elif r_op[k] == 4: right_val[:, k] /= (r_v2 + working_eps)
+
+        # Stability Clip
+        right_val = torch.clamp(right_val, -1e4, 1e4)
 
         # Soft comparison
         diff = left_val - right_val
@@ -567,7 +576,10 @@ def evaluate_predicates_gpu(
                 result[:, t, k] = torch.exp(-steepness * diff[:, k].abs())
 
     # Importance weighting
-    result[:, :, :top_k] *= active_importance.view(1, 1, top_k)
+    result[:, :, :top_k] *= active_importance.view(1, 1, top_k).to(torch.float32)
+
+    # Cast back to original dtype (likely float16/bfloat16) for the backbone
+    result = result.to(data.dtype)
 
     if squeeze_out:
         result = result.squeeze(0)
