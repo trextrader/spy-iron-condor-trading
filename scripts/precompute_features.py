@@ -246,7 +246,8 @@ def main() -> int:
     legacy_replacements = [
         "rsi", "adx", "psar", 
         "bb_lower", "bb_upper", "bb_mu", "bb_sigma",
-        "stoch_k", "atr", "sma", "psar_mark", "target_spot", "max_dd_60m"
+        "stoch_k", "atr", "sma", "psar_mark", "target_spot", "max_dd_60m",
+        "volume_ratio", "bid", "ask"
     ]
     cols_to_drop = [c for c in dynamic_cols if c in df.columns]
     cols_to_drop.extend([c for c in legacy_replacements if c in df.columns])

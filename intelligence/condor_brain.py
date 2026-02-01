@@ -50,7 +50,7 @@ except ImportError:
 from intelligence.vol_gated_attn import VolGatedAttn
 from intelligence.topk_moe import TopKMoE, BatchedTopKMoE
 from intelligence.generative.diffusion import ConditionalDiffusionHead
-from intelligence.predicate_discovery import PredicateSelector
+from intelligence.predicate_discovery import PredicateSelector, PredicateCombiner
 
 
 # ============================================================================
@@ -427,8 +427,18 @@ class CondorBrain(nn.Module):
                 n_fields=input_dim
             )
             self.max_active_predicates = max_active_predicates
-            # Adjust effective input dim for backbone
-            backbone_in_dim = input_dim + max_active_predicates
+            
+            # Nested Logic Combiner (Depth 8 chains)
+            self.predicate_combiner = PredicateCombiner(
+                n_predicates=max_active_predicates,
+                d_model=d_model // 4,
+                n_heads=4,
+                max_chain_depth=8,
+                n_output_heads=max_active_predicates # Map back to same feature space
+            )
+            
+            # Adjust effective input dim for backbone (Original + Predicates + Logical Sets)
+            backbone_in_dim = input_dim + (2 * max_active_predicates)
         else:
             self.predicate_selector = None
             backbone_in_dim = input_dim
@@ -533,8 +543,11 @@ class CondorBrain(nn.Module):
             pred_features = evaluate_predicates_gpu(
                 x, params, importance, max_active=self.max_active_predicates
             )
-            # Concatenate boolean rule outputs to raw features
-            x = torch.cat([x, pred_features], dim=-1)
+            # Apply nested logical combinations
+            logic_features = self.predicate_combiner(pred_features)
+            
+            # Concatenate raw + simple rules + nested logical sets
+            x = torch.cat([x, pred_features, logic_features], dim=-1)
 
         # Apply dropout to augmented features
         if self.feature_dropout is not None:

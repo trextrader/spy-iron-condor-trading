@@ -474,6 +474,16 @@ def parse_args():
     parser.add_argument("--no-cde", dest="cde", action="store_false",
                         help="Disable Neural CDE backbone and use Mamba/Linear.")
 
+    # === NEW: Predicate Discovery (Inequality Templates) ===
+    parser.add_argument("--use-predicate-discovery", action="store_true",
+                        help="Enable structural rule discovery (Inequality Templates).")
+    parser.add_argument("--predicate-slots", type=int, default=2048,
+                        help="Total number of rule templates to learn.")
+    parser.add_argument("--max-active-predicates", type=int, default=256,
+                        help="Max active rules to use as features.")
+    parser.add_argument("--sparsity-weight", type=float, default=0.001,
+                        help="L1 weight for pruning useless rules.")
+
     # NEW: Export epoch plots and metrics to files
     parser.add_argument("--export-epoch-plots", action="store_true",
                         help="Export plots and metrics to epoch folders (epoch_1/, epoch_2/, etc.).")
@@ -695,8 +705,11 @@ def train_condor_brain(args):
         diffusion_steps=args.diffusion_steps,
         diffusion_input_dim=10,  # Matches batch_y dimensions (targets)
         diffusion_horizon=1,     # Matches unsqueezed single step
-        feature_group_dropout=args.feature_group_dropout,  # NEW: anti-collapse regularization
-        use_cde=args.cde  # NEW: CDE Backbone flag
+        feature_group_dropout=args.feature_group_dropout,
+        use_cde=args.cde,
+        use_predicate_discovery=args.use_predicate_discovery,
+        n_predicate_slots=args.predicate_slots,
+        max_active_predicates=args.max_active_predicates
     ).to(device)
     
     # Force model weights to BF16 so Mamba kernels take the BF16 fast path
@@ -975,10 +988,17 @@ def train_condor_brain(args):
 
                 # Add diffusion loss if present
                 if diffusion_loss is not None:
-                    # Scale diffusion loss to be comparable
-                    diff_loss_scaled = diffusion_loss * 0.1 # Weighting factor?
+                    diff_loss_scaled = diffusion_loss * 0.1
                     loss = loss + diff_loss_scaled
                     loss_dict['diff'] = diff_loss_scaled
+                    loss_dict['total'] = loss
+
+                # Add structural rule discovery sparsity loss if enabled
+                if args.use_predicate_discovery:
+                    rule_loss = model.predicate_selector.sparsity_loss()
+                    rule_loss_scaled = rule_loss * args.sparsity_weight
+                    loss = loss + rule_loss_scaled
+                    loss_dict['rule'] = rule_loss_scaled
                     loss_dict['total'] = loss
 
                 # Scale loss for gradient accumulation
@@ -1381,7 +1401,10 @@ def train_condor_brain(args):
                     "moe_k": int(args.moe_k),
                     "use_diffusion": bool(args.diffusion),
                     "diffusion_steps": int(args.diffusion_steps),
-                    "use_cde": bool(args.cde),  # FIX: Record CDE backbone flag
+                    "use_cde": bool(args.cde),
+                    "use_predicate_discovery": bool(args.use_predicate_discovery),
+                    "predicate_slots": int(args.predicate_slots),
+                    "max_active_predicates": int(args.max_active_predicates),
                 },
                 "training_config": {
                     "epochs": int(args.epochs),
@@ -1390,6 +1413,7 @@ def train_condor_brain(args):
                     "lookback": int(args.lookback),
                     "composite_loss": bool(args.composite_loss),
                     "loss_lambdas": tuple(args.loss_lambdas_tuple),
+                    "sparsity_weight": float(args.sparsity_weight),
                 },
             }
             torch.save(ckpt, args.output)
@@ -1440,10 +1464,39 @@ def train_condor_brain(args):
                 "epochs": int(args.epochs),
                 "batch_size": int(args.batch_size),
                 "diffusion_warmup": int(args.diffusion_warmup),
+                "use_predicate_discovery": bool(args.use_predicate_discovery),
+                "predicate_slots": int(args.predicate_slots),
+                "max_active_predicates": int(args.max_active_predicates),
+                "sparsity_weight": float(args.sparsity_weight),
             },
         }
+        
+        # Add discovery results to epoch checkpoint
+        if args.use_predicate_discovery:
+            _, _, names = model.predicate_selector.get_active_predicates(threshold=0.01)
+            ckpt_epoch['discovery'] = {
+                'predicates': names,
+                'logic_sets': model.predicate_combiner.get_logic_sets(names)
+            }
+        
         torch.save(ckpt_epoch, epoch_path)
         print(f"  [Checkpoint] Saved epoch model: {epoch_path}")
+        
+        # === DISCRETE LOGIC EXPORT (JSON) ===
+        if args.use_predicate_discovery:
+            import json
+            discovery_json_name = f"epoch_{epoch+1}_discovery.json"
+            discovery_path = os.path.join(os.path.dirname(args.output) or 'models', discovery_json_name)
+            
+            discovery_data = {
+                'epoch': epoch + 1,
+                'timestamp': time.strftime("%Y-%m-%dT%H:%M:%S"),
+                'predicates': ckpt_epoch['discovery']['predicates'],
+                'logic_sets': ckpt_epoch['discovery']['logic_sets']
+            }
+            with open(discovery_path, 'w') as f:
+                json.dump(discovery_data, f, indent=2)
+            print(f"  [Discovery] Exported discrete rules: {discovery_path}")
 
         # === EXPORT EPOCH PLOTS AND METRICS TO FILES ===
         if args.export_epoch_plots:
