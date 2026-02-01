@@ -1483,3 +1483,18 @@ If this document conflicts with the master spec, the master spec governs impleme
 ## Model Profile Alignment (Addendum)
 
 For any quantitative claims in this spec, the *actual deployed model profile* must be recorded and traceable from checkpoint metadata. Do not assume fixed layer counts or input dimensions without verifying `model_config` and `feature_cols` stored in the checkpoint.
+
+## 13. Interpretability & Audit System
+
+To ensure safety and transparency in the Neural CDE decision-making process, a comprehensive audit system has been implemented. This system allows for deep inspection of model behavior, feature attribution, and stability across retraining cycles.
+
+### 13.1 Audit Workflow
+The following diagram illustrates the flow of the `audit_cde_comparison` tool, which systematically evaluates model checkpoints against physics-inspired stability metrics and feature importance rankings.
+
+![Audit CDE Comparison Flow](architecture/audit_cde_comparison_flow.png)
+
+### 13.2 Key Interpretability Metrics
+- **Permutation Importance:** Measures the global impact of features by shuffling inputs.
+- **Gradient Saliency:** Tracks the sensitivity of outputs to specific input changes ($\partial y / \partial x$).
+- **Physics-Inspired Stability:** Uses Energy, Coherence, and Wasserstein distance to quantify the "drift" between model versions.
+- **Surrogate Decision Trees:**Distills complex Neural CDE logic into human-readable rule sets ($R^2 > 0.65$).
