@@ -153,7 +153,14 @@ def _json_safe_dict(d):
 
 def load_data_and_features(data_path, rows=None):
     print(f"Loading data from {data_path}...")
-    df = pd.read_csv(data_path)
+    print(f"Loading data from {data_path}...")
+    
+    # FIX: Use nrows to prevent OOM on huge files
+    if rows is not None:
+        print(f"   [Memory Opt] Reading first {rows} rows only...")
+        df = pd.read_csv(data_path, nrows=rows)
+    else:
+        df = pd.read_csv(data_path)
     
     # --- STANDARDIZE DATE COLUMN ---
     if 'dt' not in df.columns and 'timestamp' in df.columns:
@@ -163,8 +170,9 @@ def load_data_and_features(data_path, rows=None):
     if 'dt' in df.columns:
         # Ensure UTC standard
         df['dt'] = pd.to_datetime(df['dt'], utc=True)
-    if rows is not None:
-        df = df.iloc[-rows:].reset_index(drop=True)
+    
+    # if rows is not None:
+    #    df = df.iloc[-rows:].reset_index(drop=True)
     
     # Compute missing V2.2 features (dynamic + primitives) on unique spot bars, then merge back.
     missing_v22 = [c for c in FEATURE_COLS_V22 if c not in df.columns]
