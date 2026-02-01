@@ -494,6 +494,10 @@ def parse_args():
                         help="Export plots and metrics to epoch folders (epoch_1/, epoch_2/, etc.).")
     parser.add_argument("--export-dir", type=str, default="training_exports",
                         help="Base directory for epoch exports (default: training_exports).")
+    
+    # NEW (Requested by user): Batch-level checkpointing
+    parser.add_argument("--save-on-batch-loss", type=float, default=None,
+                        help="Save a checkpoint immediately if batch loss is below this threshold (e.g. 1.0).")
 
     args = parser.parse_args()
     
@@ -1062,6 +1066,33 @@ def train_condor_brain(args):
             
             train_loss += loss.item() * args.accum_steps  # Un-scale for logging
             n_batches += 1
+            
+            # === BATCH-LEVEL CHECKPOINTING (User Request) ===
+            if args.save_on_batch_loss is not None and loss.item() < args.save_on_batch_loss:
+                # Save immediately!
+                _loss_val = loss.item()
+                _fname = f"batch_loss_{_loss_val:.4f}_e{epoch+1}_b{batch_idx+1}.pth"
+                _save_path = os.path.join(os.path.dirname(args.output) or 'models', 'batch_checkpoints', _fname)
+                os.makedirs(os.path.dirname(_save_path), exist_ok=True)
+                
+                # We save a minimal checkpoint to be fast
+                _ckpt = {
+                    "state_dict": model.state_dict(),
+                    "epoch": epoch + 1,
+                    "batch": batch_idx + 1,
+                    "loss": _loss_val,
+                    "model_config": {
+                       "d_model": int(args.d_model),
+                       "n_layers": int(args.layers),
+                       "cde": bool(args.cde),
+                       "use_predicate_discovery": bool(args.use_predicate_discovery),
+                       "predicate_slots": int(args.predicate_slots),
+                       "max_active_predicates": int(args.max_active_predicates),
+                    }
+                }
+                torch.save(_ckpt, _save_path)
+                # Only log to stdout (avoid cluttering tqdm)
+                # pbar.write(f"  [SAVE] Batch loss {_loss_val:.4f} < {args.save_on_batch_loss} -> {_fname}")
             
             # Update throughput display and LOG EXPLICITLY to stdout for background visibility
             if (batch_idx + 1) % args.log_every == 0:
