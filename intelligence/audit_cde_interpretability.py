@@ -24,26 +24,55 @@ def safe_nan_to_num(X: np.ndarray) -> np.ndarray:
 
 def load_cde_model(ckpt_path, input_dim=None):
     from intelligence.canonical_feature_registry import INPUT_DIM_V22
-    if input_dim is None:
-        input_dim = INPUT_DIM_V22  # V2.2 canonical default
+    
     print(f"Loading {ckpt_path}...")
     ckpt = torch.load(ckpt_path, map_location=DEVICE)
     
+    # helper: recursive get
+    def get_cfg(keys, default=None):
+        for k in keys:
+            if k in ckpt: return ckpt[k]
+        return default
+
+    # 1. Recover Input Dimension
+    if 'input_dim' in ckpt:
+        input_dim = ckpt['input_dim']
+    elif input_dim is None:
+        input_dim = INPUT_DIM_V22
+        
     global SEQ_LEN
     SEQ_LEN = ckpt.get('seq_len', 256)
     print(f"Set SEQ_LEN to {SEQ_LEN}")
     
-    config = ckpt.get('model_config', ckpt.get('config', {}))
-    d_model = config.get('d_model', 128)
-    n_layers = config.get('n_layers', 2)
-    use_topk = config.get('use_topk_moe', False)
+    # 2. Extract Configuration
+    # training_config usually has the discovery flags, model_config has arch
+    t_config = ckpt.get('training_config', {})
+    m_config = ckpt.get('model_config', ckpt.get('config', {}))
     
+    d_model = m_config.get('d_model', 128)
+    n_layers = m_config.get('n_layers', 2)
+    use_topk = m_config.get('use_topk_moe', False)
+    
+    # Predicate Discovery Flags
+    use_pred = t_config.get('use_predicate_discovery', False)
+    # fallback to model config if not in training config
+    if not use_pred: 
+        use_pred = m_config.get('use_predicate_discovery', False)
+        
+    n_slots = t_config.get('predicate_slots', 2048)
+    max_active = t_config.get('max_active_predicates', 256)
+    
+    print(f"Model Config: d_model={d_model}, layers={n_layers}, predicates={use_pred}")
+
     model = CondorBrain(
         d_model=d_model,
         n_layers=n_layers,
         input_dim=input_dim,
         use_cde=True,
-        use_topk_moe=use_topk
+        use_topk_moe=use_topk,
+        use_predicate_discovery=use_pred,
+        n_predicate_slots=n_slots,
+        max_active_predicates=max_active
     )
     
     # Strip 'module.' prefix if trained with DataParallel
