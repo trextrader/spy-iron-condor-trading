@@ -36,9 +36,9 @@ data/
 *.xlsx
 *.xls
 *.zip
-reports/
+# reports/
 py2txt/
-*.pdf
+# *.pdf
 
 # Model checkpoints - too large for git
 models/*.pth
