@@ -33,7 +33,6 @@ nohup python -u intelligence/train_condor_brain.py \
   --accum-steps 2 \
   --cde \
   --gpu-dataset \
-  --materialize-seqs \
   --grad-checkpoint \
   --early-stop \
   --patience 5 \
