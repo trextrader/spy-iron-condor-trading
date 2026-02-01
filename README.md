@@ -9,6 +9,17 @@ Full technical details available in [Scientific Specification](docs/scientific_s
 - **📊 Advanced Monitoring:** Real-time TensorBoard logging for per-head loss, regime expert activations, and 45-day price trajectories.
 - **🔥 Production Sweep:** Automated hyperparameter tuning infrastructure capable of training 100M+ parameter models.
 
+## 🔍 Interpretability Engine (v3.0)
+**"Physics-Inspired Auditing for Neural Policy Networks"**
+
+We don't just train models; we interrogate them. The new Audit System (`intelligence/audit_cde_comparison.py`) provides a granular view into the Neural CDE's decision-making process:
+
+- **Attribution Stability:** Uses **Permutation Importance** and **Gradient Saliency** to prove the model is trading based on Greeks (Delta/Theta) and not noise.
+- **Surrogate Distillation:** Trains a white-box Decision Tree ($R^2 \approx 0.70$) to extract human-readable rules from the Neural CDE's latent state.
+- **Drift Forensics:** Measures **Wasserstein Distance** and **Energy (MSD)** between model epochs to detect "personality shifts" before deployment.
+- **Visual Diagnostics:** A complete guide to the 30+ generated diagnostic plots (Gradient Heatmaps, Fisher Information, etc.) is available in **[Section 13.3 of the Scientific Spec](docs/scientific_spec.md#133-visual-guide-to-audit-plots)**.
+
+
 ## 🆕 New in v2.2 (Execution Hardening & Ph.D. Thesis)
 > [!IMPORTANT]
 > Full technical derivations and execution hardening details are available in the [Institutional Engineering Thesis v2.2](file:///C:/Users/astou/.gemini/antigravity/brain/744e41ea-70fb-4b4e-b54c-744f8b163fe5/dev_report_v2_2.md) and the [Deployment Guide](file:///C:/Users/astou/.gemini/antigravity/brain/744e41ea-70fb-4b4e-b54c-744f8b163fe5/DEPLOYMENT_v2_2.md).
