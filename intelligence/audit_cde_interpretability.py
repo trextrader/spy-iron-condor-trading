@@ -218,6 +218,45 @@ def train_surrogate_tree(model, X, feature_cols, n_samples=5000):
     print("\n📜 Extracted Trading Rules (Surrogate):")
     print(rules)
 
+def analyze_discovered_logic(model):
+    """
+    Extracts and displays the learned logical structure from the predicate discovery engine.
+    """
+    if not hasattr(model, 'predicate_selector') or not hasattr(model, 'predicate_combiner'):
+        print("\n⚠️ Model does not have predicate discovery modules enabled.")
+        return
+
+    print(f"\n🧠 Analyzing Discovered Logic Trees...")
+    
+    # 1. Get raw predicates (leaf nodes)
+    # Use a low threshold to see what the model is *considering*, even if weighted low
+    predicates, importance, names = model.predicate_selector.get_active_predicates(threshold=0.01)
+    
+    if len(names) == 0:
+        print("  No active predicates found (all importance < 0.01).")
+        return
+        
+    print(f"\n🍃 Active Leaf Predicates ({len(names)} found):")
+    for i, (name, imp) in enumerate(zip(names, importance)):
+        if i >= 20: 
+            print(f"  ... and {len(names) - 20} more")
+            break
+        print(f"  [{imp:.4f}] {name}")
+
+    # 2. Get combined logic sets (branches)
+    # These represent the deeper trees: (A > B) AND (C < D) OR ...
+    logic_sets = model.predicate_combiner.get_logic_sets(names)
+    
+    print(f"\n🌳 Learned Decision Trees (Logic Sets):")
+    if len(logic_sets) == 0:
+        print("  No logic sets formed yet (combiner weights may be uniform).")
+    else:
+        for i, expr in enumerate(logic_sets):
+            if i >= 25:
+                print(f"  ... and {len(logic_sets) - 25} more")
+                break
+            print(f"  Tree {i+1}: {expr}")
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, required=True)
@@ -266,6 +305,13 @@ def main():
     # 3. Analyze (Permutation Importance)
     analyze_permutation_importance(model, X, feature_cols, n_samples=args.samples)
     train_surrogate_tree(model, X, feature_cols, n_samples=args.samples * 5)
+    
+    # 4. Analyze Internal Logic (Discovery Engine)
+    if hasattr(model, 'use_predicate_discovery') and model.use_predicate_discovery:
+        analyze_discovered_logic(model)
+    # Check manual attribute as fallback if config dict wasn't perfectly cleanly loaded
+    elif hasattr(model, 'predicate_selector'): 
+        analyze_discovered_logic(model)
 
 if __name__ == "__main__":
     main()

@@ -205,6 +205,11 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     df['target_dte'] = np.where(low_vol, 21.0 + rng.uniform(-5, 5, n),
                         np.where(high_vol, 7.0 + rng.uniform(-2, 2, n),
                                  14.0 + rng.uniform(-3, 3, n)))
+    
+    # NORMALIZE DTE TARGET TO [0, 1] (Critical for Loss Balance)
+    # Raw days (2-45) cause DTE loss to dominate all other heads (offset/prob).
+    # We normalize here and must ensure model outputs 0-1 range.
+    df['target_dte'] = df['target_dte'] / 45.0
 
     # --- Profitability based on RSI (mean-reversion proxy) ---
     rsi = df['rsi'].fillna(50).values if 'rsi' in df.columns else np.full(n, 50.0)

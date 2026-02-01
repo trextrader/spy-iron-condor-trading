@@ -348,7 +348,7 @@ class CondorExpertHead(nn.Module):
         out[:, 0] = self.offset_activation(raw[:, 0]) * 5.0    # short_call_offset: 0-5%
         out[:, 1] = self.offset_activation(raw[:, 1]) * 5.0    # short_put_offset: 0-5%
         out[:, 2] = self.offset_activation(raw[:, 2]) * 10.0   # wing_width: 0-$10
-        out[:, 3] = 2 + self.offset_activation(raw[:, 3]) * 43  # dte: 2-45 days
+        out[:, 3] = self.offset_activation(raw[:, 3])           # dte: 0-1 (normalized)
         out[:, 4] = self.prob_activation(raw[:, 4])            # prob_profit: 0-1
         out[:, 5] = torch.tanh(raw[:, 5]) * 0.5                # expected_roi: -50% to +50%
         out[:, 6] = self.prob_activation(raw[:, 6])            # max_loss_pct: 0-1
