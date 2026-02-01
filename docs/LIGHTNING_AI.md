@@ -1,60 +1,65 @@
 # ⚡ Lightning AI / Cloud Processing Instructions
 
-Follow these steps to run the new **Neural CDE** training and **Rule-Based Validation** on a Lightning AI Studio (or any cloud GPU environment).
+Follow these steps to run the modern **CondorBrain v2.2 (Neural CDE + Predicate Discovery)** on Lightning AI.
 
-## 1. Setup Environment
-First, ensure you are in the project root:
+## 1. Fast-Track Training (3M+ Rows)
+
+We use a specialized "Fast-Track" training loop designed for large datasets on T4/A10G GPUs. This system uses:
+1.  **Batch-Level Checkpointing ("Ratchet")**: Saves the model *immediately* when batch loss drops below 1.0.
+2.  **Short-Circuit Epochs**: If a new best model is found, the epoch terminates early to validate.
+3.  **Validation Limits**: Checks only 200 batches (~10%) to provide rapid feedback.
+
+**Command (Recommended):**
 ```bash
-cd spy-iron-condor-trading
-# Or whatever the repo folder is named
+# 1. Ensure you have the latest code
+git pull
+
+# 2. Run the optimization script (Background Mode)
+bash run_training.sh
 ```
 
-Install dependencies if needed (Standard PyTorch is sufficient for the CDE prototype):
+**What `run_training.sh` does:**
+*   Loads `data/processed/mamba_institutional_2025_1m_v22.csv` (3M rows).
+*   Sets `--save-on-batch-loss 1.0` (The Magic Barrier).
+*   Sets `--val-limit 200` to speed up validation.
+*   Logs to `train_v22_3M.log`.
+
+**Monitoring:**
 ```bash
-pip install torch pandas numpy tqdm
+# Watch the training in real-time
+tail -f train_v22_3M.log
 ```
 
-**Command:**
+**Look for:**
+*   `[SAVE] New Best Batch Loss: 0.99xx`
+*   `⚡ [FAST-TRACK] Breaking epoch early...`
+
+## 2. Manual Training (Custom Flags)
+
+If you want to run manually without the script:
+
 ```bash
 python intelligence/train_condor_brain.py \
-    --local-data "data/processed/mamba_institutional_2024_1m_last 1mil_v21.csv" \
+    --local-data "data/processed/mamba_institutional_2025_1m_v22.csv" \
+    --output models/cb_manual_v22.pth \
+    --max-rows 3000000 \
     --cde \
+    --use-predicate-discovery \
+    --predicate-slots 2048 \
     --epochs 20 \
-    --d-model 512 \
-    --n-layers 3
+    --batch-size 128 \
+    --accum-steps 2 \
+    --save-on-batch-loss 1.0 \
+    --val-limit 200
 ```
 
-**Expected Output:**
-*   You should see a progress bar for `Training CondorBrain (CDE Mode)`.
-*   Loss should decrease (BF16 precision).
-*   Final model saved to: `models/condor_brain_cde_final.pth`.
+## 3. Verification (Backtest)
 
-## 3. Run Rule-Based Backtest (Baseline)
-While the model trains, verify the P&L pipeline using the **Rule Engine** alone. This bypasses the neural network and makes trades based strictly on your heuristic rules (RSI, VIX, etc.).
+Once training produces a checkpoint (e.g., `models/batch_checkpoints/batch_loss_0.9992_e1_b72.pth`), verify it:
 
-**Command:**
 ```bash
 python kaggle/condor_brain_backtest_v2.py \
-    --input "data/processed/mamba_institutional_2024_1m_last 1mil_v21.csv" \
-    --ruleset "docs/Complete_Ruleset_DSL.yaml" \
-    --rules-only
-```
-
-**What to look for:**
-*   "🛠️ RULES-ONLY MODE: Initializing Dummy CondorBrain..."
-*   Trades being entered based on "Rule Signal".
-*   Final P&L/Sharpe reported at the end.
-
-## 4. (Optional) Run TFT Transformer
-If you want to try the Transformer model, you must install the forecasting library first:
-
-```bash
-pip install pytorch-forecasting pytorch-lightning
-```
-
-Then run:
-```bash
-python kaggle/condor_brain_retrain_tft.py \
-    --input "data/processed/mamba_institutional_2024_1m_last 1mil_v21.csv" \
-    --max-epochs 10
+    --model "models/batch_checkpoints/batch_loss_0.9992_e1_b72.pth" \
+    --input "data/processed/mamba_institutional_2025_1m_v22.csv" \
+    --limit 10000
 ```

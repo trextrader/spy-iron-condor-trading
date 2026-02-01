@@ -113,26 +113,31 @@ In the **CondorBrain** implementation:
 *   **Backbone**: Neural CDE Solver (Explicit Euler)
 *   **Output**: Multi-head predictive distribution (8-head policy + 3-head MoE + 12-head Horizon)
 
-### Training Workflow
-The model creates its own "Brain" using historical intraday data.
+### Training Workflow (v2.2 Fast-Track)
 
-**1. Data Acquisition (Local)**
-```powershell
-# Fetch 2 years of 15-min bars from Alpaca
-python intelligence/train_condor_brain.py --cde --save-only
+**1. Data Acquisition**
+```bash
+# Generate the 5M row V2.2 dataset (requires 'data_factory/')
+python data_factory/pipeline.py --generate-v22
 ```
 
-**2. GPU Training (Colab)**
-```python
-# Train the 12-layer model (Fast & Accurate)
-!python intelligence/train_condor_brain.py --local-data data/processed/mamba_institutional_2024_1m_last 1mil_v21.csv --cde --d-model 512 --layers 3
+**2. "Fast-Track" Training (Lightning AI)**
+We use a **Ratchet Logic** approach that saves models immediately upon finding a loss $< 1.0$, short-circuiting the epoch to validatate instantly.
+
+```bash
+# Launches background training on 3M rows
+bash run_training.sh
 ```
+
+**Key Flags:**
+*   `--save-on-batch-loss 1.0`: Autosave high-IQ moments.
+*   `--val-limit 200`: Quick 20-min validation loops.
+*   `--gpu-dataset`: Zero-copy data loading.
 
 **3. Inference (Backtest)**
-The optimizer automatically loads `models/cde_active.pth` and uses the GPU for batch inference (processing 1M+ rows in parallel).
-
-```python
-!python core/main.py --use-optimizer --cde --d-model 512
+The optimizer uses the best batch checkpoint for simulation:
+```bash
+python kaggle/condor_brain_backtest_v2.py --model models/best_batch.pth
 ```
 ### 📊 Real-Time Monitoring Dashboard
 
