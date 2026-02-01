@@ -4,7 +4,7 @@
 # This script ensures the command is not truncated and the data exists.
 
 DATA_PATH="data/processed/mamba_institutional_2025_1m_v22.csv"
-LOG_FILE="train_v22_discovery.log"
+LOG_FILE="train_v22_5M.log"
 
 echo "[START] Validating environment..."
 if [ ! -f "$DATA_PATH" ]; then
@@ -15,26 +15,28 @@ if [ ! -f "$DATA_PATH" ]; then
 fi
 
 echo "[OK] Found dataset."
-echo "[RUN] Starting training in background..."
+echo "[RUN] Starting training (5M ROWS) in background..."
 
 nohup python -u intelligence/train_condor_brain.py \
   --local-data "$DATA_PATH" \
-  --output models/cb_cde_discovery_v22.pth \
-  --max-rows 50000 \
+  --output models/cb_cde_discovery_v22_5M.pth \
+  --max-rows 5000000 \
   --use-predicate-discovery \
   --predicate-slots 2048 \
   --max-active-predicates 256 \
   --sparsity-weight 0.001 \
-  --epochs 10 \
+  --epochs 20 \
   --batch-size 128 \
   --d-model 256 \
   --layers 32 \
   --lr 1e-4 \
   --accum-steps 2 \
   --cde \
+  --gpu-dataset \
+  --materialize-seqs \
   --grad-checkpoint \
   --early-stop \
-  --patience 10 \
+  --patience 5 \
   --tensorboard \
   --monitor \
   --export-epoch-plots \

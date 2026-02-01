@@ -275,9 +275,6 @@ def analyze_discovered_logic(model):
         
     print(f"\n🍃 Active Leaf Predicates ({len(names)} found):")
     for i, (name, imp) in enumerate(zip(names, importance)):
-        if i >= 20: 
-            print(f"  ... and {len(names) - 20} more")
-            break
         print(f"  [{imp:.4f}] {name}")
 
     # 2. Get combined logic sets (branches)
@@ -289,9 +286,6 @@ def analyze_discovered_logic(model):
         print("  No logic sets formed yet (combiner weights may be uniform).")
     else:
         for i, expr in enumerate(logic_sets):
-            if i >= 25:
-                print(f"  ... and {len(logic_sets) - 25} more")
-                break
             print(f"  Tree {i+1}: {expr}")
 
 def main():
