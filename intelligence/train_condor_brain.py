@@ -427,8 +427,8 @@ def parse_args():
                         help="Early stopping patience: epochs to wait after last improvement (default: 5).")
     parser.add_argument("--live-plot", action="store_true",
                         help="Display live training curve (train vs val loss) in Colab/notebook.")
-    parser.add_argument("--log-every", type=int, default=100,
-                        help="Log batch-level metrics every N batches (default: 100).")
+    parser.add_argument("--log-every", type=int, default=10,
+                        help="Log batch-level metrics every N batches (default: 10).")
     parser.add_argument("--monitor", action="store_true",
                         help="Enable advanced multi-head training monitor with per-predictor tracking.")
     parser.add_argument("--monitor-every", type=int, default=1,
@@ -777,10 +777,10 @@ def train_condor_brain(args):
     print(f"LR: {args.lr}, Grad Checkpoint: {args.grad_checkpoint}")
     print(f"Output: {args.output}")
     if args.early_stop:
-        print(f"Early stopping: patience={args.patience} epochs")
+        print(f"Early stopping: patience={args.patience} epochs", flush=True)
     if args.live_plot:
-        print(f"Live plotting: enabled (updates every epoch)")
-    print(f"{'='*60}\n")
+        print(f"Live plotting: enabled (updates every epoch)", flush=True)
+    print(f"{'='*60}\n", flush=True)
     
     best_loss = float('inf')
     
@@ -812,8 +812,9 @@ def train_condor_brain(args):
     # Advanced multi-head training monitor (replaces simple live_plot)
     monitor = None
     if args.monitor:
-        monitor = TrainingMonitor(checkpoint_capacity=5)
-        print("[CondorBrain] 🎯 Advanced multi-head monitor enabled (per-predictor tracking)")
+        export_dir = args.export_dir if args.export_dir else "monitor_plots"
+        monitor = TrainingMonitor(checkpoint_capacity=5, plot_dir=export_dir)
+        print(f"[CondorBrain] 🎯 Advanced monitor ENABLED (dir: {export_dir})", flush=True)
         args.live_plot = False  # Monitor handles visualization
     
     # TensorBoard setup
@@ -1092,9 +1093,19 @@ def train_condor_brain(args):
                         quick_losses[name] = torch.mean((preds_t[:, i] - targs_t[:, i]) ** 2).item()
                     quick_losses['regime_accuracy'] = 0.0  # Placeholder
                 
-                # Display inline
+                # Display and Save
                 pbar.set_description(f"Epoch {epoch+1} [plotting]")
-                display_predictions_inline(samples, epoch + 1, args.epochs, quick_losses)
+                viz_dir = args.export_dir if args.export_dir else "monitor_plots"
+                display_predictions_inline(
+                    samples, epoch + 1, args.epochs, quick_losses, 
+                    plot_dir=viz_dir, batch_idx=batch_idx + 1
+                )
+                
+                # Explicit log for visibility in background jobs
+                p_suffix = f"_batch_{batch_idx+1:05d}"
+                p_path = f"{viz_dir}/predictions_epoch_{epoch+1:03d}{p_suffix}.png"
+                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 🖼️  Saved prediction plot to: {p_path}", flush=True)
+                
                 pbar.set_description(f"Epoch {epoch+1}")
                 
                 # Real-time TensorBoard logging (batch-level for smooth updates)

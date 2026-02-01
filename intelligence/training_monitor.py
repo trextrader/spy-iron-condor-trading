@@ -535,7 +535,8 @@ def visualize_predictions(
     total_epochs: int,
     head_losses: Dict[str, float],
     output_path: str = None,
-    plot_dir: str = "monitor_plots"
+    plot_dir: str = "monitor_plots",
+    batch_idx: Optional[int] = None
 ) -> str:
     """
     Create visualization of predicted vs actual for all 8 output heads.
@@ -636,7 +637,8 @@ def visualize_predictions(
             ax.tick_params(labelsize=8)
         
         fig.suptitle(
-            f'CondorBrain Predictions vs Actuals - Epoch {epoch}/{total_epochs}\n'
+            f'CondorBrain Predictions vs Actuals - Epoch {epoch}/{total_epochs}' + \
+            (f' Batch {batch_idx}' if batch_idx is not None else '') + '\n' + \
             f'Sample size: {n_samples} | Regime acc: {100*(1-head_losses.get("regime_accuracy", 0)):.1f}%',
             fontsize=12, fontweight='bold'
         )
@@ -646,7 +648,8 @@ def visualize_predictions(
         if output_path is None:
             import os
             os.makedirs(plot_dir, exist_ok=True)
-            output_path = f"{plot_dir}/predictions_epoch_{epoch:03d}.png"
+            suffix = f"_batch_{batch_idx:05d}" if batch_idx is not None else ""
+            output_path = f"{plot_dir}/predictions_epoch_{epoch:03d}{suffix}.png"
         
         fig.savefig(output_path, dpi=100, bbox_inches='tight')
         plt.close(fig)
@@ -663,13 +666,14 @@ def display_predictions_inline(
     epoch: int,
     total_epochs: int,
     head_losses: Dict[str, float],
-    plot_dir: str = "monitor_plots"
+    plot_dir: str = "monitor_plots",
+    batch_idx: Optional[int] = None
 ):
     """Display predictions inline in Colab."""
     try:
         from IPython.display import display, Image
 
-        path = visualize_predictions(samples, epoch, total_epochs, head_losses, plot_dir=plot_dir)
+        path = visualize_predictions(samples, epoch, total_epochs, head_losses, plot_dir=plot_dir, batch_idx=batch_idx)
         if path:
             display(Image(filename=path))
     except Exception as e:
