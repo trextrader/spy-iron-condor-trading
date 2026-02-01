@@ -607,6 +607,14 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         policy_matrix = np.concatenate(all_policy, axis=0)
     else:
         policy_matrix = np.zeros((0, 10))
+    
+    # DEBUG: Diagnostic on Model Outputs
+    print(f"\n[DEBUG] Policy Matrix Shape: {policy_matrix.shape}")
+    entry_logits = policy_matrix[:, 8]
+    entry_probs = 1.0 / (1.0 + np.exp(-entry_logits))
+    print(f"[DEBUG] Entry Prob Stats: Min={entry_probs.min():.4f}, Max={entry_probs.max():.4f}, Mean={entry_probs.mean():.4f}")
+    print(f"[DEBUG] > 0.40 count: {(entry_probs > 0.40).sum()}")
+    print(f"[DEBUG] > 0.50 count: {(entry_probs > 0.50).sum()}")
         
     # Map back to bar index: policy_matrix[k] corresponds to spot_bars.iloc[SEQ_LEN + k]
     
