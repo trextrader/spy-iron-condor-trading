@@ -592,9 +592,9 @@ def train_condor_brain(args):
             torch.cuda.set_per_process_memory_fraction(0.95)  # Use 95% of GPU memory
         
         opt_str = f"TF32, cuDNN benchmark, {'BF16' if use_bf16 else 'FP16'}"
-        print(f"[CondorBrain] CUDA optimizations enabled: {opt_str}")
+        print(f"[CondorBrain] CUDA optimizations enabled: {opt_str}", flush=True)
     # Load data
-    print(f"\n[CondorBrain] Loading data from {args.local_data}...")
+    print(f"\n[CondorBrain] Loading data from {args.local_data}...", flush=True)
     if args.max_rows > 0:
         df = pd.read_csv(args.local_data, nrows=args.max_rows)
     else:
@@ -1067,8 +1067,8 @@ def train_condor_brain(args):
                 )
                 
                 # EXPLICIT LOG (to bypass tqdm non-printing in redirected logs)
-                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Epoch {epoch+1} Batch {batch_idx+1}/{n_train_batches} | "
-                      f"Loss: {loss.item():.5f} | Throughput: {_sps:,.0f} samp/s", flush=True)
+                _msg = f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Epoch {epoch+1} Batch {batch_idx+1}/{n_train_batches} | Loss: {loss.item():.5f} | Throughput: {_sps:,.0f} samp/s"
+                pbar.write(_msg)
                 
                 _tp_last_t = _now
                 _tp_last_i = (batch_idx + 1)
@@ -1104,7 +1104,7 @@ def train_condor_brain(args):
                 # Explicit log for visibility in background jobs
                 p_suffix = f"_batch_{batch_idx+1:05d}"
                 p_path = f"{viz_dir}/predictions_epoch_{epoch+1:03d}{p_suffix}.png"
-                print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 🖼️  Saved prediction plot to: {p_path}", flush=True)
+                pbar.write(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 🖼️  Saved prediction plot to: {p_path}")
                 
                 pbar.set_description(f"Epoch {epoch+1}")
                 

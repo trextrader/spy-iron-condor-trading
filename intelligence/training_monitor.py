@@ -675,7 +675,10 @@ def display_predictions_inline(
 
         path = visualize_predictions(samples, epoch, total_epochs, head_losses, plot_dir=plot_dir, batch_idx=batch_idx)
         if path:
-            display(Image(filename=path))
+            # Only display if in an interactive environment (notebook)
+            import sys
+            if hasattr(sys, 'ps1') or 'ipykernel' in sys.modules:
+                display(Image(filename=path))
     except Exception as e:
         print(f"[Display error] {e}")
 
