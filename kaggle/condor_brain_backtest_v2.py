@@ -588,7 +588,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             
         if not batch_seqs: continue
             
-        batch_input = torch.stack(batch_seqs)
+        batch_input = torch.stack(batch_seqs).float().to(DEVICE)
         with torch.no_grad():
             # Model returns tuple, 0-index is policy
             out = model(batch_input)[0].cpu().numpy()
