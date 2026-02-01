@@ -617,13 +617,16 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     # Helpers
     def _sigmoid(x): return 1 / (1 + np.exp(-x))
     
+    # Pre-extract spot timestamps as numpy array to ensure type match with ts_ranges (built from .values)
+    spot_timestamps = spot_bars[time_col].values
+    
     for i in tqdm(range(sim_start_idx, num_bars), desc="Simulating"):
          # Adjust index for policy
          pol_idx = i - SEQ_LEN
          if pol_idx >= len(policy_matrix): break
          
          # 1. Get Bar Data
-         ts = spot_bars[time_col].iloc[i]
+         ts = spot_timestamps[i]
          spot = float(spot_bars['close'].iloc[i])
          
          # 2. Get Option Chain (O(1))
