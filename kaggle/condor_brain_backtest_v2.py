@@ -405,17 +405,74 @@ def estimate_condor_pnl(spot, short_call, long_call, short_put, long_put, credit
     
     return net_pnl
 
+def find_best_legs(chain_df, spot, call_off, put_off, width):
+    """
+    Search the 100-row options chain for the 4 legs matching model suggestions.
+    Uses close prices for pricing.
+    """
+    if chain_df.empty:
+        return None
+
+    # Suggested strikes
+    s_call_target = spot + (call_off * spot * 0.01)
+    s_put_target = spot - (put_off * spot * 0.01)
+    
+    # Filter by CP
+    calls = chain_df[chain_df['call_put'] == 'C']
+    puts = chain_df[chain_df['call_put'] == 'P']
+    
+    if calls.empty or puts.empty:
+        return None
+        
+    # Find closest short strikes
+    short_call_row = calls.iloc[(calls['strike'] - s_call_target).abs().argsort()[:1]]
+    short_put_row = puts.iloc[(puts['strike'] - s_put_target).abs().argsort()[:1]]
+    
+    s_call = short_call_row['strike'].values[0]
+    s_put = short_put_row['strike'].values[0]
+    
+    # Find matching long strikes (strike + width)
+    l_call_target = s_call + width
+    l_put_target = s_put - width
+    
+    long_call_row = calls.iloc[(calls['strike'] - l_call_target).abs().argsort()[:1]]
+    long_put_row = puts.iloc[(puts['strike'] - l_put_target).abs().argsort()[:1]]
+    
+    l_call = long_call_row['strike'].values[0]
+    l_put = long_put_row['strike'].values[0]
+    
+    # Package legs
+    return {
+        'short_call': s_call, 'short_call_close': short_call_row['close'].values[0], 'short_call_symbol': short_call_row['option_symbol'].values[0],
+        'long_call': l_call, 'long_call_close': long_call_row['close'].values[0], 'long_call_symbol': long_call_row['option_symbol'].values[0],
+        'short_put': s_put, 'short_put_close': short_put_row['close'].values[0], 'short_put_symbol': short_put_row['option_symbol'].values[0],
+        'long_put': l_put, 'long_put_close': long_put_row['close'].values[0], 'long_put_symbol': long_put_row['option_symbol'].values[0],
+        'width': abs(l_call - s_call) 
+    }
+
 def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None, 
                  use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None):
-    print("Starting Backtest Simulation...")
+    print("Starting Backtest Simulation (Unique-Bar Time Alignment)...")
     
-    # Pre-process Features (Robust Norm same as training)
-    missing_cols = [c for c in feature_cols if c not in df.columns]
+    # Identify unique bars
+    time_col = 'dt' if 'dt' in df.columns else 'timestamp'
+    spot_key_cols = [time_col]
+    unique_bars = df.drop_duplicates(subset=spot_key_cols).sort_values(time_col).reset_index(drop=True)
+    num_bars = len(unique_bars)
+    
+    if limit:
+        num_bars = min(num_bars, limit + SEQ_LEN)
+        unique_bars = unique_bars.iloc[:num_bars].reset_index(drop=True)
+        print(f"Limiting to {num_bars} unique bars.")
+
+    # Pre-process Features (Robust Norm same as training) on UNIQUE BARS
+    missing_cols = [c for c in feature_cols if c not in unique_bars.columns]
     if missing_cols:
-        print(f"⚠️ Missing {len(missing_cols)} feature columns; filling with neutral defaults.")
+        print(f"⚠️ Missing {len(missing_cols)} feature columns in unique_bars; filling with neutral defaults.")
         for col in missing_cols:
-            df[col] = get_neutral_fill_value_v22(col)
-    X_np = df[feature_cols].values.astype(np.float32)
+            unique_bars[col] = get_neutral_fill_value_v22(col)
+            
+    X_np = unique_bars[feature_cols].values.astype(np.float32)
     # Sanitize inf/-inf before semantic fill
     X_np = np.where(np.isfinite(X_np), X_np, np.nan)
     X_np = apply_semantic_nan_fill(X_np, feature_cols)
@@ -426,21 +483,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         mad = np.asarray(norm_stats["mad"], dtype=np.float32)
         mu = np.squeeze(mu)
         mad = np.squeeze(mad)
-        if mu.ndim != 1:
-            mu = mu.reshape(-1)
-        if mad.ndim != 1:
-            mad = mad.reshape(-1)
-        if mu.shape[0] != X_np.shape[1] or mad.shape[0] != X_np.shape[1]:
-            print(
-                f"⚠️ Norm stats shape mismatch; "
-                f"median={mu.shape} mad={mad.shape} features={X_np.shape[1]} "
-                "-> falling back to sample stats."
-            )
-            mu = np.median(X_np, axis=0) if len(X_np) > 0 else 0
-            mad = np.median(np.abs(X_np - mu), axis=0)
+        if mu.ndim != 1: mu = mu.reshape(-1)
+        if mad.ndim != 1: mad = mad.reshape(-1)
     else:
         mu = np.median(X_np, axis=0) if len(X_np) > 0 else 0
         mad = np.median(np.abs(X_np - mu), axis=0)
+        
     mad = np.maximum(mad, 1e-6)
 
     # Protect rule features to match training normalization
@@ -478,11 +526,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     model.eval()
     
     # Iterate
-    num_bars = len(df)
-    if limit is not None:
-        num_bars = min(num_bars, limit + SEQ_LEN)
+    num_bars = len(unique_bars)
     
-    print(f"Simulating {num_bars} bars...")
+    print(f"Simulating {num_bars} unique bars...")
     print("=" * 80)
     print("TRADE DECISION LOG (First 50 bars after warmup)")
     print("=" * 80)
@@ -763,7 +809,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     MAX_LOGS = 50  # Console only
     
     # --- BATCHED OPTIMIZATION ---
-    print(f"Pre-computing model outputs for {num_bars - SEQ_LEN} bars (Batch Size: 64)...")
+    print(f"Pre-computing model outputs for {num_bars - SEQ_LEN} UNIQUE bars (Batch Size: 64)...")
     BATCH_SIZE = 64
     all_policy_outputs = []
     
@@ -791,7 +837,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         debug_log = open(DEBUG_LOG_FILE, 'w', encoding='utf-8')
         debug_log.write(f"DEBUG INFERENCE LOG - {pd.Timestamp.now()}\n")
         debug_log.write(f"Model: {model_path}\n")
-        debug_log.write(f"Data rows: {len(df)}\n")
+        debug_log.write(f"Unique bars: {len(unique_bars)}\n")
         debug_log.write("=" * 80 + "\n\n")
         print(f"📝 Debug output will be written to: {DEBUG_LOG_FILE}")
 
@@ -810,746 +856,149 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             'total_bars': 0, 'bars_with_position_0': 0, 'bars_blocked': 0
         }
 
+    # === CACHE OPTION CHAINS FOR FAST LOOKUP ===
+    print("   Caching option chains for high-fidelity lookup...")
+    chains_by_ts = {ts: group for ts, group in df.groupby(time_col)}
+
+    # === CACHE OPTION PRICES FOR O(1) LOOKUP ===
+    print("   Building P&L mark cache (O(1) lookup)...")
+    # Mapping (timestamp, symbol) -> close price for instant MTM
+    mark_cache = {}
+    for row in tqdm(df[[time_col, 'option_symbol', 'close']].itertuples(index=False), total=len(df), desc="Pricing Cache"):
+        mark_cache[(getattr(row, time_col), row.option_symbol)] = row.close
+
+    # Track last known price per symbol for gaps
+    last_known_mark = {}
+
     # Start from SEQ_LEN
     for i in tqdm(range(SEQ_LEN, num_bars - 1), desc="Simulating"):
         # 1. State
-        if i >= len(X_tensor): break
+        if i >= len(all_policy_outputs): break
+        pol = all_policy_outputs[i - SEQ_LEN]
+        ts = unique_bars[time_col].iloc[i]
+        spot = unique_bars['close'].iloc[i]
         
-        # 2. Sequential logic (Position management) - Using Pre-computed Inference
-        idx_offset = i - SEQ_LEN
-        pol = all_policy_outputs[idx_offset]
-        
-        # Slicing x_seq only if needed for tracing (expensive, but only for active decision bars in trace)
-        # We can optimize trace later if needed. For now, we need x_seq for _emit_trace_event.
-        x_seq = X_tensor[i-SEQ_LEN : i].unsqueeze(0) 
-        
-        # Extract ALL policy outputs for logging
-        # Policy head (10 outputs): [call_off, put_off, width, te, prob_profit, expected_roi, max_loss_pct, confidence, entry_logit, exit_logit]
         all_outputs = {
-            'call_off': pol[0] if len(pol) > 0 else None,
-            'put_off': pol[1] if len(pol) > 1 else None,
-            'width': pol[2] if len(pol) > 2 else None,
-            'te': pol[3] if len(pol) > 3 else None,
-            'prob_profit': pol[4] if len(pol) > 4 else None,
-            'expected_roi': pol[5] if len(pol) > 5 else None,
-            'max_loss_pct': pol[6] if len(pol) > 6 else None,
-            'confidence': pol[7] if len(pol) > 7 else None,
-            'entry_logit': pol[8] if len(pol) > 8 else None,  # NEW: Explicit entry signal from model
-            'exit_logit': pol[9] if len(pol) > 9 else None,   # NEW: Explicit exit signal from model
+            'call_off': pol[0], 'put_off': pol[1], 'width': pol[2], 'te': pol[3],
+            'prob_profit': pol[4], 'expected_roi': pol[5], 'max_loss_pct': pol[6],
+            'confidence': pol[7], 'entry_logit': pol[8], 'exit_logit': pol[9],
         }
         
-        def _sigmoid(v):
-            return 1.0 / (1.0 + np.exp(-v))
+        def _sigmoid(v): return 1.0 / (1.0 + np.exp(-v))
+        prob_profit = float(all_outputs['prob_profit'])
+        confidence = float(all_outputs['confidence'])
+        if prob_profit < 0 or prob_profit > 1: prob_profit = _sigmoid(prob_profit)
+        if confidence < 0 or confidence > 1: confidence = _sigmoid(confidence)
 
-        prob_profit = all_outputs['prob_profit'] or 0.0
-        confidence = all_outputs['confidence'] or 0.0
-        # If outputs are logits, map to (0,1)
-        if prob_profit < 0.0 or prob_profit > 1.0:
-            prob_profit = float(_sigmoid(prob_profit))
-        if confidence < 0.0 or confidence > 1.0:
-            confidence = float(_sigmoid(confidence))
+        # Rule Engine Signal
+        rule_block = float(unique_bars["rule_block_any"].iloc[i]) if "rule_block_any" in unique_bars.columns else 0.0
+        rule_long = float(unique_bars["rule_long_consensus"].iloc[i]) if "rule_long_consensus" in unique_bars.columns else 0.0
+        rule_short = float(unique_bars["rule_short_consensus"].iloc[i]) if "rule_short_consensus" in unique_bars.columns else 0.0
+        rule_exit = float(unique_bars["rule_exit_consensus"].iloc[i]) if "rule_exit_consensus" in unique_bars.columns else 0.0
+        net_rule_signal = rule_long - rule_short
 
-        # === DEBUG INFERENCE OUTPUT ===
-        if DEBUG_INFERENCE and (i < SEQ_LEN + DEBUG_FIRST_N or (i - SEQ_LEN) % DEBUG_SAMPLE_EVERY == 0):
-            # Extract key features that influence entry decisions (training targets)
-            bar_idx = i
-
-            # Key features from V2.2 schema that drive entry_target in training
-            ivr_val = float(df['ivr'].iloc[i]) if 'ivr' in df.columns else None
-            rsi_val = float(df['rsi_dyn'].iloc[i]) if 'rsi_dyn' in df.columns else (float(df['rsi'].iloc[i]) if 'rsi' in df.columns else None)
-            adx_val = float(df['adx_adaptive'].iloc[i]) if 'adx_adaptive' in df.columns else (float(df['adx'].iloc[i]) if 'adx' in df.columns else None)
-            friction_val = float(df['friction_ratio'].iloc[i]) if 'friction_ratio' in df.columns else None
-            exec_allow_val = float(df['exec_allow'].iloc[i]) if 'exec_allow' in df.columns else None
-            gap_risk_val = float(df['gap_risk_score'].iloc[i]) if 'gap_risk_score' in df.columns else None
-
-            # Model outputs
-            entry_logit = all_outputs.get('entry_logit')
-            exit_logit = all_outputs.get('exit_logit')
-            entry_prob = _sigmoid(entry_logit) if entry_logit is not None else None
-            exit_prob = _sigmoid(exit_logit) if exit_logit is not None else None
-
-            # Calculate what training would have produced for entry_target
-            # (Based on train_condor_brain.py:243-255)
-            expected_entry_score = 0.0
-            score_breakdown = []
-            if rsi_val is not None:
-                rsi_neutral = 40 < rsi_val < 60
-                expected_entry_score += 1.0 if rsi_neutral else -0.5
-                score_breakdown.append(f"RSI({'NEUTRAL' if rsi_neutral else 'EXTREME'}): {1.0 if rsi_neutral else -0.5:+.1f}")
-            if ivr_val is not None:
-                ivr_ok = ivr_val > 30 if ivr_val <= 1.5 else ivr_val > 30  # Handle 0-1 vs 0-100 scale
-                expected_entry_score += 0.5 if ivr_ok else -0.5
-                score_breakdown.append(f"IVR({ivr_val:.1f}): {0.5 if ivr_ok else -0.5:+.1f}")
-            if adx_val is not None:
-                adx_low = adx_val < 30
-                expected_entry_score += 0.5 if adx_low else -0.3
-                score_breakdown.append(f"ADX({adx_val:.1f}): {0.5 if adx_low else -0.3:+.1f}")
-            if exec_allow_val is not None:
-                exec_ok = exec_allow_val > 0.5
-                expected_entry_score += 0.5 if exec_ok else -2.0
-                score_breakdown.append(f"EXEC({exec_allow_val:.1f}): {0.5 if exec_ok else -2.0:+.1f}")
-            if friction_val is not None:
-                friction_ok = friction_val < 1.0
-                expected_entry_score += 0.3 if friction_ok else -1.0
-                score_breakdown.append(f"FRICTION({friction_val:.2f}): {0.3 if friction_ok else -1.0:+.1f}")
-            if gap_risk_val is not None:
-                gap_ok = gap_risk_val < 0.8
-                expected_entry_score += 0.2 if gap_ok else -1.5
-                score_breakdown.append(f"GAP({gap_risk_val:.2f}): {0.2 if gap_ok else -1.5:+.1f}")
-
-            expected_entry_prob = _sigmoid(expected_entry_score)
-
-            debug_print(f"\n{'='*80}")
-            debug_print(f"[DEBUG BAR {bar_idx}] INFERENCE ANALYSIS (Position={position})")
-            debug_print(f"{'='*80}")
-            debug_print(f"  KEY INPUT FEATURES (from data):")
-            debug_print(f"     IVR:            {ivr_val if ivr_val is not None else 'N/A':>10}")
-            debug_print(f"     RSI:            {rsi_val if rsi_val is not None else 'N/A':>10}")
-            debug_print(f"     ADX:            {adx_val if adx_val is not None else 'N/A':>10}")
-            debug_print(f"     friction_ratio: {friction_val if friction_val is not None else 'N/A':>10}")
-            debug_print(f"     exec_allow:     {exec_allow_val if exec_allow_val is not None else 'N/A':>10}")
-            debug_print(f"     gap_risk_score: {gap_risk_val if gap_risk_val is not None else 'N/A':>10}")
-            debug_print(f"")
-            debug_print(f"  MODEL OUTPUTS:")
-            debug_print(f"     prob_profit:    {prob_profit:>10.4f}  (threshold: {PROB_ENTRY_MIN})")
-            debug_print(f"     confidence:     {confidence:>10.4f}  (threshold: {CONF_ENTRY_MIN})")
-            debug_print(f"     entry_logit:    {entry_logit if entry_logit is not None else 'N/A':>10}")
-            debug_print(f"     entry_prob:     {entry_prob if entry_prob is not None else 'N/A':>10.4f}" if entry_prob else f"     entry_prob:     {'N/A':>10}")
-            debug_print(f"     exit_logit:     {exit_logit if exit_logit is not None else 'N/A':>10}")
-            debug_print(f"")
-            debug_print(f"  EXPECTED ENTRY SCORE (based on training formula):")
-            for s in score_breakdown:
-                debug_print(f"     {s}")
-            debug_print(f"     ─────────────────────────────")
-            debug_print(f"     TOTAL LOGIT:    {expected_entry_score:>10.2f}")
-            debug_print(f"     EXPECTED PROB:  {expected_entry_prob:>10.4f}")
-            debug_print(f"")
-            debug_print(f"  COMPARISON:")
-            if entry_prob is not None:
-                diff = entry_prob - expected_entry_prob
-                debug_print(f"     Model entry_prob:    {entry_prob:.4f}")
-                debug_print(f"     Expected entry_prob: {expected_entry_prob:.4f}")
-                debug_print(f"     Difference:          {diff:+.4f} ({'Model MORE aggressive' if diff > 0 else 'Model MORE conservative'})")
-            else:
-                debug_print(f"     Model entry_prob:    N/A (legacy 8-output model?)")
-            debug_print(f"{'='*80}\n")
-
-        # 3. Rule Signal Check
-        net_rule_signal = 0.0
-        rule_long = float(df["rule_long_consensus"].iloc[i]) if "rule_long_consensus" in df.columns else 0.0
-        rule_short = float(df["rule_short_consensus"].iloc[i]) if "rule_short_consensus" in df.columns else 0.0
-        rule_exit = float(df["rule_exit_consensus"].iloc[i]) if "rule_exit_consensus" in df.columns else 0.0
-        rule_block = float(df["rule_block_any"].iloc[i]) if "rule_block_any" in df.columns else 0.0
-        if rule_signals is not None and len(rule_signals.columns) > 0:
-            net_rule_signal = float(rule_signals.iloc[i].sum() / max(1, len(rule_signals.columns)))
-        else:
-            net_rule_signal = rule_long - rule_short
-        active_rules = []
-        if rule_signals is not None:
-            for col in rule_signals.columns:
-                if "signal" in col and rule_signals[col].iloc[i] != 0:
-                    active_rules.append(col.replace("_signal", ""))
-        
-        # 4. FUZZY LOGIC Entry Decision
-        # Score-based entry: accumulate evidence from multiple sources
-        # This allows entry even if not ALL conditions are perfect
         action = 0
         rejection_reason = None
-        
+        gate_reasons = []
+        entry_score = 0
+        pnl_dollar = 0.0
+        r_normalized = 0.0
+        entry_factors = []
+
         if position == 0:
-            # Calculate fuzzy entry score (0-100)
-            entry_score = 0
-            entry_factors = []
+            # 2. Fuzzy Entry Scoring
+            # confidence (30), prob_profit (30), rules (30), logit (10)
+            if confidence > 0.6:   entry_score += 30; entry_factors.append("Conf:HIGH")
+            elif confidence > 0.4: entry_score += 20; entry_factors.append("Conf:MED")
             
-            # Factor 1: Model Confidence (0-30 points)
-            if confidence > 0.7:
-                entry_score += 30
-                entry_factors.append(f"Confidence HIGH ({confidence:.2f}) +30")
-            elif confidence > 0.5:
-                entry_score += 20
-                entry_factors.append(f"Confidence MED ({confidence:.2f}) +20")
-            elif confidence > 0.3:
-                entry_score += 10
-                entry_factors.append(f"Confidence LOW ({confidence:.2f}) +10")
-            else:
-                entry_factors.append(f"Confidence WEAK ({confidence:.2f}) +0")
+            if prob_profit > 0.5:   entry_score += 30; entry_factors.append("Prob:HIGH")
+            elif prob_profit > 0.4: entry_score += 20; entry_factors.append("Prob:MED")
             
-            # Factor 2: Probability of Profit (0-30 points)
-            # Thresholds calibrated: model outputs prob_profit ~0.40-0.55 typically
-            if prob_profit > 0.55:         # Lowered from 0.6
-                entry_score += 30
-                entry_factors.append(f"ProbProfit HIGH ({prob_profit:.2f}) +30")
-            elif prob_profit > 0.45:
-                entry_score += 20
-                entry_factors.append(f"ProbProfit MED ({prob_profit:.2f}) +20")
-            elif prob_profit > 0.38:       # Lowered from 0.3 to catch more signals
-                entry_score += 10
-                entry_factors.append(f"ProbProfit LOW ({prob_profit:.2f}) +10")
-            else:
-                entry_factors.append(f"ProbProfit WEAK ({prob_profit:.2f}) +0")
+            if net_rule_signal > 0.4:  entry_score += 30; entry_factors.append("Rules:BULL")
+            elif net_rule_signal >= 0: entry_score += 15; entry_factors.append("Rules:NEUT")
             
-            # Factor 3: Rule Engine Signal (0-30 points)
-            if use_trade_rules:
-                if net_rule_signal > 0.5:
-                    entry_score += 30
-                    entry_factors.append(f"Rules BULLISH ({net_rule_signal:.2f}) +30")
-                elif net_rule_signal >= 0:
-                    entry_score += 15
-                    entry_factors.append(f"Rules NEUTRAL ({net_rule_signal:.2f}) +15")
-                else:
-                    entry_score += 0
-                    entry_factors.append(f"Rules BEARISH ({net_rule_signal:.2f}) +0")
-            else:
-                # Bypass rules: give neutral points to keep score consistent
-                entry_score += 15
-                entry_factors.append("Rules BYPASSED (Manual Toggle) +15")
-            
-            # Factor 4: Direction alignment (0-10 points)
-            max_loss_pct = all_outputs['max_loss_pct'] if all_outputs['max_loss_pct'] is not None else 1.0
-            if max_loss_pct <= 0.2:
-                entry_score += 10
-                entry_factors.append(f"MaxLoss LOW ({max_loss_pct:.2f}) +10")
-            elif max_loss_pct <= 0.35:
-                entry_score += 5
-                entry_factors.append(f"MaxLoss MED ({max_loss_pct:.2f}) +5")
-            else:
-                entry_factors.append(f"MaxLoss HIGH ({max_loss_pct:.2f}) +0")
+            if _sigmoid(all_outputs['entry_logit'] or 0) > 0.5: entry_score += 10
 
-            # Factor 5: Model Entry Logit (0-20 points) - NEW: Use trained entry signal
-            # Thresholds calibrated to model's actual output distribution (centered ~0.5)
-            entry_logit = all_outputs.get('entry_logit')
-            if entry_logit is not None:
-                entry_prob = 1.0 / (1.0 + np.exp(-entry_logit))  # sigmoid
-                if entry_prob > 0.55:      # Lowered from 0.7 - model rarely exceeds 0.6
-                    entry_score += 20
-                    entry_factors.append(f"EntryLogit HIGH ({entry_prob:.2f}) +20")
-                elif entry_prob > 0.48:    # Lowered from 0.5 - captures model's "positive" signals
-                    entry_score += 12
-                    entry_factors.append(f"EntryLogit MED ({entry_prob:.2f}) +12")
-                elif entry_prob > 0.40:    # Lowered from 0.3
-                    entry_score += 5
-                    entry_factors.append(f"EntryLogit LOW ({entry_prob:.2f}) +5")
-                else:
-                    entry_factors.append(f"EntryLogit WEAK ({entry_prob:.2f}) +0")
-            else:
-                # Legacy 8-output model fallback
-                entry_factors.append("EntryLogit N/A (legacy model) +0")
-
-            # Entry threshold: 40+ points (calibrated to model's conservative output distribution)
-            # Original 50 was too strict given model outputs confidence ~0.5-0.65, prob ~0.4-0.55
             ENTRY_THRESHOLD = 40
-            
-            # Hard gates to avoid degenerate churn
-            blocked = rule_block > 0
-            recent_exit = last_exit_bar is not None and (i - last_exit_bar) < MIN_BARS_BETWEEN_TRADES
-            gate_reasons = []
-            if entry_score < ENTRY_THRESHOLD:
-                gate_reasons.append(f"SCORE_TOO_LOW ({entry_score}/{ENTRY_THRESHOLD})")
-            if confidence < CONF_ENTRY_MIN:
-                gate_reasons.append(f"LOW_CONF ({confidence:.4f})")
-            if prob_profit < PROB_ENTRY_MIN:
-                gate_reasons.append(f"LOW_PROB ({prob_profit:.4f})")
-            if blocked and use_trade_rules:
-                gate_reasons.append("RULE_BLOCK")
-            if recent_exit:
-                gate_reasons.append("RECENT_EXIT")
-
-            # === DEBUG: Collect statistics for summary ===
-            if DEBUG_INFERENCE:
-                debug_stats['total_bars'] += 1
-                debug_stats['bars_with_position_0'] += 1
-                debug_stats['prob_profit'].append(prob_profit)
-                debug_stats['confidence'].append(confidence)
-                entry_logit_val = all_outputs.get('entry_logit')
-                if entry_logit_val is not None:
-                    debug_stats['entry_prob'].append(_sigmoid(entry_logit_val))
-                exit_logit_val = all_outputs.get('exit_logit')
-                if exit_logit_val is not None:
-                    debug_stats['exit_prob'].append(_sigmoid(exit_logit_val))
-                # Collect feature values
-                if 'ivr' in df.columns:
-                    debug_stats['ivr'].append(float(df['ivr'].iloc[i]))
-                if 'rsi_dyn' in df.columns:
-                    debug_stats['rsi'].append(float(df['rsi_dyn'].iloc[i]))
-                elif 'rsi' in df.columns:
-                    debug_stats['rsi'].append(float(df['rsi'].iloc[i]))
-                if 'adx_adaptive' in df.columns:
-                    debug_stats['adx'].append(float(df['adx_adaptive'].iloc[i]))
-                elif 'adx' in df.columns:
-                    debug_stats['adx'].append(float(df['adx'].iloc[i]))
-                if 'friction_ratio' in df.columns:
-                    debug_stats['friction_ratio'].append(float(df['friction_ratio'].iloc[i]))
-                if 'exec_allow' in df.columns:
-                    debug_stats['exec_allow'].append(float(df['exec_allow'].iloc[i]))
-                if 'gap_risk_score' in df.columns:
-                    debug_stats['gap_risk'].append(float(df['gap_risk_score'].iloc[i]))
-                # Count gate reasons
-                if gate_reasons:
-                    debug_stats['bars_blocked'] += 1
-                    for reason in gate_reasons:
-                        # Extract reason type (before the parenthesis)
-                        reason_type = reason.split('(')[0].strip()
-                        debug_stats['gate_reasons'][reason_type] = debug_stats['gate_reasons'].get(reason_type, 0) + 1
+            if entry_score < ENTRY_THRESHOLD: gate_reasons.append(f"SCORE_LOW({entry_score})")
+            if rule_block > 0: gate_reasons.append("BLOCK_SIGNAL")
+            if last_exit_bar and (i - last_exit_bar) < 15: gate_reasons.append("COOLDOWN")
 
             if not gate_reasons:
-                action = 1
-                spot = df['close'].iloc[i]
-                trade_num = len([t for t in trades if t.get('action') == 'OPEN']) + 1
-                
-                # Extract OPTIONS parameters from policy head
-                call_offset = all_outputs['call_off'] or 0
-                put_offset = all_outputs['put_off'] or 0
-                width = all_outputs['width'] or 5
-                te_suggested = all_outputs['te'] or 30
-                # Compute suggested strikes (offset from ATM)
-                short_call_strike = spot + (call_offset * spot * 0.01)  # ~1% per unit
-                long_call_strike = short_call_strike + width
-                short_put_strike = spot - (put_offset * spot * 0.01)
-                long_put_strike = short_put_strike - width
-                
-                # Calculate Iron Condor credit (total dollars for full position)
-                credit_received = IC_CREDIT_PER_SPREAD * IC_CONTRACTS * IC_MULTIPLIER
-                max_loss = (width - IC_CREDIT_PER_SPREAD) * IC_CONTRACTS * IC_MULTIPLIER
-                
-                # TRADE STATS with fuzzy score breakdown
-                
-                # Format Primitives & Reasons
-                reasoning = []
-                # 1. Primitives (from Triggering Rules)
-                if ruleset and active_rules:
-                    reasoning.append("  1) Primitives:")
-                    for r_id in active_rules:
-                        if r_id in ruleset.rules:
-                            rule = ruleset.rules[r_id]
-                            # Check features/primitives required
-                            reqs = rule.requires.features if hasattr(rule.requires, 'features') else []
-                            vals = []
-                            for f in reqs:
-                                if f in df.columns:
-                                    vals.append(f"{f}={df[f].iloc[i]:.4f}")
-                            if vals:
-                                reasoning.append(f"     Rule {r_id}: " + ", ".join(vals))
-                
-                # 2. Trade Rules
-                reasoning.append("  2) Trade Rules:")
-                if active_rules:
-                    reasoning.append(f"     Triggered: {', '.join(active_rules)}")
-                else:
-                    reasoning.append("     Triggered: None (Model Force?)")
-                    
-                # 3. Diffusion/Model (360 Degree View)
-                # Helper for interpretation
-                def interpret(val, low, high):
-                    return "Bullish" if val > high else ("Bearish" if val < low else "Neutral")
-                
-                # Sequence Info
-                # STANDARDIZED: use 'dt' (or 'timestamp' fallback)
-                time_col = 'dt' if 'dt' in df.columns else 'timestamp'
-                seq_start_time = df[time_col].iloc[i-SEQ_LEN] if time_col in df.columns else "N/A"
-                seq_end_time = df[time_col].iloc[i] if time_col in df.columns else "N/A"
+                chain = chains_by_ts.get(ts)
+                if chain is not None:
+                    legs = find_best_legs(chain, spot, all_outputs['call_off'], all_outputs['put_off'], all_outputs['width'])
+                    if legs:
+                        # Entry pricing from actual close prices
+                        entry_credit = (legs['short_call_close'] + legs['short_put_close'] - 
+                                        legs['long_call_close'] - legs['long_put_close'])
+                        if entry_credit > 0.10:
+                            trade_num = len([t for t in trades if t.get('action') == 'OPEN']) + 1
+                            open_trade = {
+                                'idx': i, 'type': 'IRON_CONDOR', 'action': 'OPEN', 'trade_id': f"IC-{trade_num}",
+                                'ts': ts, 'spot': spot, 'entry_credit_per_leg': entry_credit,
+                                'credit_total': entry_credit * IC_CONTRACTS * IC_MULTIPLIER,
+                                'max_loss': (legs['width'] - entry_credit) * IC_CONTRACTS * IC_MULTIPLIER,
+                                'dte': float(all_outputs['te'] or 14.0), 'entry_score': entry_score,
+                                'sc_sym': legs['short_call_symbol'], 'lc_sym': legs['long_call_symbol'],
+                                'sp_sym': legs['short_put_symbol'], 'lp_sym': legs['long_put_symbol'],
+                                'short_call': legs['short_call'], 'short_put': legs['short_put'],
+                                'long_call': legs['long_call'], 'long_put': legs['long_put'],
+                                'conf': confidence, 'prob': prob_profit, 'r_path': []
+                            }
+                            trades.append(open_trade)
+                            position, trade_entry_bar, action = 1, i, 1
+                            print(f"  >> ENTER #{trade_num} @ {ts}: Spot ${spot:.2f} | Credit ${entry_credit:.2f} | DTE {open_trade['dte']:.1f}")
+                        else: rejection_reason = "LOW_CREDIT"
+                    else: rejection_reason = "NO_LEGS_MATCH"
+                else: rejection_reason = "CHAIN_MISSING"
 
-                reasoning.append(f"  3) 360° PREDICTOR VIEW (Model Output):")
-                reasoning.append(f"     {'Predictor':<15} | {'Value':<10} | {'Interpretation'}")
-                reasoning.append(f"     {'-'*15}-+-{'-'*10}-+-{'-'*20}")
-                reasoning.append(f"     {'Confidence':<15} | {confidence:<10.4f} | {interpret(confidence, 0.3, 0.7)} (Threshold > 0.4)")
-                reasoning.append(f"     {'Prob Profit':<15} | {prob_profit:<10.4f} | {interpret(prob_profit, 0.3, 0.6)} (Threshold > 0.4)")
-                reasoning.append(f"     {'Max Loss %':<15} | {max_loss_pct:<10.4f} | {'Low' if max_loss_pct < 0.2 else 'High'}")
-                reasoning.append(f"     {'TE (DTE)':<15} | {te_suggested:<10.4f} | {'Short Term' if te_suggested < 7 else 'Standard'}")
-                reasoning.append(f"     {'Width':<15} | {width:<10.4f} | {'Wide' if width > 5 else 'Narrow'}")
-                reasoning.append(f"     {'Call Offset':<15} | {call_offset:<10.4f} | {call_offset:.1f}% OTM")
-                reasoning.append(f"     {'Put Offset':<15} | {put_offset:<10.4f} | {put_offset:.1f}% OTM")
-                
-                # 4. Fuzzy Logic & Sizing
-                reasoning.append(f"  4) DECISION LOGIC:")
-                reasoning.append(f"     Base Score:      {entry_score:.1f}/100 (Need {ENTRY_THRESHOLD})")
-                
-                # Position Sizing
-                pos_size_pct = 100.0
-                if use_fuzzy_sizing and 'position_size_mult' in df.columns:
-                    dampener = df['position_size_mult'].iloc[i]
-                    pos_size_pct = dampener * 100
-                    reasoning.append(f"     Chaos Dampener:  {dampener:.4f} (Adjusts Size)")
-                else:
-                    reasoning.append(f"     Chaos Dampener:  1.00 (BYPASSED or Unavailable)")
-                
-                reasoning.append(f"     Final Sizing:    {pos_size_pct:.1f}% of Max Allocation")
-                
-                reasoning_str = "\n".join(reasoning)
-
-                # Fix: Model trained with TE=0 target predicts ~0. Enforce min DTE.
-                DEFAULT_DTE = 14 # Hardcode default if not in config
-                if te_suggested < 1.0:
-                    te_suggested = DEFAULT_DTE
-                trade_dte = float(te_suggested)
-
-                trade_msg = f"""
-╔══════════════════════════════════════════════════════════════════════════════╗
-║ 🦅 IRON CONDOR #{trade_num} ENTRY @ Bar {i}
-║ Time:          {seq_end_time}
-╠══════════════════════════════════════════════════════════════════════════════╣
-║ SPOT:          ${spot:.2f}
-║ SEQUENCE:      {seq_start_time} -> {seq_end_time} ({SEQ_LEN} bars)
-║ FUZZY SCORE:   {entry_score}/100 (threshold: {ENTRY_THRESHOLD})
-╠─────────────────────────── DETAILED REASONING ───────────────────────────────╣
-{reasoning_str}
-╠─────────────────────────── IRON CONDOR SETUP ────────────────────────────────╣
-║   Short Call:  ${short_call_strike:.2f}  |  Long Call:  ${long_call_strike:.2f}
-║   Short Put:   ${short_put_strike:.2f}  |  Long Put:   ${long_put_strike:.2f}
-║   Width:       ${width:.2f}  |  DTE: {trade_dte:.1f} days
-╠─────────────────────────── P&L POTENTIAL ────────────────────────────────────╣
-║   Credit:      ${credit_received:,.2f} (Max Profit)
-║   Max Loss:    ${max_loss:,.2f}
-║   Contracts:   {IC_CONTRACTS}
-╚══════════════════════════════════════════════════════════════════════════════╝"""
-                print(trade_msg)
-                log_file.write(trade_msg + "\n")
-                
-                # Set DTE for expiration tracking
-                trade_entry_bar = i
-
-                trade_credit = credit_received  # Store for P&L calc
-                trade_max_loss = max_loss
-                
-                trade_id = f"IC-{trade_num}"
-                open_trade = {
-                    'idx': i, 
-                    'type': 'IRON_CONDOR', 
-                    'action': 'OPEN',
-                    'trade_id': trade_id,
-                    'spot': spot,
-                    'short_call': short_call_strike,
-                    'long_call': long_call_strike,
-                    'short_put': short_put_strike,
-                    'long_put': long_put_strike,
-                    'width': width,
-                    'dte': trade_dte,
-                    'credit': credit_received,
-                    'max_loss': max_loss,
-                    'entry_score': entry_score,
-                    'conf': float(confidence), 
-                    'prob': float(prob_profit),
-                    'rules': float(net_rule_signal),
-                    'pos_size_pct': float(pos_size_pct),
-                    'r_path': []
-                }
-                trades.append(open_trade)
-                legs = [
-                    {"right": "C", "side": "SELL", "strike": float(short_call_strike), "qty": int(IC_CONTRACTS)},
-                    {"right": "C", "side": "BUY", "strike": float(long_call_strike), "qty": int(IC_CONTRACTS)},
-                    {"right": "P", "side": "SELL", "strike": float(short_put_strike), "qty": int(IC_CONTRACTS)},
-                    {"right": "P", "side": "BUY", "strike": float(long_put_strike), "qty": int(IC_CONTRACTS)},
-                ]
-                feature_map = _feature_snapshot(x_seq)
-                _emit_trace_event(
-                    scope="ENTRY",
-                    decision_type="OPEN",
-                    intent="OPEN_CONDOR",
-                    trade_id=trade_id,
-                    spot_val=spot,
-                    legs=legs,
-                    entry_score_val=entry_score,
-                    prob_val=prob_profit,
-                    conf_val=confidence,
-                    net_rule_signal_val=net_rule_signal,
-                    dte_entry_val=trade_dte,
-                    dte_remaining_val=trade_dte,
-                    pnl_val=None,
-                    max_loss_val=max_loss,
-                    pos_size_pct_val=pos_size_pct,
-                    active_rules_list=active_rules,
-                    feature_map=feature_map,
-                    reason_text="entry"
-                )
-                _emit_trace_event(
-                    scope="SIZING",
-                    decision_type="SIZE_ONLY",
-                    intent="SIZE_ONLY",
-                    trade_id=trade_id,
-                    spot_val=spot,
-                    legs=legs,
-                    entry_score_val=entry_score,
-                    prob_val=prob_profit,
-                    conf_val=confidence,
-                    net_rule_signal_val=net_rule_signal,
-                    dte_entry_val=trade_dte,
-                    dte_remaining_val=trade_dte,
-                    pnl_val=None,
-                    max_loss_val=max_loss,
-                    pos_size_pct_val=pos_size_pct,
-                    active_rules_list=active_rules,
-                    feature_map=feature_map,
-                    reason_text="sizing"
-                )
-                position = 1
-            else:
-                # Rejection: record precise gate reasons
-                rejection_reason = " | ".join(gate_reasons)
-                rejection_factors = entry_factors
-        
         elif position == 1:
-            # Calculate remaining DTE
-            bars_held = i - trade_entry_bar if trade_entry_bar else 0
-            days_held = bars_held / BARS_PER_DAY
-            entry_dte = open_trade.get('dte') if open_trade else trade_dte
-            remaining_dte = entry_dte - days_held if entry_dte else 0
+            # 3. O(1) Pricing via mark_cache
+            entry = open_trade
+            symbols = [entry['sc_sym'], entry['lc_sym'], entry['sp_sym'], entry['lp_sym']]
+            marks = []
+            for s in symbols:
+                m = mark_cache.get((ts, s))
+                if m is None: m = last_known_mark.get(s, 0.0)
+                else: last_known_mark[s] = m
+                marks.append(m)
             
-            # Exit conditions: 1) Expiration, 2) Rule block/exit, 3) Model exit logit, 4) Low confidence, 5) Bearish rules
+            sc_m, lc_m, sp_m, lp_m = marks
+            current_cost = (sc_m + sp_m - lc_m - lp_m)
+            pnl_dollar = (entry['entry_credit_per_leg'] - current_cost) * IC_CONTRACTS * IC_MULTIPLIER
+            r_normalized = pnl_dollar / entry['max_loss'] if entry['max_loss'] > 0 else 0.0
+            entry['r_path'].append(float(r_normalized))
+
+            # Exit check
+            days_held = (i - trade_entry_bar) / BARS_PER_DAY
+            remaining_dte = entry['dte'] - days_held
             exit_reason = None
-            exit_logit = all_outputs.get('exit_logit')
-            exit_prob = 1.0 / (1.0 + np.exp(-exit_logit)) if exit_logit is not None else 0.0  # sigmoid
-
-            if remaining_dte <= 0:
-                exit_reason = f"EXPIRATION (DTE={remaining_dte:.1f})"
-            elif bars_held < MIN_HOLD_BARS:
-                exit_reason = None
-            elif rule_block > 0.5:
-                exit_reason = "RULE_BLOCK"
-            elif rule_exit > 0.5:
-                exit_reason = f"Rule Exit ({rule_exit:.2f})"
-            elif exit_logit is not None and exit_prob > 0.55:
-                # Model explicitly signals exit (threshold lowered from 0.7 to match output distribution)
-                exit_reason = f"Model Exit Signal ({exit_prob:.2f})"
-            elif confidence < 0.3:
-                exit_reason = f"Low Confidence ({confidence:.4f})"
-            elif net_rule_signal < -0.3:
-                exit_reason = f"Bearish Rules ({net_rule_signal:.2f})"
+            ep = _sigmoid(all_outputs['exit_logit'] or 0)
             
+            if remaining_dte <= 0: exit_reason = "EXPIRATION"
+            elif rule_block > 0.5: exit_reason = "RULE_BLOCK"
+            elif rule_exit > 0.5:  exit_reason = "RULE_EXIT"
+            elif ep > 0.6:         exit_reason = f"MODEL_SIGNAL({ep:.2f})"
+            elif r_normalized < -0.8: exit_reason = "STOP_LOSS"
+            elif r_normalized > 0.5:  exit_reason = "TAKE_PROFIT"
+
             if exit_reason:
-                action = -1
-                spot = df['close'].iloc[i]
-                
-                # Calculates Running Metrics
-                entry = open_trade if open_trade else trades[-1]
-                time_col = 'dt' if 'dt' in df.columns else 'timestamp'
-                entry_date = df[time_col].iloc[trade_entry_bar] if time_col in df.columns else "N/A"
-                
-                # Estimate P&L using Option Logic
-                days_elapsed = (i - trade_entry_bar) / BARS_PER_DAY
-                
-                pnl_dollar = estimate_condor_pnl(
-                    spot=spot,
-                    short_call=entry['short_call'],
-                    long_call=entry['long_call'],
-                    short_put=entry['short_put'],
-                    long_put=entry['long_put'],
-                    credit_received=entry['credit'],
-                    max_loss=entry['max_loss'],
-                    days_held=days_elapsed,
-                    total_dte=entry['dte']
-                )
-                
-                realized_pnl = pnl_dollar
-                is_win = realized_pnl > 0
-                status_icon = "✅ WIN" if is_win else "❌ LOSS"
-
-                # Define Return on Risk (ROI) for Expiration
-                pnl_pct = (realized_pnl / entry['max_loss']) * 100 if entry['max_loss'] > 0 else 0.0
-
-                # Update Stats
+                capital += pnl_dollar
                 stats['total_trades'] += 1
-                if is_win:
-                    stats['winners'] += 1
-                    stats['total_win_dollar'] = stats.get('total_win_dollar', 0.0) + realized_pnl
-                else:
-                    stats['losers'] += 1
-                    stats['total_loss_dollar'] = stats.get('total_loss_dollar', 0.0) + abs(realized_pnl)
+                if pnl_dollar > 0: stats['winners'] += 1; stats['total_win_dollar'] += pnl_dollar
+                else: stats['losers'] += 1; stats['total_loss_dollar'] += abs(pnl_dollar)
                 
-                # Realize PnL into capital at exit
-                capital += realized_pnl
-                stats['total_pnl_dollar'] = capital - starting_capital
+                stats['peak_capital'] = max(stats['peak_capital'], capital)
+                stats['max_dd_pct'] = max(stats['max_dd_pct'], (stats['peak_capital']-capital)/stats['peak_capital']*100 if stats['peak_capital']>0 else 0)
                 
-                # Check DD
-                stats['peak_capital'] = max(stats['peak_capital'], capital) # Approx equity
-                curr_equity = capital
-                curr_dd_dollar = stats['peak_capital'] - curr_equity
-                curr_dd_pct = (curr_dd_dollar / stats['peak_capital']) * 100 if stats['peak_capital'] > 0 else 0
-                stats['max_dd_pct'] = max(stats['max_dd_pct'], curr_dd_pct)
+                print(f"  << EXIT @ {ts}: PnL ${pnl_dollar:,.0f} | Reason: {exit_reason} | WR: {stats['winners']/stats['total_trades']*100:.1f}%")
                 
-                # Metrics Calculation
-                win_count = stats['winners']
-                loss_count = stats['losers']
-                total_count = stats['total_trades']
-                win_rate = (win_count / total_count) if total_count > 0 else 0
-                
-                avg_win = stats.get('total_win_dollar', 0.0) / win_count if win_count > 0 else 0
-                avg_loss = stats.get('total_loss_dollar', 0.0) / loss_count if loss_count > 0 else 0
-                
-                # Expectancy = (Win% * AvgWin) - (Loss% * AvgLoss)
-                expectancy = (win_rate * avg_win) - ((1 - win_rate) * avg_loss)
-                
-                # Running Sharpe (Trade-based)
-                # Mean(PnL) / Std(PnL) * sqrt(TradesPerYear?) -> Just use trade sharpe
-                # Not accurately tracking per-trade PnL list here for StdDev.
-                # using simplified Sharpe proxy: Expectancy / AvgLoss (sort of E-Ratio)
-                # Proper Sharpe requires variance tracking.
-                # Let's verify if we can list it.
-                if avg_loss > 0:
-                    sharpe_proxy = expectancy / avg_loss 
-                    sharpe_str = f"{sharpe_proxy:.2f}"
-                else:
-                    sharpe_proxy = 99.99
-                    sharpe_str = "Inf"
-
-                # --- TENSORBOARD LOGGING ---
-                step_idx = stats['total_trades']
-                tb_writer.add_scalar("Performance/Equity", curr_equity, step_idx)
-                tb_writer.add_scalar("Performance/Drawdown_Pct", curr_dd_pct, step_idx)
-                tb_writer.add_scalar("Performance/Win_Rate", win_rate, step_idx)
-                tb_writer.add_scalar("Trades/PnL_Dollar", realized_pnl, step_idx)
-                tb_writer.add_scalar("Trades/Expectancy", expectancy, step_idx)
-                tb_writer.add_scalar("Debug/Entry_Conf", trades[-1]['conf'], step_idx)
-
-                legs = [
-                    {"right": "C", "side": "BUY", "strike": float(entry.get('short_call', 0.0)), "qty": int(IC_CONTRACTS)},
-                    {"right": "C", "side": "SELL", "strike": float(entry.get('long_call', 0.0)), "qty": int(IC_CONTRACTS)},
-                    {"right": "P", "side": "BUY", "strike": float(entry.get('short_put', 0.0)), "qty": int(IC_CONTRACTS)},
-                    {"right": "P", "side": "SELL", "strike": float(entry.get('long_put', 0.0)), "qty": int(IC_CONTRACTS)}
-                ]
-                feature_map = _feature_snapshot(x_seq)
-
-                # Outcome labeling (ENTRY/EXIT/SIZING)
-                r_path = entry.get('r_path', [])
-                r_exit = float(realized_pnl / entry['max_loss']) if entry.get('max_loss', 0) > 0 else 0.0
-                entry_win = _entry_win_from_path(r_path)
-
-                r_future = None
-                dd_future = None
-                if i + EXIT_EVAL_HOLD_BARS < len(df):
-                    r_future_vals = []
-                    for j in range(i, min(i + EXIT_EVAL_HOLD_BARS, len(df) - 1) + 1):
-                        days_elapsed_f = (j - trade_entry_bar) / BARS_PER_DAY
-                        pnl_f = estimate_condor_pnl(
-                            spot=df['close'].iloc[j],
-                            short_call=entry['short_call'],
-                            long_call=entry['long_call'],
-                            short_put=entry['short_put'],
-                            long_put=entry['long_put'],
-                            credit_received=entry['credit'],
-                            max_loss=entry['max_loss'],
-                            days_held=days_elapsed_f,
-                            total_dte=entry['dte']
-                        )
-                        r_f = pnl_f / entry['max_loss'] if entry['max_loss'] > 0 else 0.0
-                        r_future_vals.append(float(r_f))
-                    r_future = r_future_vals[-1] if r_future_vals else None
-                    dd_future = min(r_future_vals) if r_future_vals else None
-
-                exit_win = _exit_win(r_exit, r_future, dd_future)
-                size_mult = entry.get('pos_size_pct', 100.0) / 100.0
-                min_r = min(r_path) if r_path else 0.0
-                sizing_win = _sizing_win(r_exit, min_r, size_mult)
-
-                _emit_trace_event(
-                    scope="EXIT",
-                    decision_type="CLOSE",
-                    intent="CLOSE_CONDOR",
-                    trade_id=entry.get('trade_id', f"IC-{stats['total_trades']}"),
-                    spot_val=spot,
-                    legs=legs,
-                    entry_score_val=entry.get('entry_score', 0.0),
-                    prob_val=entry.get('prob', 0.0),
-                    conf_val=entry.get('conf', 0.0),
-                    net_rule_signal_val=net_rule_signal,
-                    dte_entry_val=entry.get('dte', None),
-                    dte_remaining_val=remaining_dte,
-                    pnl_val=realized_pnl,
-                    max_loss_val=entry.get('max_loss', None),
-                    pos_size_pct_val=None,
-                    active_rules_list=active_rules,
-                    feature_map=feature_map,
-                    reason_text=exit_reason
-                )
-
-                # Emit ENTRY/SIZING eval events with outcomes
-                trade_id = entry.get('trade_id', f"IC-{stats['total_trades']}")
-                if entry_win is not None:
-                    _emit_trace_event(
-                        scope="ENTRY",
-                        decision_type="EVAL",
-                        intent="ENTRY_OUTCOME",
-                        trade_id=trade_id,
-                        spot_val=spot,
-                        legs=legs,
-                        entry_score_val=entry.get('entry_score', 0.0),
-                        prob_val=entry.get('prob', 0.0),
-                        conf_val=entry.get('conf', 0.0),
-                        net_rule_signal_val=net_rule_signal,
-                        dte_entry_val=entry.get('dte', None),
-                        dte_remaining_val=remaining_dte,
-                        pnl_val=1.0 if entry_win else -1.0,
-                        max_loss_val=1.0,
-                        pos_size_pct_val=entry.get('pos_size_pct', None),
-                        active_rules_list=active_rules,
-                        feature_map=feature_map,
-                        reason_text="entry_eval"
-                    )
-                if sizing_win is not None:
-                    _emit_trace_event(
-                        scope="SIZING",
-                        decision_type="EVAL",
-                        intent="SIZING_OUTCOME",
-                        trade_id=trade_id,
-                        spot_val=spot,
-                        legs=legs,
-                        entry_score_val=entry.get('entry_score', 0.0),
-                        prob_val=entry.get('prob', 0.0),
-                        conf_val=entry.get('conf', 0.0),
-                        net_rule_signal_val=net_rule_signal,
-                        dte_entry_val=entry.get('dte', None),
-                        dte_remaining_val=remaining_dte,
-                        pnl_val=1.0 if sizing_win else -1.0,
-                        max_loss_val=1.0,
-                        pos_size_pct_val=entry.get('pos_size_pct', None),
-                        active_rules_list=active_rules,
-                        feature_map=feature_map,
-                        reason_text="sizing_eval"
-                    )
-
-                entry_spot = entry.get('spot', 0.0)
-                exit_msg = f"""
-╔══════════════════════════════════════════════════════════════════════════════╗
-║ 🔔 IRON CONDOR EXIT @ Bar {i}
-╠══════════════════════════════════════════════════════════════════════════════╣
-║ Spot Price:    ${spot:.2f} (Entry: ${entry_spot:.2f})
-║ Exit Reason:   {exit_reason}
-║ Result:        {status_icon} (PnL: ${realized_pnl:,.0f})
-╠─────────────────────────── PERFORMANCE METRICS ──────────────────────────────╣
-║ 1) Trades:     {total_count} (W: {win_count} {win_rate*100:.1f}% | L: {loss_count})
-║ 2) Net P&L:    ${stats['total_pnl_dollar']:,.2f}
-║ 3) Drawdown:   {curr_dd_pct:.2f}% (Max: {stats['max_dd_pct']:.2f}%)
-║ 4) NP/DD:      {stats['total_pnl_dollar'] / curr_dd_dollar if curr_dd_dollar > 1 else 0:.2f}
-║ 5) Expectancy: ${expectancy:.2f}
-║ 6) Sharpe (Tr):{sharpe_str:>5} (Proxy)
-╚══════════════════════════════════════════════════════════════════════════════╝"""
-                print(exit_msg)
-                log_file.write(exit_msg + "\n")
-                
-                close_trade = {
-                    'idx': i, 
-                    'type': 'IRON_CONDOR',
-                    'action': 'CLOSE',
-                    'spot': spot,
-                    'reason': exit_reason,
-                    'days_held': days_held,
-                    'dte_entry': entry.get('dte', None),
-                    'dte_remaining': remaining_dte,
-                    'short_call': entry.get('short_call'),
-                    'long_call': entry.get('long_call'),
-                    'short_put': entry.get('short_put'),
-                    'long_put': entry.get('long_put'),
-                    'width': entry.get('width'),
-                    'credit': entry.get('credit'),
-                    'max_loss': entry.get('max_loss'),
-                    'pnl_pct': pnl_pct
-                }
-                trades.append(close_trade)
-                position = 0
-                trade_entry_bar = None
-                trade_dte = None
-                open_trade = None
+                close_rec = entry.copy()
+                close_rec.update({'action': 'CLOSE', 'exit_ts': ts, 'exit_spot': spot, 'exit_reason': exit_reason, 'realized_pnl': pnl_dollar})
+                trades.append(close_rec)
+                position, trade_entry_bar, action = 0, None, -1
                 last_exit_bar = i
-        
-        # LOG: ALL bars to file, first N to console
         spot = df['close'].iloc[i]
         entry_logit_val = all_outputs.get('entry_logit')
         exit_logit_val = all_outputs.get('exit_logit')

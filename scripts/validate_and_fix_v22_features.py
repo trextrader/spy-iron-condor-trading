@@ -21,25 +21,75 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Tuple
 
-# === VALIDATION CONFIGURATION ===
+# === VALIDATION CONFIGURATION (V2.2 Canonical) ===
 VALIDATION_SCHEMA = {
-    'exec_allow':       {'type': 'binary', 'bounds': [0, 1], 'require_var': False},
-    'risk_override':    {'type': 'binary', 'bounds': [0, 1], 'require_var': False},
-    'psar_trend':       {'type': 'binary', 'bounds': [-1, 1], 'require_var': False},
-    'friction_ratio':   {'type': 'float',  'bounds': [0, 1], 'require_var': True, 'min_std': 0.001},
-    'gap_risk_score':   {'type': 'float',  'bounds': [0, 1], 'require_var': True, 'min_std': 0.001},
-    'rsi_dyn':          {'type': 'float',  'bounds': [0, 100], 'require_var': True, 'min_std': 0.1},
-    'adx_adaptive':     {'type': 'float',  'bounds': [0, 100], 'require_var': True, 'min_std': 0.1},
-    'ivr':              {'type': 'float',  'bounds': [0, 100], 'require_var': True, 'min_std': 0.1, 'no_recompute': True},
-    'cmf':              {'type': 'float',  'bounds': [-1, 1], 'require_var': True, 'min_std': 0.01},  # Replaces volume_ratio
-    'pressure_up':      {'type': 'float',  'bounds': [0, 1], 'require_var': True, 'min_std': 0.01},  # Replaces bid
-    'pressure_down':    {'type': 'float',  'bounds': [0, 1], 'require_var': True, 'min_std': 0.01},  # Replaces ask
-    'bb_percentile':    {'type': 'float',  'bounds': [0, 100], 'require_var': True, 'min_std': 0.1},
-    'macd_norm':        {'type': 'float',  'require_var': True, 'min_std': 0.01},
+    # 1. Market Primitives (5)
+    'open':           {'type': 'price', 'bounds': [0, 1000]},
+    'high':           {'type': 'price', 'bounds': [0, 1000]},
+    'low':            {'type': 'price', 'bounds': [0, 1000]},
+    'close':          {'type': 'price', 'bounds': [0, 1000]},
+    'volume':         {'type': 'float', 'bounds': [0, 1e9]},
+
+    # 2. Options / Chain State (9)
+    'delta':          {'type': 'float', 'bounds': [-1.1, 1.1]},
+    'gamma':          {'type': 'float', 'bounds': [0, 10]},
+    'vega':           {'type': 'float', 'bounds': [0, 10]},
+    'theta':          {'type': 'float', 'bounds': [-100, 10]},
+    'iv':             {'type': 'float', 'bounds': [0, 10]},
+    'ivr':            {'type': 'float', 'bounds': [0, 100], 'require_var': True, 'min_std': 0.1},
+    'spread_ratio':   {'type': 'float', 'bounds': [0, 1], 'require_var': True},
+    'te':             {'type': 'float', 'bounds': [0, 365]},
+    'strike':         {'type': 'price', 'bounds': [0, 1000]},
+
+    # 3. Strategy / Targets / Risk (2)
+    'target_spot':    {'type': 'price', 'bounds': [0, 1000]},
+    'max_dd_60m':     {'type': 'float', 'bounds': [-1, 1]},
+
+    # 4. Dynamic / Regime-Aware Features (16)
+    'log_return':     {'type': 'float', 'bounds': [-0.5, 0.5]},
+    'vol_ewma':       {'type': 'float', 'bounds': [0, 1]},
+    'ret_z':          {'type': 'float', 'bounds': [-100, 100]},
+    'atr_pct':        {'type': 'float', 'bounds': [0, 0.5]},
+    'kappa_proxy':    {'type': 'float', 'bounds': [-100, 100]},
+    'vol_energy':     {'type': 'float', 'bounds': [0, 100]},
+    'rsi_dyn':        {'type': 'float', 'bounds': [0, 100], 'require_var': True, 'min_std': 0.1},
+    'adx_adaptive':   {'type': 'float', 'bounds': [0, 100], 'require_var': True, 'min_std': 0.1},
+    'psar_adaptive':  {'type': 'float', 'bounds': [-100, 100]},
+    'bb_mu_dyn':      {'type': 'price', 'bounds': [0, 1000]},
+    'bb_sigma_dyn':   {'type': 'float', 'bounds': [0, 100]},
+    'bb_lower_dyn':   {'type': 'price', 'bounds': [0, 1000]},
+    'bb_upper_dyn':   {'type': 'price', 'bounds': [0, 1000]},
+    'stoch_k_dyn':    {'type': 'float', 'bounds': [0, 100]},
+    'consolidation_score': {'type': 'float', 'bounds': [0, 1]},
+    'breakout_score': {'type': 'float', 'bounds': [-1.1, 1.1]},
+
+    # 5. V2.2 Primitive Outputs (20)
+    'bb_percentile':  {'type': 'float', 'bounds': [0, 100], 'require_var': True, 'min_std': 0.1},
+    'bw_expansion_rate': {'type': 'float', 'bounds': [-10, 10]},
+    'cmf':            {'type': 'float', 'bounds': [-1.1, 1.1]},
+    'pressure_up':    {'type': 'float', 'bounds': [0, 2]},
+    'pressure_down':  {'type': 'float', 'bounds': [0, 2]},
+    'friction_ratio': {'type': 'float', 'bounds': [0, 1], 'require_var': True, 'min_std': 0.001},
+    'exec_allow':     {'type': 'binary', 'bounds': [0, 1]},
+    'gap_risk_score': {'type': 'float', 'bounds': [0, 1], 'require_var': True, 'min_std': 0.001},
+    'risk_override':  {'type': 'binary', 'bounds': [0, 1]},
+    'iv_confidence':  {'type': 'float', 'bounds': [0, 1.1]},
+    'mtf_consensus':  {'type': 'float', 'bounds': [-1.1, 1.1]},
+    'macd_norm':      {'type': 'float', 'bounds': [-10, 10]},
+    'macd_signal_norm': {'type': 'float', 'bounds': [-10, 10]},
+    'macd_histogram': {'type': 'float', 'bounds': [-10, 10]},
+    'plus_di':        {'type': 'float', 'bounds': [0, 100]},
+    'minus_di':       {'type': 'float', 'bounds': [0, 100]},
+    'psar_trend':     {'type': 'binary', 'bounds': [-1, 1]},
+    'psar_reversion_mu': {'type': 'float', 'bounds': [0, 1]},
+    'chaos_membership': {'type': 'float', 'bounds': [0, 1]},
+    'position_size_mult': {'type': 'float', 'bounds': [0, 1.1]},
+    'fuzzy_reversion_11': {'type': 'float', 'bounds': [0, 1]},
+    'beta1_norm_stub': {'type': 'float', 'bounds': [-10, 10]},
 }
 
-# Columns to drop (replaced by new features)
-DEPRECATED_COLS = ['volume_ratio', 'bid', 'ask']
+# Columns to drop (replaced by new primitives or moved to sub-folders)
+DEPRECATED_COLS = ['volume_ratio', 'bid', 'ask', 'bandwidth', 'log_return_calc']
 
 VALIDATION_COLS = list(VALIDATION_SCHEMA.keys())
 
@@ -191,10 +241,13 @@ def main():
 
     print(f"\n[START] Auditing (Memory Optimized): {args.input}")
     
-    # 🕵️ MEMORY SAVER 4: Use float32 on load to halve memory footprint
-    df = pd.read_csv(args.input)
-    for col in df.select_dtypes(include=[np.float64]).columns:
-        df[col] = df[col].astype(np.float32)
+    # 🕵️ MEMORY SAVER 4: Load with float32 directly to avoid peak RAM spike
+    print(f"   [LOAD] Initializing 10M-row streaming load...")
+    # Get headers first to determine dtypes
+    headers = pd.read_csv(args.input, nrows=0).columns
+    dtype_dict = {col: np.float32 for col in headers if col not in ['dt', 'timestamp', 'option_symbol', 'symbol', 'call_put']}
+    
+    df = pd.read_csv(args.input, dtype=dtype_dict, low_memory=False)
     
     report_pre = validate_columns(df)
     has_fails = any(v['is_fail'] for v in report_pre.values())
