@@ -245,7 +245,9 @@ def main():
     print(f"   [LOAD] Initializing 10M-row streaming load...")
     # Get headers first to determine dtypes
     headers = pd.read_csv(args.input, nrows=0).columns
-    dtype_dict = {col: np.float32 for col in headers if col not in ['dt', 'timestamp', 'option_symbol', 'symbol', 'call_put']}
+    # Explicitly exclude metadata columns from float32 coercion
+    exclude_cols = ['dt', 'timestamp', 'option_symbol', 'symbol', 'call_put', 'expiration', 'Date', 'time', 'sym']
+    dtype_dict = {col: np.float32 for col in headers if col not in exclude_cols}
     
     df = pd.read_csv(args.input, dtype=dtype_dict, low_memory=False)
     
