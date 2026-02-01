@@ -4,7 +4,7 @@
 # This script ensures the command is not truncated and the data exists.
 
 DATA_PATH="data/processed/mamba_institutional_2025_1m_v22.csv"
-LOG_FILE="train_v22_2M.log"
+LOG_FILE="train_v22_3M.log"
 
 echo "[START] Validating environment..."
 if [ ! -f "$DATA_PATH" ]; then
@@ -15,12 +15,12 @@ if [ ! -f "$DATA_PATH" ]; then
 fi
 
 echo "[OK] Found dataset."
-echo "[RUN] Starting training (2M ROWS) in background..."
+echo "[RUN] Starting training (3M ROWS) in background..."
 
 nohup python -u intelligence/train_condor_brain.py \
   --local-data "$DATA_PATH" \
-  --output models/cb_cde_discovery_v22_2M.pth \
-  --max-rows 2000000 \
+  --output models/cb_cde_discovery_v22_3M.pth \
+  --max-rows 3000000 \
   --use-predicate-discovery \
   --predicate-slots 2048 \
   --max-active-predicates 256 \
@@ -38,6 +38,10 @@ nohup python -u intelligence/train_condor_brain.py \
   --patience 5 \
   --tensorboard \
   --monitor \
+  --save-on-batch-loss 1.0 \
+  > "$LOG_FILE" 2>&1 &
+
+echo "[OK] Training started. Monitor with: tail -f $LOG_FILE"
   --export-epoch-plots \
   --export-dir training_exports \
   > "$LOG_FILE" 2>&1 &
