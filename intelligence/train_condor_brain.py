@@ -1372,6 +1372,7 @@ def train_condor_brain(args):
                 # Log prediction vs actual scatter plots as images
                 if should_plot:
                     try:
+                        pbar.write(f"  [Monitor] Generating diagnostic plots for TensorBoard...")
                         import matplotlib
                         matplotlib.use('Agg')
                         import matplotlib.pyplot as plt
@@ -1433,6 +1434,10 @@ def train_condor_brain(args):
                             img_array = np.array(img)
                             plt.close(fig)
                             tb_writer.add_image('Horizon/Trajectory', img_array, global_step, dataformats='HWC')
+                        
+                        pbar.write(f"  [Monitor] Diagnostic plots complete.")
+                    except Exception as e:
+                        pbar.write(f"  [Warning] Failed to generate plots: {e}")
                             
                         # --- LOG EXPERT SPECIFIC PREDICTIONS ---
                         if samples.get('expert_preds') is not None:
