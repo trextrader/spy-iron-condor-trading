@@ -879,7 +879,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         spot = unique_bars['close'].iloc[i]
         
         all_outputs = {
-            'call_off': pol[0], 'put_off': pol[1], 'width': pol[2], 'te': pol[3],
+            'call_off': pol[0], 'put_off': pol[1], 'width': pol[2], 
+            'te': pol[3] * 45.0,  # DENORMALIZE DTE: 0-1 -> 0-45 days
             'prob_profit': pol[4], 'expected_roi': pol[5], 'max_loss_pct': pol[6],
             'confidence': pol[7], 'entry_logit': pol[8], 'exit_logit': pol[9],
         }
