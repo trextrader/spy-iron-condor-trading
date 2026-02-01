@@ -1102,6 +1102,8 @@ def train_condor_brain(args):
                 
                 # Log to stdout (briefly)
                 pbar.write(f"  [SAVE] New Best Batch Loss: {_loss_val:.4f} (was {prev_best:.4f}) -> {_fname}")
+                pbar.write(f"  ⚡ [FAST-TRACK] Breaking epoch early to validate and proceed to next epoch...")
+                break # Short-circuit this epoch to validate immediately!
             
             # Update throughput display and LOG EXPLICITLY to stdout for background visibility
             if (batch_idx + 1) % args.log_every == 0:
