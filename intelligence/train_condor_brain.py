@@ -849,6 +849,12 @@ def train_condor_brain(args):
         epoch_start = time.time()
         optimizer.zero_grad(set_to_none=True)  # Zero at start of epoch
         
+        # Prepare epoch export directory (moved from end-of-epoch)
+        viz_base = args.export_dir if args.export_dir else "monitor_plots"
+        epoch_export_dir = os.path.join(viz_base, f"epoch_{epoch+1}")
+        if args.export_epoch_plots:
+            os.makedirs(epoch_export_dir, exist_ok=True)
+        
         # Throughput monitoring
         _tp_last_t = time.time()
         _tp_start_t = time.time()
@@ -1095,7 +1101,10 @@ def train_condor_brain(args):
                 
                 # Display and Save
                 pbar.set_description(f"Epoch {epoch+1} [plotting]")
-                viz_dir = args.export_dir if args.export_dir else "monitor_plots"
+                
+                # Use epoch subfolder if exports enabled, else use base dir
+                viz_dir = epoch_export_dir if args.export_epoch_plots else viz_base
+                
                 display_predictions_inline(
                     samples, epoch + 1, args.epochs, quick_losses, 
                     plot_dir=viz_dir, batch_idx=batch_idx + 1
@@ -1528,8 +1537,7 @@ def train_condor_brain(args):
 
         # === EXPORT EPOCH PLOTS AND METRICS TO FILES ===
         if args.export_epoch_plots:
-            epoch_export_dir = os.path.join(args.export_dir, f"epoch_{epoch+1}")
-            os.makedirs(epoch_export_dir, exist_ok=True)
+            # (Directory already created at start of epoch)
 
             # Export metrics CSV
             metrics_csv_path = os.path.join(epoch_export_dir, "metrics.csv")
