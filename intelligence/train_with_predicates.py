@@ -49,6 +49,10 @@ from datetime import datetime
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from intelligence.canonical_feature_registry import FEATURE_COLS_V22, VERSION_V22
+from intelligence.predicate_discovery import (
+    PredicateSelector, evaluate_predicates_gpu, 
+    TemplateType, ArithOp, CompareOp, LogicOp, Atom, Predicate
+)
 
 # Try to import existing CondorBrain components
 try:
@@ -57,6 +61,9 @@ try:
 except ImportError:
     HAS_CONDOR_BRAIN = False
     HAS_CDE = False
+
+# Using discovery components from intelligence.predicate_discovery
+
 
 # =============================================================================
 # PREDICATE GRAMMAR (Inline for self-contained training)
@@ -68,50 +75,9 @@ IDX_TO_FIELD = {i: f for i, f in enumerate(ALL_FIELDS)}
 N_FIELDS = len(ALL_FIELDS)
 
 
-class ArithOp(IntEnum):
-    NONE = 0
-    ADD = 1
-    SUB = 2
-    MUL = 3
-    DIV = 4
-
-
-class CompareOp(IntEnum):
-    GT = 0
-    LT = 1
-    GTE = 2
-    LTE = 3
-    EQ = 4
-
-
-class LogicOp(IntEnum):
-    AND = 0
-    OR = 1
-
-
 COMPARE_SYMBOLS = ['>', '<', '>=', '<=', '==']
 ARITH_SYMBOLS = ['', '+', '-', '*', '/']
 LOGIC_SYMBOLS = ['AND', 'OR']
-
-
-@dataclass
-class Atom:
-    field1: int
-    lookback1: int
-    arith_op: ArithOp
-    field2: int = 0
-    lookback2: int = 0
-
-    def is_simple(self) -> bool:
-        return self.arith_op == ArithOp.NONE
-
-    def __str__(self) -> str:
-        f1 = IDX_TO_FIELD.get(self.field1, f"F{self.field1}")
-        if self.is_simple():
-            return f"{f1}[{self.lookback1}]"
-        f2 = IDX_TO_FIELD.get(self.field2, f"F{self.field2}")
-        op = ARITH_SYMBOLS[self.arith_op]
-        return f"{{{f1}[{self.lookback1}]{op}{f2}[{self.lookback2}]}}"
 
 
 @dataclass
@@ -122,297 +88,6 @@ class Inequality:
 
     def __str__(self) -> str:
         return f"{self.left} {COMPARE_SYMBOLS[self.compare]} {self.right}"
-
-
-@dataclass
-class Predicate:
-    inequalities: List[Inequality]
-    logic_ops: List[LogicOp]
-
-    def __str__(self) -> str:
-        if len(self.inequalities) == 1:
-            return str(self.inequalities[0])
-        parts = [str(self.inequalities[0])]
-        for ineq, op in zip(self.inequalities[1:], self.logic_ops):
-            parts.append(f" {LOGIC_SYMBOLS[op]} {ineq}")
-        return ''.join(parts)
-
-
-# =============================================================================
-# DIFFERENTIABLE PREDICATE SELECTOR
-# =============================================================================
-
-class PredicateSelector(nn.Module):
-    """
-    Learns which inequality predicates are useful from a combinatorial search space.
-
-    Each "slot" learns to decode into inequality parameters:
-    - Left atom (field, lookback, optional arithmetic)
-    - Compare operator
-    - Right atom (field, lookback, optional arithmetic)
-
-    Importance weights control which predicates are active.
-    Sparsity loss encourages finding minimal predicate sets.
-    """
-
-    def __init__(
-        self,
-        n_slots: int = 2048,
-        max_active: int = 256,
-        d_embed: int = 128,
-        n_fields: int = N_FIELDS,
-        max_lookback: int = 128,
-        temperature: float = 1.0
-    ):
-        super().__init__()
-
-        self.n_slots = n_slots
-        self.max_active = max_active
-        self.n_fields = n_fields
-        self.max_lookback = max_lookback
-        self.temperature = temperature
-
-        # Learnable predicate embeddings
-        self.predicate_embeddings = nn.Parameter(torch.randn(n_slots, d_embed) * 0.02)
-
-        # Shared decoder
-        self.decoder = nn.Sequential(
-            nn.Linear(d_embed, d_embed * 2),
-            nn.GELU(),
-            nn.LayerNorm(d_embed * 2),
-            nn.Linear(d_embed * 2, d_embed * 2),
-            nn.GELU(),
-        )
-
-        # Parameter heads
-        self.left_field1 = nn.Linear(d_embed * 2, n_fields)
-        self.left_lookback1 = nn.Linear(d_embed * 2, max_lookback + 1)
-        self.left_arith = nn.Linear(d_embed * 2, 5)
-        self.left_field2 = nn.Linear(d_embed * 2, n_fields)
-        self.left_lookback2 = nn.Linear(d_embed * 2, max_lookback + 1)
-
-        self.compare_op = nn.Linear(d_embed * 2, 5)
-
-        self.right_field1 = nn.Linear(d_embed * 2, n_fields)
-        self.right_lookback1 = nn.Linear(d_embed * 2, max_lookback + 1)
-        self.right_arith = nn.Linear(d_embed * 2, 5)
-        self.right_field2 = nn.Linear(d_embed * 2, n_fields)
-        self.right_lookback2 = nn.Linear(d_embed * 2, max_lookback + 1)
-
-        # Importance scores (learnable sparsity)
-        self.importance_logits = nn.Parameter(torch.zeros(n_slots))
-
-    def _gumbel_sample(self, logits: torch.Tensor) -> torch.Tensor:
-        """Differentiable sampling using Gumbel-softmax."""
-        if self.training:
-            probs = F.gumbel_softmax(logits, tau=self.temperature, hard=True)
-            indices = (probs * torch.arange(logits.size(-1), device=logits.device, dtype=logits.dtype)).sum(-1)
-        else:
-            indices = logits.argmax(-1).float()
-        return indices
-
-    def forward(self, return_params: bool = False):
-        """
-        Returns:
-            importance: (n_slots,) importance weights
-            params: (n_slots, 11) predicate parameters if return_params=True
-        """
-        importance = torch.sigmoid(self.importance_logits)
-
-        if not return_params:
-            return importance, None
-
-        hidden = self.decoder(self.predicate_embeddings)
-
-        params = torch.stack([
-            self._gumbel_sample(self.left_field1(hidden)),
-            self._gumbel_sample(self.left_lookback1(hidden)),
-            self._gumbel_sample(self.left_arith(hidden)),
-            self._gumbel_sample(self.left_field2(hidden)),
-            self._gumbel_sample(self.left_lookback2(hidden)),
-            self._gumbel_sample(self.compare_op(hidden)),
-            self._gumbel_sample(self.right_field1(hidden)),
-            self._gumbel_sample(self.right_lookback1(hidden)),
-            self._gumbel_sample(self.right_arith(hidden)),
-            self._gumbel_sample(self.right_field2(hidden)),
-            self._gumbel_sample(self.right_lookback2(hidden)),
-        ], dim=-1)
-
-        return importance, params
-
-    def sparsity_loss(self) -> torch.Tensor:
-        """L1 penalty on active predicates."""
-        return torch.sigmoid(self.importance_logits).sum()
-
-    def get_active_predicates(
-        self,
-        threshold: float = 0.1,
-        max_return: int = None
-    ) -> Tuple[List[Predicate], np.ndarray, List[str]]:
-        """Extract human-readable predicates above importance threshold."""
-        self.eval()
-        with torch.no_grad():
-            importance, params = self.forward(return_params=True)
-
-            mask = importance > threshold
-            active_idx = torch.where(mask)[0]
-
-            if len(active_idx) == 0:
-                return [], np.array([]), []
-
-            active_importance = importance[active_idx]
-            sort_idx = torch.argsort(active_importance, descending=True)
-            active_idx = active_idx[sort_idx]
-
-            if max_return and len(active_idx) > max_return:
-                active_idx = active_idx[:max_return]
-
-            active_params = params[active_idx].cpu().numpy().astype(int)
-            active_importance = importance[active_idx].cpu().numpy()
-
-            predicates = []
-            names = []
-
-            for i, p in enumerate(active_params):
-                left = Atom(p[0], p[1], ArithOp(p[2]), p[3], p[4])
-                right = Atom(p[6], p[7], ArithOp(p[8]), p[9], p[10])
-                ineq = Inequality(left, CompareOp(p[5]), right)
-                pred = Predicate([ineq], [])
-                predicates.append(pred)
-                names.append(f"{pred} (imp={active_importance[i]:.3f})")
-
-            return predicates, active_importance, names
-
-
-# =============================================================================
-# PREDICATE EVALUATOR (Vectorized for GPU)
-# =============================================================================
-
-def evaluate_predicates_gpu(
-    data: torch.Tensor,  # (batch, seq, n_fields) or (N, n_fields)
-    params: torch.Tensor,  # (K, 11) predicate parameters
-    importance: torch.Tensor,  # (K,) importance weights
-    max_active: int = 256,
-    eps: float = 1e-8
-) -> torch.Tensor:
-    """
-    Evaluate predicates on GPU using vectorized operations.
-
-    This is a differentiable approximation that allows gradients to flow
-    back to the predicate selector.
-
-    Args:
-        data: Input data tensor
-        params: Predicate parameters (K predicates × 11 params)
-        importance: Importance weights for each predicate
-        max_active: Maximum active predicates
-
-    Returns:
-        (batch, seq, max_active) or (N, max_active) predicate activations
-    """
-    # Handle 2D vs 3D input
-    if data.dim() == 2:
-        data = data.unsqueeze(0)  # (1, N, F)
-        squeeze_out = True
-    else:
-        squeeze_out = False
-
-    batch, seq_len, n_fields = data.shape
-    K = params.shape[0]
-    device = data.device
-
-    # Select top-K by importance
-    top_k = min(max_active, K)
-    _, top_idx = torch.topk(importance, top_k)
-    active_params = params[top_idx]  # (top_k, 11)
-    active_importance = importance[top_idx]  # (top_k,)
-
-    # Extract parameters
-    l_f1 = active_params[:, 0].long()  # (top_k,)
-    l_n1 = active_params[:, 1].long()
-    l_op = active_params[:, 2].long()
-    l_f2 = active_params[:, 3].long()
-    l_n2 = active_params[:, 4].long()
-    cmp = active_params[:, 5].long()
-    r_f1 = active_params[:, 6].long()
-    r_n1 = active_params[:, 7].long()
-    r_op = active_params[:, 8].long()
-    r_f2 = active_params[:, 9].long()
-    r_n2 = active_params[:, 10].long()
-
-    # Max lookback for this batch
-    max_lb = torch.max(torch.stack([l_n1, l_n2, r_n1, r_n2])).item()
-    max_lb = min(max_lb, seq_len - 1)
-
-    # Initialize output
-    result = torch.zeros(batch, seq_len, max_active, device=device, dtype=data.dtype)
-
-    # Evaluate predicates (vectorized over batch and predicates)
-    for t in range(max_lb, seq_len):
-        # Gather field values at lookback positions for all predicates
-        # data: (batch, seq, n_fields)
-        # We need data[b, t - lookback, field] for each predicate
-
-        # Left atom value
-        left_val = torch.zeros(batch, top_k, device=device, dtype=data.dtype)
-        for k in range(top_k):
-            t_l1 = max(0, t - l_n1[k].item())
-            left_val[:, k] = data[:, t_l1, l_f1[k]]
-
-            if l_op[k] > 0:  # Compound atom
-                t_l2 = max(0, t - l_n2[k].item())
-                val2 = data[:, t_l2, l_f2[k]]
-                if l_op[k] == 1:  # ADD
-                    left_val[:, k] = left_val[:, k] + val2
-                elif l_op[k] == 2:  # SUB
-                    left_val[:, k] = left_val[:, k] - val2
-                elif l_op[k] == 3:  # MUL
-                    left_val[:, k] = left_val[:, k] * val2
-                elif l_op[k] == 4:  # DIV
-                    left_val[:, k] = left_val[:, k] / (val2 + eps)
-
-        # Right atom value
-        right_val = torch.zeros(batch, top_k, device=device, dtype=data.dtype)
-        for k in range(top_k):
-            t_r1 = max(0, t - r_n1[k].item())
-            right_val[:, k] = data[:, t_r1, r_f1[k]]
-
-            if r_op[k] > 0:
-                t_r2 = max(0, t - r_n2[k].item())
-                val2 = data[:, t_r2, r_f2[k]]
-                if r_op[k] == 1:
-                    right_val[:, k] = right_val[:, k] + val2
-                elif r_op[k] == 2:
-                    right_val[:, k] = right_val[:, k] - val2
-                elif r_op[k] == 3:
-                    right_val[:, k] = right_val[:, k] * val2
-                elif r_op[k] == 4:
-                    right_val[:, k] = right_val[:, k] / (val2 + eps)
-
-        # Compare (soft for differentiability during training)
-        diff = left_val - right_val  # (batch, top_k)
-
-        # Soft comparisons using sigmoid
-        steepness = 10.0  # Controls sharpness of comparison
-        for k in range(top_k):
-            if cmp[k] == 0:  # GT: left > right
-                result[:, t, k] = torch.sigmoid(steepness * diff[:, k])
-            elif cmp[k] == 1:  # LT: left < right
-                result[:, t, k] = torch.sigmoid(-steepness * diff[:, k])
-            elif cmp[k] == 2:  # GTE
-                result[:, t, k] = torch.sigmoid(steepness * diff[:, k])
-            elif cmp[k] == 3:  # LTE
-                result[:, t, k] = torch.sigmoid(-steepness * diff[:, k])
-            elif cmp[k] == 4:  # EQ (approximate)
-                result[:, t, k] = torch.exp(-steepness * diff[:, k].abs())
-
-    # Weight by importance
-    result[:, :, :top_k] = result[:, :, :top_k] * active_importance.unsqueeze(0).unsqueeze(0)
-
-    if squeeze_out:
-        result = result.squeeze(0)
-
-    return result
 
 
 # =============================================================================

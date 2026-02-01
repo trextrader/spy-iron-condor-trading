@@ -63,6 +63,9 @@ IDX_TO_FIELD: Dict[int, str] = {i: f for i, f in enumerate(ALL_FIELDS)}
 N_FIELDS: int = len(ALL_FIELDS)
 
 
+import torch.nn.functional as F
+
+
 class ArithOp(IntEnum):
     """Arithmetic operators for compound atoms."""
     NONE = 0   # Simple atom (no operation)
@@ -85,6 +88,15 @@ class LogicOp(IntEnum):
     """Logical connectives."""
     AND = 0
     OR = 1
+
+
+class TemplateType(IntEnum):
+    """Structural templates for guided predicate discovery."""
+    GENERAL = 0    # No constraints: {F1[n] op F2[m]} cmp {F3[x] op F4[y]}
+    MOMENTUM = 1   # Self-comparison: F1[0] cmp F1[n]
+    RELATIVE = 2   # Peer comparison: F1[0] cmp F2[0]
+    CROSSOVER = 3  # Dual comparison: {F1[0] - F1[n]} cmp {F2[0] - F2[m]}
+    THRESHOLD = 4  # Constant compare: F1[0] cmp K
 
 
 COMPARE_SYMBOLS = ['>', '<', '>=', '<=', '==']
@@ -423,8 +435,8 @@ def evaluate_predicate_vectorized(
     return result
 
 
-def evaluate_predicates_batch(
-    data: np.ndarray,
+def evaluate_predicates(
+    data: np.ndarray,           # (N, n_fields)
     predicates: List[Predicate]
 ) -> np.ndarray:
     """
@@ -444,6 +456,119 @@ def evaluate_predicates_batch(
     for k, pred in enumerate(predicates):
         result[:, k] = evaluate_predicate_vectorized(data, pred)
 
+    return result
+
+
+def evaluate_predicates_gpu(
+    data: torch.Tensor,  # (batch, seq, n_fields) or (N, n_fields)
+    params: torch.Tensor,  # (K, 11-13) predicate parameters
+    importance: torch.Tensor,  # (K,) importance weights
+    max_active: int = 256,
+    eps: float = 1e-8
+) -> torch.Tensor:
+    """
+    Evaluate predicates on GPU using vectorized operations with soft-logic.
+    This is differentiable and intended for use during training.
+    """
+    # Handle 2D vs 3D input
+    if data.dim() == 2:
+        data = data.unsqueeze(0)  # (1, N, F)
+        squeeze_out = True
+    else:
+        squeeze_out = False
+
+    batch, seq_len, n_fields = data.shape
+    K = params.shape[0]
+    device = data.device
+
+    # Select top-K by importance
+    top_k = min(max_active, K)
+    _, top_idx = torch.topk(importance, top_k)
+    active_params = params[top_idx]  
+    active_importance = importance[top_idx]  # (top_k,)
+
+    # Extract parameters
+    l_f1 = active_params[:, 0].long()
+    l_lb1 = active_params[:, 1].long()
+    l_op = active_params[:, 2].long()
+    l_f2 = active_params[:, 3].long()
+    l_lb2 = active_params[:, 4].long()
+    cmp_op = active_params[:, 5].long()
+    r_f1 = active_params[:, 6].long()
+    r_lb1 = active_params[:, 7].long()
+    r_op = active_params[:, 8].long()
+    r_f2 = active_params[:, 9].long()
+    r_lb2 = active_params[:, 10].long()
+    
+    # Optional Template Info
+    has_templates = active_params.shape[1] >= 13
+    if has_templates:
+        templates = active_params[:, 11].long()
+        thresholds = active_params[:, 12] # Float constant for THRESHOLD
+    else:
+        templates = torch.zeros(top_k, device=device, dtype=torch.long)
+        thresholds = torch.zeros(top_k, device=device)
+
+    # Max lookback for this batch
+    max_lb = int(torch.max(active_params[:, [1, 4, 7, 10]]).item())
+    max_lb = min(max_lb, seq_len - 1)
+
+    # Initialize output
+    result = torch.zeros(batch, seq_len, max_active, device=device, dtype=data.dtype)
+
+    # Optimized vectorized evaluation
+    for t in range(max_lb, seq_len):
+        l_v1 = torch.zeros(batch, top_k, device=device, dtype=data.dtype)
+        r_v1 = torch.zeros(batch, top_k, device=device, dtype=data.dtype)
+        for k in range(top_k):
+            # Using .item() because of lookback logic; clamp to 0 to prevent IndexError
+            t_l1 = max(0, t - l_lb1[k].item())
+            t_r1 = max(0, t - r_lb1[k].item())
+            l_v1[:, k] = data[:, t_l1, l_f1[k].item()]
+            r_v1[:, k] = data[:, t_r1, r_f1[k].item()]
+        
+        # Compound logic
+        left_val = l_v1
+        for k in range(top_k):
+            if l_op[k] > 0:
+                t_l2 = max(0, t - l_lb2[k].item())
+                l_v2 = data[:, t_l2, l_f2[k].item()]
+                if l_op[k] == 1: left_val[:, k] += l_v2
+                elif l_op[k] == 2: left_val[:, k] -= l_v2
+                elif l_op[k] == 3: left_val[:, k] *= l_v2
+                elif l_op[k] == 4: left_val[:, k] /= (l_v2 + eps)
+        
+        # Right val depends on template: Constant if THRESHOLD, Peer if RELATIVE/GENERAL
+        right_val = r_v1
+        for k in range(top_k):
+            if templates[k] == 4: # THRESHOLD
+                right_val[:, k] = thresholds[k]
+            elif r_op[k] > 0:
+                t_r2 = max(0, t - r_lb2[k].item())
+                r_v2 = data[:, t_r2, r_f2[k].item()]
+                if r_op[k] == 1: right_val[:, k] += r_v2
+                elif r_op[k] == 2: right_val[:, k] -= r_v2
+                elif r_op[k] == 3: right_val[:, k] *= r_v2
+                elif r_op[k] == 4: right_val[:, k] /= (r_v2 + eps)
+
+        # Soft comparison
+        diff = left_val - right_val
+        steepness = 10.0
+        
+        for k in range(top_k):
+            op = cmp_op[k].item()
+            if op == 0 or op == 2: # GT or GTE
+                result[:, t, k] = torch.sigmoid(steepness * diff[:, k])
+            elif op == 1 or op == 3: # LT or LTE
+                result[:, t, k] = torch.sigmoid(-steepness * diff[:, k])
+            elif op == 4: # EQ
+                result[:, t, k] = torch.exp(-steepness * diff[:, k].abs())
+
+    # Importance weighting
+    result[:, :, :top_k] *= active_importance.view(1, 1, top_k)
+
+    if squeeze_out:
+        result = result.squeeze(0)
     return result
 
 
@@ -614,6 +739,12 @@ class PredicateSelector(nn.Module):
         # Importance scores (learned sparsity)
         self.importance_logits = nn.Parameter(torch.zeros(n_slots))
 
+        # Template Selection Head
+        self.template_head = nn.Linear(d_embed * 2, 5)  # 5 TemplateTypes
+        
+        # Threshold Head (for THRESHOLD template)
+        self.threshold_head = nn.Linear(d_embed * 2, 1)
+
         # Cache for decoded predicates
         self._cached_predicates = None
         self._cache_valid = False
@@ -662,10 +793,47 @@ class PredicateSelector(nn.Module):
         _, r_f2 = self._gumbel_sample(self.right_field2(hidden))
         _, r_n2 = self._gumbel_sample(self.right_lookback2(hidden))
 
+        # Template Selection
+        _, templates = self._gumbel_sample(self.template_head(hidden))
+
+        # --- TEMPLATE CONSTRAINTS (Differentiable Masking) ---
+        # Note: We use the indices directly as this happens after hard-sampling
+        
+        # MOMENTUM: Fix r_f1=l_f1, l_n1=0, r_n1>1, ops=NONE
+        is_mom = (templates == TemplateType.MOMENTUM)
+        r_f1 = torch.where(is_mom, l_f1, r_f1)
+        l_n1 = torch.where(is_mom, torch.zeros_like(l_n1), l_n1)
+        l_op = torch.where(is_mom, torch.zeros_like(l_op), l_op)
+        r_op = torch.where(is_mom, torch.zeros_like(r_op), r_op)
+
+        # RELATIVE: Fix l_n1=0, r_n1=0, ops=NONE
+        is_rel = (templates == TemplateType.RELATIVE)
+        l_n1 = torch.where(is_rel, torch.zeros_like(l_n1), l_n1)
+        r_n1 = torch.where(is_rel, torch.zeros_like(r_n1), r_n1)
+        l_op = torch.where(is_rel, torch.zeros_like(l_op), l_op)
+        r_op = torch.where(is_rel, torch.zeros_like(r_op), r_op)
+
+        # CROSSOVER: dual comparison {F1[0]-F1[n]} cmp {F2[0]-F2[m]}
+        # Fixes: atoms must be compound, ops=SUB, l_n1=0, r_n1=0, l_f1!=r_f1
+        is_cross = (templates == TemplateType.CROSSOVER)
+        l_op = torch.where(is_cross, torch.full_like(l_op, ArithOp.SUB), l_op)
+        r_op = torch.where(is_cross, torch.full_like(r_op, ArithOp.SUB), r_op)
+        l_f2 = torch.where(is_cross, l_f1, l_f2) # {F1[0] - F1[n]}
+        r_f2 = torch.where(is_cross, r_f1, r_f2) # {F2[0] - F2[m]}
+        l_n1 = torch.where(is_cross, torch.zeros_like(l_n1), l_n1)
+        r_n1 = torch.where(is_cross, torch.zeros_like(r_n1), r_n1)
+
+        # THRESHOLD: compare against learned constant
+        is_thresh = (templates == TemplateType.THRESHOLD)
+        thresh_val = self.threshold_head(hidden).squeeze(-1)
+        # Note: In THRESHOLD mode, the right atom is effectively replaced by thresh_val in the evaluator
+        
         params = torch.stack([
             l_f1, l_n1, l_op, l_f2, l_n2,
             cmp,
-            r_f1, r_n1, r_op, r_f2, r_n2
+            r_f1, r_n1, r_op, r_f2, r_n2,
+            templates,
+            thresh_val
         ], dim=-1)
 
         return importance, params
@@ -687,20 +855,30 @@ class PredicateSelector(nn.Module):
         with torch.no_grad():
             importance, params = self.forward(return_params=True)
 
+            # Determine which predicates to return
+            if max_return is None:
+                max_return = self.max_active # Use class default if not specified
+
             # Get indices above threshold
             mask = importance > threshold
             active_idx = torch.where(mask)[0]
 
             if len(active_idx) == 0:
+                # If no predicates meet threshold, take the top `max_return` overall
+                top_k = min(self.n_slots, max_return)
+                _, top_idx = torch.topk(importance, top_k)
+                active_idx = top_idx
+            else:
+                # Sort by importance if some predicates meet threshold
+                active_importance_filtered = importance[active_idx]
+                sort_idx = torch.argsort(active_importance_filtered, descending=True)
+                active_idx = active_idx[sort_idx]
+
+                if len(active_idx) > max_return:
+                    active_idx = active_idx[:max_return]
+
+            if len(active_idx) == 0:
                 return [], np.array([]), []
-
-            # Sort by importance
-            active_importance = importance[active_idx]
-            sort_idx = torch.argsort(active_importance, descending=True)
-            active_idx = active_idx[sort_idx]
-
-            if max_return and len(active_idx) > max_return:
-                active_idx = active_idx[:max_return]
 
             active_params = params[active_idx].cpu().numpy().astype(int)
             active_importance = importance[active_idx].cpu().numpy()
@@ -715,9 +893,19 @@ class PredicateSelector(nn.Module):
                 right = Atom(p[6], p[7], ArithOp(p[8]), p[9], p[10])
                 ineq = Inequality(left, CompareOp(p[5]), right)
                 pred = Predicate([ineq], [])
+                
+                # Get template name if exists
+                t_idx = p[11] if len(p) > 11 else 0
+                t_name = TemplateType(t_idx).name if t_idx < 5 else "UNKNOWN"
+                
+                # Format rule
+                if t_idx == TemplateType.THRESHOLD and len(p) > 12:
+                    t_val = active_params[i, 12] # Use float for threshold
+                    names.append(f"[{t_name}] {left} {COMPARE_SYMBOLS[p[5]]} {t_val:.3f} (imp={active_importance[i]:.3f})")
+                else:
+                    names.append(f"[{t_name}] {pred} (imp={active_importance[i]:.3f})")
 
                 predicates.append(pred)
-                names.append(f"{pred} (imp={active_importance[i]:.3f})")
 
             return predicates, active_importance, names
 
@@ -764,13 +952,15 @@ class PredicateCombiner(nn.Module):
         n_predicates: int,
         d_model: int = 128,
         n_heads: int = 4,
-        max_chain_depth: int = 4,
-        n_output_heads: int = 10
+        max_chain_depth: int = 8,  # Increased for nested logic
+        n_output_heads: int = 10,
+        n_chains: int = 256
     ):
         super().__init__()
 
         self.n_predicates = n_predicates
         self.max_chain_depth = max_chain_depth
+        self.n_chains = n_chains
 
         # Predicate embedding (learns semantic meaning of each predicate)
         self.predicate_embed = nn.Embedding(n_predicates, d_model)
@@ -844,33 +1034,37 @@ class PredicateCombiner(nn.Module):
         combined_features = torch.cat([temporal_features, chain_features], dim=-1)
         return self.output_proj(combined_features)
 
-    def get_top_chains(self, k: int = 10) -> List[Dict[str, Any]]:
-        """Extract most focused chains for interpretability."""
-        chain_attn = F.softmax(self.chain_attention, dim=-1).detach().cpu().numpy()
-        logic_weights = torch.sigmoid(self.logic_gates).detach().cpu().numpy()
-
-        # Score chains by attention concentration
-        entropies = -np.sum(chain_attn * np.log(chain_attn + 1e-8), axis=-1).mean(axis=1)
-        top_idx = np.argsort(entropies)[:k]
-
-        chains = []
-        for idx in top_idx:
-            chain = {
-                'chain_id': int(idx),
-                'entropy': float(entropies[idx]),
-                'positions': [],
-            }
-            for d in range(self.max_chain_depth):
-                top_preds = np.argsort(chain_attn[idx, d])[-3:][::-1]
-                chain['positions'].append({
-                    'depth': d,
-                    'top_predicates': top_preds.tolist(),
-                    'attention_weights': chain_attn[idx, d, top_preds].tolist(),
-                })
-            chain['logic_ops'] = ['OR' if w > 0.5 else 'AND' for w in logic_weights[idx]]
-            chains.append(chain)
-
-        return chains
+    def get_logic_sets(self, predicate_names: List[str], threshold: float = 0.5) -> List[str]:
+        """Extract full human-readable logical chains."""
+        self.eval()
+        with torch.no_grad():
+            chain_attn = F.softmax(self.chain_attention, dim=-1).cpu().numpy()
+            logic_weights = torch.sigmoid(self.logic_gates).cpu().numpy()
+            
+            logic_sets = []
+            for c in range(self.n_chains):
+                active_elements = []
+                for d in range(self.max_chain_depth):
+                    best_pred_idx = np.argmax(chain_attn[c, d])
+                    if chain_attn[c, d, best_pred_idx] > 0.3:
+                        name = predicate_names[best_pred_idx] if best_pred_idx < len(predicate_names) else f"P{best_pred_idx}"
+                        active_elements.append((d, name))
+                
+                if len(active_elements) < 2:
+                    continue
+                
+                # Build string with operators only between active elements
+                expr = f"({active_elements[0][1]})"
+                for i in range(1, len(active_elements)):
+                    depth_idx, name = active_elements[i]
+                    # Use the logic gate corresponding to the PREVIOUS position
+                    prev_depth = active_elements[i-1][0]
+                    op = "OR" if logic_weights[c, prev_depth] > 0.5 else "AND"
+                    expr += f" {op} ({name})"
+                
+                logic_sets.append(expr)
+            
+            return logic_sets
 
 
 # =============================================================================

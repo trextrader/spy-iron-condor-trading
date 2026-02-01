@@ -50,6 +50,7 @@ except ImportError:
 from intelligence.vol_gated_attn import VolGatedAttn
 from intelligence.topk_moe import TopKMoE, BatchedTopKMoE
 from intelligence.generative.diffusion import ConditionalDiffusionHead
+from intelligence.predicate_discovery import PredicateSelector
 
 
 # ============================================================================
@@ -390,7 +391,10 @@ class CondorBrain(nn.Module):
         diffusion_input_dim: int = 4,
         diffusion_horizon: int = 32,
         feature_group_dropout: float = 0.0,
-        use_cde: bool = True               # NEW: Default to CDE given recent success
+        use_cde: bool = True,              # NEW: Default to CDE given recent success
+        use_predicate_discovery: bool = False, # NEW: Toggle for inequality templates
+        n_predicate_slots: int = 2048,
+        max_active_predicates: int = 256
     ):
         super().__init__()
 
@@ -413,13 +417,29 @@ class CondorBrain(nn.Module):
             input_dim=input_dim
         ) if feature_group_dropout > 0 else None
 
+        # Predicate Discovery (Structural Templates)
+        self.use_predicate_discovery = use_predicate_discovery
+        if use_predicate_discovery:
+            logger.info(f"[CondorBrain] Initializing Predicate Discovery ({n_predicate_slots} slots)")
+            self.predicate_selector = PredicateSelector(
+                n_slots=n_predicate_slots,
+                max_active=max_active_predicates,
+                n_fields=input_dim
+            )
+            self.max_active_predicates = max_active_predicates
+            # Adjust effective input dim for backbone
+            backbone_in_dim = input_dim + max_active_predicates
+        else:
+            self.predicate_selector = None
+            backbone_in_dim = input_dim
+
         # ----------------------------------------------------------------
         # BACKBONE SELECTION
         # ----------------------------------------------------------------
         if self.use_cde:
-            logger.info(f"[CondorBrain] Initializing Neural CDE Backbone (In={input_dim}, Hidden={d_model})")
+            logger.info(f"[CondorBrain] Initializing Neural CDE Backbone (In={backbone_in_dim}, Hidden={d_model})")
             self.cde_backbone = NeuralCDE(
-                input_dim=input_dim,
+                input_dim=backbone_in_dim,
                 hidden_dim=d_model,
                 output_dim=d_model, # Dummy output dim, we use latent state
                 n_layers=n_layers,   # Doesn't affect CDE much, maybe depth of vector field?
@@ -433,7 +453,7 @@ class CondorBrain(nn.Module):
             
         else:
             # Standard Mamba Implementation
-            self.input_proj = nn.Linear(input_dim, d_model)
+            self.input_proj = nn.Linear(backbone_in_dim, d_model)
             
             if HAS_MAMBA:
                 self.layers = nn.ModuleList([
@@ -504,7 +524,19 @@ class CondorBrain(nn.Module):
         Args:
             x: Input tensor (B, SeqLen, InputDim)
         """
-        # Apply dropout to raw features
+        # --- Predicate Discovery Path ---
+        if self.use_predicate_discovery and self.predicate_selector is not None:
+            from intelligence.predicate_discovery import evaluate_predicates_gpu
+            # Get decoded rules and importance
+            importance, params = self.predicate_selector(return_params=True)
+            # Evaluate templates on normalized input data
+            pred_features = evaluate_predicates_gpu(
+                x, params, importance, max_active=self.max_active_predicates
+            )
+            # Concatenate boolean rule outputs to raw features
+            x = torch.cat([x, pred_features], dim=-1)
+
+        # Apply dropout to augmented features
         if self.feature_dropout is not None:
             x = self.feature_dropout(x)
 
