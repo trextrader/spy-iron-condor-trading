@@ -1509,19 +1509,19 @@ $$
 
 Where the vector field network $f$ is bounded by a hyperbolic tangent activation:
 $$
-\|f(z)\|_\infty \leq 1
+|f(z)|_\infty \leq 1
 $$
 
 #### B. Perturbation & Gradient Attribution
 To determine *why* the model makes a trade, we employ two complementary methods:
 
-**1. Permutation Importance ($I_j$):**
+**1. Permutation Importance** ($I_j$):
 Measures global feature impact by calculating the prediction error increase when feature $j$ is shuffled (breaking the causal link).
 $$
 I_j = \frac{1}{K} \sum_{k=1}^{K} \left[ \mathcal{L}(f(X^{(j,k)}), y) - \mathcal{L}(f(X), y) \right]
 $$
 
-**2. Gradient Saliency ($S_j$):**
+**2. Gradient Saliency** ($S_j$):
 Measures local sensitivity via backpropagated gradients to the input layer. This captures the instantaneous "attention" of the model.
 $$
 S_j = \frac{1}{N} \sum_{i=1}^{N} \left| \frac{\partial \hat{y}^{(i)}}{\partial x_j^{(i)}} \right|
@@ -1530,13 +1530,13 @@ $$
 #### C. Information Geometry (Fisher & Hessian)
 To audit the training quality and parameter sensitivity, we analyze the curvature of the loss landscape.
 
-**Fisher Information Matrix ($\mathcal{F}$):**
+**Fisher Information Matrix** ($\mathcal{F}$):
 Estimates how much information the parameters $\theta$ carry about the output distribution.
 $$
 \mathcal{F}_{ij} = \mathbb{E}\left[ \frac{\partial \log p(y|x;\theta)}{\partial \theta_i} \frac{\partial \log p(y|x;\theta)}{\partial \theta_j} \right]
 $$
 
-**Hessian Eigenspectrum ($\lambda$):**
+**Hessian Eigenspectrum** ($\lambda$):
 The eigenvalues of the Hessian matrix $H = \nabla^2 \mathcal{L}$ reveal the sharpness of the minima.
 *   **$\lambda_{max}$**: Large values indicate sharp minima (unstable generalization).
 *   **Flatness**: We prefer models with lower $\text{Tr}(H)$, correlating with robust out-of-sample performance.
