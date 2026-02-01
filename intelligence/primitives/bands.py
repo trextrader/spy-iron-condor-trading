@@ -66,6 +66,7 @@ def compute_bandwidth_percentile_and_expansion(
     bw_pct = _percentile_series(bandwidth, window)
     prev = bandwidth.shift(expansion_lookback)
     expansion_rate = (bandwidth - prev) / prev.replace(0, np.nan)
+    expansion_rate = expansion_rate.clip(-10.0, 10.0)
 
     return pd.DataFrame(
         {

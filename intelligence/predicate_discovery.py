@@ -539,10 +539,12 @@ def evaluate_predicates_gpu(
                 elif l_op[k] == 4: left_val[:, k] /= (l_v2 + eps)
         
         # Right val depends on template: Constant if THRESHOLD, Peer if RELATIVE/GENERAL
-        right_val = r_v1
+        # Note: Index 4 is THRESHOLD template in the hard-coded evaluator logic
+        right_val = r_v1.clone()
         for k in range(top_k):
-            if templates[k] == 4: # THRESHOLD
-                right_val[:, k] = thresholds[k]
+            # Check for THRESHOLD template (t_idx=4)
+            if templates[k].item() == 4:
+                right_val[:, k] = thresholds[k].to(data.dtype)
             elif r_op[k] > 0:
                 t_r2 = max(0, t - r_lb2[k].item())
                 r_v2 = data[:, t_r2, r_f2[k].item()]
@@ -599,7 +601,7 @@ if HAS_NUMBA:
     @jit(nopython=True, parallel=True, cache=True)
     def _eval_inequalities_numba(
         data: np.ndarray,           # (N, n_fields)
-        ineq_params: np.ndarray,    # (K, 11) - encoded inequalities
+        ineq_params: np.ndarray,    # (K, 13) - encoded inequalities with template info
     ) -> np.ndarray:
         """Evaluate K single inequalities. Returns (N, K)."""
         N, n_fields = data.shape
@@ -637,16 +639,20 @@ if HAS_NUMBA:
                     left_val /= (denom + eps)
 
                 # Evaluate right atom
-                right_val = data[t - r_n1, r_f1] if r_n1 < N else 0.0
-                if r_op == 1:
-                    right_val += data[t - r_n2, r_f2] if r_n2 < N else 0.0
-                elif r_op == 2:
-                    right_val -= data[t - r_n2, r_f2] if r_n2 < N else 0.0
-                elif r_op == 3:
-                    right_val *= data[t - r_n2, r_f2] if r_n2 < N else 1.0
-                elif r_op == 4:
-                    denom = data[t - r_n2, r_f2] if r_n2 < N else 1.0
-                    right_val /= (denom + eps)
+                # THRESHOLD logic: template_idx is at p[11], thresh_val at p[12]
+                if int(ineq_params[k, 11]) == 4: # THRESHOLD
+                    right_val = ineq_params[k, 12]
+                else:
+                    right_val = data[t - r_n1, r_f1] if r_n1 < N else 0.0
+                    if r_op == 1:
+                        right_val += data[t - r_n2, r_f2] if r_n2 < N else 0.0
+                    elif r_op == 2:
+                        right_val -= data[t - r_n2, r_f2] if r_n2 < N else 0.0
+                    elif r_op == 3:
+                        right_val *= data[t - r_n2, r_f2] if r_n2 < N else 1.0
+                    elif r_op == 4:
+                        denom = data[t - r_n2, r_f2] if r_n2 < N else 1.0
+                        right_val /= (denom + eps)
 
                 # Compare
                 if cmp_op == 0:    # GT
@@ -880,7 +886,7 @@ class PredicateSelector(nn.Module):
             if len(active_idx) == 0:
                 return [], np.array([]), []
 
-            active_params = params[active_idx].cpu().numpy().astype(int)
+            active_params = params[active_idx].cpu().numpy()
             active_importance = importance[active_idx].cpu().numpy()
 
             # Convert to Predicate objects
@@ -889,19 +895,19 @@ class PredicateSelector(nn.Module):
 
             for i, p in enumerate(active_params):
                 # Decode inequality
-                left = Atom(p[0], p[1], ArithOp(p[2]), p[3], p[4])
-                right = Atom(p[6], p[7], ArithOp(p[8]), p[9], p[10])
-                ineq = Inequality(left, CompareOp(p[5]), right)
+                left = Atom(int(p[0]), int(p[1]), ArithOp(int(p[2])), int(p[3]), int(p[4]))
+                right = Atom(int(p[6]), int(p[7]), ArithOp(int(p[8])), int(p[9]), int(p[10]))
+                ineq = Inequality(left, CompareOp(int(p[5])), right)
                 pred = Predicate([ineq], [])
                 
                 # Get template name if exists
-                t_idx = p[11] if len(p) > 11 else 0
+                t_idx = int(p[11]) if len(p) > 11 else 0
                 t_name = TemplateType(t_idx).name if t_idx < 5 else "UNKNOWN"
                 
                 # Format rule
-                if t_idx == TemplateType.THRESHOLD and len(p) > 12:
-                    t_val = active_params[i, 12] # Use float for threshold
-                    names.append(f"[{t_name}] {left} {COMPARE_SYMBOLS[p[5]]} {t_val:.3f} (imp={active_importance[i]:.3f})")
+                if t_idx == TemplateType.THRESHOLD:
+                    t_val = p[12]
+                    names.append(f"[{t_name}] {left} {COMPARE_SYMBOLS[int(p[5])]} {t_val:.3f} (imp={active_importance[i]:.3f})")
                 else:
                     names.append(f"[{t_name}] {pred} (imp={active_importance[i]:.3f})")
 

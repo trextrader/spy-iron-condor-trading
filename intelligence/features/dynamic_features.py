@@ -499,15 +499,19 @@ def compute_all_dynamic_features(
         "bb_lower_dyn", "bb_upper_dyn", "stoch_k_dyn", "consolidation_score", "breakout_score"
     ]
     
-    print(f"   Broadcasting {len(spot_cols)} spot features via Map (Memory Optimized)...")
-    bars_indexed = bars.set_index(time_col)
+    print(f"   Broadcasting {len(spot_cols)} spot features via Join (Memory Optimized)...")
     
+    # 🕵️ MEMORY SAVER: Single join is better than multiple maps on 10M rows
+    df = df.merge(bars[spot_cols + [time_col]], on=time_col, how='left')
+    
+    # Ensure float32 to save space
     for col in spot_cols:
-        df[col] = df[time_col].map(bars_indexed[col]).astype(np.float32)
-    
+        df[col] = df[col].astype(np.float32)
+        
     # Clean up bar frame to free memory
     del bars
-    del bars_indexed
+    import gc
+    gc.collect()
     
     # Spread Ratio (Keep row-specific if bid/ask exists per option, 
     # but here it likely comes from spot if OHLCV based)

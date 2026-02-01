@@ -33,8 +33,10 @@ def compute_vol_normalized_macd(
     hist = macd - sig
 
     vol = vol_ewma.replace(0, np.nan)
-    macd_norm = macd / vol
-    sig_norm = sig / vol
+    # Corrected: Normalize by Dollar-Volatility (Price * RetVol)
+    denom = (close * vol).replace(0, np.nan)
+    macd_norm = macd / denom
+    sig_norm = sig / denom
 
     return pd.DataFrame(
         {

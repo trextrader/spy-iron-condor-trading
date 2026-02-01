@@ -169,35 +169,43 @@ def forensic_repair(df: pd.DataFrame) -> pd.DataFrame:
         compute_all_primitive_features_v22
     )
 
+    import gc
     print("\n[REPAIR] Starting memory-safe forensic recomputation...")
 
-    # Drop deprecated columns (replaced by cmf, pressure_up, pressure_down)
-    for col in DEPRECATED_COLS:
-        if col in df.columns:
-            print(f"   [DROP] Removing deprecated column: {col}")
-            df.drop(columns=[col], inplace=True)
+    # 1. Bulk Drop Deprecated Columns
+    to_drop = [c for c in DEPRECATED_COLS if c in df.columns]
+    if to_drop:
+        print(f"   [DROP] Removing {len(to_drop)} deprecated columns...")
+        df.drop(columns=to_drop, inplace=True)
+    
+    # helper drops
+    to_drop_helpers = [c for c in ['bandwidth', 'log_return', 'vol_ewma'] if c in df.columns]
+    if to_drop_helpers:
+        df.drop(columns=to_drop_helpers, inplace=True)
+    
+    gc.collect()
 
-    # MEMORY SAVER 1: Extract original columns into a dict of Series (not a copy of the whole DF)
-    # Then drop them from df to clear space.
+    # 2. MEMORY SAVER 1: Extract original columns into a dict of numpy arrays
+    # Using df.pop() is much more memory-safe than copy + drop
     preserved_data = {}
-    for col in VALIDATION_COLS:
-        if col in df.columns:
-            preserved_data[col] = df[col].values # Save as raw numpy array for max efficiency
-            df.drop(columns=[col], inplace=True)
+    cols_to_extract = [c for c in VALIDATION_COLS if c in df.columns]
+    print(f"   [EXTRACT] Preserving {len(cols_to_extract)} columns for interrogation...")
+    for col in cols_to_extract:
+        preserved_data[col] = df.pop(col).values 
+    
+    gc.collect()
 
-    # Also drop legacy helper cols that will be recomputed
-    for col in ['bandwidth', 'log_return', 'vol_ewma']:
-        if col in df.columns:
-            df.drop(columns=[col], inplace=True)
-
-    # Recompute fresh (this now uses the map-optimized engine)
+    # 3. Recompute fresh (this now uses the map-optimized engine)
+    print("   [RECOMPUTE] Running dynamic feature engines...")
     df = compute_all_dynamic_features(df)
     df = compute_all_primitive_features_v22(df)
+    
+    gc.collect()
     
     # 🕵️ MEMORY SAVER 2: Winner Selection (Column-by-Column Interrogation)
     print("\n[MERGE] Performing Alignment-Safe Winner Selection...")
     
-    for col in VALIDATION_COLS:
+    for i, col in enumerate(VALIDATION_COLS):
         if col not in df.columns:
             if col in preserved_data:
                 df[col] = preserved_data[col] # Restore if missing
@@ -208,9 +216,9 @@ def forensic_repair(df: pd.DataFrame) -> pd.DataFrame:
             s_new = df[col].std()
             u_new = df[col].nunique()
             
-            # Stats on the preserved version
+            # Stats on the preserved version (using Series for efficient NUnique on large arrays)
             s_orig = np.nanstd(preserved_data[col])
-            u_orig = len(np.unique(preserved_data[col][~np.isnan(preserved_data[col])]))
+            u_orig = pd.Series(preserved_data[col]).nunique()
             
             # Winner logic
             is_new_better = (u_new > u_orig + 2) or (s_new > s_orig * 1.2 and u_new >= u_orig)
@@ -224,6 +232,8 @@ def forensic_repair(df: pd.DataFrame) -> pd.DataFrame:
             
             # 🕵️ MEMORY SAVER 3: Delete the reference immediately
             del preserved_data[col]
+            if i % 10 == 0:
+                gc.collect()
 
     return df
 
