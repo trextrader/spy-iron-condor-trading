@@ -175,27 +175,35 @@ def train_surrogate_tree(model, X, feature_cols, n_samples=5000):
     input_states = []
     targets = []
     
-    with torch.no_grad():
-        for idx in tqdm(idxs):
+    BATCH_SIZE = 32
+    for i in tqdm(range(0, len(idxs), BATCH_SIZE)):
+        batch_idxs = idxs[i : i + BATCH_SIZE]
+        batch_seqs = []
+        batch_last_steps = []
+        
+        for idx in batch_idxs:
             seq = X[idx : idx+SEQ_LEN]
-            last_step = seq[-1] # Interpret based on current state
+            batch_seqs.append(seq)
+            batch_last_steps.append(seq[-1])
             
-            x_tensor = torch.tensor(seq, device=DEVICE).unsqueeze(0).float()
-            # Predict
-            with torch.no_grad():
-                out = model(x_tensor)
-                # CondorBrain forward returns (outputs, regime, horizon, features, ...)
-                # Primary logic uses index 0 (regression outputs)
-                if isinstance(out, tuple):
-                    out = out[0]
-                pred = out[0, 5].item() # index 5 is expected_roi in CondorBrain
+        if not batch_seqs: continue
             
-            # CRITICAL: Skip if scalar prediction is NaN or Inf
-            if not np.isfinite(pred):
-                continue
-                
-            input_states.append(last_step)
-            targets.append(pred)
+        x_tensor = torch.tensor(np.stack(batch_seqs), device=DEVICE).float()
+        
+        with torch.no_grad():
+            # Batch Inference
+            out = model(x_tensor)
+            if isinstance(out, tuple):
+                out = out[0]
+            
+            # Extract ROI Predictions (index 5)
+            preds = out[:, 5].cpu().numpy()
+            
+            # Filter NaNs
+            valid_mask = np.isfinite(preds)
+            if valid_mask.sum() > 0:
+                input_states.extend(np.array(batch_last_steps)[valid_mask])
+                targets.extend(preds[valid_mask])
             
     if not input_states:
         print("⚠️ Warning: No valid samples collected for surrogate tree (all NaNs).")
@@ -265,8 +273,9 @@ def main():
     args = parser.parse_args()
     
     # 1. Load Data
-    print(f"Loading Data: {args.data}")
-    df = pd.read_csv(args.data)
+    print(f"Loading Data: {args.data} (Limit: {args.samples * 20} rows)")
+    # Load enough data to allow for sequence length + some buffer
+    df = pd.read_csv(args.data, nrows=max(5000, args.samples * 20))
     feature_cols = FEATURE_COLS_V22
     for c in feature_cols:
         if c not in df.columns: df[c] = 0.0
@@ -303,8 +312,8 @@ def main():
     model = load_cde_model(args.model, input_dim=len(feature_cols))
     
     # 3. Analyze (Permutation Importance)
-    analyze_permutation_importance(model, X, feature_cols, n_samples=args.samples)
-    train_surrogate_tree(model, X, feature_cols, n_samples=args.samples * 5)
+    # analyze_permutation_importance(model, X, feature_cols, n_samples=args.samples)
+    train_surrogate_tree(model, X, feature_cols, n_samples=args.samples)
     
     # 4. Analyze Internal Logic (Discovery Engine)
     if hasattr(model, 'use_predicate_discovery') and model.use_predicate_discovery:
