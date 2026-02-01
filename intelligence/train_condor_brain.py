@@ -602,6 +602,9 @@ def train_condor_brain(args):
         
         opt_str = f"TF32, cuDNN benchmark, {'BF16' if use_bf16 else 'FP16'}"
         print(f"[CondorBrain] CUDA optimizations enabled: {opt_str}", flush=True)
+
+    # Initialize batch loss tracker (if arg set)
+    best_batch_loss_tracker = args.save_on_batch_loss
     # Load data
     print(f"\n[CondorBrain] Loading data from {args.local_data}...", flush=True)
     if args.max_rows > 0:
@@ -1067,8 +1070,9 @@ def train_condor_brain(args):
             train_loss += loss.item() * args.accum_steps  # Un-scale for logging
             n_batches += 1
             
-            # === BATCH-LEVEL CHECKPOINTING (User Request) ===
-            if args.save_on_batch_loss is not None and loss.item() < args.save_on_batch_loss:
+            # === BATCH-LEVEL CHECKPOINTING (User Request: Ratchet Logic) ===
+            # Only save if loss is strictly better than the best seen so far (starting at threshold)
+            if best_batch_loss_tracker is not None and loss.item() < best_batch_loss_tracker:
                 # Save immediately!
                 _loss_val = loss.item()
                 _fname = f"batch_loss_{_loss_val:.4f}_e{epoch+1}_b{batch_idx+1}.pth"
@@ -1091,8 +1095,13 @@ def train_condor_brain(args):
                     }
                 }
                 torch.save(_ckpt, _save_path)
-                # Only log to stdout (avoid cluttering tqdm)
-                # pbar.write(f"  [SAVE] Batch loss {_loss_val:.4f} < {args.save_on_batch_loss} -> {_fname}")
+                
+                # Update tracker - only save if we beat THIS new low record next time
+                prev_best = best_batch_loss_tracker
+                best_batch_loss_tracker = _loss_val
+                
+                # Log to stdout (briefly)
+                pbar.write(f"  [SAVE] New Best Batch Loss: {_loss_val:.4f} (was {prev_best:.4f}) -> {_fname}")
             
             # Update throughput display and LOG EXPLICITLY to stdout for background visibility
             if (batch_idx + 1) % args.log_every == 0:
