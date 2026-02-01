@@ -186,12 +186,22 @@ def forensic_repair(df: pd.DataFrame) -> pd.DataFrame:
     gc.collect()
 
     # 2. MEMORY SAVER 1: Extract original columns into a dict of numpy arrays
-    # Using df.pop() is much more memory-safe than copy + drop
+    # Foundation columns must stay in DF to serve as inputs for recomputation
+    FOUNDATION_COLS = {
+        'open', 'high', 'low', 'close', 'volume', 
+        'dt', 'timestamp', 'option_symbol', 'symbol', 'strike', 
+        'te', 'target_spot', 'lag_minutes', 'ivr', 'mtf_consensus'
+    }
+
     preserved_data = {}
     cols_to_extract = [c for c in VALIDATION_COLS if c in df.columns]
     print(f"   [EXTRACT] Preserving {len(cols_to_extract)} columns for interrogation...")
+    
     for col in cols_to_extract:
-        preserved_data[col] = df.pop(col).values 
+        if col in FOUNDATION_COLS:
+            preserved_data[col] = df[col].values # Keep in DF
+        else:
+            preserved_data[col] = df.pop(col).values # Move out of DF
     
     gc.collect()
 
