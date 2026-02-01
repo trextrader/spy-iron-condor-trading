@@ -1486,125 +1486,141 @@ For any quantitative claims in this spec, the *actual deployed model profile* mu
 
 ## 13. Interpretability & Audit System (v3.0)
 
-To ensure safety, transparency, and regulatory compliance in the Neural CDE decision-making process, a comprehensive **Audit System** has been implemented. This system allows for deep inspection of model behavior, feature attribution, and stability across retraining cycles, transforming the "Black Box" of deep learning into a verifiable "White Box" policy network.
+To ensure safety, transparency, and regulatory auditability of the Neural CDE decision process, we implement a rigorous model interpretability and stability audit framework.
+This framework transforms the Neural CDE from a black-box predictor into a verifiable parametric policy system.
 
-### 13.1 Audit Artifacts & Workflow
-Every training run automatically generates a standardized audit packet. The system allows quants and risk managers to verify the "cognitive health" of the model before deployment.
+### 13.1 Neural CDE Dynamics & Stability
 
-**Key Artifacts:**
-*   **Audit Report (`reports/3_model_comparison.md`)**: The primary scientific document detailing feature rankings, stability metrics, and pros/cons.
-*   **Data Structure (`reports/3_model_comparison.json`)**: Machine-readable export of all calculated metrics (feature importance scores, drift tensors).
-*   **Visual Assets (`reports/plots/*.png`)**: A suite of 30+ diagnostic charts visualizing the decision boundary and information geometry.
-
-### 13.2 Mathematical Foundations
-
-The audit system relies on rigorous mathematical definitions to quantify model behavior.
-
-#### A. Neural CDE Dynamics
-The underlying model evolves a latent state $Z_t$ via a continuous integral driven by a control path $X_t$. The stability of this system is guaranteed by the Lipschitz constraint on the vector field $f$.
+The model evolves a latent state $Z_t$ driven by a continuous control path $X_t$ under a learned vector field $f$.
 
 $$
 Z_T = Z_0 + \int_0^T f(Z_t) \, dX_t
 $$
 
-Where the vector field network $f$ is bounded by a hyperbolic tangent activation:
+The vector field network is explicitly bounded using a hyperbolic tangent activation to guarantee numerical stability and prevent state explosion:
+
 $$
 |f(z)|_\infty \leq 1
 $$
 
-#### B. Perturbation & Gradient Attribution
-To determine *why* the model makes a trade, we employ two complementary methods:
+This bound enforces a global Lipschitz constraint on the dynamics, ensuring controlled state evolution even under large market shocks.
 
-**1. Permutation Importance** ($I_j$):
-Measures global feature impact by calculating the prediction error increase when feature $j$ is shuffled (breaking the causal link).
+### 13.2 Perturbation & Gradient Attribution
+
+To explain why the model makes a given trade decision, we apply two complementary attribution methods: global perturbation analysis and local sensitivity analysis.
+
+#### 13.2.1 Permutation Importance
+
+Permutation importance measures the global causal influence of each feature by breaking its association with the target and observing the resulting degradation in predictive performance.
+
+For feature $j$, the importance score is defined as:
+
 $$
 I_j = \frac{1}{K} \sum_{k=1}^{K} \left[ \mathcal{L}(f(X^{(j,k)}), y) - \mathcal{L}(f(X), y) \right]
 $$
 
-**2. Gradient Saliency** ($S_j$):
-Measures local sensitivity via backpropagated gradients to the input layer. This captures the instantaneous "attention" of the model.
+Where:
+*   $X^{(j,k)}$ is the dataset with feature $j$ randomly permuted in trial $k$
+*   $\mathcal{L}(\cdot)$ is the evaluation loss
+*   $K$ is the number of permutation trials
+
+High $I_j$ indicates strong dependence of the model’s predictions on feature $j$.
+
+#### 13.2.2 Gradient Saliency
+
+Gradient saliency measures local sensitivity by analyzing how infinitesimal changes in input features affect the model output.
+
+The saliency score for feature $j$ is defined as:
+
 $$
 S_j = \frac{1}{N} \sum_{i=1}^{N} \left| \frac{\partial \hat{y}^{(i)}}{\partial x_j^{(i)}} \right|
 $$
 
-#### C. Information Geometry (Fisher & Hessian)
-To audit the training quality and parameter sensitivity, we analyze the curvature of the loss landscape.
+Where:
+*   $\hat{y}^{(i)}$ is the model prediction for sample $i$
+*   $x_j^{(i)}$ is the value of feature $j$ for sample $i$
 
-**Fisher Information Matrix** ($\mathcal{F}$):
-Estimates how much information the parameters $\theta$ carry about the output distribution.
+This captures the instantaneous attention of the Neural CDE to each feature at decision time.
+
+### 13.3 Information Geometry: Fisher & Hessian Analysis
+
+To audit training quality and parameter sensitivity, we analyze the curvature of the loss landscape using information-geometric tools.
+
+#### 13.3.1 Fisher Information Matrix
+
+The Fisher Information Matrix quantifies how much information the parameters $\theta$ carry about the predictive distribution.
+
 $$
 \mathcal{F}_{ij} = \mathbb{E}\left[ \frac{\partial \log p(y|x;\theta)}{\partial \theta_i} \frac{\partial \log p(y|x;\theta)}{\partial \theta_j} \right]
 $$
 
-**Hessian Eigenspectrum** ($\lambda$):
-The eigenvalues of the Hessian matrix $H = \nabla^2 \mathcal{L}$ reveal the sharpness of the minima.
-*   **$\lambda_{max}$**: Large values indicate sharp minima (unstable generalization).
-*   **Flatness**: We prefer models with lower $\text{Tr}(H)$, correlating with robust out-of-sample performance.
+Properties:
+*   Large diagonal entries indicate highly sensitive parameters
+*   Strong off-diagonal terms indicate parameter coupling
+*   Low-rank structure suggests redundancy or over-parameterization
 
-#### D. Physics-Inspired Stability Metrics
-To quantify "drift" between model versions $P$ and $Q$ (e.g., Epoch 3 vs Epoch 4), we apply metrics from statistical physics and optimal transport.
+#### 13.3.2 Hessian Eigenspectrum
 
-**1. Wasserstein Distance ($W_1$ - Earth Mover's):**
-Measures the minimum work required to transform distribution $P$ into $Q$.
+The Hessian matrix of the loss function is defined as:
+
 $$
-W_1(P, Q) = \inf_{\gamma \in \Gamma(P,Q)} \mathbb{E}_{(x,y) \sim \gamma}[\|x - y\|]
+H = \nabla^2 \mathcal{L}
 $$
 
-**2. Mean Squared Deviation (Energy):**
+Let $\{\lambda_i\}$ denote its eigenvalues.
+
+Key diagnostics:
+
+*   **Maximum eigenvalue** $\lambda_{\max}$: Large values indicate sharp minima and unstable generalization.
+*   **Trace of the Hessian**:
+
+$$
+\text{Tr}(H) = \sum_i \lambda_i
+$$
+
+Lower trace correlates with flatter minima and improved out-of-sample robustness.
+
+### 13.4 Physics-Inspired Stability Metrics
+
+To quantify model drift between two checkpoints $P$ and $Q$ (e.g., Epoch 3 vs Epoch 4), we apply metrics inspired by statistical physics and optimal transport.
+
+#### 13.4.1 Wasserstein Distance (Earth Mover’s Distance)
+
+The first-order Wasserstein distance measures the minimal transport cost required to transform one prediction distribution into another.
+
+$$
+W_1(P, Q) = \inf_{\gamma \in \Gamma(P,Q)} \mathbb{E}_{(x,y) \sim \gamma}[|x - y|]
+$$
+
+Where:
+*   $\Gamma(P,Q)$ is the set of all joint couplings with marginals $P$ and $Q$
+
+Small $W_1$ indicates distributional stability across training epochs.
+
+#### 13.4.2 Mean Squared Deviation (Energy Metric)
+
+The mean squared deviation measures the energy difference between two model outputs.
+
 $$
 \text{MSD}(A, B) = \frac{1}{N} \sum_{i=1}^{N} (y_A^{(i)} - y_B^{(i)})^2
 $$
 
-### 13.3 Visual Guide to Audit Plots
- The `audit_cde_comparison` tool generates a comprehensive visual suite in `reports/plots/`. Here is how interpret the key diagrams:
+This metric captures pointwise drift in predictions and is sensitive to regime-specific divergence.
 
-| Diagram | Filename Pattern | Interpretation Guide |
-|:---|:---|:---|
-| **Gradient Saliency Map** | `gradient_saliency.png` | **X-Axis:** Features, **Y-Axis:** Saliency Magnitude. Shows which inputs physically trigger output changes. spikes in `ivr`, `theta`, and `delta` indicate healthy "Greeks-based" trading. |
-| **Information Overlap** | `fisher_comparison_*.png` | **Scatter Plot:** Each dot is a parameter. High linear correlation ($R^2 > 0.9$) implies models share the same "knowledge structure" across epochs. |
-| **Surrogate Tree** | `decision_tree_*.png` | **Flowchart:** A literal decision tree distilled from the Neural CDE. Use this to trace specific logic paths (e.g., "If IVR > 50 AND RSI < 30 $\to$ Buy"). |
-| **Stability Matrix** | `stability_*.png` | **Heatmap:** Compares output heads (ROI, POP, Delta) between models. Red squares indicate "High Energy" (disagreement). Green indicates stability. Good for spotting "drift" in specific outputs like `confidence`. |
-| **Feature Heatmap** | `importance_heatmap_*.png` | **Temporal View:** Shows feature importance over time. Look for consistent bands of color (stable attention) vs. chaotic flickering (noise overfitting). |
-| **Output Histograms** | `output_dist_*.png` | **Distribution:** Probability density of model outputs. We check for "mode collapse" (single variance-less spike) vs. healthy Gaussian-like distributions. |
+### 13.5 Audit Interpretation & Deployment Gate
 
-### 13.4 Empirical Audit Case Study: Epoch 3 vs 4 vs 5 (Jan 2026)
+A model checkpoint is considered deployment-safe if it satisfies:
+*   Stable permutation rankings across epochs
+*   Consistent gradient saliency concentration
+*   Bounded Fisher trace and Hessian spectrum
+*   Low Wasserstein distance to previous stable checkpoints
+*   Low MSD under identical evaluation sets
 
-A comparative audit of recent training checkpoints revealed `epoch_3_013026` as the optimal candidate for deployment.
+Failure in any criterion triggers retraining or rollback.
 
-**Phase 1: Feature Attribution Stability**
-Both models discovered identical primary drivers, indicating robust feature learning.
+### ✅ Result
 
-| Rank | Feature | Importance (Epoch 3) | Importance (Epoch 4) | Shift |
-|:-----|:--------|:---------------------|:---------------------|:------|
-| 1 | `ivr` | 11.88% | 16.19% | +4.3% |
-| 2 | `theta` | 9.55% | 10.31% | +0.7% |
-| 3 | `delta` | 8.47% | 9.98% | +1.5% |
-| 4 | `pressure_down` | 6.25% | 5.87% | -0.3% |
-
-**Phase 2: Physics-Inspired Stability**
-While feature importance was highly correlated (Cosine Similarity > 0.98), the raw output distributions showed meaningful divergence, measured by **Coherence**.
-
-*   **Logic Alignment:** Cosine Sim **0.983** (High agreement on "what matters")
-*   **Execution Diversity:** Coherence **0.011** (Low correlation in raw output variance)
-*   **Distribution Shape:** Wasserstein **0.003** (Very similar overall distribution shapes)
-
-**Conclusion:** The models are **Conceptually Stable** (attending to the same physics) but **Executionally Diverse** (arriving at slightly different pricing conclusions). This is an ideal property for ensemble robustness.
-
-### 13.5 White-Box Surrogate Logic Rules
-
-To verify safety, we distill the Neural CDE's complex non-linear decision boundary into a human-readable Decision Tree ($R^2 \approx 0.68$).
-
-**Extracted Rules for `epoch_3`:**
-```text
-IF ivr <= 0.67 (Low Vol Regime):
-    AND bb_sigma_dyn <= 0.83 (Tight Bands):
-        -> Conservative Entry (Target -0.11 ROI) [Credit Collection]
-    AND bb_sigma_dyn > 0.83 (Expanding Bands):
-        -> Aggressive Entry (Target -0.04 ROI)   [Breakout Risk]
-
-IF ivr > 0.67 (High Vol Regime):
-    AND bb_sigma_dyn > 1.14 (Extreme Vol):
-        -> Defensive Entry (Target +0.03 ROI)    [Avoidance/Long Hedges]
-```
-
-This confirms the model has learned a **Volatility-Adaptive Policy**: it behaves differently in low vs. high IV environments, consistently with the "Regime-Gated MoE" design.
+This audit system guarantees:
+*   **Interpretability** (why the trade exists)
+*   **Stability** (why it will still exist tomorrow)
+*   **Regulatory defensibility** (why it was safe to deploy)
