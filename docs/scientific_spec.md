@@ -1503,28 +1503,38 @@ The audit system relies on rigorous mathematical definitions to quantify model b
 #### A. Neural CDE Dynamics
 The underlying model evolves a latent state $Z_t$ via a continuous integral driven by a control path $X_t$. The stability of this system is guaranteed by the Lipschitz constraint on the vector field $f$.
 
-$$ Z_T = Z_0 + \int_0^T f(Z_t) \, dX_t $$
+$$
+Z_T = Z_0 + \int_0^T f(Z_t) \, dX_t
+$$
 
 Where the vector field network $f$ is bounded by a hyperbolic tangent activation:
-$$ \|f(z)\|_\infty \leq 1 $$
+$$
+\|f(z)\|_\infty \leq 1
+$$
 
 #### B. Perturbation & Gradient Attribution
 To determine *why* the model makes a trade, we employ two complementary methods:
 
 **1. Permutation Importance ($I_j$):**
 Measures global feature impact by calculating the prediction error increase when feature $j$ is shuffled (breaking the causal link).
-$$ I_j = \frac{1}{K} \sum_{k=1}^{K} \left[ \mathcal{L}(f(X^{(j,k)}), y) - \mathcal{L}(f(X), y) \right] $$
+$$
+I_j = \frac{1}{K} \sum_{k=1}^{K} \left[ \mathcal{L}(f(X^{(j,k)}), y) - \mathcal{L}(f(X), y) \right]
+$$
 
 **2. Gradient Saliency ($S_j$):**
 Measures local sensitivity via backpropagated gradients to the input layer. This captures the instantaneous "attention" of the model.
-$$ S_j = \frac{1}{N} \sum_{i=1}^{N} \left| \frac{\partial \hat{y}^{(i)}}{\partial x_j^{(i)}} \right| $$
+$$
+S_j = \frac{1}{N} \sum_{i=1}^{N} \left| \frac{\partial \hat{y}^{(i)}}{\partial x_j^{(i)}} \right|
+$$
 
 #### C. Information Geometry (Fisher & Hessian)
 To audit the training quality and parameter sensitivity, we analyze the curvature of the loss landscape.
 
 **Fisher Information Matrix ($\mathcal{F}$):**
 Estimates how much information the parameters $\theta$ carry about the output distribution.
-$$ \mathcal{F}_{ij} = \mathbb{E}\left[ \frac{\partial \log p(y|x;\theta)}{\partial \theta_i} \frac{\partial \log p(y|x;\theta)}{\partial \theta_j} \right] $$
+$$
+\mathcal{F}_{ij} = \mathbb{E}\left[ \frac{\partial \log p(y|x;\theta)}{\partial \theta_i} \frac{\partial \log p(y|x;\theta)}{\partial \theta_j} \right]
+$$
 
 **Hessian Eigenspectrum ($\lambda$):**
 The eigenvalues of the Hessian matrix $H = \nabla^2 \mathcal{L}$ reveal the sharpness of the minima.
@@ -1536,10 +1546,14 @@ To quantify "drift" between model versions $P$ and $Q$ (e.g., Epoch 3 vs Epoch 4
 
 **1. Wasserstein Distance ($W_1$ - Earth Mover's):**
 Measures the minimum work required to transform distribution $P$ into $Q$.
-$$ W_1(P, Q) = \inf_{\gamma \in \Gamma(P,Q)} \mathbb{E}_{(x,y) \sim \gamma}[\|x - y\|] $$
+$$
+W_1(P, Q) = \inf_{\gamma \in \Gamma(P,Q)} \mathbb{E}_{(x,y) \sim \gamma}[\|x - y\|]
+$$
 
 **2. Mean Squared Deviation (Energy):**
-$$ \text{MSD}(A, B) = \frac{1}{N} \sum_{i=1}^{N} (y_A^{(i)} - y_B^{(i)})^2 $$
+$$
+\text{MSD}(A, B) = \frac{1}{N} \sum_{i=1}^{N} (y_A^{(i)} - y_B^{(i)})^2
+$$
 
 ### 13.3 Visual Guide to Audit Plots
  The `audit_cde_comparison` tool generates a comprehensive visual suite in `reports/plots/`. Here is how interpret the key diagrams:
