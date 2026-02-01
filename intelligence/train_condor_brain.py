@@ -498,6 +498,8 @@ def parse_args():
     # NEW (Requested by user): Batch-level checkpointing
     parser.add_argument("--save-on-batch-loss", type=float, default=None,
                         help="Save a checkpoint immediately if batch loss is below this threshold (e.g. 1.0).")
+    parser.add_argument("--val-limit", type=int, default=0,
+                        help="Limit validation to N batches to save time (0=unlimited).")
 
     args = parser.parse_args()
     
@@ -1215,9 +1217,15 @@ def train_condor_brain(args):
             model.eval()
             _n_val_done = 0
             
+            # Determine number of batches to run
+            _total_val_batches = n_val_batches
+            if args.val_limit > 0:
+                 _total_val_batches = min(n_val_batches, args.val_limit)
+                 print(f"  [Validation] Limiting to first {_total_val_batches} batches (of {n_val_batches} total)")
+
             with torch.no_grad():
                 for bi in tqdm(
-                    range(n_val_batches),
+                    range(_total_val_batches),
                     desc=f"Val {epoch+1}",
                     leave=False,
                     mininterval=2.0,

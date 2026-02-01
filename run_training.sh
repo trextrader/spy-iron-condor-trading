@@ -36,6 +36,7 @@ nohup python -u intelligence/train_condor_brain.py \
   --grad-checkpoint \
   --early-stop \
   --patience 5 \
+  --val-limit 200 \
   --tensorboard \
   --monitor \
   --save-on-batch-loss 1.0 \
