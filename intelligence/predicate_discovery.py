@@ -1022,6 +1022,11 @@ class PredicateCombiner(nn.Module):
         # predicate_values: (batch, seq, n_pred)
         # chain_attn: (n_chains, max_depth, n_pred)
         # Result: (batch, seq, n_chains, max_depth)
+        
+        # Ensure dtype match (e.g. if predicate_values is float64/double but weights are float32)
+        if predicate_values.dtype != chain_attn.dtype:
+            predicate_values = predicate_values.to(chain_attn.dtype)
+            
         chain_values = torch.einsum('bsp,cdp->bscd', predicate_values, chain_attn)
 
         # Apply logic gates (soft AND/OR)
