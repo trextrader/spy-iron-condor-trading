@@ -16,7 +16,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 
 import time
-import datetime
+import datetime as dt
 import argparse
 import math
 import numpy as np
@@ -1159,7 +1159,7 @@ def train_condor_brain(args):
                 )
                 
                 # EXPLICIT LOG (to bypass tqdm non-printing in redirected logs)
-                _msg = f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Epoch {epoch+1} Batch {batch_idx+1}/{n_train_batches} | Loss: {loss.item():.5f} | Throughput: {_sps:,.0f} samp/s"
+                _msg = f"[{dt.datetime.now().strftime('%H:%M:%S')}] Epoch {epoch+1} Batch {batch_idx+1}/{n_train_batches} | Loss: {loss.item():.5f} | Throughput: {_sps:,.0f} samp/s"
                 pbar.write(_msg)
                 
                 _tp_last_t = _now
@@ -1199,7 +1199,7 @@ def train_condor_brain(args):
                 # Explicit log for visibility in background jobs
                 p_suffix = f"_batch_{batch_idx+1:05d}"
                 p_path = f"{viz_dir}/predictions_epoch_{epoch+1:03d}{p_suffix}.png"
-                pbar.write(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] 🖼️  Saved prediction plot to: {p_path}")
+                pbar.write(f"[{dt.datetime.now().strftime('%H:%M:%S')}] 🖼️  Saved prediction plot to: {p_path}")
                 
                 pbar.set_description(f"Epoch {epoch+1}")
                 
