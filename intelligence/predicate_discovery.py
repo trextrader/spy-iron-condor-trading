@@ -811,6 +811,11 @@ class PredicateSelector(nn.Module):
         self.max_lookback = max_lookback
         self.max_depth = max_depth
         self.temperature = temperature
+        
+        # RECURSIVE LOGIC:
+        # The input space for a predicate includes raw fields AND output of all predicate slots.
+        # This allows predicates to reference each other.
+        self.total_input_kwargs = n_fields + n_slots
 
         # Learnable predicate embeddings
         self.predicate_embeddings = nn.Parameter(torch.randn(n_slots, d_embed) * 0.01)
@@ -827,20 +832,21 @@ class PredicateSelector(nn.Module):
         # Parameter heads for each component of the predicate
         # We learn parameters for a single inequality (can extend to chains)
         # Left atom: field1, lookback1, arith_op, field2, lookback2
-        self.left_field1 = nn.Linear(d_embed * 2, n_fields)
+        # FIELDS now map to [0..total_input_kwargs-1]
+        self.left_field1 = nn.Linear(d_embed * 2, self.total_input_kwargs)
         self.left_lookback1 = nn.Linear(d_embed * 2, max_lookback + 1)
         self.left_arith = nn.Linear(d_embed * 2, 5)  # NONE, ADD, SUB, MUL, DIV
-        self.left_field2 = nn.Linear(d_embed * 2, n_fields)
+        self.left_field2 = nn.Linear(d_embed * 2, self.total_input_kwargs)
         self.left_lookback2 = nn.Linear(d_embed * 2, max_lookback + 1)
 
         # Compare operator
         self.compare_op = nn.Linear(d_embed * 2, 5)  # GT, LT, GTE, LTE, EQ
 
         # Right atom
-        self.right_field1 = nn.Linear(d_embed * 2, n_fields)
+        self.right_field1 = nn.Linear(d_embed * 2, self.total_input_kwargs)
         self.right_lookback1 = nn.Linear(d_embed * 2, max_lookback + 1)
         self.right_arith = nn.Linear(d_embed * 2, 5)
-        self.right_field2 = nn.Linear(d_embed * 2, n_fields)
+        self.right_field2 = nn.Linear(d_embed * 2, self.total_input_kwargs)
         self.right_lookback2 = nn.Linear(d_embed * 2, max_lookback + 1)
 
         # Importance scores (learned sparsity)

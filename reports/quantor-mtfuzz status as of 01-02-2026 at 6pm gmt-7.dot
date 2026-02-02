@@ -1,0 +1,129 @@
+digraph QuantorMTFuzz_Roadmap {
+  rankdir=TB;
+  ratio=compress;
+  size="8.5,11";
+  nodesep=0.15;
+  ranksep=0.25;
+  bgcolor="#0f1115";
+  fontname="Helvetica";
+  fontsize=12;
+  label="Quantor-MTFuzz Roadmap: Completed vs Pending";
+  labelloc="t";
+  fontcolor="#e6e6e6";
+
+  node [fontname="Helvetica", fontsize=9, style="filled", color="#1f2a33", fontcolor="#e6e6e6"];
+  edge [fontname="Helvetica", fontsize=8, color="#9aa4ad", arrowsize=0.6];
+
+  // External anchors for horizontal alignment (outside clusters)
+  anchor_done [label="", shape=point, width=0.01, height=0.01, style="invis"];
+  anchor_s1 [label="", shape=point, width=0.01, height=0.01, style="invis"];
+  anchor_s2 [label="", shape=point, width=0.01, height=0.01, style="invis"];
+  anchor_s3 [label="", shape=point, width=0.01, height=0.01, style="invis"];
+
+  { rank=same; anchor_done; anchor_s1; anchor_s2; anchor_s3; }
+
+  subgraph cluster_legend {
+    label="Legend";
+    color="#2b3138";
+    fontcolor="#e6e6e6";
+    style="rounded";
+
+    done_box [label="Completed", shape=box, fillcolor="#1f6f4a"];
+    todo_box [label="Pending", shape=box, fillcolor="#8a3b3b"];
+    inprog_box [label="Planned (Next)", shape=box, fillcolor="#6b5b2a"];
+    dashed_edge [label="dashed = optional/parallel", shape=note, fillcolor="#2b3138"];
+  }
+
+  subgraph cluster_done {
+    label="Completed Work";
+    color="#1f6f4a";
+    fontcolor="#e6e6e6";
+    style="rounded";
+
+    done_backtest_arch [label="Backtesting Architecture\n(PositionState + synthetic options)", shape=box, fillcolor="#1f6f4a"];
+    done_pnl [label="Mark-to-Market P&L\n+ Leg exit logic", shape=box, fillcolor="#1f6f4a"];
+    done_logging [label="Trade Logging + Diagnostics", shape=box, fillcolor="#1f6f4a"];
+    done_reporting [label="Professional Reporting\n(PDF, visuals, zero-trade fix)", shape=box, fillcolor="#1f6f4a"];
+    done_optimizer [label="Phased Serial Optimizer\n+ Metrics + CSV top100", shape=box, fillcolor="#1f6f4a"];
+    done_benchmark [label="CPU Benchmark", shape=box, fillcolor="#1f6f4a"];
+    done_broker [label="AlpacaBroker Integration\n+ live/paper wiring", shape=box, fillcolor="#1f6f4a"];
+    done_docs [label="Docs & Roadmap", shape=box, fillcolor="#1f6f4a"];
+  }
+
+  subgraph cluster_stage1 {
+    label="Stage 0–1: Baseline & Data Realism";
+    color="#6b5b2a";
+    fontcolor="#e6e6e6";
+    style="rounded";
+
+    todo_baseline [label="Baseline Metrics\n(PnL/DD/Sharpe + runtime)", shape=box, fillcolor="#6b5b2a"];
+    todo_config_guard [label="Config Sanity Checks\n(main.py)", shape=box, fillcolor="#6b5b2a"];
+    todo_rf_iv [label="Add risk_free_rate\n+ iv_annual_volatility", shape=box, fillcolor="#6b5b2a"];
+    todo_realized_vol [label="Realized Vol + IV Rank Proxy", shape=box, fillcolor="#6b5b2a"];
+    todo_slippage [label="Slippage + Commission Model", shape=box, fillcolor="#6b5b2a"];
+  }
+
+  subgraph cluster_stage2 {
+    label="Stage 2–3: Strategy Depth & Risk Controls";
+    color="#8a3b3b";
+    fontcolor="#e6e6e6";
+    style="rounded";
+
+    todo_skew [label="Skew/Term Structure\nStrike Selection", shape=box, fillcolor="#8a3b3b"];
+    todo_prob_filter [label="Probabilistic Entry Filter", shape=box, fillcolor="#8a3b3b"];
+    todo_regime [label="Regime Classifier\n(Trend vs Mean Reversion)", shape=box, fillcolor="#8a3b3b"];
+    todo_greeks [label="Portfolio Greeks\n(Delta/Gamma/Vega)", shape=box, fillcolor="#8a3b3b"];
+    todo_risk_caps [label="Portfolio Risk Caps\n+ Risk Budget Sizing", shape=box, fillcolor="#8a3b3b"];
+    todo_stress [label="Shock/Stress Tests", shape=box, fillcolor="#8a3b3b"];
+  }
+
+  subgraph cluster_stage3 {
+    label="Stage 4–5: Performance & Validation";
+    color="#4f3b77";
+    fontcolor="#e6e6e6";
+    style="rounded";
+
+    todo_parallel [label="Parallel Optimizer", shape=box, fillcolor="#4f3b77"];
+    todo_index [label="Pre-index Option Chains", shape=box, fillcolor="#4f3b77"];
+    todo_optimize [label="Hot-loop Optimizations\n(lookup + vectorize/JIT)", shape=box, fillcolor="#4f3b77"];
+    todo_report [label="Expanded PDF Metrics\n(DTE/Credit/Regime)", shape=box, fillcolor="#4f3b77"];
+    todo_tests [label="Regression + Unit Tests", shape=box, fillcolor="#4f3b77"];
+  }
+
+  // Invisible ties from anchors to top nodes
+  anchor_done -> done_backtest_arch [style=invis, weight=10];
+  anchor_s1 -> todo_baseline [style=invis, weight=10];
+  anchor_s2 -> todo_skew [style=invis, weight=10];
+  anchor_s3 -> todo_parallel [style=invis, weight=10];
+
+  done_backtest_arch -> done_pnl [color="#5fd38d"];
+  done_pnl -> done_logging [color="#5fd38d"];
+  done_logging -> done_reporting [color="#5fd38d"];
+  done_reporting -> done_optimizer [color="#5fd38d"];
+  done_optimizer -> done_benchmark [color="#5fd38d"];
+  done_benchmark -> done_broker [color="#5fd38d"];
+  done_broker -> done_docs [color="#5fd38d"];
+
+  done_docs -> todo_baseline [color="#f0c36d"];
+  todo_baseline -> todo_config_guard [color="#f0c36d"];
+  todo_config_guard -> todo_rf_iv [color="#f0c36d"];
+  todo_rf_iv -> todo_realized_vol [color="#f0c36d"];
+  todo_realized_vol -> todo_slippage [color="#f0c36d"];
+
+  todo_slippage -> todo_skew [color="#ff8b8b"];
+  todo_skew -> todo_prob_filter [color="#ff8b8b"];
+  todo_prob_filter -> todo_regime [color="#ff8b8b"];
+  todo_regime -> todo_greeks [color="#ff8b8b"];
+  todo_greeks -> todo_risk_caps [color="#ff8b8b"];
+  todo_risk_caps -> todo_stress [color="#ff8b8b"];
+
+  todo_stress -> todo_parallel [color="#a58bff"];
+  todo_parallel -> todo_index [color="#a58bff"];
+  todo_index -> todo_optimize [color="#a58bff"];
+  todo_optimize -> todo_report [color="#a58bff"];
+  todo_report -> todo_tests [color="#a58bff"];
+
+  todo_realized_vol -> todo_skew [style="dashed", color="#9aa4ad"];
+  todo_parallel -> todo_optimize [style="dashed", color="#9aa4ad"];
+  todo_report -> todo_tests [style="dashed", color="#9aa4ad"];
+}

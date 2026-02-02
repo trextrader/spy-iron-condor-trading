@@ -700,7 +700,7 @@ def train_condor_brain(args):
         print(f"[CondorBrain] GPU tensors ready: {n_train_batches} train batches, {n_val_batches} val batches", flush=True)
     else:
         # Fallback: CPU DataLoader path (much slower)
-        print("[CondorBrain] ⚠️ gpu-dataset DISABLED: using CPU loaders (slower)")
+        print("[CondorBrain] [WARNING] gpu-dataset DISABLED: using CPU loaders (slower)")
         train_ds = BatchedSequenceDataset(X_train, y_train, r_train, L, B, drop_last=True)
         val_ds = BatchedSequenceDataset(X_val, y_val, r_val, L, B, drop_last=False)
         train_loader = DataLoader(train_ds, batch_size=None, num_workers=0)

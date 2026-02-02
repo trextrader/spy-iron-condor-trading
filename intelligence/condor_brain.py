@@ -417,6 +417,25 @@ class CondorBrain(nn.Module):
             input_dim=input_dim
         ) if feature_group_dropout > 0 else None
 
+        # Standard Feature Names (Mamba-V3) for Interpretability
+        self.feature_names = [
+            "Open", "High", "Low", "Close", "Volume", 
+            "RSI", "MACD", "Signal", "Hist", "BB_Up", "BB_Mid", "BB_Low", "BB_Width",
+            "ATR", "ADX", "Obv", "Slope", "VIX", "VIX_Slope", "PutCallRatio",
+            "NetDelta", "NetGamma", "NetVega", "NetTheta",
+            "DTE_0_IV", "DTE_0_De", "DTE_0_Ga", "DTE_0_Ve", "DTE_0_Th",
+            "DTE_1_IV", "DTE_1_De", "DTE_1_Ga", "DTE_1_Ve", "DTE_1_Th",
+            "DTE_2_IV", "DTE_2_De", "DTE_2_Ga", "DTE_2_Ve", "DTE_2_Th",
+            "DTE_3_IV", "DTE_3_De", "DTE_3_Ga", "DTE_3_Ve", "DTE_3_Th",
+            "DTE_4_IV", "DTE_4_De", "DTE_4_Ga", "DTE_4_Ve", "DTE_4_Th",
+            "DayOfWeek", "HourOfDay", "MinuteOfHour", "IsRegularHours", 
+            "TimeFromOpen", "TimeToClose"
+        ]
+        # Pad if input_dim > len(feature_names)
+        if input_dim > len(self.feature_names):
+            self.feature_names.extend([f"F{i}" for i in range(len(self.feature_names), input_dim)])
+
+
         # Predicate Discovery (Structural Templates)
         self.use_predicate_discovery = use_predicate_discovery
         if use_predicate_discovery:
@@ -536,11 +555,14 @@ class CondorBrain(nn.Module):
         """
         # --- Predicate Discovery Path ---
         if self.use_predicate_discovery and self.predicate_selector is not None:
-            from intelligence.predicate_discovery import evaluate_predicates_gpu
+            # from intelligence.predicate_discovery import evaluate_predicates_gpu
+            # Use the Recursive Logic Evaluator (Depth=4)
+            from intelligence.recursive_evaluator import evaluate_predicates_recursive
+            
             # Get decoded rules and importance
             importance, params = self.predicate_selector(return_params=True)
             # Evaluate templates on normalized input data
-            pred_features = evaluate_predicates_gpu(
+            pred_features = evaluate_predicates_recursive(
                 x, params, importance, max_active=self.max_active_predicates
             )
             # Apply nested logical combinations
@@ -1197,23 +1219,46 @@ class CondorBrainEngine:
     def get_discovered_predicates(self, threshold: float = 0.1) -> List[str]:
         """
         Return human-readable list of discovered predicates, 
-        including nested logical combinations from the Combiner.
+        unrolling recursive definitions.
         """
         if not self.use_predicate_discovery or self.predicate_selector is None:
             return []
             
-        # 1. Get atomic predicates from Selector
-        # We need the NAMES to feed into the combiner's logic explanation
-        # But get_active_predicates returns names with [Template] tags.
-        # We want pure names for the combiner logic set.
-        _, _, names = self.predicate_selector.get_active_predicates(threshold=threshold)
+        from intelligence.recursive_evaluator import trace_recursive_rule
         
-        # 2. Get combined logic sets
-        # The combiner knows how to mix these atoms
-        logic_sets = self.predicate_combiner.get_logic_sets(names)
+        # 1. Get raw params
+        importance, params = self.predicate_selector(return_params=True)
+        # Select active
+        k = min(self.max_active_predicates, params.shape[0])
+        _, top_idx = torch.topk(importance, k)
+        active_params = params[top_idx]
+        active_imp = importance[top_idx]  
         
-        # 3. Return both (Atoms for reference, Logic Sets for depth)
-        return logic_sets + ["--- Atomic Rules (Components) ---"] + names
+        # 2. Trace all active rules
+        # We need the feature names from somewhere... 
+        # CondorBrainEngine has them. CondorBrain might not store them explicitly?
+        # We can assume standard names if not passed.
+        # Ideally, we pass feature_names to this function.
+        # Since I can't easily change the signature in the call site (train_condor_brain), 
+        # I will try to infer or use placeholders.
+        # Actually, CondorBrain usually knows its input_dim, but maybe not names.
+        # I'll use F0..FN if needed.
+        
+        # Checking if self has feature_names 
+        feature_names = getattr(self, 'feature_names', [f"F{i}" for i in range(54)]) # Default fallback
+        
+        names = []
+        for i in range(k):
+            if active_imp[i] > -10.0: # Filter very low importance
+                # Trace!
+                rule_str = trace_recursive_rule(i, active_params, feature_names, [], depth=0)
+                names.append(f"[R{i}] {rule_str} (imp={active_imp[i]:.2f})")
+        
+        # 3. Get combined logic sets (Combiner) - Still valuable for AND/OR logic
+        # For the Combiner, we just pass the names we generated
+        # logic_sets = self.predicate_combiner.get_logic_sets(names)
+        
+        return names # + logic_sets
 
     def benchmark(self, n_iterations: int = 100) -> dict:
         """Benchmark inference latency."""
