@@ -35,6 +35,7 @@ nohup python -u intelligence/train_condor_brain.py \
   --gpu-dataset \
   --grad-checkpoint \
   --no-plots \
+  --batch-patience 10 \
   --early-stop \
   --patience 5 \
   --val-limit 200 \

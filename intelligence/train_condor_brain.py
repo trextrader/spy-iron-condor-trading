@@ -504,6 +504,8 @@ def parse_args():
                         help="Limit validation to N batches to save time (0=unlimited).")
     parser.add_argument("--no-plots", action="store_true",
                         help="Disable ALL plotting (Safe Mode) - Prevents hangs on headless systems.")
+    parser.add_argument("--batch-patience", type=int, default=0,
+                        help="[TESTING] Skip to next epoch if batch loss doesn't improve for N batches (0=disabled).")
 
     args = parser.parse_args()
     
@@ -612,6 +614,7 @@ def train_condor_brain(args):
     # Initialize batch loss tracker (if arg set)
     best_batch_loss_tracker = args.save_on_batch_loss
     last_best_batch_path = None # Track file to delete old ones
+    batch_patience_counter = 0 # [TESTING] Track consecutive batches without improvement
     # Load data
     print(f"\n[CondorBrain] Loading data from {args.local_data}...", flush=True)
     if args.max_rows > 0:
@@ -1130,8 +1133,17 @@ def train_condor_brain(args):
                 
                 # Log to stdout (briefly)
                 pbar.write(f"  [SAVE] New Best Batch Loss: {_loss_val:.4f} (was {prev_best:.4f}) -> {_fname}")
-            
-            # Update throughput display and LOG EXPLICITLY to stdout for background visibility
+                
+                # Reset patience on improvement
+                batch_patience_counter = 0
+                
+            elif args.batch_patience > 0:
+                # No improvement, increment patience
+                batch_patience_counter += 1
+                if batch_patience_counter >= args.batch_patience:
+                    pbar.write(f"  ⚡ [TEST MODE] Batch patience ({args.batch_patience}) exceeded without improvement.")
+                    pbar.write(f"  ⚡ Skipping remainder of Epoch {epoch+1} ({batch_idx+1}/{n_train_batches})...")
+                    break # Skip to validation/next epochbility
             if (batch_idx + 1) % args.log_every == 0:
                 _now = time.time()
                 _dt = max(_now - _tp_last_t, 1e-6)
