@@ -75,7 +75,6 @@ def load_model_any(ckpt_path: str, device: torch.device, input_dim: int = INPUT_
     state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
     if any(k.startswith("module.") for k in state_dict.keys()):
         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-
     config = ckpt.get("model_config", ckpt.get("config", {})) or {}
     
     # --- ARCHAEOLOGICAL INFERENCE ---
@@ -89,46 +88,57 @@ def load_model_any(ckpt_path: str, device: torch.device, input_dim: int = INPUT_
     # 2. Predicate Discovery
     use_pred = any(k.startswith("predicate_selector") for k in state_dict.keys())
     
-    # 3. Input Dim and Predicate Hyperparams
-    # We look at predicate_selector.predicate_embeddings: [n_slots, n_fields]
+    # Initialize defaults
+    d_model = config.get("d_model", 1024)
+    n_layers = int(config.get("n_layers", 32))
+    max_active = config.get("max_active_predicates", 512)
+    n_slots = config.get("n_predicate_slots", 2048)
+    input_dim = config.get("input_dim", INPUT_DIM_V22)
+
+    # 3. Precise Hyperparam Reconstruction
     if use_pred:
+        # predicate_embeddings: [n_slots, d_embed]
         p_embed = state_dict.get("predicate_selector.predicate_embeddings")
         if p_embed is not None:
-            input_dim = p_embed.shape[1]
+            n_slots = p_embed.shape[0]
+            # d_embed = p_embed.shape[1] (not used for CondorBrain init, but good to know)
         
-        # Look at combiner output or selector heads
-        # template_head.bias: [n_slots]
+        # left_field1.weight: [n_fields + n_slots, d_embed * 2]
+        # This is the gold standard for recovering original input_dim
+        lf1 = state_dict.get("predicate_selector.left_field1.weight")
+        if lf1 is not None:
+            input_dim = lf1.shape[0] - n_slots
+        
         # logic_gates: [max_active, max_active, 4]
         gates = state_dict.get("predicate_combiner.logic_gates")
         if gates is not None:
             max_active = gates.shape[0]
-        else:
-            # Fallback to current default if we can't find it
-            max_active = config.get("max_active_predicates", 512)
     else:
-        max_active = config.get("max_active_predicates", 512)
+        # Non-predicate model: check input_proj or backbone encoder
+        if "input_proj.weight" in state_dict:
+            # Mamba: [d_model, input_dim]
+            input_dim = state_dict["input_proj.weight"].shape[1]
+        elif "cde_backbone.encoder.weight" in state_dict:
+            # CDE: [hidden_dim, input_dim + 2*max_active]
+            # If no predicates, backbone_in_dim == input_dim
+            input_dim = state_dict["cde_backbone.encoder.weight"].shape[1]
 
     # 4. d_model
-    # Look at norm.weight if it exists, or backbone encoder
-    d_model = config.get("d_model", 1024)
     if "norm.weight" in state_dict:
         d_model = state_dict["norm.weight"].shape[0]
     elif "cde_backbone.encoder.weight" in state_dict:
         d_model = state_dict["cde_backbone.encoder.weight"].shape[0]
 
     # 5. n_layers
-    # Check Mamba layers or CDE structure
     if not use_cde:
         mamba_layers = [k for k in state_dict.keys() if k.startswith("layers.") and ".mamba." in k]
         if mamba_layers:
             n_layers = max([int(k.split(".")[1]) for k in mamba_layers]) + 1
-        else:
-            n_layers = config.get("n_layers", 32)
     else:
-        # CDE n_layers is often in config, usually 2-3 for vector field
-        n_layers = int(config.get("n_layers", 2))
+        # CDE n_layers refers to vector field blocks if applicable, or stay with config
+        pass
 
-    print(f"  [Inferred] Arch={'CDE' if use_cde else 'Mamba'}, d_model={d_model}, layers={n_layers}, input_dim={input_dim}, predicates={use_pred}", flush=True)
+    print(f"  [Inferred] Arch={'CDE' if use_cde else 'Mamba'}, d_model={d_model}, layers={n_layers}, input_dim={input_dim}, slots={n_slots}, max_active={max_active}", flush=True)
 
     model = CondorBrain(
         d_model=d_model,
@@ -136,6 +146,7 @@ def load_model_any(ckpt_path: str, device: torch.device, input_dim: int = INPUT_
         input_dim=input_dim,
         use_cde=use_cde,
         use_predicate_discovery=use_pred,
+        n_predicate_slots=n_slots,
         max_active_predicates=max_active,
         use_topk_moe=bool(config.get("use_topk_moe", config.get("use_topk", False))),
     )
