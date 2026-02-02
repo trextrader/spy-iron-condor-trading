@@ -488,6 +488,8 @@ def parse_args():
                         help="Max active rules to use as features.")
     parser.add_argument("--sparsity-weight", type=float, default=0.001,
                         help="L1 weight for pruning useless rules.")
+    parser.add_argument("--recursion-depth", type=int, default=4,
+                        help="Depth of recursive logic (Gödel sets of sets). Default: 4.")
 
     # NEW: Export epoch plots and metrics to files
     parser.add_argument("--export-epoch-plots", action="store_true",
