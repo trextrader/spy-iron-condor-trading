@@ -26,11 +26,11 @@ nohup python -u intelligence/train_condor_brain.py \
   --max-active-predicates 256 \
   --sparsity-weight 0.001 \
   --epochs 20 \
-  --batch-size 128 \
+  --batch-size 64 \
   --d-model 256 \
   --layers 32 \
   --lr 1e-4 \
-  --accum-steps 2 \
+  --accum-steps 4 \
   --cde \
   --gpu-dataset \
   --grad-checkpoint \
