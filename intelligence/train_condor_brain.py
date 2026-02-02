@@ -741,6 +741,12 @@ def train_condor_brain(args):
     if args.grad_checkpoint:
         model.gradient_checkpointing = True
         print("[CondorBrain] Gradient checkpointing ENABLED (memory saver)")
+        
+    # --- AUTO-ENABLE MULTI-GPU (DataParallel) ---
+    if torch.cuda.device_count() > 1:
+        print(f"[CondorBrain] 🚀 Multi-GPU Detected! Wrapping model in DataParallel ({torch.cuda.device_count()} GPUs).")
+        model = torch.nn.DataParallel(model)
+        # Note: Gradient Checkpointing might need special handling with DataParallel, but usually works if set on module first.
     
     # torch.compile() (guarded). This CAN help, but depends on your exact mamba build.
     if args.compile and hasattr(torch, "compile") and device.type == "cuda":
@@ -1083,7 +1089,7 @@ def train_condor_brain(args):
                 
                 # We save a minimal checkpoint to be fast
                 _ckpt = {
-                    "state_dict": model.state_dict(),
+                    "state_dict": (model.module if hasattr(model, "module") else model).state_dict(),
                     "epoch": epoch + 1,
                     "batch": batch_idx + 1,
                     "loss": _loss_val,
@@ -1479,7 +1485,7 @@ def train_condor_brain(args):
             print(f"  [Saving] Writing model to {args.output}...")
             save_start = time.time()
             ckpt = {
-                "state_dict": model.state_dict(),
+                "state_dict": (model.module if hasattr(model, "module") else model).state_dict(),
                 "feature_cols": list(FEATURE_COLS),
                 "input_dim": int(len(FEATURE_COLS)),
                 "median": med.tolist() if isinstance(med, np.ndarray) else med,
