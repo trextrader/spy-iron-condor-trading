@@ -548,13 +548,14 @@ class CondorBrain(nn.Module):
         
         self.legacy_head = nn.Linear(d_model, 1)
         
-    def forward(self, x: torch.Tensor, return_regime: bool = True, return_experts: bool = False, return_features: bool = False, forecast_days: int = 0, diffusion_target: Optional[torch.Tensor] = None) -> Any:
+    def forward(self, x: torch.Tensor, return_regime: bool = True, return_experts: bool = False, return_features: bool = False, forecast_days: int = 20, diffusion_target: Optional[torch.Tensor] = None, return_predicates: bool = False) -> Any:
         """
         Forward pass.
         Args:
             x: Input tensor (B, SeqLen, InputDim)
         """
         # --- Predicate Discovery Path ---
+        pred_logits = None
         if self.use_predicate_discovery and self.predicate_selector is not None:
             # from intelligence.predicate_discovery import evaluate_predicates_gpu
             # Use the Recursive Logic Evaluator (Depth=4)
@@ -573,6 +574,7 @@ class CondorBrain(nn.Module):
             pred_features = evaluate_predicates_recursive(
                 x, active_params, active_imp, max_active=self.max_active_predicates
             )
+            pred_logits = pred_features
             # Apply nested logical combinations
             logic_features = self.predicate_combiner(pred_features)
             
@@ -689,6 +691,9 @@ class CondorBrain(nn.Module):
             if self.use_topk_moe: res.append(moe_routing_info)
             else: res.append({'low': out_low, 'normal': out_normal, 'high': out_high})
             
+        if return_predicates:
+            res.append(pred_logits)
+
         return tuple(res) if len(res) > 1 else outputs
     
     def predict_legacy(self, x: torch.Tensor) -> torch.Tensor:

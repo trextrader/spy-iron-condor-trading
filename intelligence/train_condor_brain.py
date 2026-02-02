@@ -489,6 +489,8 @@ def parse_args():
                         help="Max active rules to use as features.")
     parser.add_argument("--sparsity-weight", type=float, default=0.001,
                         help="L1 weight for pruning useless rules.")
+    parser.add_argument("--diversity-weight", type=float, default=0.01,
+                        help="Entropy weight for encouraging feature diversity in rules.")
     parser.add_argument("--recursion-depth", type=int, default=4,
                         help="Depth of recursive logic (Gödel sets of sets). Default: 4.")
 
@@ -1039,15 +1041,18 @@ def train_condor_brain(args):
                     loss_dict['diff'] = diff_loss_scaled
                     loss_dict['total'] = loss
 
-                # Add structural rule discovery sparsity loss if enabled
+                # Add structural rule discovery sparsity and diversity loss if enabled
                 if args.use_predicate_discovery:
                     # Handle DataParallel wrapping
                     if isinstance(model, nn.DataParallel):
-                        rule_loss = model.module.predicate_selector.sparsity_loss()
+                        selector = model.module.predicate_selector
                     else:
-                        rule_loss = model.predicate_selector.sparsity_loss()
+                        selector = model.predicate_selector
+                        
+                    rule_sparsity = selector.sparsity_loss()
+                    rule_diversity = selector.diversity_loss()
 
-                    rule_loss_scaled = rule_loss * args.sparsity_weight
+                    rule_loss_scaled = (rule_sparsity * args.sparsity_weight) + (rule_diversity * args.diversity_weight)
                     loss = loss + rule_loss_scaled
                     loss_dict['rule'] = rule_loss_scaled
                     loss_dict['total'] = loss

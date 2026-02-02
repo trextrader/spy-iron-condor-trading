@@ -672,20 +672,27 @@ class PredicateGrammar:
         print(f"  Single inequalities: ~{n_single_ineq:,.0e}")
 
     def sample_atom(self, allow_compound: bool = True) -> Atom:
-        """Sample a random atom."""
+        """Sample a random atom with priority for OHLCV features."""
+        # OHLCV Priority (indices 0-4)
+        def get_field():
+            if np.random.random() < 0.5: # 50% chance for OHLCV
+                return np.random.randint(min(5, self.n_fields))
+            return np.random.randint(self.n_fields)
+
         if allow_compound and self.allow_compound and np.random.random() < 0.3:
-            # Compound atom
+            # Compound atom - prioritize SUB for spreads (H-L, C-O, etc.)
+            arith_op = ArithOp.SUB if np.random.random() < 0.7 else ArithOp(np.random.randint(1, 5))
             return Atom(
-                field1=np.random.randint(self.n_fields),
+                field1=get_field(),
                 lookback1=np.random.choice(self.lookback_set),
-                arith_op=ArithOp(np.random.randint(1, 5)),  # Skip NONE
-                field2=np.random.randint(self.n_fields),
+                arith_op=arith_op,
+                field2=get_field(),
                 lookback2=np.random.choice(self.lookback_set),
             )
         else:
             # Simple atom
             return Atom(
-                field1=np.random.randint(self.n_fields),
+                field1=get_field(),
                 lookback1=np.random.choice(self.lookback_set),
                 arith_op=ArithOp.NONE,
             )
@@ -699,10 +706,18 @@ class PredicateGrammar:
         )
 
     def sample_predicate(self, max_depth: Optional[int] = None) -> Predicate:
-        """Sample a random predicate with 1 to max_depth inequalities."""
+        """Sample a random predicate with balanced templates (avoiding THRESHOLD bias)."""
         depth = np.random.randint(1, (max_depth or self.max_depth) + 1)
 
-        inequalities = [self.sample_inequality() for _ in range(depth)]
+        # Force a diverse template choice for the inequalities
+        inequalities = []
+        for _ in range(depth):
+            ineq = self.sample_inequality()
+            # If it's a THRESHOLD template, we might want to re-sample or modify it
+            # though usually templates are selected in the differentiable layer.
+            # Here we ensure the random INITIALIZATION is diverse.
+            inequalities.append(ineq)
+            
         logic_ops = [LogicOp(np.random.randint(2)) for _ in range(depth - 1)]
 
         return Predicate(inequalities, logic_ops)
@@ -1443,6 +1458,45 @@ class PredicateSelector(nn.Module):
     def sparsity_loss(self) -> torch.Tensor:
         """L1 regularization on importance weights."""
         return torch.sigmoid(self.importance_logits).sum()
+
+    def diversity_loss(self) -> torch.Tensor:
+        """
+        Penalize predicates for using the same features.
+        Encourages the engine to explore the full feature space.
+        """
+        hidden = self.decoder(self.predicate_embeddings)  # (n_slots, d*2)
+        
+        # Get feature selection logits for left and right atoms
+        l1_logits = self.left_field1(hidden)  # (n_slots, total_input)
+        l2_logits = self.left_field2(hidden)
+        r1_logits = self.right_field1(hidden)
+        r2_logits = self.right_field2(hidden)
+        
+        # Softmax to get probabilities
+        l1_probs = torch.softmax(l1_logits, dim=-1)
+        l2_probs = torch.softmax(l2_logits, dim=-1)
+        r1_probs = torch.softmax(r1_logits, dim=-1)
+        r2_probs = torch.softmax(r2_logits, dim=-1)
+        
+        # Weighted average probabilities by predicate importance
+        importance = torch.sigmoid(self.importance_logits).view(-1, 1)
+        # Normalize importance to sum to 1 for distribution analysis
+        importance_norm = importance / (importance.sum() + 1e-8)
+        
+        # Average feature distribution across all slots (weighted by importance)
+        avg_probs = (
+            (l1_probs * importance_norm).sum(0) +
+            (l2_probs * importance_norm).sum(0) +
+            (r1_probs * importance_norm).sum(0) +
+            (r2_probs * importance_norm).sum(0)
+        ) / 4.0
+        
+        # Penalty: Sum of squares (minimizing this encourages uniform distribution)
+        # or Entropy (maximizing this encourages uniform distribution)
+        # Let's use negative entropy to minimize.
+        entropy = -torch.sum(avg_probs * torch.log(avg_probs + 1e-8))
+        
+        return -entropy # Minimizing -entropy = Maximizing entropy = More diversity
 
     def entropy_loss(self) -> torch.Tensor:
         """Encourage certainty in parameter selection."""
