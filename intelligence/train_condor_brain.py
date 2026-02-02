@@ -611,6 +611,7 @@ def train_condor_brain(args):
 
     # Initialize batch loss tracker (if arg set)
     best_batch_loss_tracker = args.save_on_batch_loss
+    last_best_batch_path = None # Track file to delete old ones
     # Load data
     print(f"\n[CondorBrain] Loading data from {args.local_data}...", flush=True)
     if args.max_rows > 0:
@@ -1111,7 +1112,17 @@ def train_condor_brain(args):
                        "max_active_predicates": int(args.max_active_predicates),
                     }
                 }
+                
+                # CLEANUP: Delete previous best checkpoint to save disk space
+                if last_best_batch_path and os.path.exists(last_best_batch_path):
+                    try:
+                        os.remove(last_best_batch_path)
+                        # pbar.write(f"  [CLEANUP] Deleted previous best: {os.path.basename(last_best_batch_path)}")
+                    except OSError:
+                        pass # Ignore deletion errors
+                
                 torch.save(_ckpt, _save_path)
+                last_best_batch_path = _save_path
                 
                 # Update tracker - only save if we beat THIS new low record next time
                 prev_best = best_batch_loss_tracker
@@ -1119,8 +1130,6 @@ def train_condor_brain(args):
                 
                 # Log to stdout (briefly)
                 pbar.write(f"  [SAVE] New Best Batch Loss: {_loss_val:.4f} (was {prev_best:.4f}) -> {_fname}")
-                # pbar.write(f"  ⚡ [FAST-TRACK] Breaking epoch early...")  <-- REMOVED
-                # break <-- REMOVED (Continue training!)
             
             # Update throughput display and LOG EXPLICITLY to stdout for background visibility
             if (batch_idx + 1) % args.log_every == 0:
