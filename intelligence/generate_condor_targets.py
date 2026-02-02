@@ -23,6 +23,7 @@ from tqdm import tqdm
 
 # Add project root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from intelligence.strategy_suite import CalendarSimulator, BWBSimulator, VerticalSimulator
 
 # ============================================================================
 # CONFIGURATION
@@ -244,7 +245,16 @@ def generate_condor_targets(
     was_profitable = np.full(n, 0.5)
     realized_roi = np.zeros(n)
     realized_max_loss = np.full(n, 0.2)
+    realized_max_loss = np.full(n, 0.2)
     confidence_target = np.full(n, 0.5)
+    
+    # v3.0 Targets
+    target_roi_calendar = np.zeros(n)
+    target_roi_bwb = np.zeros(n)
+    
+    # Initialize v3 simulators
+    cal_sim = CalendarSimulator()
+    bwb_sim = BWBSimulator()
     
     # Get unique timestamps for simulation
     unique_dts = df['dt'].unique()
@@ -283,6 +293,52 @@ def generate_condor_targets(
                 best_call, best_put, best_wing
             )
             
+            # --- NEW: Simulate Alternative Strategies (v3.0) ---
+            # Calendar Spread: Short 14DTE (Front), Long 45DTE (Back)
+            # Simplification: We assume Back Leg IV = Front Leg IV ( conservative)
+            # In reality, back month usually has lower IV (contango) or different.
+            # We treat ROI as purely directional/vega for now.
+            try:
+                # Need future spot at 14 days (or min(dte, 14))
+                cal_days = min(dte_days, 14) 
+                cal_idx = min(len(future_closes)-1, int(cal_days * config.bars_per_day))
+                cal_exit_spot = future_closes[cal_idx]
+                
+                # Mock IV (assuming sticky strike for now as we don't have historical surfaces loaded here)
+                # Ideally we'd use 'ivr' from the row, but let's assume 20% vol (0.2) + shift
+                # This is a placeholder until we load full option surface data
+                mock_iv = 0.2 
+                
+                cal_res = cal_sim.simulate(
+                    entry_spot=spot, exit_spot=cal_exit_spot, 
+                    entry_iv=mock_iv, exit_iv=mock_iv, # Assuming constant vol for base case
+                    strike=spot, # ATM
+                    front_dte=14, back_dte=45
+                )
+                roi_calendar = cal_res['roi']
+            except:
+                roi_calendar = 0.0
+
+            # BWB: Downside Crash Protection
+            # Structure: +1 Put (ATM-2%), -2 Puts (ATM-5%), +1 Put (ATM-10%)
+            try:
+                # Check min price over next 5 days
+                crash_days = min(dte_days, 5)
+                crash_idx_end = min(len(future_closes), int(crash_days * config.bars_per_day))
+                crash_period_closes = future_closes[:crash_idx_end]
+                
+                if len(crash_period_closes) > 0:
+                    exit_spot_bwb = np.min(crash_period_closes) # Worst case (or best for BWB)
+                    bwb_res = bwb_sim.simulate(
+                        entry_spot=spot, exit_spot=exit_spot_bwb,
+                        body_strike=spot * 0.95, width=spot * 0.03 # 3% width
+                    )
+                    roi_bwb = bwb_res['roi']
+                else:
+                    roi_bwb = 0.0
+            except:
+                roi_bwb = 0.0
+
             # Update rows matching this dt
             mask = df['dt'] == dt
             idx = df.index[mask]
@@ -294,6 +350,10 @@ def generate_condor_targets(
             was_profitable[idx] = result['was_profitable']
             realized_roi[idx] = result['realized_roi']
             realized_max_loss[idx] = result['max_loss_pct']
+            
+            # v3.0 Targets
+            target_roi_calendar[idx] = roi_calendar
+            target_roi_bwb[idx] = roi_bwb
             
             # Confidence = how clear-cut the outcome was
             confidence_target[idx] = abs(result['realized_roi'])
@@ -315,6 +375,10 @@ def generate_condor_targets(
     df['realized_roi'] = realized_roi
     df['realized_max_loss'] = realized_max_loss
     df['confidence_target'] = confidence_target
+    
+    # v3.0 columns
+    df['target_roi_calendar'] = target_roi_calendar
+    df['target_roi_bwb'] = target_roi_bwb
     
     # Regime labeling based on IVR (0-1 range)
     if 'ivr' in df.columns:
@@ -387,7 +451,8 @@ def main():
     temp_out = args.input + ".tmp"
     target_cols = [
         'target_call_offset', 'target_put_offset', 'target_wing_width', 'target_dte',
-        'was_profitable', 'realized_roi', 'realized_max_loss', 'confidence_target', 'regime_label'
+        'was_profitable', 'realized_roi', 'realized_max_loss', 'confidence_target', 'regime_label',
+        'target_roi_calendar', 'target_roi_bwb'
     ]
     
     # Create a lookup for targets
