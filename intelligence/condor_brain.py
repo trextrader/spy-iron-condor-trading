@@ -561,9 +561,16 @@ class CondorBrain(nn.Module):
             
             # Get decoded rules and importance
             importance, params = self.predicate_selector(return_params=True)
+            
+            # CRITICAL: Only evaluate ACTIVE predicates (TopK) to save memory/dims
+            k_active = min(self.max_active_predicates, params.shape[0])
+            _, top_idx = torch.topk(importance, k_active)
+            active_params = params[top_idx]
+            active_imp = importance[top_idx]
+            
             # Evaluate templates on normalized input data
             pred_features = evaluate_predicates_recursive(
-                x, params, importance, max_active=self.max_active_predicates
+                x, active_params, active_imp, max_active=self.max_active_predicates
             )
             # Apply nested logical combinations
             logic_features = self.predicate_combiner(pred_features)
