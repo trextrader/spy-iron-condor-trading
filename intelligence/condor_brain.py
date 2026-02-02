@@ -51,6 +51,7 @@ from intelligence.vol_gated_attn import VolGatedAttn
 from intelligence.topk_moe import TopKMoE, BatchedTopKMoE
 from intelligence.generative.diffusion import ConditionalDiffusionHead
 from intelligence.predicate_discovery import PredicateSelector, PredicateCombiner
+from intelligence.canonical_feature_registry import FEATURE_COLS_V22
 
 
 # ============================================================================
@@ -1252,8 +1253,8 @@ class CondorBrainEngine:
         # Actually, CondorBrain usually knows its input_dim, but maybe not names.
         # I'll use F0..FN if needed.
         
-        # Checking if self has feature_names 
-        feature_names = getattr(self, 'feature_names', [f"F{i}" for i in range(54)]) # Default fallback
+        # Checking if self has feature_names - use FEATURE_COLS_V22 as default
+        feature_names = getattr(self, 'feature_names', FEATURE_COLS_V22)  # Human-readable names
         
         names = []
         for i in range(k):
