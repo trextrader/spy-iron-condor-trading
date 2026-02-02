@@ -522,63 +522,152 @@ def evaluate_predicates_gpu(
     # Initialize output in FP32
     result = torch.zeros(batch, seq_len, max_active, device=device, dtype=torch.float32)
 
-    # Optimized vectorized evaluation
-    for t in range(max_lb, seq_len):
-        l_v1 = torch.zeros(batch, top_k, device=device, dtype=torch.float32)
-        r_v1 = torch.zeros(batch, top_k, device=device, dtype=torch.float32)
-        for k in range(top_k):
-            t_l1 = max(0, t - l_lb1[k].item())
-            t_r1 = max(0, t - r_lb1[k].item())
-            l_v1[:, k] = working_data[:, t_l1, l_f1[k].item()]
-            r_v1[:, k] = working_data[:, t_r1, r_f1[k].item()]
-        
-        # Compound logic in FP32
-        left_val = l_v1
-        for k in range(top_k):
-            if l_op[k] > 0:
-                t_l2 = max(0, t - l_lb2[k].item())
-                l_v2 = working_data[:, t_l2, l_f2[k].item()]
-                if l_op[k] == 1: left_val[:, k] += l_v2
-                elif l_op[k] == 2: left_val[:, k] -= l_v2
-                elif l_op[k] == 3: left_val[:, k] *= l_v2
-                elif l_op[k] == 4: left_val[:, k] /= (l_v2 + working_eps)
-        
-        # Stability Clip: Prevent extreme values from atomic arithmetic
-        left_val = torch.clamp(left_val, -1e4, 1e4)
+    # Optimized Vectorized Evaluation (No Python Loops)
+    # -------------------------------------------------------------------------
+    # 1. Create indices for gathering
+    # We want: result[b, t, k] based on lookbacks l_lb1[k]
+    
+    # Time indices (1, S, 1) to (1, S, K)
+    t_seq = torch.arange(seq_len, device=device).view(1, seq_len, 1)
+    
+    # Lookback adjustments (1, 1, K)
+    # We use .long() for indexing
+    l_lb1_long = l_lb1.view(1, 1, top_k)
+    r_lb1_long = r_lb1.view(1, 1, top_k)
+    l_lb2_long = l_lb2.view(1, 1, top_k)
+    r_lb2_long = r_lb2.view(1, 1, top_k)
+    
+    # Calculate effective T indices for each atom: t - lookback
+    # result shape: (1, S, K) -> broadcast to batch later or gather directly
+    # But data has batch dim (B, S, F).
+    # We need to gather (B, S, K). 
+    
+    # Field indices (1, 1, K)
+    l_f1_idx = l_f1.view(1, 1, top_k).expand(batch, seq_len, top_k)
+    r_f1_idx = r_f1.view(1, 1, top_k).expand(batch, seq_len, top_k)
+    l_f2_idx = l_f2.view(1, 1, top_k).expand(batch, seq_len, top_k)
+    r_f2_idx = r_f2.view(1, 1, top_k).expand(batch, seq_len, top_k)
 
-        # Right val depends on template: Constant if THRESHOLD, Peer if RELATIVE/GENERAL
-        right_val = r_v1.clone()
-        for k in range(top_k):
-            if templates[k].item() == 4:
-                right_val[:, k] = thresholds[k].to(torch.float32)
-            elif r_op[k] > 0:
-                t_r2 = max(0, t - r_lb2[k].item())
-                r_v2 = working_data[:, t_r2, r_f2[k].item()]
-                if r_op[k] == 1: right_val[:, k] += r_v2
-                elif r_op[k] == 2: right_val[:, k] -= r_v2
-                elif r_op[k] == 3: right_val[:, k] *= r_v2
-                elif r_op[k] == 4: right_val[:, k] /= (r_v2 + working_eps)
-
-        # Stability Clip
-        right_val = torch.clamp(right_val, -1e4, 1e4)
-
-        # Soft comparison
-        diff = left_val - right_val
-        steepness = 10.0
+    def get_atom_values(field_idx_map, lb_map):
+        """Gather values for B, S, K from data (B, S, F)."""
+        # Calculate time indices: (B, S, K)
+        # Clamp to 0 to avoid index error (will mask later if needed, or assume padded)
+        t_gather = (t_seq - lb_map).clamp(min=0).expand(batch, seq_len, top_k)
         
-        for k in range(top_k):
-            op = cmp_op[k].item()
-            if op == 0 or op == 2: # GT or GTE
-                result[:, t, k] = torch.sigmoid(steepness * diff[:, k])
-            elif op == 1 or op == 3: # LT or LTE
-                result[:, t, k] = torch.sigmoid(-steepness * diff[:, k])
-            elif op == 4: # EQ
-                result[:, t, k] = torch.exp(-steepness * diff[:, k].abs())
+        # We need to gather from 3D tensor data[b, t_gather[b,t,k], field_idx[b,t,k]]
+        # Use torch.gather? Gather works on one dim.
+        # Direct indexing with gather is tricky for multi-dim.
+        # Easier: Gather fields first -> (B, S, K) using field_idx per K
+        # data_fields = data.index_select(2, ...)? No, diff fields per K.
+        # We can use gather on dim 2.
+        
+        # 1. Gather fields at all time steps. 
+        # But wait, field is constant per K.
+        # data index select is fast.
+        
+        # Let's use the 'unfold' trick or just simple advanced indexing?
+        # PyTorch advanced indexing: data[b_idx, t_idx, f_idx]
+        
+        # Create Batch indices (B, S, K)
+        # b_idx = torch.arange(batch, device=device).view(batch, 1, 1).expand(batch, seq_len, top_k)
+        
+        # return working_data[b_idx, t_gather, field_idx_map] << Memory heavy?
+        # (128 * 240 * 256) * 4 bytes = 30MB. Is fine.
+        
+        # Manual gathering to avoid massive index tensor creation if possible.
+        # Check step 1: Gather fields
+        # fields = active_params[:, field_col].long()
+        # sub_data = working_data.index_select(2, fields) # (B, S, K) - this gets Columns for each K
+        
+        # Step 2: Shift in time (Gather on dim 1)
+        # t_gather = (t_seq - lb_map).clamp(min=0).expand(batch, seq_len, top_k)
+        # final = torch.gather(sub_data, 1, t_gather)
+        
+        return torch.gather(working_data.index_select(2, field_idx_map[0,0,:]), 1, (t_seq - lb_map).clamp(min=0).expand(batch, seq_len, top_k))
+
+    # Evaluate Left Side
+    # ------------------
+    l_v1 = get_atom_values(l_f1_idx, l_lb1_long)
+    left_val = l_v1
+    
+    # LogicOps (Vectorized)
+    # Mask for compound ops: l_op > 0
+    compound_mask = (l_op > 0).view(1, 1, top_k)
+    if compound_mask.any():
+        l_v2 = get_atom_values(l_f2_idx, l_lb2_long)
+        
+        # Apply ops carefully using masks to avoid execution on NONE atoms
+        # 1: ADD, 2: SUB, 3: MUL, 4: DIV
+        l_op_view = l_op.view(1, 1, top_k)
+        
+        left_val = torch.where(l_op_view == 1, left_val + l_v2, left_val)
+        left_val = torch.where(l_op_view == 2, left_val - l_v2, left_val)
+        left_val = torch.where(l_op_view == 3, left_val * l_v2, left_val)
+        left_val = torch.where(l_op_view == 4, left_val / (l_v2 + working_eps), left_val)
+
+    # Stability Clip
+    left_val = torch.clamp(left_val, -1e4, 1e4)
+
+    # Evaluate Right Side
+    # -------------------
+    r_v1 = get_atom_values(r_f1_idx, r_lb1_long)
+    right_val = r_v1
+    
+    # Handle Templates
+    # 4: THRESHOLD (Constant)
+    template_view = templates.view(1, 1, top_k)
+    thresh_view = thresholds.view(1, 1, top_k)
+    
+    right_val = torch.where(template_view == 4, thresh_view.float(), right_val)
+    
+    # Compound ops for Right Side (only if not Threshold)
+    compound_mask_r = (r_op > 0).view(1, 1, top_k) & (template_view != 4)
+    if compound_mask_r.any():
+        r_v2 = get_atom_values(r_f2_idx, r_lb2_long)
+        r_op_view = r_op.view(1, 1, top_k)
+        
+        right_val = torch.where(r_op_view == 1, right_val + r_v2, right_val)
+        right_val = torch.where(r_op_view == 2, right_val - r_v2, right_val)
+        right_val = torch.where(r_op_view == 3, right_val * r_v2, right_val)
+        right_val = torch.where(r_op_view == 4, right_val / (r_v2 + working_eps), right_val)
+
+    # Stability Clip
+    right_val = torch.clamp(right_val, -1e4, 1e4)
+
+    # Comparison (Vectorized)
+    # -----------------------
+    diff = left_val - right_val
+    steepness = 10.0
+    op_view = cmp_op.view(1, 1, top_k)
+    
+    # 0: GT, 1: LT, 2: GTE, 3: LTE, 4: EQ
+    # GT/GTE: sigmoid(steep * diff)
+    # LT/LTE: sigmoid(-steep * diff)
+    # EQ: exp(-steep * abs(diff))
+    
+    # Pre-calculate common terms
+    sig_pos = torch.sigmoid(steepness * diff)
+    sig_neg = torch.sigmoid(-steepness * diff)
+    eq_val = torch.exp(-steepness * diff.abs())
+    
+    result = torch.zeros_like(diff)
+    result = torch.where((op_view == 0) | (op_view == 2), sig_pos, result)
+    result = torch.where((op_view == 1) | (op_view == 3), sig_neg, result)
+    result = torch.where(op_view == 4, eq_val, result)
+    
+    # Mask out early time steps where lb was invalid?
+    # max_lb logic from loop: t < max_lb is 0.
+    # We can apply a mask.
+    max_lb_per_k = torch.max(torch.stack([l_lb1, r_lb1, l_lb2, r_lb2]), dim=0)[0] # (K,)
+    max_lb_view = max_lb_per_k.view(1, 1, top_k)
+    
+    time_mask = t_seq >= max_lb_view
+    result = result * time_mask.float()
 
     # Importance weighting
-    result[:, :, :top_k] *= active_importance.view(1, 1, top_k).to(torch.float32)
+    result = result * active_importance.view(1, 1, top_k).to(torch.float32)
 
-    # Cast back to original dtype (likely float16/bfloat16) for the backbone
+    # Cast back
     result = result.to(data.dtype)
 
     if squeeze_out:
