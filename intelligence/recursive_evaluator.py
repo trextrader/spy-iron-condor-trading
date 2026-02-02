@@ -140,9 +140,6 @@ def evaluate_predicates_recursive(
         t_gather_r = (t_seq - r_lb1_exp).clamp(min=0).expand(batch, seq_len, top_k)
         rhs = torch.gather(val_r, 1, t_gather_r)
         
-        # OOM FIX: Free intermediates explicity
-        del val_r, t_gather_r
-        
         is_thresh = (templates == 4).view(1,1,top_k)
         rhs = torch.where(is_thresh, thresholds.view(1,1,top_k).float(), rhs)
         
@@ -160,7 +157,6 @@ def evaluate_predicates_recursive(
             val_r2 = torch.where(is_raw_r2.view(1,1,top_k), raw_val_r2, virt_val_r2)
             t_gather_r2 = (t_seq - r_lb2_exp).clamp(min=0).expand(batch, seq_len, top_k)
             v2 = torch.gather(val_r2, 1, t_gather_r2)
-            del val_r2, t_gather_r2 # FREE
 
             denom = v2 + working_eps
             op_v = r_op.view(1,1,top_k)
@@ -189,7 +185,6 @@ def evaluate_predicates_recursive(
             if mask_div.any():
                 rhs = torch.where(mask_div, rhs / denom, rhs)
                 
-            del v2, denom # FREE
             
         rhs = torch.clamp(rhs, -1e4, 1e4)
 
