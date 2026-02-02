@@ -245,7 +245,7 @@ class InequalityChain:
     This represents a SINGLE chain where comparisons flow left-to-right,
     evaluating as: (E₁ ○₁ E₂) AND (E₂ ○₂ E₃) AND ...
     """
-    expressions: List[Atom]  # Up to 50 expressions (memory-conscious)
+    expressions: List[Atom]  # Up to 200 expressions (paper spec)
     operators: List[CompareOp]  # len = len(expressions) - 1
     
     def __post_init__(self):
@@ -339,7 +339,8 @@ class SuperSet:
     """
     sets: List[InequalitySet]  # Up to 4 sets
     set_comparisons: List[CompareOp]  # Compare operators between sets
-    aggregation: str = "mean"  # How to reduce set to scalar: "mean", "max", "min"
+    aggregation: str = "pnorm"  # "pnorm", "owa", "mean", "max", "min"
+    p_value: float = 1.0  # For p-norm: p→∞=max, p=1=mean, p→-∞=min
     
     def __post_init__(self):
         if self.sets and len(self.set_comparisons) != len(self.sets) - 1:
@@ -359,17 +360,242 @@ class SuperSet:
         return f"SuperSet({' '.join(parts)})"
     
     def aggregate_set(self, truth_values: np.ndarray) -> float:
-        """Reduce a set's truth values to a single scalar."""
+        """Reduce a set's truth values to a single scalar using chosen aggregation."""
         if len(truth_values) == 0:
             return 0.0
-        if self.aggregation == "mean":
-            return float(np.mean(truth_values))
+        if self.aggregation == "pnorm":
+            return self._pnorm_aggregate(truth_values, self.p_value)
         elif self.aggregation == "max":
             return float(np.max(truth_values))
         elif self.aggregation == "min":
             return float(np.min(truth_values))
-        else:
+        else:  # "mean" or default
             return float(np.mean(truth_values))
+    
+    def _pnorm_aggregate(self, values: np.ndarray, p: float) -> float:
+        """
+        Generalized p-norm aggregation:
+        A_p(t₁,...,tₙ) = (1/n Σᵢ tᵢᵖ)^(1/p)
+        
+        - p → +∞: behaves like max
+        - p = 1: mean
+        - p → -∞: behaves like min
+        """
+        eps = 1e-8
+        n = len(values)
+        if n == 0:
+            return 0.0
+        
+        # Handle edge cases
+        if p > 50.0:  # Approximate max
+            return float(np.max(values))
+        elif p < -50.0:  # Approximate min
+            return float(np.min(values))
+        elif abs(p) < eps:  # Geometric mean (p→0)
+            return float(np.exp(np.mean(np.log(values + eps))))
+        else:
+            # Clamp values to avoid numerical issues
+            values = np.clip(values, eps, 1.0 - eps)
+            return float(np.power(np.mean(np.power(values, p)), 1.0 / p))
+
+
+# =============================================================================
+# LEARNABLE AGGREGATION MODULES (Phase 3)
+# =============================================================================
+# Per user feedback: "treat aggregation as a learnable or at least configurable 
+# operator drawn from a small, well-structured family"
+
+class LearnablePNormAggregator(nn.Module):
+    """
+    Learnable p-norm aggregation for within-set truth value reduction.
+    
+    A_p(t₁,...,tₙ) = (1/n Σᵢ tᵢᵖ)^(1/p)
+    
+    - p → +∞: max (disjunctive)
+    - p = 1: mean (averaging)
+    - p → -∞: min (conjunctive)
+    
+    The parameter p is learned per aggregation layer.
+    """
+    def __init__(self, init_p: float = 1.0, min_p: float = -10.0, max_p: float = 10.0):
+        super().__init__()
+        # Learnable parameter (unconstrained, then clamped)
+        self.p_raw = nn.Parameter(torch.tensor(init_p))
+        self.min_p = min_p
+        self.max_p = max_p
+    
+    @property
+    def p(self) -> torch.Tensor:
+        """Return clamped p value."""
+        return torch.clamp(self.p_raw, self.min_p, self.max_p)
+    
+    def forward(self, values: torch.Tensor, dim: int = -1) -> torch.Tensor:
+        """
+        Aggregate values along specified dimension.
+        
+        Args:
+            values: Tensor of truth values in [0, 1]
+            dim: Dimension to aggregate over
+            
+        Returns:
+            Aggregated tensor with dim reduced
+        """
+        eps = 1e-8
+        p = self.p
+        
+        # Clamp values to avoid numerical issues
+        values = torch.clamp(values, eps, 1.0 - eps)
+        
+        # p-norm aggregation
+        if p.abs() < eps:
+            # Geometric mean (p → 0)
+            return torch.exp(torch.mean(torch.log(values), dim=dim))
+        else:
+            mean_powered = torch.mean(torch.pow(values, p), dim=dim)
+            return torch.pow(mean_powered + eps, 1.0 / p)
+    
+    def extra_repr(self) -> str:
+        return f"p={self.p.item():.2f}"
+
+
+class LearnableOWAAggregator(nn.Module):
+    """
+    Learnable Ordered Weighted Averaging (OWA) aggregation.
+    
+    Sort truth values t_(1) ≥ ... ≥ t_(n), then:
+    A_w(t₁,...,tₙ) = Σᵢ wᵢ * t_(i)
+    
+    Weights wᵢ ≥ 0 with Σwᵢ = 1 (enforced via softmax).
+    
+    - Max-like: most weight on t_(1)
+    - Min-like: most weight on t_(n)
+    - Mean-like: uniform weights
+    """
+    def __init__(self, n_positions: int, init_mode: str = "mean"):
+        super().__init__()
+        self.n_positions = n_positions
+        
+        # Initialize weight logits
+        if init_mode == "max":
+            # Most weight on highest values
+            logits = torch.linspace(2.0, -2.0, n_positions)
+        elif init_mode == "min":
+            # Most weight on lowest values
+            logits = torch.linspace(-2.0, 2.0, n_positions)
+        else:  # "mean"
+            logits = torch.zeros(n_positions)
+        
+        self.weight_logits = nn.Parameter(logits)
+    
+    @property
+    def weights(self) -> torch.Tensor:
+        """Return normalized weights via softmax."""
+        return torch.softmax(self.weight_logits, dim=0)
+    
+    def forward(self, values: torch.Tensor, dim: int = -1) -> torch.Tensor:
+        """
+        Aggregate values using OWA.
+        
+        Args:
+            values: Tensor of truth values in [0, 1]
+            dim: Dimension to aggregate over
+            
+        Returns:
+            Aggregated tensor with dim reduced
+        """
+        # Sort values in descending order
+        sorted_values, _ = torch.sort(values, dim=dim, descending=True)
+        
+        # Pad or truncate to n_positions
+        n = sorted_values.shape[dim]
+        if n < self.n_positions:
+            # Pad with zeros
+            pad_shape = list(sorted_values.shape)
+            pad_shape[dim] = self.n_positions - n
+            padding = torch.zeros(pad_shape, device=sorted_values.device, dtype=sorted_values.dtype)
+            sorted_values = torch.cat([sorted_values, padding], dim=dim)
+        elif n > self.n_positions:
+            # Truncate
+            sorted_values = sorted_values.narrow(dim, 0, self.n_positions)
+        
+        # Apply weights
+        weights = self.weights.view([1] * dim + [self.n_positions] + [1] * (sorted_values.dim() - dim - 1))
+        if dim == -1:
+            weights = self.weights
+        
+        return torch.sum(sorted_values * weights, dim=dim)
+    
+    def extra_repr(self) -> str:
+        w = self.weights.detach().cpu().numpy()
+        return f"n_positions={self.n_positions}, weights=[{w[0]:.2f}...{w[-1]:.2f}]"
+
+
+class HierarchicalSetAggregator(nn.Module):
+    """
+    Complete hierarchical aggregation for sets-of-sets.
+    
+    Level 1 (within chain): Aggregate inequalities in a chain
+    Level 2 (within set): Aggregate chains in an inequality set  
+    Level 3 (between sets): Aggregate sets in a super-set
+    Level 4 (super-set comparison): Compare super-set scalars
+    
+    Each level uses a learnable aggregator (p-norm or OWA).
+    """
+    def __init__(
+        self,
+        max_chain_length: int = 200,
+        max_chains_per_set: int = 200,
+        max_sets_per_super: int = 4,
+        within_chain_mode: str = "pnorm",
+        within_set_mode: str = "pnorm", 
+        between_set_mode: str = "pnorm",
+        init_p_chain: float = 1.0,  # Mean
+        init_p_set: float = -1.0,   # Slightly conjunctive
+        init_p_super: float = 2.0,  # Slightly disjunctive
+    ):
+        super().__init__()
+        
+        # Level 1: Within chain (conjunctive by default - all inequalities must hold)
+        if within_chain_mode == "owa":
+            self.chain_aggregator = LearnableOWAAggregator(max_chain_length, init_mode="mean")
+        else:
+            self.chain_aggregator = LearnablePNormAggregator(init_p=init_p_chain)
+        
+        # Level 2: Within set (average of chains)
+        if within_set_mode == "owa":
+            self.set_aggregator = LearnableOWAAggregator(max_chains_per_set, init_mode="mean")
+        else:
+            self.set_aggregator = LearnablePNormAggregator(init_p=init_p_set)
+        
+        # Level 3: Between sets (compare 4 sets)
+        if between_set_mode == "owa":
+            self.super_aggregator = LearnableOWAAggregator(max_sets_per_super, init_mode="mean")
+        else:
+            self.super_aggregator = LearnablePNormAggregator(init_p=init_p_super)
+    
+    def forward(
+        self,
+        chain_truths: torch.Tensor,  # (B, S, N_chains, Chain_len) or list of tensors
+    ) -> torch.Tensor:
+        """
+        Aggregate hierarchically.
+        
+        Args:
+            chain_truths: Truth values for each inequality in each chain
+            
+        Returns:
+            Single scalar per batch element
+        """
+        # Level 1: Aggregate within chains
+        set_truths = self.chain_aggregator(chain_truths, dim=-1)  # (B, S, N_chains)
+        
+        # Level 2: Aggregate within sets
+        super_truths = self.set_aggregator(set_truths, dim=-1)  # (B, S)
+        
+        # Level 3: Aggregate across super-set
+        result = self.super_aggregator(super_truths, dim=-1)  # (B,)
+        
+        return result
 
 
 
@@ -489,14 +715,13 @@ class PredicateGrammar:
     # PAPER-ALIGNED SAMPLING (Phase 2)
     # =========================================================================
     
-    def sample_chain(self, max_length: int = 50) -> 'InequalityChain':
+    def sample_chain(self, max_length: int = 200) -> 'InequalityChain':
         """
         Sample a chained inequality: E₁ ○₁ E₂ ○₂ ... Eₙ
         
         Paper: Up to 200 expressions per chain.
-        We use 50 as default for memory efficiency.
         """
-        length = np.random.randint(2, min(max_length, 50) + 1)
+        length = np.random.randint(2, max_length + 1)
         expressions = [self.sample_atom() for _ in range(length)]
         operators = [CompareOp(np.random.randint(5)) for _ in range(length - 1)]
         return InequalityChain(expressions=expressions, operators=operators)
@@ -504,7 +729,7 @@ class PredicateGrammar:
     def sample_inequality_set(
         self, 
         max_chains: int = 200,
-        max_chain_length: int = 50,
+        max_chain_length: int = 200,
         set_id: int = 0
     ) -> 'InequalitySet':
         """
@@ -512,7 +737,7 @@ class PredicateGrammar:
         
         Paper: Up to 200 chained inequalities per set.
         """
-        n_chains = np.random.randint(1, min(max_chains, 20) + 1)  # Start with 20 for testing
+        n_chains = np.random.randint(1, max_chains + 1)
         chains = [self.sample_chain(max_chain_length) for _ in range(n_chains)]
         logic_ops = [LogicOp(np.random.randint(2)) for _ in range(n_chains - 1)]
         return InequalitySet(chains=chains, logic_ops=logic_ops, set_id=set_id)
