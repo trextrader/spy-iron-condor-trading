@@ -118,7 +118,7 @@ class PredicateAugmentedCondorBrain(nn.Module):
         n_layers: int = 4,
         n_heads: int = 8,
         n_predicate_slots: int = 2048,
-        max_active_predicates: int = 256,
+        max_active_predicates: int = 512,  # Paper: 800+
         n_output_heads: int = 10,
         dropout: float = 0.1,
     ):

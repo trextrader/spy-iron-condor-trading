@@ -227,6 +227,152 @@ class Predicate:
         return encoding
 
 
+# =============================================================================
+# PAPER-ALIGNED STRUCTURES (Phase 2)
+# =============================================================================
+# Per "Recursive Inequality Logic for SPY Options Using Combinatorics and Group Theory"
+
+@dataclass
+class InequalityChain:
+    """
+    Chained inequality: E₁ ○₁ E₂ ○₂ E₃ ... ○ₙ₋₁ Eₙ
+    
+    Paper: "A chained inequality is a sequence of expressions...  
+           with up to 200 such chained inequalities"
+    
+    Example: H[3]-H[2] > H[5]-H[3] < H[10]-C[8] > ...
+    
+    This represents a SINGLE chain where comparisons flow left-to-right,
+    evaluating as: (E₁ ○₁ E₂) AND (E₂ ○₂ E₃) AND ...
+    """
+    expressions: List[Atom]  # Up to 50 expressions (memory-conscious)
+    operators: List[CompareOp]  # len = len(expressions) - 1
+    
+    def __post_init__(self):
+        if len(self.operators) != max(0, len(self.expressions) - 1):
+            raise ValueError(f"Operators ({len(self.operators)}) must be len(expressions)-1 ({len(self.expressions)-1})")
+    
+    def length(self) -> int:
+        return len(self.expressions)
+    
+    def max_lookback(self) -> int:
+        if not self.expressions:
+            return 0
+        return max(e.max_lookback() for e in self.expressions)
+    
+    def __str__(self) -> str:
+        if not self.expressions:
+            return "∅"
+        parts = [str(self.expressions[0])]
+        for expr, op in zip(self.expressions[1:], self.operators):
+            parts.append(f" {COMPARE_SYMBOLS[op]} {expr}")
+        return ''.join(parts)
+    
+    def to_encoding(self, max_length: int = 50) -> np.ndarray:
+        """Encode chain as fixed-size vector."""
+        # Each expression (Atom): 5 values
+        # Each operator: 1 value
+        # Total: max_length * 5 + (max_length - 1) = 6*max_length - 1
+        encoding = np.zeros(max_length * 5 + (max_length - 1), dtype=np.float32)
+        
+        for i, expr in enumerate(self.expressions[:max_length]):
+            base = i * 5
+            encoding[base:base+5] = [
+                expr.field1, expr.lookback1, int(expr.arith_op),
+                expr.field2, expr.lookback2
+            ]
+        
+        for i, op in enumerate(self.operators[:max_length-1]):
+            encoding[max_length * 5 + i] = int(op)
+        
+        return encoding
+
+
+@dataclass
+class InequalitySet:
+    """
+    Set of chained inequalities combined with AND/OR.
+    
+    Paper: "An inequality set S is a conjunction (AND) or disjunction (OR) 
+           of up to 200 such chained inequalities"
+    
+    S = ⋀ⱼ₌₁²⁰⁰ Iⱼ  OR  S = ⋁ⱼ₌₁²⁰⁰ Iⱼ
+    """
+    chains: List[InequalityChain]  # Up to 200 chains
+    logic_ops: List[LogicOp]  # len = len(chains) - 1
+    set_id: int = 0  # Identifier for super-set comparisons
+    
+    def __post_init__(self):
+        if self.chains and len(self.logic_ops) != len(self.chains) - 1:
+            # Default to AND
+            self.logic_ops = [LogicOp.AND] * (len(self.chains) - 1)
+    
+    def size(self) -> int:
+        return len(self.chains)
+    
+    def max_lookback(self) -> int:
+        if not self.chains:
+            return 0
+        return max(c.max_lookback() for c in self.chains)
+    
+    def __str__(self) -> str:
+        if not self.chains:
+            return f"Set{self.set_id}(∅)"
+        if len(self.chains) == 1:
+            return f"Set{self.set_id}({self.chains[0]})"
+        
+        parts = [f"({self.chains[0]})"]
+        for chain, op in zip(self.chains[1:], self.logic_ops):
+            parts.append(f" {LOGIC_SYMBOLS[op]} ({chain})")
+        return f"Set{self.set_id}[{''.join(parts)}]"
+
+
+@dataclass  
+class SuperSet:
+    """
+    Hierarchical comparison of inequality sets.
+    
+    Paper: "A super set S = (S₁ # S₂ # S₃ # S₄) with up to four sets Sᵢ,
+           each compared using <, >, ="
+    
+    S = (S₁ < S₂) AND (S₂ > S₃) AND (S₃ = S₄)
+    """
+    sets: List[InequalitySet]  # Up to 4 sets
+    set_comparisons: List[CompareOp]  # Compare operators between sets
+    aggregation: str = "mean"  # How to reduce set to scalar: "mean", "max", "min"
+    
+    def __post_init__(self):
+        if self.sets and len(self.set_comparisons) != len(self.sets) - 1:
+            # Default to ">"
+            self.set_comparisons = [CompareOp.GT] * (len(self.sets) - 1)
+    
+    def depth(self) -> int:
+        return len(self.sets)
+    
+    def __str__(self) -> str:
+        if not self.sets:
+            return "SuperSet(∅)"
+        
+        parts = [f"S{self.sets[0].set_id}"]
+        for s, op in zip(self.sets[1:], self.set_comparisons):
+            parts.append(f" {COMPARE_SYMBOLS[op]} S{s.set_id}")
+        return f"SuperSet({' '.join(parts)})"
+    
+    def aggregate_set(self, truth_values: np.ndarray) -> float:
+        """Reduce a set's truth values to a single scalar."""
+        if len(truth_values) == 0:
+            return 0.0
+        if self.aggregation == "mean":
+            return float(np.mean(truth_values))
+        elif self.aggregation == "max":
+            return float(np.max(truth_values))
+        elif self.aggregation == "min":
+            return float(np.min(truth_values))
+        else:
+            return float(np.mean(truth_values))
+
+
+
 class PredicateGrammar:
     """
     Defines the search space of all possible predicates.
@@ -338,6 +484,50 @@ class PredicateGrammar:
     def sample_random(self, n: int) -> List[Predicate]:
         """Sample n random predicates."""
         return [self.sample_predicate() for _ in range(n)]
+    
+    # =========================================================================
+    # PAPER-ALIGNED SAMPLING (Phase 2)
+    # =========================================================================
+    
+    def sample_chain(self, max_length: int = 50) -> 'InequalityChain':
+        """
+        Sample a chained inequality: E₁ ○₁ E₂ ○₂ ... Eₙ
+        
+        Paper: Up to 200 expressions per chain.
+        We use 50 as default for memory efficiency.
+        """
+        length = np.random.randint(2, min(max_length, 50) + 1)
+        expressions = [self.sample_atom() for _ in range(length)]
+        operators = [CompareOp(np.random.randint(5)) for _ in range(length - 1)]
+        return InequalityChain(expressions=expressions, operators=operators)
+    
+    def sample_inequality_set(
+        self, 
+        max_chains: int = 200,
+        max_chain_length: int = 50,
+        set_id: int = 0
+    ) -> 'InequalitySet':
+        """
+        Sample an inequality set: conjunction/disjunction of chains.
+        
+        Paper: Up to 200 chained inequalities per set.
+        """
+        n_chains = np.random.randint(1, min(max_chains, 20) + 1)  # Start with 20 for testing
+        chains = [self.sample_chain(max_chain_length) for _ in range(n_chains)]
+        logic_ops = [LogicOp(np.random.randint(2)) for _ in range(n_chains - 1)]
+        return InequalitySet(chains=chains, logic_ops=logic_ops, set_id=set_id)
+    
+    def sample_super_set(self, n_sets: int = 4) -> 'SuperSet':
+        """
+        Sample a super-set: hierarchical comparison of inequality sets.
+        
+        Paper: Up to 4 sets compared using <, >, =.
+        """
+        n_sets = min(n_sets, 4)
+        sets = [self.sample_inequality_set(set_id=i) for i in range(n_sets)]
+        comparisons = [CompareOp(np.random.randint(5)) for _ in range(n_sets - 1)]
+        aggregation = np.random.choice(["mean", "max", "min"])
+        return SuperSet(sets=sets, set_comparisons=comparisons, aggregation=aggregation)
 
 
 # =============================================================================
@@ -1210,7 +1400,7 @@ class PredicateAugmentedModel(nn.Module):
         self,
         raw_input_dim: int,
         n_predicate_slots: int = 2048,
-        max_active_predicates: int = 256,
+        max_active_predicates: int = 512,  # Paper: 800+
         d_model: int = 128,
         n_layers: int = 2,
         n_heads: int = 4,
@@ -1460,7 +1650,7 @@ if __name__ == '__main__':
     model = PredicateAugmentedModel(
         raw_input_dim=54,
         n_predicate_slots=2048,
-        max_active_predicates=256,
+        max_active_predicates=512,
     )
 
     total_params = sum(p.numel() for p in model.parameters())

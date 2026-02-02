@@ -394,7 +394,7 @@ class CondorBrain(nn.Module):
         use_cde: bool = True,              # NEW: Default to CDE given recent success
         use_predicate_discovery: bool = False, # NEW: Toggle for inequality templates
         n_predicate_slots: int = 2048,
-        max_active_predicates: int = 256
+        max_active_predicates: int = 512  # Paper: 800+, using 512 for memory balance
     ):
         super().__init__()
 
