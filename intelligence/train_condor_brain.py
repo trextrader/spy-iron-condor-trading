@@ -1740,17 +1740,17 @@ def train_condor_brain(args):
         ckpt_path = args.output.replace('.pth', '_full_ckpt.pth')
         monitor.save_checkpoint_to_disk(ckpt_path)
         print(f"\n[Checkpoint] Full checkpoint (with optimizer state) saved to: {ckpt_path}")
-        print("\ud83d\udca1 TIP: Use monitor.restore_best(model) to restore optimal weights after interruption")
+        print("[TIP] Use monitor.restore_best(model) to restore optimal weights after interruption")
         
         # Save analytics JSON for post-analysis
         monitor.save_analytics_to_file("training_analytics")
-        print("\ud83d\udcca Per-head best epochs saved to training_analytics/analytics.json")
+        print("[INFO] Per-head best epochs saved to training_analytics/analytics.json")
     
     # Close TensorBoard writer
     if tb_writer is not None:
         tb_writer.close()
-        print(f"\n📊 TensorBoard logs saved to: {args.tb_logdir}")
-        print(f"🌐 View with: tensorboard --logdir={args.tb_logdir} --port={args.tb_port}")
+        print(f"\n[TensorBoard] Logs saved to: {args.tb_logdir}")
+        print(f"[TensorBoard] View with: tensorboard --logdir={args.tb_logdir} --port={args.tb_port}")
 
     # Export final training summary if epoch exports enabled
     if args.export_epoch_plots:
