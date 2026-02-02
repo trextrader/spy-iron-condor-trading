@@ -25,7 +25,7 @@ nohup python -u intelligence/train_condor_brain.py \
   --predicate-slots 2048 \
   --max-active-predicates 256 \
   --sparsity-weight 0.001 \
-  --epochs 20 \
+  --epochs 50 \
   --batch-size 64 \
   --d-model 256 \
   --layers 32 \
