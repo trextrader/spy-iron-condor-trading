@@ -500,6 +500,8 @@ def parse_args():
                         help="Save a checkpoint immediately if batch loss is below this threshold (e.g. 1.0).")
     parser.add_argument("--val-limit", type=int, default=0,
                         help="Limit validation to N batches to save time (0=unlimited).")
+    parser.add_argument("--no-plots", action="store_true",
+                        help="Disable ALL plotting (Safe Mode) - Prevents hangs on headless systems.")
 
     args = parser.parse_args()
     
