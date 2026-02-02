@@ -1381,6 +1381,8 @@ def train_condor_brain(args):
                     tb_writer.add_scalar(f'HeadLoss/{head_name}', head_loss, global_step)
                 
                 # Log prediction vs actual scatter plots as images
+                should_plot = not args.no_plots and ((epoch % args.monitor_every == 0) or (epoch == args.epochs - 1))
+                
                 if should_plot:
                     try:
                         pbar.write(f"  [Monitor] Generating diagnostic plots for TensorBoard...")
@@ -1483,7 +1485,7 @@ def train_condor_brain(args):
                         print(f"[TensorBoard] Image logging error: {e}")
             
             # === SAVE EPOCH SNAPSHOT TO DISK (prevents race conditions) ===
-            if monitor is not None and run_val:
+            if monitor is not None and run_val and not args.no_plots:
                 print("  [Monitor] Saving epoch snapshot...")
                 try:
                     monitor.save_epoch_snapshot(epoch + 1, args.epochs)
