@@ -1327,8 +1327,9 @@ def train_condor_brain(args):
                 print(f"[Plot error] {e}")
         
         # === ADVANCED MULTI-HEAD MONITOR ===
+        # Skip entire block if --no-plots (Safe Mode) to avoid second validation pass
         print(f"[DEBUG] Step 2: Advanced Monitor Check (run_val={run_val})...")
-        if monitor is not None and run_val:
+        if monitor is not None and run_val and not args.no_plots:
             # Compute per-head validation losses (GPU-accumulated, fast)
             print("[DEBUG] Step 3: Computing head losses (Second Val Pass)...")
             try:
