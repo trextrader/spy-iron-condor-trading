@@ -1299,6 +1299,9 @@ def train_condor_brain(args):
         val_losses.append(val_loss if run_val else None)
         
         # === LIVE PLOTTING ===
+        
+        # === LIVE PLOTTING ===
+        # print("[DEBUG] Step 1: Checking Live Plotting...")
         if args.live_plot and len(train_losses) > 0:
             try:
                 clear_output(wait=True)
@@ -1324,26 +1327,39 @@ def train_condor_brain(args):
                 print(f"[Plot error] {e}")
         
         # === ADVANCED MULTI-HEAD MONITOR ===
+        print(f"[DEBUG] Step 2: Advanced Monitor Check (run_val={run_val})...")
         if monitor is not None and run_val:
             # Compute per-head validation losses (GPU-accumulated, fast)
-            head_losses = compute_val_head_losses(
-                model=model,
-                get_batch_fn=get_val_batch if use_gpu_dataset else lambda bi: next(iter(val_loader)),
-                n_batches=n_val_batches,
-                device=device,
-                amp_dtype=amp_dtype
-            )
+            print("[DEBUG] Step 3: Computing head losses (Second Val Pass)...")
+            try:
+                head_losses = compute_val_head_losses(
+                    model=model,
+                    get_batch_fn=get_val_batch if use_gpu_dataset else lambda bi: next(iter(val_loader)),
+                    n_batches=n_val_batches,
+                    device=device,
+                    amp_dtype=amp_dtype
+                )
+                print("[DEBUG] Step 4: Head losses computed.")
+            except Exception as e:
+                print(f"[DEBUG] FATAL: Head loss computation failed: {e}")
+                raise e
             
             # Update monitor with epoch results (only checkpoints on global improvement)
-            status = monitor.update(
-                epoch=epoch + 1,
-                train_loss=train_loss,
-                val_loss=val_loss,
-                head_val_losses=head_losses,
-                model=model,
-                optimizer=optimizer,
-                scheduler=scheduler
-            )
+            print("[DEBUG] Step 5: Updating monitor (Deepcopy check)...")
+            try:
+                status = monitor.update(
+                    epoch=epoch + 1,
+                    train_loss=train_loss,
+                    val_loss=val_loss,
+                    head_val_losses=head_losses,
+                    model=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler
+                )
+                print("[DEBUG] Step 6: Monitor updated.")
+            except Exception as e:
+                print(f"[DEBUG] FATAL: Monitor update failed: {e}")
+                raise e
             
             # Print per-head improvement summary
             if status['improved_heads']:
