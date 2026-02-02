@@ -59,12 +59,12 @@ def stream_sample_windows_csv(
 
     usecols = feature_cols
     dtypes = {c: "float32" for c in usecols}
-
     rows_read = 0
-    print(f"  [Stream] Reading CSV: {csv_path} (seq_len={seq_len})", flush=True)
-    
+
     # Use chunksize to keep memory footprint low
-    for chunk in pd.read_csv(csv_path, usecols=usecols, dtype=dtypes, chunksize=100_000):
+    total_chunks = max_rows // 100_000 if max_rows else None
+    for chunk in tqdm(pd.read_csv(csv_path, usecols=usecols, dtype=dtypes, chunksize=100_000), 
+                      total=total_chunks, desc="  [Stream] Reading CSV", leave=False):
         Xc = chunk.to_numpy(copy=False)
         m = Xc.shape[0]
 
@@ -112,7 +112,7 @@ def stream_sample_windows_csv(
 def batch_predict(adapter, X: np.ndarray, batch_size: int) -> Tuple[np.ndarray, Optional[np.ndarray]]:
     N = X.shape[0]
     ys, ps = [], []
-    for s in range(0, N, batch_size):
+    for s in tqdm(range(0, N, batch_size), desc=f"  [Predict] {adapter.info.name}", leave=False):
         xb = torch.from_numpy(X[s:s+batch_size]).to(DEVICE, non_blocking=True)
         with torch.cuda.amp.autocast(enabled=(DEVICE.type == "cuda"), dtype=torch.bfloat16):
             out = adapter.predict(xb)
@@ -218,8 +218,9 @@ def main():
     results = {"generated": datetime.now().isoformat(), "T": T_common, "N": len(X), "models": {}, "pairwise": {}}
 
     print("\n[STEP 3/5] Computing Architectural & Physics Metrics...", flush=True)
-    for ad in adapters:
-        print(f"  > Processing {ad.info.name}...", flush=True)
+    pbar = tqdm(adapters, desc="Models", unit="model")
+    for ad in pbar:
+        pbar.set_postfix({"current": ad.info.name})
         y, pred = batch_predict(ad, X, args.batch_size)
         
         entry = {
