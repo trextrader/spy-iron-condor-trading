@@ -31,7 +31,7 @@ nohup python -u intelligence/train_condor_brain.py \
   --predicate-slots 2048 \
   --max-active-predicates 256 \
   --sparsity-weight 0.001 \
-  --epochs 20 \
+  --epochs 50 \
   --batch-size 128 \
   --d-model 256 \
   --layers 32 \
@@ -40,6 +40,7 @@ nohup python -u intelligence/train_condor_brain.py \
   --no-cde \
   --gpu-dataset \
   --grad-checkpoint \
+  --no-plots \
   --early-stop \
   --patience 5 \
   --val-limit 200 \
