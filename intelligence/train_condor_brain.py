@@ -1452,34 +1452,44 @@ def train_condor_brain(args):
                             
                         # --- LOG EXPERT SPECIFIC PREDICTIONS ---
                         if samples.get('expert_preds') is not None:
-                            for expert_name, preds in samples['expert_preds'].items():
-                                # Just log one representative head (e.g., call_offset) to see divergence
-                                for head_idx, head_name in enumerate(['call_offset', 'put_offset']):
-                                    fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-                                    p = preds[:, head_idx]
-                                    t = samples['targets'][:, head_idx]
-                                    
-                                    ax.scatter(t, p, alpha=0.6, s=50, c='green', edgecolors='black')
-                                    vmin, vmax = min(p.min(), t.min()), max(p.max(), t.max())
-                                    margin = (vmax - vmin) * 0.1 + 0.01
-                                    ax.plot([vmin-margin, vmax+margin], [vmin-margin, vmax+margin], 'k--', alpha=0.5)
-                                    
-                                    ax.set_title(f'Expert: {expert_name} | {head_name}')
-                                    ax.grid(True, alpha=0.3)
-                                    fig.tight_layout()
-                                    
-                                    buf = io.BytesIO()
-                                    fig.savefig(buf, format='png', dpi=80)
-                                    buf.seek(0)
-                                    tb_writer.add_image(f'Experts_{expert_name}/{head_name}', np.array(Image.open(buf)), global_step, dataformats='HWC')
-                                    plt.close(fig)
+                            print("  [Plots] Generating expert prediction plots...")
+                            try:
+                                for expert_name, preds in samples['expert_preds'].items():
+                                    # Just log one representative head (e.g., call_offset) to see divergence
+                                    for head_idx, head_name in enumerate(['call_offset', 'put_offset']):
+                                        fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+                                        p = preds[:, head_idx]
+                                        t = samples['targets'][:, head_idx]
+                                        
+                                        ax.scatter(t, p, alpha=0.6, s=50, c='green', edgecolors='black')
+                                        vmin, vmax = min(p.min(), t.min()), max(p.max(), t.max())
+                                        margin = (vmax - vmin) * 0.1 + 0.01
+                                        ax.plot([vmin-margin, vmax+margin], [vmin-margin, vmax+margin], 'k--', alpha=0.5)
+                                        
+                                        ax.set_title(f'Expert: {expert_name} | {head_name}')
+                                        ax.grid(True, alpha=0.3)
+                                        fig.tight_layout()
+                                        
+                                        buf = io.BytesIO()
+                                        fig.savefig(buf, format='png', dpi=80)
+                                        buf.seek(0)
+                                        tb_writer.add_image(f'Experts_{expert_name}/{head_name}', np.array(Image.open(buf)), global_step, dataformats='HWC')
+                                        plt.close(fig)
+                                print("  [Plots] Expert plots done.")
+                            except Exception as e:
+                                print(f"  [Warning] Expert plotting failed: {e}")
                         
                     except Exception as e:
                         print(f"[TensorBoard] Image logging error: {e}")
             
             # === SAVE EPOCH SNAPSHOT TO DISK (prevents race conditions) ===
             if monitor is not None and run_val:
-                monitor.save_epoch_snapshot(epoch + 1, args.epochs)
+                print("  [Monitor] Saving epoch snapshot...")
+                try:
+                    monitor.save_epoch_snapshot(epoch + 1, args.epochs)
+                    print("  [Monitor] Snapshot saved.")
+                except Exception as e:
+                    print(f"  [Warning] Monitor snapshot failed: {e}")
         
         # === EARLY STOPPING CHECK ===
         if save_loss < best_loss:
