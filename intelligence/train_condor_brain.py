@@ -16,6 +16,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 
 import time
+import datetime
 import argparse
 import math
 import numpy as np
