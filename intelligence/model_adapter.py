@@ -63,91 +63,84 @@ class ModelAdapter:
 
 def _infer_use_cde_from_state_dict(state_dict: Dict[str, torch.Tensor]) -> Optional[bool]:
     keys = list(state_dict.keys())
-    # Heuristics: adjust based on your actual module names if needed.
-    if any("cde" in k.lower() or "vector_field" in k.lower() for k in keys):
-        return True
-    if any("mamba" in k.lower() or "ssm" in k.lower() or "selective_scan" in k.lower() for k in keys):
+    # Robust Mamba Detection: Mamba2 models have A_log, dt_proj, or layers.X.mixer
+    if any(".A_log" in k or ".dt_proj" in k or ".mixer" in k for k in keys):
         return False
+    # Layers prefix check for Mamba/Transfomers
+    if any(k.startswith("layers.") for k in keys) and not any(k.startswith("cde_backbone") for k in keys):
+        return False
+    # Neural CDE pillars
+    if any("cde_backbone" in k or "vector_field" in k for k in keys):
+        return True
     return None
 
 def load_model_any(ckpt_path: str, device: torch.device, input_dim: int = INPUT_DIM_V22) -> Tuple[ModelAdapter, Dict[str, Any]]:
+    print(f"  [Load] {os.path.basename(ckpt_path)}", flush=True)
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
     if any(k.startswith("module.") for k in state_dict.keys()):
         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+
     config = ckpt.get("model_config", ckpt.get("config", {})) or {}
     
     # --- ARCHAEOLOGICAL INFERENCE ---
-    # We prioritize state_dict shapes over config to avoid OOM/RuntimeErrors on mismatch
-    
-    # 1. Architecture: CDE vs Mamba
-    use_cde = _infer_use_cde_from_state_dict(state_dict)
-    if use_cde is None:
-        use_cde = bool(config.get("use_cde", True))
+    it_use_cde = _infer_use_cde_from_state_dict(state_dict)
+    if it_use_cde is None:
+        it_use_cde = bool(config.get("use_cde", True))
 
-    # 2. Predicate Discovery
-    use_pred = any(k.startswith("predicate_selector") for k in state_dict.keys())
+    it_use_pred = any(k.startswith("predicate_selector") for k in state_dict.keys())
     
-    # Initialize defaults
-    d_model = config.get("d_model", 1024)
-    n_layers = int(config.get("n_layers", 32))
-    max_active = config.get("max_active_predicates", 512)
-    n_slots = config.get("n_predicate_slots", 2048)
-    input_dim = config.get("input_dim", INPUT_DIM_V22)
+    # Initialize working variables
+    it_d_model = config.get("d_model", 1024)
+    it_n_layers = int(config.get("n_layers", 32))
+    it_max_active = config.get("max_active_predicates", 512)
+    it_n_slots = config.get("n_predicate_slots", 2048)
+    it_input_dim = input_dim # passed default
 
-    # 3. Precise Hyperparam Reconstruction
-    if use_pred:
-        # predicate_embeddings: [n_slots, d_embed]
+    # Hyperparam Recovery
+    if it_use_pred:
+        # Recover slots and input_dim from predicate shapes
         p_embed = state_dict.get("predicate_selector.predicate_embeddings")
         if p_embed is not None:
-            n_slots = p_embed.shape[0]
-            # d_embed = p_embed.shape[1] (not used for CondorBrain init, but good to know)
+            it_n_slots = p_embed.shape[0]
         
-        # left_field1.weight: [n_fields + n_slots, d_embed * 2]
-        # This is the gold standard for recovering original input_dim
+        # left_field1 weights are [n_fields + n_slots, d_embed * 2]
         lf1 = state_dict.get("predicate_selector.left_field1.weight")
-        if lf1 is not None:
-            input_dim = lf1.shape[0] - n_slots
+        if lf1 is not None and p_embed is not None:
+            it_input_dim = lf1.shape[0] - it_n_slots
         
-        # logic_gates: [max_active, max_active, 4]
         gates = state_dict.get("predicate_combiner.logic_gates")
         if gates is not None:
-            max_active = gates.shape[0]
+            it_max_active = gates.shape[0]
     else:
-        # Non-predicate model: check input_proj or backbone encoder
+        # Recover from projection weights
         if "input_proj.weight" in state_dict:
-            # Mamba: [d_model, input_dim]
-            input_dim = state_dict["input_proj.weight"].shape[1]
+            it_input_dim = state_dict["input_proj.weight"].shape[1]
         elif "cde_backbone.encoder.weight" in state_dict:
-            # CDE: [hidden_dim, input_dim + 2*max_active]
-            # If no predicates, backbone_in_dim == input_dim
-            input_dim = state_dict["cde_backbone.encoder.weight"].shape[1]
+            it_input_dim = state_dict["cde_backbone.encoder.weight"].shape[1]
 
-    # 4. d_model
+    # Recover d_model
     if "norm.weight" in state_dict:
-        d_model = state_dict["norm.weight"].shape[0]
+        it_d_model = state_dict["norm.weight"].shape[0]
     elif "cde_backbone.encoder.weight" in state_dict:
-        d_model = state_dict["cde_backbone.encoder.weight"].shape[0]
+        it_d_model = state_dict["cde_backbone.encoder.weight"].shape[0]
 
-    # 5. n_layers
-    if not use_cde:
-        mamba_layers = [k for k in state_dict.keys() if k.startswith("layers.") and ".mamba." in k]
-        if mamba_layers:
-            n_layers = max([int(k.split(".")[1]) for k in mamba_layers]) + 1
-    else:
-        # CDE n_layers refers to vector field blocks if applicable, or stay with config
-        pass
+    # Recover n_layers for Mamba
+    if not it_use_cde:
+        m_layers = [k for k in state_dict.keys() if k.startswith("layers.") and ".A_log" in k]
+        if m_layers:
+            it_n_layers = max([int(k.split(".")[1]) for k in m_layers]) + 1
 
-    print(f"  [Inferred] Arch={'CDE' if use_cde else 'Mamba'}, d_model={d_model}, layers={n_layers}, input_dim={input_dim}, slots={n_slots}, max_active={max_active}", flush=True)
+    print(f"    - Inferred: Arch={'CDE' if it_use_cde else 'Mamba'}, d_model={it_d_model}, layers={it_n_layers}, input_dim={it_input_dim}, slots={it_n_slots}", flush=True)
 
     model = CondorBrain(
-        d_model=d_model,
-        n_layers=n_layers,
-        input_dim=input_dim,
-        use_cde=use_cde,
-        use_predicate_discovery=use_pred,
-        n_predicate_slots=n_slots,
-        max_active_predicates=max_active,
+        d_model=it_d_model,
+        n_layers=it_n_layers,
+        input_dim=it_input_dim,
+        use_cde=it_use_cde,
+        use_predicate_discovery=it_use_pred,
+        n_predicate_slots=it_n_slots,
+        max_active_predicates=it_max_active,
         use_topk_moe=bool(config.get("use_topk_moe", config.get("use_topk", False))),
     )
 
