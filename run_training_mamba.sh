@@ -15,6 +15,12 @@ if [ ! -f "$DATA_PATH" ]; then
 fi
 
 echo "[OK] Found dataset."
+
+# Create output directories explicitly
+echo "[SETUP] Creating output directories..."
+mkdir -p models
+mkdir -p training_exports_mamba
+
 echo "[RUN] Starting MAMBA-2 training (3M ROWS) in background..."
 
 nohup python -u intelligence/train_condor_brain.py \

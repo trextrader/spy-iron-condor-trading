@@ -90,12 +90,13 @@ def load_cde_model(ckpt_path, input_dim=None):
     d_model = config.get('d_model', 128)
     n_layers = config.get('n_layers', 2)
     use_topk = config.get('use_topk_moe', False)
+    use_cde = config.get('use_cde', True) # Default to True for older checkpoints, but respect config
 
     model = CondorBrain(
         d_model=d_model,
         n_layers=n_layers,
         input_dim=input_dim,
-        use_cde=True,
+        use_cde=use_cde,
         use_topk_moe=use_topk
     )
 
