@@ -1410,7 +1410,7 @@ def train_condor_brain(args):
                         import matplotlib.pyplot as plt
                         import io
                         from PIL import Image
-                        import numpy as np
+                        # import numpy as np  <-- REMOVED: Already imported globally
                         
                         for i, head_name in enumerate(MAIN_HEADS):
                             fig, ax = plt.subplots(1, 1, figsize=(6, 6))
