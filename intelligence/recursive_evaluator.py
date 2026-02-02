@@ -88,34 +88,36 @@ def evaluate_predicates_recursive(
         # But we can write the logic directly or use a helper outside.
         # Writing inline for JIT safety.
         
-        # --- Helper Logic: Get Values ---
-        def get_vals(f_idx_map: torch.Tensor, lb_map: torch.Tensor) -> torch.Tensor:
-            f_ids = f_idx_map[0,0,:] # (K,)
-            is_raw = f_ids < n_fields_raw
-            
-            # Raw Data
-            raw_ids = torch.where(is_raw, f_ids, torch.zeros_like(f_ids))
-            raw_val = working_data.index_select(2, raw_ids)
-            
-            # Virtual Data
-            slot_ids = f_ids - n_fields_raw
-            active_idx = slot_ids % top_k
-            safe_idx = active_idx.clamp(min=0, max=top_k-1)
-            virt_val = current_preds.index_select(2, safe_idx)
-            
-            # Combine
-            val = torch.where(is_raw.view(1,1,top_k), raw_val, virt_val)
-            
-            # Lookback
-            t_gather = (t_seq - lb_map).clamp(min=0).expand(batch, seq_len, top_k)
-            return torch.gather(val, 1, t_gather)
         
-        # Left Side
-        lhs = get_vals(l_f1_exp, l_lb1_exp)
+        # --- Left Side ---
+        # Get Vals (Inline)
+        f_ids_l = l_f1_exp[0,0,:]
+        is_raw_l = f_ids_l < n_fields_raw
+        raw_ids_l = torch.where(is_raw_l, f_ids_l, torch.zeros_like(f_ids_l))
+        raw_val_l = working_data.index_select(2, raw_ids_l)
+        slot_ids_l = f_ids_l - n_fields_raw
+        active_idx_l = slot_ids_l % top_k
+        safe_idx_l = active_idx_l.clamp(min=0, max=top_k-1)
+        virt_val_l = current_preds.index_select(2, safe_idx_l)
+        val_l = torch.where(is_raw_l.view(1,1,top_k), raw_val_l, virt_val_l)
+        t_gather_l = (t_seq - l_lb1_exp).clamp(min=0).expand(batch, seq_len, top_k)
+        lhs = torch.gather(val_l, 1, t_gather_l)
         
         cmp_mask_l = (l_op > 0).view(1,1,top_k)
         if cmp_mask_l.any():
-            v2 = get_vals(l_f2_exp, l_lb2_exp)
+             # Get Vals for Op
+            f_ids_l2 = l_f2_exp[0,0,:]
+            is_raw_l2 = f_ids_l2 < n_fields_raw
+            raw_ids_l2 = torch.where(is_raw_l2, f_ids_l2, torch.zeros_like(f_ids_l2))
+            raw_val_l2 = working_data.index_select(2, raw_ids_l2)
+            slot_ids_l2 = f_ids_l2 - n_fields_raw
+            active_idx_l2 = slot_ids_l2 % top_k
+            safe_idx_l2 = active_idx_l2.clamp(min=0, max=top_k-1)
+            virt_val_l2 = current_preds.index_select(2, safe_idx_l2)
+            val_l2 = torch.where(is_raw_l2.view(1,1,top_k), raw_val_l2, virt_val_l2)
+            t_gather_l2 = (t_seq - l_lb2_exp).clamp(min=0).expand(batch, seq_len, top_k)
+            v2 = torch.gather(val_l2, 1, t_gather_l2)
+            
             denom = v2 + working_eps
             op_v = l_op.view(1,1,top_k)
             lhs = torch.where(op_v==1, lhs+v2, lhs)
@@ -125,15 +127,37 @@ def evaluate_predicates_recursive(
             
         lhs = torch.clamp(lhs, -1e4, 1e4)
 
-        # Right Side
-        rhs = get_vals(r_f1_exp, r_lb1_exp)
+        # --- Right Side ---
+        f_ids_r = r_f1_exp[0,0,:]
+        is_raw_r = f_ids_r < n_fields_raw
+        raw_ids_r = torch.where(is_raw_r, f_ids_r, torch.zeros_like(f_ids_r))
+        raw_val_r = working_data.index_select(2, raw_ids_r)
+        slot_ids_r = f_ids_r - n_fields_raw
+        active_idx_r = slot_ids_r % top_k
+        safe_idx_r = active_idx_r.clamp(min=0, max=top_k-1)
+        virt_val_r = current_preds.index_select(2, safe_idx_r)
+        val_r = torch.where(is_raw_r.view(1,1,top_k), raw_val_r, virt_val_r)
+        t_gather_r = (t_seq - r_lb1_exp).clamp(min=0).expand(batch, seq_len, top_k)
+        rhs = torch.gather(val_r, 1, t_gather_r)
         
         is_thresh = (templates == 4).view(1,1,top_k)
         rhs = torch.where(is_thresh, thresholds.view(1,1,top_k).float(), rhs)
         
         cmp_mask_r = (r_op > 0).view(1,1,top_k) & (~is_thresh)
         if cmp_mask_r.any():
-            v2 = get_vals(r_f2_exp, r_lb2_exp)
+             # Get Vals for Op
+            f_ids_r2 = r_f2_exp[0,0,:]
+            is_raw_r2 = f_ids_r2 < n_fields_raw
+            raw_ids_r2 = torch.where(is_raw_r2, f_ids_r2, torch.zeros_like(f_ids_r2))
+            raw_val_r2 = working_data.index_select(2, raw_ids_r2)
+            slot_ids_r2 = f_ids_r2 - n_fields_raw
+            active_idx_r2 = slot_ids_r2 % top_k
+            safe_idx_r2 = active_idx_r2.clamp(min=0, max=top_k-1)
+            virt_val_r2 = current_preds.index_select(2, safe_idx_r2)
+            val_r2 = torch.where(is_raw_r2.view(1,1,top_k), raw_val_r2, virt_val_r2)
+            t_gather_r2 = (t_seq - r_lb2_exp).clamp(min=0).expand(batch, seq_len, top_k)
+            v2 = torch.gather(val_r2, 1, t_gather_r2)
+
             denom = v2 + working_eps
             op_v = r_op.view(1,1,top_k)
             rhs = torch.where(op_v==1, rhs+v2, rhs)
