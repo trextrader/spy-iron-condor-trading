@@ -2,11 +2,17 @@
 # intelligence/audit_cde_vs_mamba2_comparison.py
 
 import os
+import sys
 import argparse
 import math
 import json
 from datetime import datetime
 from typing import Dict, Any, List, Tuple, Optional
+
+# Add project root to sys.path to allow absolute imports when run as a script
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 import numpy as np
 import pandas as pd
