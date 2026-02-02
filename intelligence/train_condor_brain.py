@@ -1340,7 +1340,7 @@ def train_condor_brain(args):
                 head_losses = compute_val_head_losses(
                     model=model,
                     get_batch_fn=get_val_batch if use_gpu_dataset else lambda bi: next(iter(val_loader)),
-                    n_batches=n_val_batches,
+                    n_batches=_total_val_batches,
                     device=device,
                     amp_dtype=amp_dtype
                 )
