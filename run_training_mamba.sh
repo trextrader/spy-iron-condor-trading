@@ -3,7 +3,7 @@
 # Training Script for CondorBrain V2.2 (Mamba-2 Architecture)
 # Comparison Run: Identical settings to CDE run, but with --no-cde
 
-DATA_PATH="data/processed/mamba_institutional_2025_1m_v22.csv"
+DATA_PATH="/kaggle/working/spy-iron-condor-trading/data/mamba_institutional_2025_1m_v22.csv"
 LOG_FILE="train_mamba2_v22.log"
 
 echo "[START] Validating environment..."
