@@ -72,36 +72,73 @@ def _infer_use_cde_from_state_dict(state_dict: Dict[str, torch.Tensor]) -> Optio
 
 def load_model_any(ckpt_path: str, device: torch.device, input_dim: int = INPUT_DIM_V22) -> Tuple[ModelAdapter, Dict[str, Any]]:
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
+    if any(k.startswith("module.") for k in state_dict.keys()):
+        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
 
-    seq_len = int(ckpt.get("seq_len", 256))
     config = ckpt.get("model_config", ckpt.get("config", {})) or {}
-
-    d_model = int(config.get("d_model", 128))
-    n_layers = int(config.get("n_layers", 2))
-
-    # Determine architecture
-    use_cde = config.get("use_cde", None)
+    
+    # --- ARCHAEOLOGICAL INFERENCE ---
+    # We prioritize state_dict shapes over config to avoid OOM/RuntimeErrors on mismatch
+    
+    # 1. Architecture: CDE vs Mamba
+    use_cde = _infer_use_cde_from_state_dict(state_dict)
     if use_cde is None:
-        use_cde = config.get("cde", None)
-    if use_cde is None:
-        # infer from weights
-        state_dict = ckpt.get("state_dict", ckpt)
-        if any(k.startswith("module.") for k in state_dict.keys()):
-            state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-        inferred = _infer_use_cde_from_state_dict(state_dict)
-        use_cde = True if inferred is None else inferred
+        use_cde = bool(config.get("use_cde", True))
+
+    # 2. Predicate Discovery
+    use_pred = any(k.startswith("predicate_selector") for k in state_dict.keys())
+    
+    # 3. Input Dim and Predicate Hyperparams
+    # We look at predicate_selector.predicate_embeddings: [n_slots, n_fields]
+    if use_pred:
+        p_embed = state_dict.get("predicate_selector.predicate_embeddings")
+        if p_embed is not None:
+            input_dim = p_embed.shape[1]
+        
+        # Look at combiner output or selector heads
+        # template_head.bias: [n_slots]
+        # logic_gates: [max_active, max_active, 4]
+        gates = state_dict.get("predicate_combiner.logic_gates")
+        if gates is not None:
+            max_active = gates.shape[0]
+        else:
+            # Fallback to current default if we can't find it
+            max_active = config.get("max_active_predicates", 512)
+    else:
+        max_active = config.get("max_active_predicates", 512)
+
+    # 4. d_model
+    # Look at norm.weight if it exists, or backbone encoder
+    d_model = config.get("d_model", 1024)
+    if "norm.weight" in state_dict:
+        d_model = state_dict["norm.weight"].shape[0]
+    elif "cde_backbone.encoder.weight" in state_dict:
+        d_model = state_dict["cde_backbone.encoder.weight"].shape[0]
+
+    # 5. n_layers
+    # Check Mamba layers or CDE structure
+    if not use_cde:
+        mamba_layers = [k for k in state_dict.keys() if k.startswith("layers.") and ".mamba." in k]
+        if mamba_layers:
+            n_layers = max([int(k.split(".")[1]) for k in mamba_layers]) + 1
+        else:
+            n_layers = config.get("n_layers", 32)
+    else:
+        # CDE n_layers is often in config, usually 2-3 for vector field
+        n_layers = int(config.get("n_layers", 2))
+
+    print(f"  [Inferred] Arch={'CDE' if use_cde else 'Mamba'}, d_model={d_model}, layers={n_layers}, input_dim={input_dim}, predicates={use_pred}", flush=True)
 
     model = CondorBrain(
         d_model=d_model,
         n_layers=n_layers,
         input_dim=input_dim,
-        use_cde=bool(use_cde),
+        use_cde=use_cde,
+        use_predicate_discovery=use_pred,
+        max_active_predicates=max_active,
         use_topk_moe=bool(config.get("use_topk_moe", config.get("use_topk", False))),
     )
-
-    state_dict = ckpt["state_dict"] if "state_dict" in ckpt else ckpt
-    if any(k.startswith("module.") for k in state_dict.keys()):
-        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
 
     model.load_state_dict(state_dict, strict=True)
     model.to(device)
@@ -111,8 +148,8 @@ def load_model_any(ckpt_path: str, device: torch.device, input_dim: int = INPUT_
     info = ModelInfo(
         name=os.path.basename(ckpt_path).replace(".pth", ""),
         ckpt_path=ckpt_path,
-        seq_len=seq_len,
-        use_cde=bool(use_cde),
+        seq_len=int(ckpt.get("seq_len", 256)),
+        use_cde=use_cde,
         d_model=d_model,
         n_layers=n_layers,
         n_params=n_params,
