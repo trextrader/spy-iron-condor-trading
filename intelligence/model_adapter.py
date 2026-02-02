@@ -153,9 +153,9 @@ def load_model_any(ckpt_path: str, device: torch.device, input_dim: int = INPUT_
         name=os.path.basename(ckpt_path).replace(".pth", ""),
         ckpt_path=ckpt_path,
         seq_len=int(ckpt.get("seq_len", 256)),
-        use_cde=use_cde,
-        d_model=d_model,
-        n_layers=n_layers,
+        use_cde=it_use_cde,
+        d_model=it_d_model,
+        n_layers=it_n_layers,
         n_params=n_params,
     )
     return ModelAdapter(model, info, device), ckpt
