@@ -1228,8 +1228,10 @@ class CondorBrainEngine:
         
         # 1. Get raw params
         importance, params = self.predicate_selector(return_params=True)
-        # Select active
-        k = min(self.max_active_predicates, params.shape[0])
+        # FULL TRANSPARENCY: Export ALL predicates, not just active ones.
+        k = params.shape[0]  # Show everything (e.g. 2048 or 4096)
+        
+        # Sort by importance, but keep all
         _, top_idx = torch.topk(importance, k)
         active_params = params[top_idx]
         active_imp = importance[top_idx]  
