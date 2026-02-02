@@ -482,9 +482,9 @@ def parse_args():
     # === NEW: Predicate Discovery (Inequality Templates) ===
     parser.add_argument("--use-predicate-discovery", action="store_true",
                         help="Enable structural rule discovery (Inequality Templates).")
-    parser.add_argument("--predicate-slots", type=int, default=2048,
-                        help="Total number of rule templates to learn.")
-    parser.add_argument("--max-active-predicates", type=int, default=256,
+    parser.add_argument("--predicate-slots", type=int, default=16384,
+                        help="Total number of rule templates to learn (Increased for 'Unlimited' capacity).")
+    parser.add_argument("--max-active-predicates", type=int, default=1024,
                         help="Max active rules to use as features.")
     parser.add_argument("--sparsity-weight", type=float, default=0.001,
                         help="L1 weight for pruning useless rules.")

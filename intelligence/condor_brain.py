@@ -1194,6 +1194,27 @@ class CondorBrainEngine:
         
         return signals
     
+    def get_discovered_predicates(self, threshold: float = 0.1) -> List[str]:
+        """
+        Return human-readable list of discovered predicates, 
+        including nested logical combinations from the Combiner.
+        """
+        if not self.use_predicate_discovery or self.predicate_selector is None:
+            return []
+            
+        # 1. Get atomic predicates from Selector
+        # We need the NAMES to feed into the combiner's logic explanation
+        # But get_active_predicates returns names with [Template] tags.
+        # We want pure names for the combiner logic set.
+        _, _, names = self.predicate_selector.get_active_predicates(threshold=threshold)
+        
+        # 2. Get combined logic sets
+        # The combiner knows how to mix these atoms
+        logic_sets = self.predicate_combiner.get_logic_sets(names)
+        
+        # 3. Return both (Atoms for reference, Logic Sets for depth)
+        return logic_sets + ["--- Atomic Rules (Components) ---"] + names
+
     def benchmark(self, n_iterations: int = 100) -> dict:
         """Benchmark inference latency."""
         import time

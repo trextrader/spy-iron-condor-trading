@@ -382,9 +382,13 @@ def generate_condor_targets(
     
     # Regime labeling based on IVR (0-1 range)
     if 'ivr' in df.columns:
+        # Fill NaNs to prevent pd.cut ValueError
+        ivr_safe = df['ivr'].fillna(0)
+        
+        # Cut with extended bins to handle outliers (IVR can be > 1.0 or < 0.0)
         df['regime_label'] = pd.cut(
-            df['ivr'], 
-            bins=[-0.1, 0.3, 0.7, 1.1], 
+            ivr_safe, 
+            bins=[-float('inf'), 0.3, 0.7, float('inf')], 
             labels=[0, 1, 2]
         ).astype(int)
     else:

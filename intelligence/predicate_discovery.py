@@ -844,7 +844,10 @@ class PredicateSelector(nn.Module):
         self.right_lookback2 = nn.Linear(d_embed * 2, max_lookback + 1)
 
         # Importance scores (learned sparsity)
-        self.importance_logits = nn.Parameter(torch.zeros(n_slots))
+        # Initialize to -5.0 (sigmoid(-5) ~= 0.006) to start sparse.
+        # This prevents the model from being overwhelmed by noise and collapsing to "Always False" (EQ) 
+        # just to silence the random predicates.
+        self.importance_logits = nn.Parameter(torch.ones(n_slots) * -5.0)
 
         # Template Selection Head
         self.template_head = nn.Linear(d_embed * 2, 5)  # 5 TemplateTypes
