@@ -411,6 +411,7 @@ def main():
     parser.add_argument("--output", type=str, help="Output path for enhanced CSV")
     parser.add_argument("--sample-rate", type=int, default=100, help="Simulate 1 in N rows")
     parser.add_argument("--max-rows", type=int, default=0, help="Limit input rows for testing")
+    parser.add_argument("--mode", type=str, default="v2", choices=["v2", "v3"], help="Generation mode (v2=standard, v3=multi-strategy)")
     
     args = parser.parse_args()
     

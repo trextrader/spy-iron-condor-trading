@@ -40,11 +40,9 @@ nohup python -u intelligence/train_condor_brain.py \
   --tensorboard \
   --monitor \
   --save-on-batch-loss 1.0 \
-  > "$LOG_FILE" 2>&1 &
-
-echo "[OK] Training started. Monitor with: tail -f $LOG_FILE"
   --export-epoch-plots \
   --export-dir training_exports \
+  "$@" \
   > "$LOG_FILE" 2>&1 &
 
 PID=$!
