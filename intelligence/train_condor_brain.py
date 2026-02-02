@@ -1032,7 +1032,12 @@ def train_condor_brain(args):
 
                 # Add structural rule discovery sparsity loss if enabled
                 if args.use_predicate_discovery:
-                    rule_loss = model.predicate_selector.sparsity_loss()
+                    # Handle DataParallel wrapping
+                    if isinstance(model, nn.DataParallel):
+                        rule_loss = model.module.predicate_selector.sparsity_loss()
+                    else:
+                        rule_loss = model.predicate_selector.sparsity_loss()
+
                     rule_loss_scaled = rule_loss * args.sparsity_weight
                     loss = loss + rule_loss_scaled
                     loss_dict['rule'] = rule_loss_scaled
