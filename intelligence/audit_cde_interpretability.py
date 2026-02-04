@@ -18,7 +18,32 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 SEQ_LEN = 240 # CondorNet standard
 EPS = 1e-6
 
+def build_pair_lookup(n_features: int, feature_names: list) -> dict:
+    """
+    Build a lookup table mapping pair_idx -> (feature_a, feature_b).
+    
+    The RelationalLogicLayer uses upper triangle indices (i < j).
+    pair_idx corresponds to torch.triu_indices ordering.
+    """
+    # Generate upper triangle indices (same as RelationalLogicLayer)
+    iu = np.triu_indices(n_features, k=1)
+    pair_lookup = {}
+    for pair_idx in range(len(iu[0])):
+        i, j = iu[0][pair_idx], iu[1][pair_idx]
+        name_i = feature_names[i] if i < len(feature_names) else f"feat_{i}"
+        name_j = feature_names[j] if j < len(feature_names) else f"feat_{j}"
+        pair_lookup[pair_idx] = (name_i, name_j)
+    return pair_lookup
+
+def format_comparison(pair_idx: int, dominant_op: str, pair_lookup: dict) -> str:
+    """Format a comparison as 'feature_a < feature_b' or similar."""
+    if pair_idx not in pair_lookup:
+        return f"Pair_{pair_idx} {dominant_op} ?"
+    feat_a, feat_b = pair_lookup[pair_idx]
+    return f"{feat_a} {dominant_op} {feat_b}"
+
 def safe_nan_to_num(X: np.ndarray) -> np.ndarray:
+
     return np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
 def load_condor_model(ckpt_path):
@@ -75,6 +100,19 @@ def extract_learned_logic(model, feature_names):
     if hasattr(model, 'super_sets') and len(model.super_sets) > 0:
         logic["super_set"]["n_super_sets"] = len(model.super_sets)
         logic["super_set"]["super_sets"] = []
+        
+        # Build pair lookup for first super_set (they all use same n_inputs)
+        first_ss = model.super_sets[0]
+        if hasattr(first_ss, 'sets') and len(first_ss.sets) > 0:
+            first_rl = first_ss.sets[0].relational_logic if hasattr(first_ss.sets[0], 'relational_logic') else None
+            if first_rl and hasattr(first_rl, 'n_inputs'):
+                n_inputs = first_rl.n_inputs
+                pair_lookup = build_pair_lookup(n_inputs, feature_names)
+            else:
+                pair_lookup = {}
+        else:
+            pair_lookup = {}
+        
         for ss_idx, ss in enumerate(model.super_sets):
             ss_info = {
                 "index": ss_idx,
@@ -114,13 +152,18 @@ def extract_learned_logic(model, feature_names):
                             
                             # Find top contributing pairs and their dominant operators
                             pair_importance = op_weights.sum(axis=1)  # (n_pairs,)
-                            top_pairs = np.argsort(pair_importance)[-3:][::-1]  # top 3 pairs
+                            top_pairs = np.argsort(pair_importance)[-5:][::-1]  # top 5 pairs
                             set_info["top_comparisons"] = []
                             for p_idx in top_pairs:
                                 ops = op_weights[p_idx]
                                 dominant_op = ["<", ">", "="][np.argmax(ops)]
+                                
+                                # Format as named comparison
+                                comparison_str = format_comparison(p_idx, dominant_op, pair_lookup)
+                                
                                 set_info["top_comparisons"].append({
                                     "pair_idx": int(p_idx),
+                                    "comparison": comparison_str,
                                     "dominant_op": dominant_op,
                                     "weights": {"<": float(ops[0]), ">": float(ops[1]), "=": float(ops[2])}
                                 })
@@ -128,6 +171,7 @@ def extract_learned_logic(model, feature_names):
                             set_info["projection_weight_norm"] = float(rl.projection.weight.norm().item())
                     ss_info["sets"].append(set_info)
             logic["super_set"]["super_sets"].append(ss_info)
+
 
     # Legacy fallback
     elif hasattr(model, 'super_set'):
@@ -195,31 +239,35 @@ def generate_trading_rules(logic):
     # Analyze SuperSet (V21+ format)
     ss = logic.get("super_set", {})
     if "super_sets" in ss:
-        for ss_info in ss["super_sets"][:2]:  # Show first 2 super-sets
-            rules.append(f"SUPER_SET {ss_info['index']}: {ss_info['n_sets']} logic sets")
-            for set_info in ss_info.get("sets", [])[:2]:  # Show first 2 sets per super-set
+        rules.append("")
+        rules.append("=" * 60)
+        rules.append("LEARNED RELATIONAL LOGIC (Feature Comparisons)")
+        rules.append("=" * 60)
+        for ss_info in ss["super_sets"][:3]:  # Show first 3 super-sets
+            rules.append(f"\nSUPER_SET {ss_info['index']}: {ss_info['n_sets']} predicate logic sets")
+            for set_info in ss_info.get("sets", [])[:3]:  # Show first 3 sets per super-set
                 steepness = set_info.get('steepness', 10)
                 
-                # V26: Show operator breakdown if available
+                # V27: Show named comparisons
                 if "operator_weights" in set_info:
                     ops = set_info["operator_weights"]
-                    rules.append(f"  └─ SET {set_info['index']}: operators: < {ops['<']:.1f}% | > {ops['>']:.1f}% | = {ops['=']:.1f}%")
+                    rules.append(f"  SET {set_info['index']}: (<:{ops['<']:.0f}% | >:{ops['>']:.0f}% | =:{ops['=']:.0f}%)")
                     
-                    # Show top comparisons with their dominant operators
+                    # Show top comparisons with named features
                     if "top_comparisons" in set_info:
-                        for comp in set_info["top_comparisons"][:2]:
-                            op = comp["dominant_op"]
-                            w = comp["weights"]
-                            rules.append(f"      └─ Pair {comp['pair_idx']}: {op} dominates (<{w['<']:.2f}, >{w['>']:.2f}, ={w['=']:.2f})")
+                        for comp in set_info["top_comparisons"][:3]:
+                            comparison_str = comp.get("comparison", f"Pair_{comp['pair_idx']}")
+                            rules.append(f"    → {comparison_str}")
                 else:
                     norm = set_info.get('projection_weight_norm', 0)
-                    rules.append(f"  └─ SET {set_info['index']}: weight_norm={norm:.3f}, steepness={steepness:.1f}")
+                    rules.append(f"  SET {set_info['index']}: weight_norm={norm:.3f}, steepness={steepness:.1f}")
     # Legacy format
     elif "sets" in ss:
         for s in ss["sets"]:
             if "predicate_weights" in s:
                 top_pred = max(s["predicate_weights"].items(), key=lambda x: x[1])[0]
                 rules.append(f"SET {s['index']} Focus: {top_pred} (Weight: {s['predicate_weights'][top_pred]:.2f})")
+
 
         
     return rules
