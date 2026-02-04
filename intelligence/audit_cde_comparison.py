@@ -118,17 +118,35 @@ def load_cde_model(ckpt_path, input_dim=None):
     
     if is_condornet:
         # CondorNet V21+ architecture
-        d_hidden = config.get('d_hidden', 64)
-        n_super_sets = config.get('n_super_sets', 3)
-        sets_per_super = config.get('sets_per_super', 8)
+        # Extract dimensions from state_dims if available (training script format)
+        dims = ckpt.get('state_dims', {})
+        d_h = dims.get('d_h', config.get('d_h', 256))
+        d_v = dims.get('d_v', config.get('d_v', 32))
+        d_m = dims.get('d_m', config.get('d_m', 64))
+        d_r = dims.get('d_r', config.get('d_r', 32))
+        
+        # Logic dimensions (from config or defaults in condor_train_net.py)
+        n_predicates = config.get('n_predicates', 512)
+        n_sets = config.get('n_sets', 256)
+        n_super_sets = config.get('n_super_sets', 128)
+        
+        # Shared params
+        d_control = config.get('d_control', 128)
+        n_layers = config.get('n_layers', 2)
         
         model = CondorNet(
-            n_inputs=input_dim,
-            d_hidden=d_hidden,
-            n_super_sets=n_super_sets,
-            sets_per_super=sets_per_super
+            d_input=input_dim,
+            d_h=d_h,
+            d_v=d_v,
+            d_m=d_m,
+            d_r=d_r,
+            d_control=d_control,
+            n_layers=n_layers,
+            n_predicates=n_predicates,
+            n_sets=n_sets,
+            n_super_sets=n_super_sets
         )
-        print(f"  [CondorNet] d_hidden={d_hidden}, n_super_sets={n_super_sets}, sets_per_super={sets_per_super}")
+        print(f"  [CondorNet] d_h={d_h}, n_sets={n_sets}, n_super_sets={n_super_sets}")
     else:
         # CondorBrain (Mamba/CDE) architecture
         d_model = config.get('d_model', 128)
