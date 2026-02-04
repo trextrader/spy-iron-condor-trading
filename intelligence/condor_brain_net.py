@@ -185,6 +185,7 @@ class BlockMatrixA(nn.Module):
 
         return self.spec.cat(h_new, v_new, m_new, r_new)
 
+
     def full_matrix(self) -> torch.Tensor:
         """
         Construct full [d_x, d_x] matrix for ETD-1.
@@ -547,17 +548,10 @@ class PredicateSignature(nn.Module):
         # Output dimension
         self.d_out = K + R + M
 
-    def forward(self, p: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Args:
-            p: (batch, K) predicate vector
+    def forward(self, p: torch.Tensor):
+        # FORCE FP32 for all signature math
+        p = p.float()
 
-        Returns:
-            p_sorted: (batch, K) sorted predicates
-            moments: (batch, R) power moments
-            bloom: (batch, M) Bloom-like embedding
-            z_pred: (batch, K+R+M) full signature
-        """
         # Sort for permutation invariance
         p_sorted, _ = torch.sort(p, dim=-1, descending=True)
 
@@ -569,12 +563,14 @@ class PredicateSignature(nn.Module):
         moments = torch.cat(moments, dim=-1)  # (batch, R)
 
         # Bloom-like signature (use sorted for invariance)
-        bloom = torch.sigmoid(self.W_bloom(p_sorted))  # (batch, M)
+        # Match weight dtype for mixed precision safely
+        w_dtype = self.W_bloom.weight.dtype
+        bloom = torch.sigmoid(self.W_bloom(p_sorted.to(w_dtype)))  # (batch, M)
 
         # Full signature
-        z_pred = torch.cat([p, moments, bloom], dim=-1)
+        z_pred = torch.cat([p, moments, bloom.float()], dim=-1)
 
-        return p_sorted, moments, bloom, z_pred
+        return p_sorted, moments, bloom.float(), z_pred
 
     def signature_only(self, p: torch.Tensor) -> torch.Tensor:
         """Return just the invariant part (moments + bloom)."""
