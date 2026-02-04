@@ -56,6 +56,7 @@ warnings.filterwarnings('ignore')
 sys.path.insert(0, os.getcwd())
 
 from intelligence.condor_brain import CondorBrain
+from intelligence.condor_brain_net import CondorNet
 from intelligence.canonical_feature_registry import FEATURE_COLS_V22, INPUT_DIM_V22
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -79,30 +80,54 @@ def safe_nan_to_num(X: np.ndarray) -> np.ndarray:
 
 
 def load_cde_model(ckpt_path, input_dim=None):
-    """Load a CDE model from checkpoint."""
+    """Load a CDE/CondorNet model from checkpoint.
+    
+    Automatically detects CondorNet vs CondorBrain based on checkpoint structure.
+    """
     if input_dim is None:
         input_dim = INPUT_DIM_V22
 
     ckpt = torch.load(ckpt_path, map_location=DEVICE, weights_only=False)
 
-    seq_len = ckpt.get('seq_len', 256)
+    seq_len = ckpt.get('seq_len', 240)  # CondorNet default is 240
     config = ckpt.get('model_config', ckpt.get('config', {}))
-    d_model = config.get('d_model', 128)
-    n_layers = config.get('n_layers', 2)
-    use_topk = config.get('use_topk_moe', False)
-    use_cde = config.get('use_cde', True) # Default to True for older checkpoints, but respect config
-
-    model = CondorBrain(
-        d_model=d_model,
-        n_layers=n_layers,
-        input_dim=input_dim,
-        use_cde=use_cde,
-        use_topk_moe=use_topk
-    )
-
-    state_dict = ckpt['state_dict']
+    state_dict = ckpt.get('state_dict', ckpt)
+    
+    # Clean state dict
     if any(k.startswith('module.') for k in state_dict.keys()):
         state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+    
+    # Detect CondorNet vs CondorBrain based on state_dict keys
+    is_condornet = any('super_sets' in k or 'state_block' in k for k in state_dict.keys())
+    
+    if is_condornet:
+        # CondorNet V21+ architecture
+        d_hidden = config.get('d_hidden', 64)
+        n_super_sets = config.get('n_super_sets', 3)
+        sets_per_super = config.get('sets_per_super', 8)
+        
+        model = CondorNet(
+            n_inputs=input_dim,
+            d_hidden=d_hidden,
+            n_super_sets=n_super_sets,
+            sets_per_super=sets_per_super
+        )
+        print(f"  [CondorNet] d_hidden={d_hidden}, super_sets={n_super_sets}, sets={sets_per_super}")
+    else:
+        # CondorBrain (Mamba/CDE) architecture
+        d_model = config.get('d_model', 128)
+        n_layers = config.get('n_layers', 2)
+        use_topk = config.get('use_topk_moe', False)
+        use_cde = config.get('use_cde', True)
+        
+        model = CondorBrain(
+            d_model=d_model,
+            n_layers=n_layers,
+            input_dim=input_dim,
+            use_cde=use_cde,
+            use_topk_moe=use_topk
+        )
+        print(f"  [CondorBrain] d_model={d_model}, layers={n_layers}")
 
     model.load_state_dict(state_dict)
     model.to(DEVICE)
