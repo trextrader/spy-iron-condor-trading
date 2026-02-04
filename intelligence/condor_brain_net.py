@@ -628,13 +628,14 @@ class RegimeCombinatoricsDynamics(nn.Module):
 
 class RelationalLogicLayer(nn.Module):
     """
-    Standardized Explicit Logic Engine.
-    Evaluates every pairwise relation (<, >, =) between N inputs.
+    Memory-Efficient Explicit Logic Engine (V22).
+    Evaluates pairwise relations (<, >, =) in chunks to prevent OOM.
     """
-    def __init__(self, n_inputs: int, out_dim: int):
+    def __init__(self, n_inputs: int, out_dim: int, chunk_size: int = 4096):
         super().__init__()
         self.n_inputs = n_inputs
         self.out_dim = out_dim
+        self.chunk_size = chunk_size
         
         # Features: (N choose 2) * 3 [less, greater, equal]
         self.n_pairs = (n_inputs * (n_inputs - 1)) // 2
@@ -654,21 +655,55 @@ class RelationalLogicLayer(nn.Module):
         if self.n_inputs < 2:
             return self.projection(x)
 
-        # Pairwise differences: D[b, i, j] = x[b, i] - x[b, j]
-        diffs = x.unsqueeze(-1) - x.unsqueeze(-2)
+        batch_size = x.shape[0]
+        device = x.device
         
-        # Extract upper triangle
-        iu = torch.triu_indices(self.n_inputs, self.n_inputs, offset=1, device=x.device)
-        tri_diffs = diffs[:, iu[0], iu[1]] 
+        # Pre-compute upper triangle indices once
+        iu = torch.triu_indices(self.n_inputs, self.n_inputs, offset=1, device=device)
+        n_pairs = iu.shape[1]
         
-        # Soft Logic Operators
-        lt = torch.sigmoid(-self.steepness * tri_diffs)
-        gt = torch.sigmoid(self.steepness * tri_diffs)
-        eq = torch.exp(-self.steepness * (tri_diffs ** 2))
-        
-        # Relational feature vector
-        rel_features = torch.cat([lt, gt, eq], dim=-1)
-        return self.projection(rel_features)
+        # Use chunked processing if too many pairs
+        if n_pairs > self.chunk_size:
+            # Accumulate result via projection chunks
+            out = torch.zeros(batch_size, self.out_dim, device=device)
+            weight = self.projection.weight  # (out_dim, n_pairs*3)
+            
+            for start in range(0, n_pairs, self.chunk_size):
+                end = min(start + self.chunk_size, n_pairs)
+                chunk_iu0 = iu[0, start:end]
+                chunk_iu1 = iu[1, start:end]
+                
+                # Compute diffs for this chunk only
+                tri_diffs = x[:, chunk_iu0] - x[:, chunk_iu1]  # (batch, chunk)
+                
+                # Soft Logic Operators
+                lt = torch.sigmoid(-self.steepness * tri_diffs)
+                gt = torch.sigmoid(self.steepness * tri_diffs)
+                eq = torch.exp(-self.steepness * (tri_diffs ** 2))
+                
+                # Accumulate projection contribution from this chunk
+                chunk_features = torch.cat([lt, gt, eq], dim=-1)  # (batch, chunk*3)
+                
+                # Slice the weight matrix for this chunk's features
+                feat_start = start * 3
+                feat_end = end * 3
+                chunk_weight = weight[:, feat_start:feat_end]  # (out_dim, chunk*3)
+                
+                out += torch.mm(chunk_features, chunk_weight.t())
+            
+            # Add bias once at the end
+            if self.projection.bias is not None:
+                out += self.projection.bias
+            return out
+        else:
+            # Standard processing for small inputs
+            tri_diffs = x[:, iu[0]] - x[:, iu[1]]
+            lt = torch.sigmoid(-self.steepness * tri_diffs)
+            gt = torch.sigmoid(self.steepness * tri_diffs)
+            eq = torch.exp(-self.steepness * (tri_diffs ** 2))
+            rel_features = torch.cat([lt, gt, eq], dim=-1)
+            return self.projection(rel_features)
+
 
 
 class PredicateSet(nn.Module):
