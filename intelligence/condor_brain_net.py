@@ -982,6 +982,9 @@ class CondorNet(nn.Module):
                     dt_k=dt,
                 ).float()
 
+                # V7: Manifold Squashing - Keep state in [-1, 1] range to prevent energy explosion
+                x_k = torch.tanh(x_k)
+
                 h, v, m, r = self.spec.split(x_k)
 
                 if return_diagnostics:

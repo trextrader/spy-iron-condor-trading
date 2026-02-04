@@ -133,8 +133,8 @@ class CompositeCondorNetLoss(nn.Module):
         # log(1+r) avoids exploding cumprod
         log_ret = torch.log1p(w_returns.clamp(-0.9, 5.0))
         cum_log_ret = torch.cumsum(log_ret, dim=-1)
-        # CAP cum_log_ret to prevent exp overflow (e.g., e^20 is ~4.8e8, e^80 overflows float32)
-        cum_log_ret = cum_log_ret.clamp(-50, 50)
+        # V7: Tighten clamp to [-5, 5] (exp(5) is ~148x growth) to prevent trillions-scale loss
+        cum_log_ret = cum_log_ret.clamp(-5.0, 5.0)
         cum_ret = torch.exp(cum_log_ret)
 
         # === 1. NPDD Loss (Weighted) ===
