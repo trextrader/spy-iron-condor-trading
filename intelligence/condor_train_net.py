@@ -453,6 +453,9 @@ def parse_args():
     parser.add_argument("--n-layers", type=int, default=2, help="TFT layers")
 
     # Training
+    parser.add_argument("--n-predicates", type=int, default=1024)
+    parser.add_argument("--n-sets", type=int, default=512)
+    parser.add_argument("--n-super-sets", type=int, default=256)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -567,6 +570,9 @@ def train_condor_net(args):
         d_r=args.d_r,
         d_control=args.d_control,
         n_layers=args.n_layers,
+        n_predicates=args.n_predicates,
+        n_sets=args.n_sets,
+        n_super_sets=args.n_super_sets,
         enforce_sparsity=not args.no_sparsity,
     ).to(device)
 
