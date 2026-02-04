@@ -343,6 +343,9 @@ def etd1_kernel(A: torch.Tensor, dt: float) -> Tuple[torch.Tensor, torch.Tensor]
 
     CRITICAL: Compute M = AΔt first, then pinv(M), NOT pinv(A).
 
+    Supports mixed precision: bf16/fp16 inputs are computed in fp32
+    for numerical stability in linalg ops, then cast back.
+
     Args:
         A: (d_x, d_x) drift matrix
         dt: time increment
@@ -351,6 +354,16 @@ def etd1_kernel(A: torch.Tensor, dt: float) -> Tuple[torch.Tensor, torch.Tensor]
         F: (d_x, d_x) state transition matrix e^{AΔt}
         phi1: (d_x, d_x) ETD-1 basis function φ_1(AΔt)
     """
+    original_dtype = A.dtype
+    
+    # Cast to fp32 if needed (pinv/matrix_exp don't support bf16/fp16)
+    if A.dtype in (torch.bfloat16, torch.float16):
+        A = A.float()
+    
+    # Ensure dt is tensor
+    if not torch.is_tensor(dt):
+        dt = torch.tensor(dt, device=A.device, dtype=A.dtype)
+    
     M = A * dt
     expM = torch.linalg.matrix_exp(M)
     I = torch.eye(M.shape[-1], device=M.device, dtype=M.dtype)
@@ -358,6 +371,11 @@ def etd1_kernel(A: torch.Tensor, dt: float) -> Tuple[torch.Tensor, torch.Tensor]
     # φ_1(M) = M⁺(e^M - I)
     # Use pinv for numerical stability when M is singular/near-singular
     phi1 = torch.linalg.pinv(M) @ (expM - I)
+
+    # Cast back to original dtype
+    if original_dtype in (torch.bfloat16, torch.float16):
+        expM = expM.to(original_dtype)
+        phi1 = phi1.to(original_dtype)
 
     return expM, phi1
 
