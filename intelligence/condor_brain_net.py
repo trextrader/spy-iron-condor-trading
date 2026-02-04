@@ -556,7 +556,6 @@ class PredicateSignature(nn.Module):
 
     def forward(self, p: torch.Tensor):
         # Math in float32 for stability
-        original_dtype = p.dtype
         p_fp32 = p.float()
 
         # Sort for permutation invariance
@@ -569,19 +568,20 @@ class PredicateSignature(nn.Module):
             moments_fp32.append(mu_r)
         moments_fp32 = torch.cat(moments_fp32, dim=-1)  # (batch, R)
 
-        # Bloom-like signature (match W_bloom dtype for matmul)
-        w_dtype = self.W_bloom.weight.dtype
-        bloom = torch.sigmoid(self.W_bloom(p_sorted_fp32.to(w_dtype)))
+        # Bloom-like signature (match W_bloom dtype for matmul safely inside autocast)
+        # Even if autocast is active, we force FP32 for signature stability
+        with torch.amp.autocast(device_type='cuda', enabled=False):
+            w_dtype = self.W_bloom.weight.dtype
+            bloom = torch.sigmoid(self.W_bloom(p_sorted_fp32.to(w_dtype)))
 
         # Full signature
         z_pred = torch.cat([p_fp32, moments_fp32, bloom.float()], dim=-1)
 
-        # Return results in the original dtype of p to avoid hidden state pollution
-        return p_sorted_fp32.to(original_dtype), moments_fp32.to(original_dtype), bloom.to(original_dtype), z_pred.to(original_dtype)
+        # ALWAYS return FP32 results to keep the backbone stable
+        return p_sorted_fp32, moments_fp32, bloom.float(), z_pred.float()
 
     def signature_only(self, p: torch.Tensor) -> torch.Tensor:
         """Return just the invariant part (moments + bloom)."""
-        original_dtype = p.dtype
         p_fp32 = p.float()
         
         p_sorted_fp32, _ = torch.sort(p_fp32, dim=-1, descending=True)
@@ -592,10 +592,11 @@ class PredicateSignature(nn.Module):
         moments_fp32 = torch.cat(moments_fp32, dim=-1)
         
         # Match W_bloom dtype
-        w_dtype = self.W_bloom.weight.dtype
-        bloom = torch.sigmoid(self.W_bloom(p_sorted_fp32.to(w_dtype)))
+        with torch.amp.autocast(device_type='cuda', enabled=False):
+            w_dtype = self.W_bloom.weight.dtype
+            bloom = torch.sigmoid(self.W_bloom(p_sorted_fp32.to(w_dtype)))
         
-        return torch.cat([moments_fp32.to(original_dtype), bloom.to(original_dtype)], dim=-1)
+        return torch.cat([moments_fp32, bloom.float()], dim=-1)
 
 
 class RegimeCombinatoricsDynamics(nn.Module):
@@ -1018,19 +1019,20 @@ class CondorNet(nn.Module):
             S_t[:, -1],
             S_t_minus_1[:, -1],
             gamma[:, -1],
-        )
+        ).float()  # FORCE FP32 for backbone
 
         p_sorted, moments, bloom, z_pred = self.pred_signature(p_k)
 
         # Update r_k with combinatorics dynamics
-        r = self.regime_dyn(r, z_pred)
-        z_final = self.spec.cat(h, v, m, r)
+        # Both r and z_pred are now FP32
+        r = self.regime_dyn(r.float(), z_pred.float())
+        z_final = self.spec.cat(h.float(), v.float(), m.float(), r.float())
 
         # Super-set gating
-        super_gate = self.super_set(p_k)
+        super_gate = self.super_set(p_k).float()
         z_gated = z_final * super_gate
 
-        # Output
+        # Output (Let autocast handle this part for speed)
         outputs = self.output_head(z_gated)
 
         if return_diagnostics:

@@ -96,14 +96,7 @@ class CompositeCondorNetLoss(nn.Module):
         dt: float = 1.0,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
 
-        device = predictions.device
-
-        # --- FORCE ALL LOSS MATH TO FP32 ---
-        # This conversion is necessary because some loss components (e.g., group_invariant_loss)
-        # might expect FP32 inputs, and intermediate calculations can suffer from FP16 precision.
-        # The model's forward pass might be in FP16/BF16 due to autocast, but loss calculation
-        # should ideally be in FP32 for stability.
-        predictions = predictions.float()
+        outputs = outputs.float()
         targets = targets.float()
         if gates is not None:
             gates = gates.float()
@@ -116,8 +109,8 @@ class CompositeCondorNetLoss(nn.Module):
 
         # Debug Prints for first batch
         if not hasattr(self, '_printed_loss_dtype_debug'):
-            print(f"\n[CompositeCondorNetLoss Forward Debug] Dtypes:")
-            print(f"  Predictions: {predictions.dtype}")
+            print(f"\n[CompositeCondorNetLoss Debug] Dtypes (Inside Criterion):")
+            print(f"  Outputs: {outputs.dtype}")
             print(f"  Targets: {targets.dtype}")
             print(f"  Gates: {gates.dtype if gates is not None else 'None'}")
             print(f"  Autocast Active: {torch.is_autocast_enabled()}")
@@ -582,39 +575,38 @@ def train_condor_net(args):
             batch_x = X_train_seq[s:e]  # (B, L, F)
             batch_y = y_train_t[s + L:e + L]  # (B, 10)
 
-            with autocast(device_type='cuda', dtype=amp_dtype):
+            # Move to device (KEEP AS FLOAT32 for stable backward pass)
+            batch_x = batch_x.to(device)
+            batch_y = batch_y.to(device)
+
+            # --- FORWARD PASS (WITH AUTOCAST) ---
+            with torch.amp.autocast(device_type='cuda', dtype=amp_dtype):
                 outputs, diag = model(batch_x, return_diagnostics=True)
 
-                # A_matrix is returned as fp32 by design
                 A_matrix = model.get_A_matrix()
                 gates = diag.get('predicates')
                 state = diag.get('z_final')
 
-                loss, components = criterion(
-                    outputs,          # fp16/bf16; loss will upcast internally
-                    batch_y,          # fp32
-                    gates=gates,
-                    state=state,
-                    A_matrix=A_matrix,
-                    pred_signature=model.pred_signature,
-                )
+            # --- LOSS CALCULATION (OUTSIDE AUTOCAST FOR PRECISION) ---
+            loss, components = criterion(
+                outputs,
+                batch_y,
+                gates=gates,
+                state=state,
+                A_matrix=A_matrix,
+                pred_signature=model.pred_signature,
+            )
 
-            # Debug Prints for Crash (only once or every 100 batches)
+            # Debug Prints for Crash
             if batch_idx == 0:
-                print(f"\n[DEBUG BATCH 0] Detailed Dtypes:")
-                print(f"  Inputs - batch_x: {batch_x.dtype}")
-                print(f"  Model Weights - First Param: {next(model.parameters()).dtype}")
-                print(f"  Outputs: {outputs.dtype}")
-                print(f"  Targets: {batch_y.dtype}")
-                if gates is not None: print(f"  Gates: {gates.dtype}")
-                if state is not None: print(f"  State: {state.dtype}")
-                if A_matrix is not None: print(f"  A_matrix: {A_matrix.dtype}")
-                print(f"  Loss: {loss.dtype}, GradFn: {loss.grad_fn}")
+                print(f"\n[DEBUG BATCH 0] System Inventory:")
+                print(f"  Input batch_x: {batch_x.dtype}")
+                print(f"  Model Weights: {next(model.parameters()).dtype}")
+                print(f"  Outputs (Raw): {outputs.dtype}")
+                print(f"  Final Loss: {loss.dtype}, GradFn: {loss.grad_fn}")
                 for k, v in components.items():
                     if torch.is_tensor(v):
                         print(f"    - {k}: {v.dtype}, GradFn: {v.grad_fn}")
-                    else:
-                        print(f"    - {k}: {type(v)} (Scalar)")
 
                 if scaler is not None:
                     print(f"  Scaler: enabled={scaler.is_enabled()}, scale={scaler.get_scale()}")
