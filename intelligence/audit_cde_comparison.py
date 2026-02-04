@@ -79,7 +79,7 @@ def safe_nan_to_num(X: np.ndarray) -> np.ndarray:
     return np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
 
-def load_cde_model(ckpt_path, input_dim=None):
+def load_cde_model(ckpt_path, input_dim=None, verbose_math=False):
     """Load a CDE/CondorNet model OR its extracted logic (JSON).
     
     Automatically detects:
@@ -165,7 +165,8 @@ def load_cde_model(ckpt_path, input_dim=None):
             n_layers=n_layers,
             n_predicates=n_predicates,
             n_sets=n_sets,
-            n_super_sets=n_super_sets
+            n_super_sets=n_super_sets,
+            verbose_math=verbose_math
         )
     else:
         # CondorBrain (Mamba/CDE) architecture
@@ -2691,8 +2692,14 @@ def convert_numpy_for_json(obj):
 # =============================================================================
 
 def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model_comparison.md',
-              seed=42, skip_gradients=False, skip_hessian=False, skip_shap=False, skip_fisher=False,
-              skip_mi=False):
+              seed=42,
+    skip_mi=False,
+    skip_hessian=False,
+    skip_gradients=False,
+    skip_fisher=False,
+    skip_shap=False,
+    verbose_math=False,
+):
     """
     Main orchestration function for the audit (Spec Section 10).
     """
@@ -2738,7 +2745,7 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
     print(f"\nModels: {len(model_paths)}", flush=True)
     for p in model_paths:
         exists = os.path.exists(p)
-        size = os.path.getsize(p) / 1e6 if exists else 0
+        size = os.path.path.getsize(p) / 1e6 if exists else 0
         print(f"  - {p} {'[OK, {:.1f}MB]'.format(size) if exists else '[NOT FOUND]'}", flush=True)
     print(f"Data: {data_path}", flush=True)
     data_exists = os.path.exists(data_path)
@@ -2758,13 +2765,15 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
     models = {}
     seq_lens = {}
 
-    for i, path in enumerate(model_paths):
-        name = os.path.basename(path).replace('.pth', '')
-        print(f"  [{i+1}/{len(model_paths)}] Loading {name}...", flush=True)
+    for model_path in model_paths:
+        name = os.path.basename(model_path).replace('.pth', '').replace('.json', '')
+        print(f"  [{len(models)+1}/{len(model_paths)}] Loading {name}...", flush=True)
+        
         try:
-            model, ckpt, seq_len = load_cde_model(path)
+            model, ckpt, sl = load_cde_model(model_path, verbose_math=verbose_math)
             models[name] = model
-            seq_lens[name] = seq_len
+            seq_lens[name] = sl
+            seq_len = sl # Use sl for the print statement
             n_params = sum(p.numel() for p in model.parameters())
             print(f"    - seq_len: {seq_len}", flush=True)
             print(f"    - parameters: {n_params:,}", flush=True)
@@ -3204,6 +3213,7 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
         'skip_shap': skip_shap,
         'skip_fisher': skip_fisher,
         'skip_mi': skip_mi,
+        'verbose_math': verbose_math,
     }
 
     # Markdown report
@@ -3298,6 +3308,10 @@ Examples:
                         help='Output path for markdown report')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility')
+    parser.add_argument('--verbose-math', action='store_true',
+                        help='Output mathematical derivations and compute cycles')
+    
+    # Fast flags
     parser.add_argument('--skip-gradients', action='store_true',
                         help='Skip gradient saliency analysis')
     parser.add_argument('--skip-hessian', '--no-hessian', action='store_true',
@@ -3320,7 +3334,7 @@ Examples:
             parser.error(f"Model not found: {path}")
 
     if not os.path.exists(args.data):
-        parser.error(f"Data file not found: {args.data}")
+            parser.error(f"Data file not found: {args.data}")
 
     # Create output directory
     os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
@@ -3337,6 +3351,7 @@ Examples:
         skip_shap=args.skip_shap,
         skip_fisher=args.skip_fisher,
         skip_mi=args.skip_mi,
+        verbose_math=args.verbose_math,
     )
 
 

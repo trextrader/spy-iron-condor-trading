@@ -898,8 +898,10 @@ class CondorNet(nn.Module):
         n_sets: int = 4,
         n_super_sets: int = 1,
         enforce_sparsity: bool = True,
+        verbose_math: bool = False,
     ):
         super().__init__()
+        self.verbose_math = verbose_math
 
         # State specification
         self.spec = AugmentedStateSpec(d_h, d_v, d_m, d_r)
@@ -946,6 +948,18 @@ class CondorNet(nn.Module):
         # === OUTPUT ===
         self.output_head = nn.Linear(self.spec.d_x, 10)
 
+    def log_math(self, label: str, equation: str, tensor: torch.Tensor = None):
+        """Print mathematical derivation step in LaTeX style."""
+        if not self.verbose_math or not hasattr(self, 'verbose_math') or not self.verbose_math:
+            return
+        
+        prefix = "  [MATH] "
+        print(f"{prefix}{label}: {equation}")
+        if tensor is not None:
+            # Stats for the tensor
+            mu, std = tensor.mean().item(), tensor.std().item()
+            print(f"{prefix}       Shape: {list(tensor.shape)} | μ={mu:.4f}, σ={std:.4f}")
+
     def forward(
         self,
         x: torch.Tensor,
@@ -961,8 +975,13 @@ class CondorNet(nn.Module):
         gamma: torch.Tensor = None,
         dt: float = 1.0,
         return_diagnostics: bool = False,
+        verbose_math: bool = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict]]:
         """Forward pass with defensive dtype casting."""
+        if verbose_math is not None:
+            self.verbose_math = verbose_math
+            
+        self.log_math("START", "x_0 initialization from d_input path")
         batch, seq_len, _ = x.shape
         device = x.device
         
@@ -993,10 +1012,14 @@ class CondorNet(nn.Module):
             self._printed_dtype_debug = True
 
         # === DEFAULT INPUTS ===
-        if greeks is None:
-            greeks = torch.zeros(batch, seq_len, self.n_greeks, device=device, dtype=dtype)
-        if q is None:
-            q = torch.ones(batch, seq_len, 1, device=device, dtype=dtype)
+        if self.super_sets is not None:
+                gates = torch.cat([ss(p_k) for ss in self.super_sets], dim=-1)
+                self.log_math("SUPER_SETS", "S = concat([SuperSet_i(p) for i in 1..N])", gates)
+                
+                final_gate = torch.sigmoid(self.hierarchical_logic(gates))
+                self.log_math("HIERARCHICAL_LOGIC", "λ = σ(RELATION(S))", final_gate)
+            else:
+                final_gate = torch.ones(batch, 1, device=device, dtype=dtype)
 
         # Default predicate inputs (use features from x if not provided)
         if iv_rank is None:
@@ -1036,7 +1059,11 @@ class CondorNet(nn.Module):
             # === PRECOMPUTE KERNELS (V5 Performance Opt) ===
             # A_θ is shared across sequence, dt is constant
             A_full = self.A_theta.full_matrix().float()
+            self.log_math("MATRIX_A", "A_full = [A_hh A_hv; A_vh A_vv ...]", A_full)
+            
             F_k, phi1 = etd1_kernel(A_full, dt)
+            self.log_math("TRANSITION", "F_k = exp(A_full * Δt)", F_k)
+            self.log_math("PHI_1", "φ1 = (exp(AΔt) - I)A⁻¹", phi1)
 
             # === TIME LOOP ===
             for t in range(seq_len - 1):
