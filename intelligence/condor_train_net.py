@@ -646,10 +646,11 @@ def train_condor_net(args):
                 print(f"  Input batch_x: {batch_x.dtype}")
                 print(f"  Model Weights: {next(model.parameters()).dtype}")
                 print(f"  Outputs (Raw): {outputs.dtype}")
-                print(f"  Final Loss: {loss.dtype}, GradFn: {loss.grad_fn}")
+                print(f"  Final Loss: {loss.item():.6f} ({loss.dtype}), GradFn: {loss.grad_fn}")
                 for k, v in components.items():
                     if torch.is_tensor(v):
-                        print(f"    - {k}: {v.dtype}, GradFn: {v.grad_fn}")
+                        val = v.item() if v.numel() == 1 else v.mean().item()
+                        print(f"    - {k}: {val:.6f} ({v.dtype}), GradFn: {v.grad_fn}")
 
                 if scaler is not None:
                     print(f"  Scaler: enabled={scaler.is_enabled()}, scale={scaler.get_scale()}")
