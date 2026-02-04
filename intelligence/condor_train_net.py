@@ -69,8 +69,10 @@ class CompositeCondorNetLoss(nn.Module):
         lambda_rho: float = 0.1,
         lambda_energy: float = 0.01,
         lambda_growth: float = 0.1,
+        use_clamping: bool = True,
     ):
         super().__init__()
+        self.use_clamping = use_clamping
         self.lambdas = {
             'npdd': lambda_npdd,
             'sharpe': lambda_sharpe,
@@ -147,7 +149,10 @@ class CompositeCondorNetLoss(nn.Module):
             npdd = mean_w_ret / max_dd
             # V11: Soft-Clamping (tanh) preserves gradient flow even at extreme magnitudes
             unclamped_npdd = -npdd.mean()
-            components['npdd'] = torch.tanh(unclamped_npdd / 50.0) * 50.0
+            if self.use_clamping:
+                components['npdd'] = torch.tanh(unclamped_npdd / 50.0) * 50.0
+            else:
+                components['npdd'] = unclamped_npdd
             debug_val('npdd', components['npdd'])
             debug_val('unclamped_npdd', unclamped_npdd)
         else:
@@ -161,7 +166,10 @@ class CompositeCondorNetLoss(nn.Module):
             sharpe = mean_w_ret / std_w_ret * math.sqrt(252 * 78)
             # V11: Soft-Clamping (tanh) preserves gradient flow even at extreme magnitudes
             unclamped_sharpe = -sharpe.mean()
-            components['sharpe'] = torch.tanh(unclamped_sharpe / 50.0) * 50.0
+            if self.use_clamping:
+                components['sharpe'] = torch.tanh(unclamped_sharpe / 50.0) * 50.0
+            else:
+                components['sharpe'] = unclamped_sharpe
             debug_val('sharpe', components['sharpe'])
             debug_val('unclamped_sharpe', unclamped_sharpe)
         else:
@@ -462,6 +470,8 @@ def parse_args():
     parser.add_argument("--lambda-rho", type=float, default=0.1)
     parser.add_argument("--lambda-energy", type=float, default=0.01)
     parser.add_argument("--lambda-growth", type=float, default=0.1)
+    parser.add_argument("--use-clamping", action="store_true", default=True, help="Use soft-clamping (tanh) for Sharpe/NPDD")
+    parser.add_argument("--no-clamping", action="store_false", dest="use_clamping", help="Disable soft-clamping")
 
     # Output
     parser.add_argument("--output", type=str, default="auto")
@@ -583,6 +593,7 @@ def train_condor_net(args):
         lambda_rho=args.lambda_rho,
         lambda_energy=args.lambda_energy,
         lambda_growth=args.lambda_growth,
+        use_clamping=args.use_clamping,
     )
 
     # Optimizer
