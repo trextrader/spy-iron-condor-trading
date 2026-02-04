@@ -441,92 +441,84 @@ def estimate_hessian_hutchinson(model, X, seq_len, indices, n_eigenvalues=20, n_
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
 
-    traces = []
     params = [p for p in model.parameters() if p.requires_grad]
-
-    # Use fewer samples for memory efficiency
-    sample_indices = indices[:5]  # Reduced from 20 to 5
-
-    # Force 'math' attention backend to allow second-order derivatives
-    try:
-        from torch.backends.cuda import sdp_kernel
-        sdp_ctx = sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True)
-    except:
-        class DummyCtx:
-            def __enter__(self): pass
-            def __exit__(self, *args): pass
-        sdp_ctx = DummyCtx()
-
-    with sdp_ctx:
-        try:
-            for vec_idx in tqdm(range(n_vectors), desc="Hutchinson estimation", leave=False):
-                # Random Rademacher vector
-                v = [torch.randint_like(p, 0, 2).float() * 2 - 1 for p in params]
-
-                total_hvp = 0.0
-                n_successful = 0
-
-                for idx in sample_indices:
-                    try:
-                        seq = X[idx : idx + seq_len]
-                        x_tensor = torch.tensor(seq, device=DEVICE, dtype=torch.float32).unsqueeze(0)
-
-                        out = model(x_tensor)
-                        if isinstance(out, tuple):
-                            out = out[0]
-
-                        loss = ((out) ** 2).mean()
-
-                        grads = torch.autograd.grad(loss, params, create_graph=True, allow_unused=True)
-                        grads = [g if g is not None else torch.zeros_like(p) for g, p in zip(grads, params)]
-
-                        # Hessian-vector product
-                        grad_v = sum((g * vi).sum() for g, vi in zip(grads, v))
-                        hvp = torch.autograd.grad(grad_v, params, allow_unused=True)
-
-                        # v^T H v approximates trace
-                        for hi, vi in zip(hvp, v):
-                            if hi is not None:
-                                total_hvp += (hi * vi).sum().item()
-
-                        n_successful += 1
-
-                    except torch.cuda.OutOfMemoryError:
-                        print(f"  [Hessian] OOM on sample, skipping...", flush=True)
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
-                        continue
-                    finally:
-                        # Clear intermediate tensors
-                        del x_tensor, out, loss
-                        if 'grads' in dir():
-                            del grads
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
-
-                if n_successful > 0:
-                    traces.append(total_hvp / n_successful)
-
-                # Clear Rademacher vectors
-                del v
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-
-        except RuntimeError as e:
-            if "derivative" in str(e).lower() or "attention" in str(e).lower():
-                print(f"  [Hessian] WARNING: Model uses non-differentiable attention kernels. Skipping stochastic trace.", flush=True)
-                return np.zeros(n_eigenvalues)
-            raise e
-
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-    if not traces:
-        return np.zeros(n_eigenvalues)
+    traces = []
     
-    avg_trace = np.mean(traces)
-    # Return a dummy spectrum centered around the average trace for consistent report formatting
-    return np.linspace(avg_trace*1.1, avg_trace*0.9, n_eigenvalues)
+    # Use fewer samples for memory efficiency
+    sample_indices = indices[:5]
+
+    try:
+        # Force 'math' attention backend to allow second-order derivatives
+        try:
+            from torch.backends.cuda import sdp_kernel
+            sdp_ctx = sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True)
+        except:
+            class DummyCtx:
+                def __enter__(self): pass
+                def __exit__(self, *args): pass
+            sdp_ctx = DummyCtx()
+
+        with sdp_ctx:
+            try:
+                for vec_idx in tqdm(range(n_vectors), desc="Hutchinson estimation", leave=False):
+                    # Random Rademacher vector
+                    v = [torch.randint_like(p, 0, 2).float() * 2 - 1 for p in params]
+
+                    total_hvp = 0.0
+                    n_successful = 0
+
+                    for idx in sample_indices:
+                        try:
+                            seq = X[idx : idx + seq_len]
+                            x_tensor = torch.tensor(seq, device=DEVICE, dtype=torch.float32).unsqueeze(0)
+
+                            out = model(x_tensor)
+                            if isinstance(out, tuple):
+                                out = out[0]
+
+                            loss = ((out) ** 2).mean()
+
+                            grads = torch.autograd.grad(loss, params, create_graph=True, allow_unused=True)
+                            grads = [g if g is not None else torch.zeros_like(p) for g, p in zip(grads, params)]
+
+                            # Hessian-vector product
+                            grad_v = sum((g * vi).sum() for g, vi in zip(grads, v))
+                            hvp = torch.autograd.grad(grad_v, params, allow_unused=True)
+
+                            # v^T H v approximates trace
+                            for hi, vi in zip(hvp, v):
+                                if hi is not None:
+                                    total_hvp += (hi * vi).sum().item()
+
+                            n_successful += 1
+
+                        except torch.cuda.OutOfMemoryError:
+                            print(f"  [Hessian] OOM on sample, skipping...", flush=True)
+                            if torch.cuda.is_available():
+                                torch.cuda.empty_cache()
+                            continue
+                        finally:
+                            # Clear intermediate tensors
+                            if 'x_tensor' in locals(): del x_tensor
+                            if 'out' in locals(): del out
+                            if 'loss' in locals(): del loss
+                            if 'grads' in locals(): del grads
+                            if torch.cuda.is_available():
+                                torch.cuda.empty_cache()
+
+                    if n_successful > 0:
+                        traces.append(total_hvp / n_successful)
+
+                    # Clear Rademacher vectors
+                    del v
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+            except RuntimeError as e:
+                if "derivative" in str(e).lower() or "attention" in str(e).lower():
+                    print(f"  [Hessian] WARNING: Model uses non-differentiable attention kernels. Skipping stochastic trace.", flush=True)
+                    return np.zeros(n_eigenvalues)
+                raise e
 
     except torch.cuda.OutOfMemoryError:
         print(f"  [Hessian] GPU OOM - returning approximate values", flush=True)
@@ -534,16 +526,12 @@ def estimate_hessian_hutchinson(model, X, seq_len, indices, n_eigenvalues=20, n_
             torch.cuda.empty_cache()
         return np.array([0.0] * n_eigenvalues)
 
-    if len(traces) == 0:
-        return np.array([0.0] * n_eigenvalues)
-
-    # Return trace estimate and variance
-    trace_mean = np.mean(traces)
-
-    # Approximate top eigenvalue from trace (very rough)
-    approx_eigenvalues = np.array([trace_mean / (i + 1) for i in range(n_eigenvalues)])
-
-    return approx_eigenvalues
+    if not traces:
+        return np.zeros(n_eigenvalues)
+    
+    avg_trace = np.mean(traces)
+    # Return a dummy spectrum centered around the average trace for consistent report formatting
+    return np.linspace(avg_trace*1.1, avg_trace*0.9, n_eigenvalues)
 
 
 def compute_shap_approximation(model, X, feature_names, seq_len, n_samples=200, n_background=50):
@@ -2745,7 +2733,7 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
     print(f"\nModels: {len(model_paths)}", flush=True)
     for p in model_paths:
         exists = os.path.exists(p)
-        size = os.path.path.getsize(p) / 1e6 if exists else 0
+        size = os.path.getsize(p) / 1e6 if exists else 0
         print(f"  - {p} {'[OK, {:.1f}MB]'.format(size) if exists else '[NOT FOUND]'}", flush=True)
     print(f"Data: {data_path}", flush=True)
     data_exists = os.path.exists(data_path)
@@ -3334,7 +3322,7 @@ Examples:
             parser.error(f"Model not found: {path}")
 
     if not os.path.exists(args.data):
-            parser.error(f"Data file not found: {args.data}")
+        parser.error(f"Data file not found: {args.data}")
 
     # Create output directory
     os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
