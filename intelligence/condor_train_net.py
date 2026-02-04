@@ -473,8 +473,8 @@ def parse_args():
     parser.add_argument("--lambda-rho", type=float, default=0.1)
     parser.add_argument("--lambda-energy", type=float, default=0.01)
     parser.add_argument("--lambda-growth", type=float, default=0.1)
-    parser.add_argument("--use-clamping", action="store_true", default=True, help="Use soft-clamping (tanh) for Sharpe/NPDD")
-    parser.add_argument("--no-clamping", action="store_false", dest="use_clamping", help="Disable soft-clamping")
+    parser.add_argument("--use-clamping", action="store_true", default=False, help="Use soft-clamping (tanh) for Sharpe/NPDD")
+    parser.add_argument("--no-clamping", action="store_false", dest="use_clamping", help="Explicitly disable soft-clamping")
 
     # Output
     parser.add_argument("--output", type=str, default="auto")
