@@ -1054,16 +1054,20 @@ def group_invariant_loss(
     device = p.device
     total_loss = 0.0
 
+    # Match dtype to pred_signature weights for mixed precision compatibility
+    sig_dtype = next(pred_signature.parameters()).dtype
+    p = p.to(sig_dtype)
+
     # Get original invariant signature
     _, moments, bloom, _ = pred_signature(p)
-    sig = torch.cat([moments, bloom], dim=-1)
+    sig = torch.cat([moments.float(), bloom.float()], dim=-1)
 
     for _ in range(n_permutations):
         perm = torch.randperm(K, device=device)
         p_perm = p[:, perm]
 
         _, moments_perm, bloom_perm, _ = pred_signature(p_perm)
-        sig_perm = torch.cat([moments_perm, bloom_perm], dim=-1)
+        sig_perm = torch.cat([moments_perm.float(), bloom_perm.float()], dim=-1)
 
         total_loss = total_loss + F.mse_loss(sig, sig_perm)
 
