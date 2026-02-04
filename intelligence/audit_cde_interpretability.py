@@ -88,9 +88,47 @@ def extract_learned_logic(model, feature_names):
                     if hasattr(pset, 'relational_logic'):
                         rl = pset.relational_logic
                         set_info["steepness"] = float(rl.steepness.data) if hasattr(rl, 'steepness') else 10.0
-                        set_info["projection_weight_norm"] = float(rl.projection.weight.norm().item())
+                        
+                        # Extract operator weights: projection.weight has shape (out_dim, n_pairs * 3)
+                        # The 3 channels per pair are: [<, >, =]
+                        w = rl.projection.weight.detach().cpu().numpy()  # (out_dim, n_pairs*3)
+                        n_pairs = rl.n_pairs if hasattr(rl, 'n_pairs') else w.shape[1] // 3
+                        
+                        # Reshape to (out_dim, n_pairs, 3) to separate operators
+                        if w.shape[1] == n_pairs * 3:
+                            w_reshaped = w.reshape(w.shape[0], n_pairs, 3)  # (out_dim, n_pairs, 3)
+                            
+                            # Sum absolute weights across output dim for each operator
+                            op_weights = np.abs(w_reshaped).sum(axis=0)  # (n_pairs, 3)
+                            total_lt = float(op_weights[:, 0].sum())
+                            total_gt = float(op_weights[:, 1].sum())
+                            total_eq = float(op_weights[:, 2].sum())
+                            
+                            # Normalize to percentages
+                            total = total_lt + total_gt + total_eq + 1e-8
+                            set_info["operator_weights"] = {
+                                "<": round(100 * total_lt / total, 1),
+                                ">": round(100 * total_gt / total, 1),
+                                "=": round(100 * total_eq / total, 1)
+                            }
+                            
+                            # Find top contributing pairs and their dominant operators
+                            pair_importance = op_weights.sum(axis=1)  # (n_pairs,)
+                            top_pairs = np.argsort(pair_importance)[-3:][::-1]  # top 3 pairs
+                            set_info["top_comparisons"] = []
+                            for p_idx in top_pairs:
+                                ops = op_weights[p_idx]
+                                dominant_op = ["<", ">", "="][np.argmax(ops)]
+                                set_info["top_comparisons"].append({
+                                    "pair_idx": int(p_idx),
+                                    "dominant_op": dominant_op,
+                                    "weights": {"<": float(ops[0]), ">": float(ops[1]), "=": float(ops[2])}
+                                })
+                        else:
+                            set_info["projection_weight_norm"] = float(rl.projection.weight.norm().item())
                     ss_info["sets"].append(set_info)
             logic["super_set"]["super_sets"].append(ss_info)
+
     # Legacy fallback
     elif hasattr(model, 'super_set'):
         ss = model.super_set
@@ -157,18 +195,32 @@ def generate_trading_rules(logic):
     # Analyze SuperSet (V21+ format)
     ss = logic.get("super_set", {})
     if "super_sets" in ss:
-        for ss_info in ss["super_sets"]:
+        for ss_info in ss["super_sets"][:2]:  # Show first 2 super-sets
             rules.append(f"SUPER_SET {ss_info['index']}: {ss_info['n_sets']} logic sets")
-            for set_info in ss_info.get("sets", [])[:3]:  # Show first 3 sets per super-set
-                norm = set_info.get('projection_weight_norm', 0)
+            for set_info in ss_info.get("sets", [])[:2]:  # Show first 2 sets per super-set
                 steepness = set_info.get('steepness', 10)
-                rules.append(f"  └─ SET {set_info['index']}: weight_norm={norm:.3f}, steepness={steepness:.1f}")
+                
+                # V26: Show operator breakdown if available
+                if "operator_weights" in set_info:
+                    ops = set_info["operator_weights"]
+                    rules.append(f"  └─ SET {set_info['index']}: operators: < {ops['<']:.1f}% | > {ops['>']:.1f}% | = {ops['=']:.1f}%")
+                    
+                    # Show top comparisons with their dominant operators
+                    if "top_comparisons" in set_info:
+                        for comp in set_info["top_comparisons"][:2]:
+                            op = comp["dominant_op"]
+                            w = comp["weights"]
+                            rules.append(f"      └─ Pair {comp['pair_idx']}: {op} dominates (<{w['<']:.2f}, >{w['>']:.2f}, ={w['=']:.2f})")
+                else:
+                    norm = set_info.get('projection_weight_norm', 0)
+                    rules.append(f"  └─ SET {set_info['index']}: weight_norm={norm:.3f}, steepness={steepness:.1f}")
     # Legacy format
     elif "sets" in ss:
         for s in ss["sets"]:
             if "predicate_weights" in s:
                 top_pred = max(s["predicate_weights"].items(), key=lambda x: x[1])[0]
                 rules.append(f"SET {s['index']} Focus: {top_pred} (Weight: {s['predicate_weights'][top_pred]:.2f})")
+
         
     return rules
 
