@@ -140,7 +140,7 @@ class BlockMatrixA(nn.Module):
 
     def _init_stable(self):
         """Initialize for spectral stability (ρ(A) < 1)."""
-        scale = 0.01
+        scale = 0.001  # Tighter for V5 stability
         for name, param in self.named_parameters():
             if param.dim() >= 2:
                 nn.init.xavier_uniform_(param, gain=scale)
@@ -379,7 +379,6 @@ def etd1_kernel(A: torch.Tensor, dt: float) -> Tuple[torch.Tensor, torch.Tensor]
 
 def condornet_master_step(
     spec: AugmentedStateSpec,
-    A_theta: BlockMatrixA,
     B_theta: BlockVectorB,
     G_theta: CDEResponseG,
     D_forcing: FullForcingD,
@@ -389,38 +388,14 @@ def condornet_master_step(
     greeks_k: torch.Tensor,
     r_prev: torch.Tensor,
     q_k: torch.Tensor,
+    F_k: torch.Tensor,
+    phi1: torch.Tensor,
     dt_k: float,
 ) -> torch.Tensor:
     """
-    One CondorNet master update step (faithful to canonical equation).
-
-    Implements:
-        x_k = F_k x_{k-1} + g_k + G_θ(x_{k-1}, u_k) ΔX_k + D(Greeks_k, r_{k-1}, q_k)
-
-    where:
-        F_k = exp(A_θ(u_k) Δt_k)
-        g_k = Δt_k φ_1(A_θ(u_k) Δt_k) B_θ(u_k)
-
-    Args:
-        spec: AugmentedStateSpec
-        A_theta: Block transition operator
-        B_theta: Control injection
-        G_theta: CDE response
-        D_forcing: Full forcing
-        x_prev: (batch, d_x) previous state
-        u_k: (batch, d_control) control embedding
-        dX_k: (batch, d_input) control increment
-        greeks_k: (batch, n_greeks) Greeks
-        r_prev: (batch, d_r) PREVIOUS regime (causality!)
-        q_k: (batch, d_q) position size
-        dt_k: time increment
-
-    Returns:
-        x_k: (batch, d_x) updated state
+    Update x_{k-1} → x_k using precomputed ETD-1 kernels.
     """
-    batch = x_prev.shape[0]
-
-    # Force all math to FP32 for the master step to avoid autocast mismatches
+    # Force all math to FP32
     x_prev = x_prev.float()
     u_k = u_k.float()
     dX_k = dX_k.float()
@@ -428,28 +403,24 @@ def condornet_master_step(
     r_prev = r_prev.float()
     q_k = q_k.float()
 
-    # 1. Build A(u_k) as full [d_x, d_x] (shared across batch)
-    A_full = A_theta.full_matrix().float()  # (d_x, d_x)
-    F_k, phi1 = etd1_kernel(A_full, dt_k)  # (d_x, d_x), (d_x, d_x)
-
-    # 2. B_θ(u_k) and ETD injection g_k = Δt φ_1(AΔt) B
-    # Disable autocast for these specific matmuls to force FP32 consistency
     with torch.amp.autocast('cuda', enabled=False):
-        B_k = B_theta(u_k).float()  # (batch, d_x)
-        g_k = torch.matmul(B_k, phi1.T) * dt_k  # (batch, d_x)
-
-        # 3. Linear propagation F_k x_{k-1}
+        # 1. Linear propagation F_k x_{k-1}
         x_lin = torch.matmul(x_prev, F_k.T)  # (batch, d_x)
 
-        # 4. Controlled response G_θ(x_{k-1}, u_k) ΔX_k
-        G_k = G_theta(x_prev, u_k).float()  # (batch, d_x, d_input)
-        dX_vec = dX_k.unsqueeze(-1)  # (batch, d_input, 1)
-        cde_term = torch.bmm(G_k, dX_vec).squeeze(-1)  # (batch, d_x)
+        # 2. B_θ(u_k) and ETD injection (Squashed for stability)
+        # Apply tanh to forcing to prevent energy explosion over T=240
+        B_k = torch.tanh(B_theta(u_k).float())
+        g_k = torch.matmul(B_k, phi1.T) * dt_k
 
-        # 5. Full forcing D(Greeks_k, r_{k-1}, q_k)
-        D_k = D_forcing(greeks_k, r_prev, q_k).float()  # (batch, d_x)
+        # 3. Controlled response G_θ(x_{k-1}, u_k) ΔX_k (Squashed for stability)
+        G_k = G_theta(x_prev, u_k).float()
+        dX_vec = dX_k.unsqueeze(-1)
+        cde_term = torch.tanh(torch.bmm(G_k, dX_vec).squeeze(-1))
 
-        # 6. Master update
+        # 4. Full forcing D(Greeks_k, r_{k-1}, q_k) (Squashed for stability)
+        D_k = torch.tanh(D_forcing(greeks_k, r_prev, q_k).float())
+
+        # 5. Master update
         x_k = x_lin + g_k + cde_term + D_k
 
     return x_k.float()
@@ -980,6 +951,11 @@ class CondorNet(nn.Module):
             # === DIAGNOSTICS ===
             diagnostics = {'h': [], 'v': [], 'm': [], 'r': [], 'gates': []} if return_diagnostics else None
 
+            # === PRECOMPUTE KERNELS (V5 Performance Opt) ===
+            # A_θ is shared across sequence, dt is constant
+            A_full = self.A_theta.full_matrix().float()
+            F_k, phi1 = etd1_kernel(A_full, dt)
+
             # === TIME LOOP ===
             for t in range(seq_len - 1):
                 x_prev = self.spec.cat(h, v, m, r).float()
@@ -992,7 +968,6 @@ class CondorNet(nn.Module):
                 # Master update (uses r as r_{k-1} for causality)
                 x_k = condornet_master_step(
                     spec=self.spec,
-                    A_theta=self.A_theta,
                     B_theta=self.B_theta,
                     G_theta=self.G_theta,
                     D_forcing=self.D_forcing,
@@ -1002,6 +977,8 @@ class CondorNet(nn.Module):
                     greeks_k=greeks_k,
                     r_prev=r,  # CRITICAL: r_{k-1} for causality
                     q_k=q_k,
+                    F_k=F_k,
+                    phi1=phi1,
                     dt_k=dt,
                 ).float()
 
