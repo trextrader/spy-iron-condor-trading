@@ -1012,14 +1012,10 @@ class CondorNet(nn.Module):
             self._printed_dtype_debug = True
 
         # === DEFAULT INPUTS ===
-        if self.super_sets is not None:
-                gates = torch.cat([ss(p_k) for ss in self.super_sets], dim=-1)
-                self.log_math("SUPER_SETS", "S = concat([SuperSet_i(p) for i in 1..N])", gates)
-                
-                final_gate = torch.sigmoid(self.hierarchical_logic(gates))
-                self.log_math("HIERARCHICAL_LOGIC", "λ = σ(RELATION(S))", final_gate)
-            else:
-                final_gate = torch.ones(batch, 1, device=device, dtype=dtype)
+        if greeks is None:
+            greeks = torch.zeros(batch, seq_len, self.n_greeks, device=device, dtype=dtype)
+        if q is None:
+            q = torch.ones(batch, seq_len, 1, device=device, dtype=dtype)
 
         # Default predicate inputs (use features from x if not provided)
         if iv_rank is None:
@@ -1120,12 +1116,22 @@ class CondorNet(nn.Module):
             r = self.regime_dyn(r.float(), z_pred.float()).float()
             z_final = self.spec.cat(h.float(), v.float(), m.float(), r.float())
 
-            # Super-set gating (Multi-branch intersection)
-            super_gate = torch.ones((iv_rank.shape[0], 1), device=iv_rank.device).float()
-            for ss_module in self.super_sets:
-                super_gate = super_gate * ss_module(p_k).float()
+            # Hierarchical Relational Logic (HAL) Gating
+            if self.super_sets is not None:
+                # V21: Concatenate super-set outputs and pass through hierarchical relation layer
+                gates = torch.cat([ss(p_k).float() for ss in self.super_sets], dim=-1)
+                self.log_math("SUPER_SETS", "S = concat([SuperSet_i(p) for i in 1..N])", gates)
+                
+                # Use Hierarchical Logic if available, else product
+                if hasattr(self, 'hierarchical_logic'):
+                    super_gate = torch.sigmoid(self.hierarchical_logic(gates))
+                    self.log_math("HIERARCHICAL_LOGIC", "λ = σ(RELATION(S))", super_gate)
+                else:
+                    super_gate = gates.prod(dim=-1, keepdim=True)
+            else:
+                super_gate = torch.ones((batch, 1), device=device, dtype=torch.float32)
             
-            z_gated = (z_final * super_gate).float()
+            z_gated = (z_final.float() * super_gate).float()
 
             # Output (Keep in FP32 for "Ultra-Safe Mode")
             outputs = self.output_head(z_gated).float()
