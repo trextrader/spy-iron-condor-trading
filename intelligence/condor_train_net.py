@@ -441,6 +441,8 @@ def parse_args():
                         help="Disable sparsity constraints")
     parser.add_argument("--patience", type=int, default=10,
                         help="Early stopping patience")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="Verbose per-batch logging")
 
     args = parser.parse_args()
 
@@ -621,6 +623,12 @@ def train_condor_net(args):
                 epoch_components[k] += v.item() if torch.is_tensor(v) else v
 
             pbar.set_postfix({'loss': f'{loss.item():.4f}'})
+
+            # Verbose per-batch logging
+            if getattr(args, 'verbose', False) and (batch_idx + 1) % 10 == 0:
+                comp_str = ' | '.join([f"{k}:{v.item():.3f}" if torch.is_tensor(v) else f"{k}:{v:.3f}" 
+                                       for k, v in list(components.items())[:5]])
+                print(f"  [B{batch_idx+1:04d}] loss={loss.item():.4f} | {comp_str}")
 
         scheduler.step()
 
