@@ -590,6 +590,9 @@ def train_condor_net(args):
                 state = diag.get('z_final')
 
             # --- LOSS CALCULATION (OUTSIDE AUTOCAST FOR PRECISION) ---
+            # Synthetic return series for Sharpe/Drawdown (across the batch)
+            roi_returns = batch_y[:, 5].unsqueeze(0)  # (1, B)
+
             loss, components = criterion(
                 outputs,
                 batch_y,
@@ -597,6 +600,7 @@ def train_condor_net(args):
                 state=state,
                 A_matrix=A_matrix,
                 pred_signature=model.pred_signature,
+                returns=roi_returns,
             )
 
             # Debug Prints for Crash
