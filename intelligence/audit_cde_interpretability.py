@@ -28,15 +28,28 @@ def load_condor_model(ckpt_path):
     sd = ckpt['state_dims']
     feature_cols = ckpt.get('feature_cols', FEATURE_COLS_V22)
     
+    # V24: Read hyperparameters from checkpoint to match saved architecture
+    hp = ckpt.get('hyperparameters', {})
+    n_predicates = hp.get('n_predicates', 32)
+    n_sets = hp.get('n_sets', 16)
+    n_super_sets = hp.get('n_super_sets', 8)
+    
+    print(f"  Architecture: d_h={sd['d_h']}, d_v={sd['d_v']}, d_m={sd['d_m']}, d_r={sd['d_r']}")
+    print(f"  Logic: n_predicates={n_predicates}, n_sets={n_sets}, n_super_sets={n_super_sets}")
+    
     model = CondorNet(
         d_input=len(feature_cols),
         d_h=sd['d_h'], d_v=sd['d_v'], d_m=sd['d_m'], d_r=sd['d_r'],
+        n_predicates=n_predicates,
+        n_sets=n_sets,
+        n_super_sets=n_super_sets,
     )
     
     model.load_state_dict(ckpt['model_state_dict'])
     model.to(DEVICE)
     model.eval()
     return model, feature_cols, ckpt.get('normalization', None)
+
 
 def extract_learned_logic(model, feature_names):
     """Extracts internal weights and thresholds from the CondorNet modules."""
@@ -58,8 +71,28 @@ def extract_learned_logic(model, feature_names):
             "steepness": pg.steepness
         }
 
-    # 2. Extract SuperSet Logic
-    if hasattr(model, 'super_set'):
+    # 2. Extract SuperSet Logic (V21+: super_sets is a ModuleList)
+    if hasattr(model, 'super_sets') and len(model.super_sets) > 0:
+        logic["super_set"]["n_super_sets"] = len(model.super_sets)
+        logic["super_set"]["super_sets"] = []
+        for ss_idx, ss in enumerate(model.super_sets):
+            ss_info = {
+                "index": ss_idx,
+                "n_sets": len(ss.sets) if hasattr(ss, 'sets') else 0,
+                "sets": []
+            }
+            if hasattr(ss, 'sets'):
+                for i, pset in enumerate(ss.sets):
+                    set_info = {"index": i}
+                    # V21+: PredicateSet uses relational_logic
+                    if hasattr(pset, 'relational_logic'):
+                        rl = pset.relational_logic
+                        set_info["steepness"] = float(rl.steepness.data) if hasattr(rl, 'steepness') else 10.0
+                        set_info["projection_weight_norm"] = float(rl.projection.weight.norm().item())
+                    ss_info["sets"].append(set_info)
+            logic["super_set"]["super_sets"].append(ss_info)
+    # Legacy fallback
+    elif hasattr(model, 'super_set'):
         ss = model.super_set
         logic["super_set"]["n_sets"] = ss.n_sets
         logic["super_set"]["sets"] = []
@@ -76,6 +109,7 @@ def extract_learned_logic(model, feature_names):
                     "gamma_gate": weights[4]
                 }
             })
+
 
     # 3. Extract Output Head Focus (Sensitivities)
     if hasattr(model, 'output_head'):
@@ -112,20 +146,32 @@ def generate_trading_rules(logic):
     """Transcribes extracted logic into human-readable rules."""
     rules = []
     
-    p = logic["predicates"]
-    rules.append(f"RULE 1 (Vol): Enter if IVR > {p['iv_rank_threshold']:.2f}")
-    rules.append(f"RULE 2 (Liq): Block if Spread/Price > {p['spread_ratio_threshold']:.4%}")
-    rules.append(f"RULE 3 (Trend): Signal Reversal if RSI < {p['rsi_threshold']:.2f} and delta_RSI < 0")
-    rules.append(f"RULE 4 (Gap): Guard if 1m price jump > {p['gap_fraction_threshold']:.2%}")
-    rules.append(f"RULE 5 (Greeks): Hedge if |Gamma| > {p['gamma_threshold']:.4f}")
+    p = logic.get("predicates", {})
+    if p:
+        rules.append(f"RULE 1 (Vol): Enter if IVR > {p.get('iv_rank_threshold', 0.75):.2f}")
+        rules.append(f"RULE 2 (Liq): Block if Spread/Price > {p.get('spread_ratio_threshold', 0.004):.4%}")
+        rules.append(f"RULE 3 (Trend): Signal Reversal if RSI < {p.get('rsi_threshold', 25):.2f} and delta_RSI < 0")
+        rules.append(f"RULE 4 (Gap): Guard if 1m price jump > {p.get('gap_fraction_threshold', 0.012):.2%}")
+        rules.append(f"RULE 5 (Greeks): Hedge if |Gamma| > {p.get('gamma_threshold', 0.01):.4f}")
     
-    # Analyze SuperSet
-    ss = logic["super_set"]
-    for s in ss["sets"]:
-        top_pred = max(s["predicate_weights"].items(), key=lambda x: x[1])[0]
-        rules.append(f"SET {s['index']} Focus: {top_pred} (Weight: {s['predicate_weights'][top_pred]:.2f})")
+    # Analyze SuperSet (V21+ format)
+    ss = logic.get("super_set", {})
+    if "super_sets" in ss:
+        for ss_info in ss["super_sets"]:
+            rules.append(f"SUPER_SET {ss_info['index']}: {ss_info['n_sets']} logic sets")
+            for set_info in ss_info.get("sets", [])[:3]:  # Show first 3 sets per super-set
+                norm = set_info.get('projection_weight_norm', 0)
+                steepness = set_info.get('steepness', 10)
+                rules.append(f"  └─ SET {set_info['index']}: weight_norm={norm:.3f}, steepness={steepness:.1f}")
+    # Legacy format
+    elif "sets" in ss:
+        for s in ss["sets"]:
+            if "predicate_weights" in s:
+                top_pred = max(s["predicate_weights"].items(), key=lambda x: x[1])[0]
+                rules.append(f"SET {s['index']} Focus: {top_pred} (Weight: {s['predicate_weights'][top_pred]:.2f})")
         
     return rules
+
 
 def main():
     parser = argparse.ArgumentParser()
