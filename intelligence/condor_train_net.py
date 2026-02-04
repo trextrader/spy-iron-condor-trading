@@ -91,7 +91,7 @@ class CompositeCondorNetLoss(nn.Module):
         gates: torch.Tensor = None,
         state: torch.Tensor = None,
         A_matrix: torch.Tensor = None,
-        pred_signature = None,
+        pred_signature: Optional[nn.Module] = None,
         returns: torch.Tensor = None,
         dt: float = 1.0,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
@@ -174,9 +174,11 @@ class CompositeCondorNetLoss(nn.Module):
 
         # === 7. Group Invariance ===
         if raw_gates is not None and pred_signature is not None:
-            # Match gates dtype to pred_signature parameters to avoid fp16/fp32 matmul mismatch
+            # Match gates dtype to pred_signature parameters to avoid matmul mismatch
             sig_dtype = next(pred_signature.parameters()).dtype
             gates_for_group = raw_gates.to(dtype=sig_dtype)
+
+            # Run group_invariant_loss in the same dtype as pred_signature
             components['group_inv'] = group_invariant_loss(
                 pred_signature,
                 gates_for_group,
@@ -207,110 +209,6 @@ class CompositeCondorNetLoss(nn.Module):
 
         total_loss = sum(self.lambdas[k] * v for k, v in components.items())
         return total_loss, components
-
-        # Cast all inputs to fp32 for loss computation (mixed precision safety)
-        predictions = predictions.float()
-        targets = targets.float()
-        if gates is not None:
-            gates = gates.float()
-        if state is not None:
-            state = state.float()
-        if A_matrix is not None:
-            A_matrix = A_matrix.float()
-        if returns is not None:
-            returns = returns.float()
-        
-        components = {}
-
-        # === 1. NPDD Loss ===
-        # Primary prediction loss (MSE on targets)
-        # In full implementation, compute actual NP/DD from returns
-        if returns is not None and returns.numel() > 0:
-            mean_ret = returns.mean(dim=-1)
-            cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
-            running_max = torch.cummax(cumulative, dim=-1)[0]
-            dd = (running_max - cumulative) / (running_max + 1e-8)
-            max_dd = dd.max(dim=-1)[0] + 1e-8
-            npdd = mean_ret / max_dd
-            components['npdd'] = -npdd.mean()
-        else:
-            components['npdd'] = F.mse_loss(predictions, targets)
-
-        # === 2. Sharpe Loss ===
-        if returns is not None and returns.shape[-1] > 1:
-            mean_ret = returns.mean(dim=-1)
-            std_ret = returns.std(dim=-1) + 1e-8
-            sharpe = mean_ret / std_ret * math.sqrt(252 * 78)
-            components['sharpe'] = -sharpe.mean()
-        else:
-            components['sharpe'] = torch.tensor(0.0, device=device)
-
-        # === 3. Drawdown Loss ===
-        if returns is not None and returns.numel() > 0:
-            cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
-            running_max = torch.cummax(cumulative, dim=-1)[0]
-            dd = (running_max - cumulative) / (running_max + 1e-8)
-            max_dd = dd.max(dim=-1)[0]
-            components['dd'] = max_dd.mean()
-        else:
-            components['dd'] = torch.tensor(0.0, device=device)
-
-        # === 4. Turnover Loss ===
-        if predictions.shape[-1] >= 10:
-            entry_logits = predictions[:, 8]
-            exit_logits = predictions[:, 9]
-        else:
-            entry_logits = predictions[:, -2]
-            exit_logits = predictions[:, -1]
-        turnover = torch.abs(entry_logits).mean() + torch.abs(exit_logits).mean()
-        components['turnover'] = turnover
-
-        # === 5. Fuzzy Loss ===
-        if predictions.shape[-1] >= 8:
-            confidence = predictions[:, 7]
-        else:
-            confidence = predictions[:, -3]
-        components['fuzzy'] = torch.var(confidence)
-
-        # === 6. Pattern Entropy ===
-        if gates is not None:
-            gate_probs = gates.mean(dim=0).clamp(1e-8, 1 - 1e-8)
-            entropy = -(gate_probs * torch.log(gate_probs)).sum()
-            components['pattern_ent'] = -entropy  # Maximize entropy
-        else:
-            components['pattern_ent'] = torch.tensor(0.0, device=device)
-
-        # === 7. Group Invariance ===
-        if gates is not None and pred_signature is not None:
-            components['group_inv'] = group_invariant_loss(pred_signature, gates, n_permutations=2)
-        else:
-            components['group_inv'] = torch.tensor(0.0, device=device)
-
-        # === 8. Spectral Radius ===
-        if A_matrix is not None:
-            components['rho'] = spectral_radius_loss(A_matrix, dt=dt, target_rho=0.99)
-        else:
-            components['rho'] = torch.tensor(0.0, device=device)
-
-        # === 9. Energy Loss ===
-        if state is not None:
-            components['energy'] = (state ** 2).mean()
-        else:
-            components['energy'] = torch.tensor(0.0, device=device)
-
-        # === 10. Growth Loss ===
-        if returns is not None and returns.numel() > 0:
-            cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
-            final_growth = cumulative[..., -1].mean()
-            components['growth'] = -final_growth
-        else:
-            components['growth'] = torch.tensor(0.0, device=device)
-
-        # === TOTAL ===
-        total_loss = sum(self.lambdas[k] * v for k, v in components.items())
-
-        return total_loss, components
-
 
 # =============================================================================
 # DATA PREPARATION
@@ -632,6 +530,9 @@ def train_condor_net(args):
         model = model.to(torch.float16)
         print("[CondorNet] Model converted to FP16 (T4 compatibility)")
 
+    # IMPORTANT: keep pred_signature in fp32 to avoid matmul dtype mismatches
+    model.pred_signature = model.pred_signature.to(torch.float32)
+
     n_params = sum(p.numel() for p in model.parameters())
     print(f"[CondorNet] Parameters: {n_params:,}")
 
@@ -725,8 +626,10 @@ def train_condor_net(args):
 
             # Verbose per-batch logging
             if getattr(args, 'verbose', False) and (batch_idx + 1) % 10 == 0:
-                comp_str = ' | '.join([f"{k}:{v.item():.3f}" if torch.is_tensor(v) else f"{k}:{v:.3f}" 
-                                       for k, v in list(components.items())[:5]])
+                comp_str = ' | '.join(
+                    [f"{k}:{(v.item() if torch.is_tensor(v) else v):.3f}"
+                     for k, v in list(components.items())[:5]]
+                )
                 print(f"  [B{batch_idx+1:04d}] loss={loss.item():.4f} | {comp_str}")
 
         scheduler.step()
@@ -746,7 +649,7 @@ def train_condor_net(args):
                 batch_x = X_val_seq[s:e]
                 batch_y = y_val_t[s + L:e + L]
 
-                with autocast('cuda', dtype=amp_dtype):
+                with autocast(device_type='cuda', dtype=amp_dtype):
                     outputs = model(batch_x)
                     loss, _ = criterion(outputs.float(), batch_y)
 
@@ -787,7 +690,6 @@ def train_condor_net(args):
     print(f"Training complete. Best val loss: {best_val_loss:.4f}")
     print(f"Model saved to: {args.output}")
     print(f"{'='*60}")
-
 
 # =============================================================================
 # MAIN
