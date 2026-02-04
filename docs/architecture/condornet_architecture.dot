@@ -1,0 +1,147 @@
+// CondorNet™ Architecture Diagram
+// Mathematically faithful 4-block ETD-1 + CDE + Predicate architecture
+// Render: dot -Tpng condornet_architecture.dot -o condornet_architecture.png
+
+digraph CondorNet {
+    rankdir=LR;
+    node [shape=record, style=filled, fontname="Segoe UI", fontsize=10];
+    edge [fontname="Segoe UI", fontsize=9];
+    
+    // Graph styling
+    bgcolor="#1a1a2e";
+    
+    // Input cluster
+    subgraph cluster_input {
+        label="Inputs";
+        labeljust=l;
+        fontcolor="#ffffff";
+        fontname="Segoe UI Semibold";
+        style=filled;
+        color="#2d2d44";
+        fillcolor="#2d2d44";
+        
+        X [label="X_{1:k}\n(seq, d_input)", fillcolor="#4a4a6a", fontcolor="#ffffff"];
+        Greeks [label="Greeks_k\n(Δ, Γ, Θ, ν, ρ)", fillcolor="#4a4a6a", fontcolor="#ffffff"];
+        q [label="q_k\n(position size)", fillcolor="#4a4a6a", fontcolor="#ffffff"];
+        PredFeatures [label="Market features\n(IVR, spread, price,\nRSI, S_t, Γ)", fillcolor="#4a4a6a", fontcolor="#ffffff"];
+    }
+    
+    // Control encoder
+    TFT [label="TFTControlEncoder\nu_k = TFT_θ(X_{1:k})", fillcolor="#3a7bd5", fontcolor="#ffffff"];
+    Init [label="InitialEncoder\nx_0 = [h_0|v_0|m_0|r_0]", fillcolor="#3a7bd5", fontcolor="#ffffff"];
+    
+    // 4-block state cluster
+    subgraph cluster_state {
+        label="4-Block State x_k = [h; v; m; r]";
+        labeljust=l;
+        fontcolor="#ffffff";
+        fontname="Segoe UI Semibold";
+        style=filled;
+        color="#2d2d44";
+        fillcolor="#2d2d44";
+        
+        h [label="h_k\nlatent risk-manifold\n(d_h)", fillcolor="#f39c12", fontcolor="#1a1a2e"];
+        v [label="v_k\nportfolio state\n(d_v)", fillcolor="#e74c3c", fontcolor="#ffffff"];
+        m [label="m_k\nrisk memory\n(d_m)", fillcolor="#9b59b6", fontcolor="#ffffff"];
+        r [label="r_k\nregime/combinatorics\n(d_r)", fillcolor="#1abc9c", fontcolor="#1a1a2e"];
+    }
+    
+    // Core operators cluster
+    subgraph cluster_operators {
+        label="Block Operators";
+        labeljust=l;
+        fontcolor="#ffffff";
+        fontname="Segoe UI Semibold";
+        style=filled;
+        color="#2d2d44";
+        fillcolor="#2d2d44";
+        
+        Atheta [label="BlockMatrixA\n4×4 blocks\nA_θ(u_k)", fillcolor="#ff6b6b", fontcolor="#ffffff"];
+        Btheta [label="BlockVectorB\nB_θ(u_k)", fillcolor="#ff6b6b", fontcolor="#ffffff"];
+        Gtheta [label="CDEResponseG\nG_θ(x_{k-1}, u_k)", fillcolor="#ff6b6b", fontcolor="#ffffff"];
+        Dforcing [label="FullForcingD\nD(Greeks_k, r_{k-1}, q_k)\n→ all 4 blocks", fillcolor="#ff6b6b", fontcolor="#ffffff"];
+    }
+    
+    // ETD-1 kernel
+    ETD [label="ETD-1 Kernel\nF_k = exp(AΔt)\nφ₁(AΔt) = M⁺(e^M - I)", fillcolor="#00d2d3", fontcolor="#1a1a2e", shape=ellipse];
+    
+    // Predicate system cluster
+    subgraph cluster_predicates {
+        label="Predicate System";
+        labeljust=l;
+        fontcolor="#ffffff";
+        fontname="Segoe UI Semibold";
+        style=filled;
+        color="#2d2d44";
+        fillcolor="#2d2d44";
+        
+        PredGates [label="CanonicalPredicateGates\n5 inequality gates:\n• Vol spike: IVR > 75\n• Liquidity: spread/price > 0.4%\n• Reversal: RSI < 25 ∧ ΔRSI < 0\n• Gap: |ΔS/S| > 1.2%\n• Greeks: |Γ| > thresh", fillcolor="#2ecc71", fontcolor="#1a1a2e"];
+        PredSig [label="PredicateSignature\nz = [p; moments; bloom]\nGroup-invariant", fillcolor="#2ecc71", fontcolor="#1a1a2e"];
+        RegimeDyn [label="RegimeCombinatoricsDynamics\nr_k = α_k ⊙ r_{k-1} + β_k", fillcolor="#2ecc71", fontcolor="#1a1a2e"];
+        SuperSet [label="SuperSet\nhierarchical sets", fillcolor="#2ecc71", fontcolor="#1a1a2e"];
+    }
+    
+    // Output
+    Fusion [label="FusionGate\n[h; bloom; moments]\n→ branch weights", fillcolor="#a855f7", fontcolor="#ffffff"];
+    Output [label="OutputHead\n10 targets", fillcolor="#a855f7", fontcolor="#ffffff"];
+    
+    // Edges - Input flow
+    X -> TFT [color="#6b7280"];
+    X -> Init [color="#6b7280"];
+    
+    // Control flow
+    TFT -> Btheta [color="#3a7bd5", label="u_k"];
+    TFT -> Gtheta [color="#3a7bd5"];
+    TFT -> Atheta [color="#3a7bd5", style=dashed, label="(optional)"];
+    Init -> h [color="#6b7280"];
+    Init -> v [color="#6b7280"];
+    Init -> m [color="#6b7280"];
+    Init -> r [color="#6b7280"];
+    
+    // Operator to ETD
+    Atheta -> ETD [color="#ff6b6b", label="A_full"];
+    Btheta -> ETD [color="#ff6b6b", label="B_k"];
+    
+    // Greeks forcing
+    Greeks -> Dforcing [color="#6b7280"];
+    q -> Dforcing [color="#6b7280"];
+    r -> Dforcing [color="#1abc9c", label="r_{k-1}", style=dashed];
+    
+    // ETD output to state (master equation)
+    ETD -> h [color="#00d2d3", label="x_lin + g_k"];
+    ETD -> v [color="#00d2d3"];
+    ETD -> m [color="#00d2d3"];
+    
+    // CDE response
+    Gtheta -> h [color="#ff6b6b", label="G @ dX"];
+    Gtheta -> v [color="#ff6b6b"];
+    Gtheta -> m [color="#ff6b6b"];
+    Gtheta -> r [color="#ff6b6b"];
+    
+    // D forcing output
+    Dforcing -> h [color="#ff6b6b", label="D_h"];
+    Dforcing -> v [color="#ff6b6b", label="D_v"];
+    Dforcing -> m [color="#ff6b6b", label="D_m"];
+    Dforcing -> r [color="#ff6b6b", label="D_r"];
+    
+    // Predicate flow
+    PredFeatures -> PredGates [color="#6b7280"];
+    PredGates -> PredSig [color="#2ecc71", label="p_k"];
+    PredSig -> RegimeDyn [color="#2ecc71", label="z_pred"];
+    RegimeDyn -> r [color="#1abc9c", label="r_k"];
+    PredGates -> SuperSet [color="#2ecc71"];
+    
+    // Fusion and output
+    h -> Fusion [color="#f39c12"];
+    PredSig -> Fusion [color="#2ecc71", label="moments, bloom"];
+    
+    h -> Output [color="#f39c12"];
+    v -> Output [color="#e74c3c"];
+    m -> Output [color="#9b59b6"];
+    r -> Output [color="#1abc9c"];
+    
+    Fusion -> Output [color="#a855f7", style=dashed, label="branch weights"];
+    
+    // Master equation annotation
+    MasterEq [shape=note, label="Master Equation:\nx_k = e^{A_θ Δt} x_{k-1}\n    + Δt φ₁(A_θ Δt) B_θ(u_k)\n    + G_θ(x_{k-1}, u_k) ΔX_k\n    + D(Greeks_k, r_{k-1}, q_k)", fillcolor="#fef3c7", fontcolor="#1a1a2e", fontname="Consolas"];
+}
