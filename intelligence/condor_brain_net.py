@@ -1023,84 +1023,102 @@ class CondorNet(nn.Module):
 
         return outputs
 
-    def get_A_matrix(self) -> torch.Tensor:
-        """Expose A matrix for loss computation (spectral radius)."""
-        return self.A_theta.full_matrix()
+    def get_A_matrix(self, dt: float = 1.0) -> torch.Tensor:
+        """
+        Return the full drift matrix A_θ as fp32 for loss computations.
 
+        This is used by spectral_radius_loss; we keep it in fp32 to avoid
+        mixed-precision matmul issues in autograd.
+        """
+        A_full = self.A_theta.full_matrix()  # same dtype as model (fp16/bf16)
+        return A_full.to(torch.float32)
 
 # =============================================================================
 # PART 9: GROUP INVARIANT LOSS
 # =============================================================================
 
+# =============================================================================
+# AUXILIARY LOSSES (GROUP INVARIANCE, SPECTRAL RADIUS)
+# =============================================================================
+
 def group_invariant_loss(
-    pred_signature: PredicateSignature,
-    p: torch.Tensor,
-    n_permutations: int = 3,
+    pred_signature_module: "PredicateSignature",
+    gates: torch.Tensor,
+    n_permutations: int = 2,
 ) -> torch.Tensor:
     """
-    Enforce signature invariance under random permutations.
-
-    L_group-inv = E_π [ ||s(p) - s(π(p))||² ]
+    Enforce group invariance of the predicate signature under permutations.
 
     Args:
-        pred_signature: PredicateSignature module
-        p: (batch, K) predicate values
-        n_permutations: number of random permutations to test
+        pred_signature_module: PredicateSignature instance
+        gates: (batch, K) predicate activations
+        n_permutations: number of random permutations to compare
 
     Returns:
-        loss: scalar
+        loss: scalar tensor
     """
-    batch, K = p.shape
-    device = p.device
-    total_loss = 0.0
+    if gates is None or gates.numel() == 0:
+        return torch.tensor(0.0, device=gates.device if gates is not None else "cpu")
 
-    # Match dtype to pred_signature weights for mixed precision compatibility
-    sig_dtype = next(pred_signature.parameters()).dtype
-    p = p.to(sig_dtype)
+    device = gates.device
+    dtype = torch.float32  # compute in fp32 for stability
 
-    # Get original invariant signature
-    _, moments, bloom, _ = pred_signature(p)
-    sig = torch.cat([moments.float(), bloom.float()], dim=-1)
+    p = gates.to(dtype=dtype)
+    base_sig = pred_signature_module.signature_only(p)  # (batch, d_sig)
 
+    losses = []
+    K = p.shape[-1]
     for _ in range(n_permutations):
         perm = torch.randperm(K, device=device)
         p_perm = p[:, perm]
+        sig_perm = pred_signature_module.signature_only(p_perm)
+        losses.append(F.mse_loss(sig_perm, base_sig))
 
-        _, moments_perm, bloom_perm, _ = pred_signature(p_perm)
-        sig_perm = torch.cat([moments_perm.float(), bloom_perm.float()], dim=-1)
-
-        total_loss = total_loss + F.mse_loss(sig, sig_perm)
-
-    return total_loss / max(n_permutations, 1)
-
+    return torch.stack(losses).mean().to(gates.dtype)
 
 # =============================================================================
 # PART 10: SPECTRAL RADIUS LOSS
 # =============================================================================
 
-def spectral_radius_loss(A: torch.Tensor, dt: float = 1.0, target_rho: float = 0.99) -> torch.Tensor:
+def spectral_radius_loss(
+    A: torch.Tensor,
+    dt: float = 1.0,
+    target_rho: float = 0.99,
+) -> torch.Tensor:
     """
-    Penalize spectral radius of AΔt if > target.
-
-    Ensures stability: ρ(AΔt) < 1 for convergent dynamics.
+    Penalize spectral radius of exp(A * dt) above target_rho.
 
     Args:
         A: (d_x, d_x) drift matrix
         dt: time increment
-        target_rho: target spectral radius (should be < 1)
+        target_rho: desired upper bound on spectral radius
 
     Returns:
-        loss: scalar penalty
+        loss: scalar tensor
     """
-    # Cast to fp32 for eigvals (doesn't support fp16/bf16)
-    A_fp32 = A.float() if A.dtype in (torch.float16, torch.bfloat16) else A
-    M = A_fp32 * dt
-    try:
-        eigvals = torch.linalg.eigvals(M)
-        rho = eigvals.abs().max()
-        return F.relu(rho - target_rho) ** 2
-    except Exception:
-        return torch.tensor(0.0, device=A.device, dtype=torch.float32)
+    if A is None:
+        return torch.tensor(0.0)
+
+    # Work in fp32 for eigenvalues
+    A32 = A.to(torch.float32)
+    M = A32 * float(dt)
+
+    # Use matrix_exp then power iteration for dominant eigenvalue magnitude
+    F = torch.linalg.matrix_exp(M)  # (d_x, d_x)
+
+    # Power iteration
+    v = torch.randn(F.shape[0], 1, device=F.device, dtype=F.dtype)
+    v = v / (v.norm() + 1e-8)
+    for _ in range(10):
+        v = F @ v
+        v = v / (v.norm() + 1e-8)
+
+    # Rayleigh quotient approximation
+    vT_F_v = (v.transpose(0, 1) @ (F @ v)).squeeze()
+    rho_est = torch.abs(vT_F_v)
+
+    excess = torch.clamp(rho_est - target_rho, min=0.0)
+    return excess.to(A.dtype)
 
 
 # =============================================================================

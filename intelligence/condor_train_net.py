@@ -56,18 +56,6 @@ FEATURE_COLS = FEATURE_COLS_V22
 class CompositeCondorNetLoss(nn.Module):
     """
     10-component composite loss for CondorNet training.
-
-    Components:
-        1. L_npdd: Net Profit / Max Drawdown ratio
-        2. L_sharpe: Annualized Sharpe ratio
-        3. L_dd: Maximum drawdown penalty
-        4. L_turnover: Trading frequency penalty
-        5. L_fuzzy: Sizing consistency
-        6. L_pattern_ent: Predicate usage entropy
-        7. L_group_inv: Group invariance enforcement
-        8. L_rho: Spectral radius stability
-        9. L_energy: State magnitude regularization
-        10. L_growth: Capital growth trajectory
     """
     def __init__(
         self,
@@ -108,24 +96,118 @@ class CompositeCondorNetLoss(nn.Module):
         dt: float = 1.0,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """
-        Compute 10-component composite loss.
-
-        Args:
-            predictions: (batch, 10) model outputs
-            targets: (batch, 10) target values
-            gates: (batch, n_predicates) predicate gates
-            state: (batch, d_x) final state
-            A_matrix: (d_x, d_x) drift matrix
-            pred_signature: PredicateSignature module
-            returns: (batch, seq) return series (if available)
-            dt: time increment
-
-        Returns:
-            total_loss: scalar
-            components: dict of individual losses
+        Compute 10-component composite loss in fp32 space.
         """
         device = predictions.device
-        
+
+        # Keep a copy of raw gates for group_invariant_loss (to match pred_signature dtype)
+        raw_gates = gates
+
+        # Cast everything to fp32 for scalar loss math
+        predictions = predictions.float()
+        targets = targets.float()
+        if gates is not None:
+            gates = gates.float()
+        if state is not None:
+            state = state.float()
+        if A_matrix is not None:
+            A_matrix = A_matrix.float()
+        if returns is not None:
+            returns = returns.float()
+
+        components: Dict[str, torch.Tensor] = {}
+
+        # === 1. NPDD Loss ===
+        if returns is not None and returns.numel() > 0:
+            mean_ret = returns.mean(dim=-1)
+            cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
+            running_max = torch.cummax(cumulative, dim=-1)[0]
+            dd = (running_max - cumulative) / (running_max + 1e-8)
+            max_dd = dd.max(dim=-1)[0] + 1e-8
+            npdd = mean_ret / max_dd
+            components['npdd'] = -npdd.mean()
+        else:
+            components['npdd'] = F.mse_loss(predictions, targets)
+
+        # === 2. Sharpe Loss ===
+        if returns is not None and returns.shape[-1] > 1:
+            mean_ret = returns.mean(dim=-1)
+            std_ret = returns.std(dim=-1) + 1e-8
+            sharpe = mean_ret / std_ret * math.sqrt(252 * 78)
+            components['sharpe'] = -sharpe.mean()
+        else:
+            components['sharpe'] = torch.tensor(0.0, device=device)
+
+        # === 3. Drawdown Loss ===
+        if returns is not None and returns.numel() > 0:
+            cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
+            running_max = torch.cummax(cumulative, dim=-1)[0]
+            dd = (running_max - cumulative) / (running_max + 1e-8)
+            max_dd = dd.max(dim=-1)[0]
+            components['dd'] = max_dd.mean()
+        else:
+            components['dd'] = torch.tensor(0.0, device=device)
+
+        # === 4. Turnover Loss ===
+        if predictions.shape[-1] >= 10:
+            entry_logits = predictions[:, 8]
+            exit_logits = predictions[:, 9]
+        else:
+            entry_logits = predictions[:, -2]
+            exit_logits = predictions[:, -1]
+        components['turnover'] = torch.abs(entry_logits).mean() + torch.abs(exit_logits).mean()
+
+        # === 5. Fuzzy Loss ===
+        if predictions.shape[-1] >= 8:
+            confidence = predictions[:, 7]
+        else:
+            confidence = predictions[:, -3]
+        components['fuzzy'] = torch.var(confidence)
+
+        # === 6. Pattern Entropy ===
+        if gates is not None:
+            gate_probs = gates.mean(dim=0).clamp(1e-8, 1 - 1e-8)
+            entropy = -(gate_probs * torch.log(gate_probs)).sum()
+            components['pattern_ent'] = -entropy
+        else:
+            components['pattern_ent'] = torch.tensor(0.0, device=device)
+
+        # === 7. Group Invariance ===
+        if raw_gates is not None and pred_signature is not None:
+            # Match gates dtype to pred_signature parameters to avoid fp16/fp32 matmul mismatch
+            sig_dtype = next(pred_signature.parameters()).dtype
+            gates_for_group = raw_gates.to(dtype=sig_dtype)
+            components['group_inv'] = group_invariant_loss(
+                pred_signature,
+                gates_for_group,
+                n_permutations=2,
+            ).float()
+        else:
+            components['group_inv'] = torch.tensor(0.0, device=device)
+
+        # === 8. Spectral Radius ===
+        if A_matrix is not None:
+            components['rho'] = spectral_radius_loss(A_matrix, dt=dt, target_rho=0.99)
+        else:
+            components['rho'] = torch.tensor(0.0, device=device)
+
+        # === 9. Energy Loss ===
+        if state is not None:
+            components['energy'] = (state ** 2).mean()
+        else:
+            components['energy'] = torch.tensor(0.0, device=device)
+
+        # === 10. Growth Loss ===
+        if returns is not None and returns.numel() > 0:
+            cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
+            final_growth = cumulative[..., -1].mean()
+            components['growth'] = -final_growth
+        else:
+            components['growth'] = torch.tensor(0.0, device=device)
+
+        total_loss = sum(self.lambdas[k] * v for k, v in components.items())
+        return total_loss, components
+
         # Cast all inputs to fp32 for loss computation (mixed precision safety)
         predictions = predictions.float()
         targets = targets.float()
@@ -603,16 +685,17 @@ def train_condor_net(args):
             batch_x = X_train_seq[s:e]  # (B, L, F)
             batch_y = y_train_t[s + L:e + L]  # (B, 10)
 
-            with autocast('cuda', dtype=amp_dtype):
+            with autocast(device_type='cuda', dtype=amp_dtype):
                 outputs, diag = model(batch_x, return_diagnostics=True)
 
+                # A_matrix is returned as fp32 by design
                 A_matrix = model.get_A_matrix()
                 gates = diag.get('predicates')
                 state = diag.get('z_final')
 
                 loss, components = criterion(
-                    outputs.float(),
-                    batch_y,
+                    outputs,          # fp16/bf16; loss will upcast internally
+                    batch_y,          # fp32
                     gates=gates,
                     state=state,
                     A_matrix=A_matrix,
