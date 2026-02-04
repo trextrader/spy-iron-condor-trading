@@ -5,346 +5,165 @@ import pandas as pd
 import argparse
 import sys
 import os
-from sklearn.tree import DecisionTreeRegressor, export_text
+import json
 from tqdm import tqdm
 
 # Add project root to path
 sys.path.insert(0, os.getcwd())
 
-from intelligence.condor_brain import CondorBrain
-from intelligence.canonical_feature_registry import FEATURE_COLS_V22
+from intelligence.condor_brain_net import CondorNet
+from intelligence.canonical_feature_registry import FEATURE_COLS_V22, select_feature_frame
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-SEQ_LEN = 256
+SEQ_LEN = 240 # CondorNet standard
 EPS = 1e-6
 
 def safe_nan_to_num(X: np.ndarray) -> np.ndarray:
-    """Replace NaN/Inf with 0 to prevent Neural CDE explosion."""
     return np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
-def load_cde_model(ckpt_path, input_dim=None):
-    from intelligence.canonical_feature_registry import INPUT_DIM_V22
-    
+def load_condor_model(ckpt_path):
     print(f"Loading {ckpt_path}...")
     ckpt = torch.load(ckpt_path, map_location=DEVICE)
     
-    # helper: recursive get
-    def get_cfg(keys, default=None):
-        for k in keys:
-            if k in ckpt: return ckpt[k]
-        return default
-
-    # 1. Recover Input Dimension
-    if 'input_dim' in ckpt:
-        input_dim = ckpt['input_dim']
-    elif input_dim is None:
-        input_dim = INPUT_DIM_V22
-        
-    global SEQ_LEN
-    SEQ_LEN = ckpt.get('seq_len', 256)
-    print(f"Set SEQ_LEN to {SEQ_LEN}")
+    sd = ckpt['state_dims']
+    feature_cols = ckpt.get('feature_cols', FEATURE_COLS_V22)
     
-    # 2. Extract Configuration
-    # training_config usually has the discovery flags, model_config has arch
-    t_config = ckpt.get('training_config', {})
-    m_config = ckpt.get('model_config', ckpt.get('config', {}))
-    
-    d_model = m_config.get('d_model', 128)
-    n_layers = m_config.get('n_layers', 2)
-    use_topk = m_config.get('use_topk_moe', False)
-    
-    # Predicate Discovery Flags
-    use_pred = t_config.get('use_predicate_discovery', False)
-    # fallback to model config if not in training config
-    if not use_pred: 
-        use_pred = m_config.get('use_predicate_discovery', False)
-        
-    n_slots = t_config.get('predicate_slots', 2048)
-    max_active = t_config.get('max_active_predicates', 256)
-    
-    print(f"Model Config: d_model={d_model}, layers={n_layers}, predicates={use_pred}")
-
-    model = CondorBrain(
-        d_model=d_model,
-        n_layers=n_layers,
-        input_dim=input_dim,
-        use_cde=True,
-        use_topk_moe=use_topk,
-        use_predicate_discovery=use_pred,
-        n_predicate_slots=n_slots,
-        max_active_predicates=max_active
+    model = CondorNet(
+        d_input=len(feature_cols),
+        d_h=sd['d_h'], d_v=sd['d_v'], d_m=sd['d_m'], d_r=sd['d_r'],
     )
     
-    # Strip 'module.' prefix if trained with DataParallel
-    state_dict = ckpt['state_dict']
-    if any(k.startswith('module.') for k in state_dict.keys()):
-        state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
-        
-    model.load_state_dict(state_dict)
+    model.load_state_dict(ckpt['model_state_dict'])
     model.to(DEVICE)
     model.eval()
-    return model
+    return model, feature_cols, ckpt.get('normalization', None)
 
-def analyze_permutation_importance(model, dataset, feature_names, n_samples=1000):
-    """
-    Computes feature importance via Permutation Importance (Robust to Gradient issues).
-    
-    Method:
-    1. Measure baseline error/output magnitude.
-    2. For each feature:
-       - Shuffle that feature across the batch (breaking its signal).
-       - Measure the change in output (magnitude of deviation from baseline).
-       - Higher deviation = Higher importance.
-    """
-    print(f"\n🔬 Running Permutation Importance on {n_samples} samples...")
-    
-    # Get a batch
-    # Ensure n_samples does not exceed available sequences in dataset
-    n_samples = min(n_samples, len(dataset))
-    indices = np.random.choice(len(dataset), n_samples, replace=False)
-    batch_X = []
-    
-    # Collect batch
-    for idx in indices:
-        # data is raw (N, D), slice sequence manually
-        x_seq = dataset[idx : idx+SEQ_LEN] 
-        if len(x_seq) < SEQ_LEN:
-            # Pad or skip
-            continue
-        batch_X.append(torch.tensor(x_seq, dtype=torch.float32))
-        
-    if not batch_X:
-        print("⚠️ Error: No sequences could be collected. Data too short?")
-        return {}
-        
-    X_base = torch.stack(batch_X).to(DEVICE) # (B, T, D)
-    
-    # Baseline forward pass
-    model.eval()
-    with torch.no_grad():
-        base_out = model(X_base)
-        if isinstance(base_out, tuple):
-            base_out = base_out[0]
-        
-    # FILTER: Keep only samples with finite outputs
-    # base_out: (B, Hidden)
-    valid_mask = torch.isfinite(base_out).all(dim=1) # (B,)
-    n_valid = valid_mask.sum().item()
-    
-    if n_valid == 0:
-        print("⚠️ Warning: All baseline samples produced NaN outputs! Model may be unstable.")
-        return {}
-        
-    if n_valid < n_samples:
-        print(f"⚠️ Note: Filtered {n_samples - n_valid} NaN samples. using {n_valid} valid samples.")
-        
-    # Keep only valid
-    X_base = X_base[valid_mask]
-    base_out = base_out[valid_mask]
-    
-    # We use strict output magnitude or just the output tensor itself to compare
-    # Let's track mean absolute change in the output vector
-    
-    importances = {}
-    
-    for i, fname in enumerate(tqdm(feature_names, desc="Perturbing features")):
-        # Create perturbed batch
-        X_perm = X_base.clone()
-        
-        # Shuffle feature i across batch dimension (only valid samples)
-        perm_indices = torch.randperm(n_valid)
-        X_perm[:, :, i] = X_perm[perm_indices, :, i]
-        
-        with torch.no_grad():
-            perm_out = model(X_perm)
-            if isinstance(perm_out, tuple):
-                perm_out = perm_out[0]
-            
-        # Measure impact: Mean Absolute Difference between base_out and perm_out
-        # This captures how much the output *changes* when the feature is destroyed
-        # Handle valid outputs only (perm_out might become NaN due to perturbation)
-        diff_tensor = torch.abs(base_out - perm_out)
-        
-        # Mean over features (Hidden dim)
-        diff_per_sample = diff_tensor.mean(dim=1)
-        
-        # Ignore new NaNs
-        idx_valid_perm = torch.isfinite(diff_per_sample)
-        if idx_valid_perm.sum() > 0:
-            diff = diff_per_sample[idx_valid_perm].mean().item()
-        else:
-            diff = 0.0 # If perturbation causes 100% NaNs, effectively it broke the model (high impact?)
-            # Or 0.0 to be safe
-        
-        importances[fname] = diff
+def extract_learned_logic(model, feature_names):
+    """Extracts internal weights and thresholds from the CondorNet modules."""
+    logic = {
+        "predicates": {},
+        "super_set": {},
+        "output_head": {}
+    }
 
-    # Normalize to 0-100
-    total_impact = sum(importances.values())
-    if total_impact > 0:
-        for k in importances:
-            importances[k] = (importances[k] / total_impact) * 100.0
-            
-    # Sort
-    sorted_feats = sorted(importances.items(), key=lambda x: x[1], reverse=True)
-    
-    print("\n🌟 CDE Feature Importance (Permutation Method):")
-    print(f"{'Feature':<30} | {'Impact Score':<10}")
-    print("-" * 45)
-    for name, score in sorted_feats[:15]:
-        print(f"{name:<30} | {score:6.2f}")
-        
-    return importances
+    # 1. Extract Predicate Thresholds
+    if hasattr(model, 'pred_gates'):
+        pg = model.pred_gates
+        logic["predicates"] = {
+            "iv_rank_threshold": float(pg.iv_rank_thresh.data),
+            "spread_ratio_threshold": float(pg.spread_frac_thresh.data),
+            "rsi_threshold": float(pg.rsi_thresh.data),
+            "gap_fraction_threshold": float(pg.gap_frac_thresh.data),
+            "gamma_threshold": float(pg.gamma_thresh.data),
+            "steepness": pg.steepness
+        }
 
-def train_surrogate_tree(model, X, feature_cols, n_samples=5000):
-    print(f"\n🌳 Training Surrogate Decision Tree on {n_samples} samples...")
-    from sklearn.tree import DecisionTreeRegressor, export_text
-    
-    n_samples = min(n_samples, len(X) - SEQ_LEN)
-    idxs = np.random.randint(0, len(X) - SEQ_LEN, size=n_samples)
-    input_states = []
-    targets = []
-    
-    BATCH_SIZE = 32
-    for i in tqdm(range(0, len(idxs), BATCH_SIZE)):
-        batch_idxs = idxs[i : i + BATCH_SIZE]
-        batch_seqs = []
-        batch_last_steps = []
-        
-        for idx in batch_idxs:
-            seq = X[idx : idx+SEQ_LEN]
-            batch_seqs.append(seq)
-            batch_last_steps.append(seq[-1])
-            
-        if not batch_seqs: continue
-            
-        x_tensor = torch.tensor(np.stack(batch_seqs), device=DEVICE).float()
-        
-        with torch.no_grad():
-            # Batch Inference
-            out = model(x_tensor)
-            if isinstance(out, tuple):
-                out = out[0]
-            
-            # Extract ROI Predictions (index 5)
-            preds = out[:, 5].cpu().numpy()
-            
-            # Filter NaNs
-            valid_mask = np.isfinite(preds)
-            if valid_mask.sum() > 0:
-                input_states.extend(np.array(batch_last_steps)[valid_mask])
-                targets.extend(preds[valid_mask])
-            
-    if not input_states:
-        print("⚠️ Warning: No valid samples collected for surrogate tree (all NaNs).")
-        return
-            
-    input_states = np.array(input_states)
-    targets = np.array(targets)
-    
-    # Check if we have enough samples
-    if len(targets) < 50:
-         print(f"⚠️ Warning: Only {len(targets)} valid samples. Tree might be unstable.")
-    
-    tree = DecisionTreeRegressor(max_depth=5, min_samples_leaf=20)
-    tree.fit(input_states, targets)
-    
-    r2 = tree.score(input_states, targets)
-    print(f"✅ Surrogate Tree R2 Score: {r2:.3f} (How well rules explain NN)")
-    
-    # We remove max_depth from export_text (or set it high) to show full tree
-    rules = export_text(tree, feature_names=feature_cols)
-    print("\n📜 Extracted Trading Rules (Surrogate):")
-    print(rules)
+    # 2. Extract SuperSet Logic
+    if hasattr(model, 'super_set'):
+        ss = model.super_set
+        logic["super_set"]["n_sets"] = ss.n_sets
+        logic["super_set"]["sets"] = []
+        for i, pset in enumerate(ss.sets):
+            weights = torch.softmax(pset.membership, dim=0).detach().cpu().numpy().tolist()
+            logic["super_set"]["sets"].append({
+                "index": i,
+                "aggregation": pset.aggregation,
+                "predicate_weights": {
+                    "vol_spike": weights[0],
+                    "liq_lock": weights[1],
+                    "mom_rev": weights[2],
+                    "gap_gate": weights[3],
+                    "gamma_gate": weights[4]
+                }
+            })
 
-def analyze_discovered_logic(model):
-    """
-    Extracts and displays the learned logical structure from the predicate discovery engine.
-    """
-    if not hasattr(model, 'predicate_selector') or not hasattr(model, 'predicate_combiner'):
-        print("\n⚠️ Model does not have predicate discovery modules enabled.")
-        return
-
-    print(f"\n🧠 Analyzing Discovered Logic Trees...")
-    
-    # 1. Get raw predicates (leaf nodes)
-    # Use a low threshold to see what the model is *considering*, even if weighted low
-    predicates, importance, names = model.predicate_selector.get_active_predicates(threshold=0.01)
-    
-    if len(names) == 0:
-        print("  No active predicates found (all importance < 0.01).")
-        return
+    # 3. Extract Output Head Focus (Sensitivities)
+    if hasattr(model, 'output_head'):
+        # Weight matrix: (10, d_x)
+        # d_x is split into (h, v, m, r)
+        weights = model.output_head.weight.detach().cpu().numpy() # (10, d_x)
+        spec = model.spec
         
-    print(f"\n🍃 Active Leaf Predicates ({len(names)} found):")
-    for i, (name, imp) in enumerate(zip(names, importance)):
-        print(f"  [{imp:.4f}] {name}")
+        target_names = [
+            'target_call_offset', 'target_put_offset', 'target_wing_width', 'target_dte',
+            'was_profitable', 'realized_roi', 'realized_max_loss', 'confidence_target',
+            'entry_target', 'exit_target'
+        ]
+        
+        logic["output_head"]["sensitivities"] = {}
+        for i, target in enumerate(target_names):
+            w = weights[i]
+            # split into block norm magnitudes
+            h_w = np.linalg.norm(w[:spec.d_h])
+            v_w = np.linalg.norm(w[spec.d_h : spec.d_h+spec.d_v])
+            m_w = np.linalg.norm(w[spec.d_h+spec.d_v : spec.d_h+spec.d_v+spec.d_m])
+            r_w = np.linalg.norm(w[spec.d_h+spec.d_v+spec.d_m :])
+            
+            logic["output_head"]["sensitivities"][target] = {
+                "market_physics_h": float(h_w),
+                "portfolio_v": float(v_w),
+                "momentum_m": float(m_w),
+                "regime_r": float(r_w)
+            }
+            
+    return logic
 
-    # 2. Get combined logic sets (branches)
-    # These represent the deeper trees: (A > B) AND (C < D) OR ...
-    logic_sets = model.predicate_combiner.get_logic_sets(names)
+def generate_trading_rules(logic):
+    """Transcribes extracted logic into human-readable rules."""
+    rules = []
     
-    print(f"\n🌳 Learned Decision Trees (Logic Sets):")
-    if len(logic_sets) == 0:
-        print("  No logic sets formed yet (combiner weights may be uniform).")
-    else:
-        for i, expr in enumerate(logic_sets):
-            print(f"  Tree {i+1}: {expr}")
+    p = logic["predicates"]
+    rules.append(f"RULE 1 (Vol): Enter if IVR > {p['iv_rank_threshold']:.2f}")
+    rules.append(f"RULE 2 (Liq): Block if Spread/Price > {p['spread_ratio_threshold']:.4%}")
+    rules.append(f"RULE 3 (Trend): Signal Reversal if RSI < {p['rsi_threshold']:.2f} and delta_RSI < 0")
+    rules.append(f"RULE 4 (Gap): Guard if 1m price jump > {p['gap_fraction_threshold']:.2%}")
+    rules.append(f"RULE 5 (Greeks): Hedge if |Gamma| > {p['gamma_threshold']:.4f}")
+    
+    # Analyze SuperSet
+    ss = logic["super_set"]
+    for s in ss["sets"]:
+        top_pred = max(s["predicate_weights"].items(), key=lambda x: x[1])[0]
+        rules.append(f"SET {s['index']} Focus: {top_pred} (Weight: {s['predicate_weights'][top_pred]:.2f})")
+        
+    return rules
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, required=True)
     parser.add_argument("--data", type=str, required=True)
-    parser.add_argument("--samples", type=int, default=1000)
+    parser.add_argument("--samples", type=int, default=5000)
+    parser.add_argument("--output-json", type=str, default="models/condor_logic.json")
     args = parser.parse_args()
-    
+
     # 1. Load Data
-    print(f"Loading Data: {args.data} (Limit: {args.samples * 20} rows)")
-    # Load enough data to allow for sequence length + some buffer
-    df = pd.read_csv(args.data, nrows=max(5000, args.samples * 20))
-    feature_cols = FEATURE_COLS_V22
-    for c in feature_cols:
-        if c not in df.columns: df[c] = 0.0
-            
-    X = df[feature_cols].values.astype(np.float32)
-    X = safe_nan_to_num(X)
+    print(f"Loading Data: {args.data}")
+    df = pd.read_csv(args.data, nrows=args.samples + SEQ_LEN + 100)
+    X_raw, _, _, _, _ = (lambda x: (x, 0, 0, 0, 0))(df[FEATURE_COLS_V22].values.astype(np.float32))
     
-    # Robust scale detection (try to load from checkpoint first)
-    ckpt = torch.load(args.model, map_location=DEVICE)
-    if 'median' in ckpt and 'mad' in ckpt:
-        print("Using scaling parameters from checkpoint...")
-        median = np.array(ckpt['median'], dtype=np.float32)
-        scale = np.array(ckpt['mad'], dtype=np.float32) # In training we store scale = 1.4826 * mad
-    else:
-        print("Recalculating scaling parameters from data...")
-        median = np.median(X, axis=0)
-        mad = np.median(np.abs(X - median), axis=0)
-        scale = 1.4826 * mad
-        scale = np.where(scale < EPS, 1.0, scale)
-            
-    # Apply Scaling
-    X = (X - median) / (scale + EPS)
-    X = np.clip(X, -10.0, 10.0)
-    X = safe_nan_to_num(X) # Final safety check
-    
-    # Mask leakage
-    leakage = ['target_spot', 'max_dd_60m']
-    for c in leakage:
-        if c in feature_cols:
-            idx = feature_cols.index(c)
-            X[:, idx] = 0.0
-            
     # 2. Load Model
-    model = load_cde_model(args.model, input_dim=len(feature_cols))
+    model, feature_cols, norm = load_condor_model(args.model)
     
-    # 3. Analyze (Permutation Importance)
-    # analyze_permutation_importance(model, X, feature_cols, n_samples=args.samples)
-    train_surrogate_tree(model, X, feature_cols, n_samples=args.samples)
+    # 3. Extract Logic
+    print("\n🧠 Extracting Learned Logic...")
+    logic = extract_learned_logic(model, feature_cols)
     
-    # 4. Analyze Internal Logic (Discovery Engine)
-    if hasattr(model, 'use_predicate_discovery') and model.use_predicate_discovery:
-        analyze_discovered_logic(model)
-    # Check manual attribute as fallback if config dict wasn't perfectly cleanly loaded
-    elif hasattr(model, 'predicate_selector'): 
-        analyze_discovered_logic(model)
+    # 4. Generate Signal Summary
+    print("\n📜 Learned Trading Rules & Signals:")
+    rules = generate_trading_rules(logic)
+    for r in rules:
+        print(f"  * {r}")
+        
+    # 5. Output Sensitivities
+    print("\n🎯 Neural Sensitivity (Target -> State Block):")
+    for target, sens in logic["output_head"]["sensitivities"].items():
+        primary = max(sens.items(), key=lambda x: x[1])[0]
+        print(f"  - {target:<20}: Driven by {primary:<20} (score: {sens[primary]:.4f})")
+        
+    # 6. Save to JSON
+    logic["rules"] = rules
+    with open(args.output_json, 'w') as f:
+        json.dump(logic, f, indent=4)
+    print(f"\n✅ Logic exported to {args.output_json}")
 
 if __name__ == "__main__":
     main()
