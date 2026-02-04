@@ -902,25 +902,27 @@ class CondorNet(nn.Module):
         dt: float = 1.0,
         return_diagnostics: bool = False,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict]]:
-        """
-        Forward pass implementing the CondorNet master equation.
-
-        Args:
-            x: (batch, seq, d_input) input sequence
-            greeks: (batch, seq, n_greeks) Greeks time series
-            q: (batch, seq, d_q) position size time series
-            iv_rank, bid_ask_spread, price, rsi, delta_rsi, S_t, S_t_minus_1, gamma:
-                (batch, seq) predicate gate inputs
-            dt: time increment
-            return_diagnostics: return internal states for analysis
-
-        Returns:
-            outputs: (batch, 10) predictions
-            diagnostics: dict (if requested)
-        """
+        """Forward pass with defensive dtype casting."""
         batch, seq_len, _ = x.shape
         device = x.device
-        dtype = x.dtype
+        
+        # Determine target model dtype
+        model_dtype = next(self.parameters()).dtype
+        
+        # Defensive Casting: Force all inputs to match model dtype
+        x = x.to(model_dtype)
+        if greeks is not None: greeks = greeks.to(model_dtype)
+        if q is not None: q = q.to(model_dtype)
+        if iv_rank is not None: iv_rank = iv_rank.to(model_dtype)
+        if bid_ask_spread is not None: bid_ask_spread = bid_ask_spread.to(model_dtype)
+        if price is not None: price = price.to(model_dtype)
+        if rsi is not None: rsi = rsi.to(model_dtype)
+        if delta_rsi is not None: delta_rsi = delta_rsi.to(model_dtype)
+        if S_t is not None: S_t = S_t.to(model_dtype)
+        if S_t_minus_1 is not None: S_t_minus_1 = S_t_minus_1.to(model_dtype)
+        if gamma is not None: gamma = gamma.to(model_dtype)
+        
+        dtype = model_dtype
 
         # === DEFAULT INPUTS ===
         if greeks is None:

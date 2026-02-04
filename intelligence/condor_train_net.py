@@ -590,18 +590,33 @@ def train_condor_net(args):
 
             # Debug Prints for Crash (only once or every 100 batches)
             if batch_idx == 0:
-                print(f"\n[DEBUG BATCH 0] Dtypes:")
+                print(f"\n[DEBUG BATCH 0] Detailed Dtypes:")
+                print(f"  Inputs - batch_x: {batch_x.dtype}")
+                print(f"  Model Weights - First Param: {next(model.parameters()).dtype}")
                 print(f"  Outputs: {outputs.dtype}")
                 print(f"  Targets: {batch_y.dtype}")
                 if gates is not None: print(f"  Gates: {gates.dtype}")
                 if state is not None: print(f"  State: {state.dtype}")
                 if A_matrix is not None: print(f"  A_matrix: {A_matrix.dtype}")
-                print(f"  Loss: {loss.dtype}")
+                print(f"  Loss: {loss.dtype}, GradFn: {loss.grad_fn}")
                 for k, v in components.items():
-                    print(f"    - {k}: {v.dtype}")
+                    if torch.is_tensor(v):
+                        print(f"    - {k}: {v.dtype}, GradFn: {v.grad_fn}")
+                    else:
+                        print(f"    - {k}: {type(v)} (Scalar)")
+
+                if scaler is not None:
+                    print(f"  Scaler: enabled={scaler.is_enabled()}, scale={scaler.get_scale()}")
 
             if scaler is not None:
-                scaler.scale(loss).backward()
+                try:
+                    scaler.scale(loss).backward()
+                except RuntimeError as e:
+                    print(f"\n!!! BACKWARD CRASHED in batch {batch_idx}:")
+                    print(f"Error: {e}")
+                    # If it's a dtype mismatch, we can't do much here but print what we have
+                    raise e
+                
                 if (batch_idx + 1) % args.accum_steps == 0:
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
