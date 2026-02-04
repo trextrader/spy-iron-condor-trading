@@ -1088,13 +1088,15 @@ def spectral_radius_loss(A: torch.Tensor, dt: float = 1.0, target_rho: float = 0
     Returns:
         loss: scalar penalty
     """
-    M = A * dt
+    # Cast to fp32 for eigvals (doesn't support fp16/bf16)
+    A_fp32 = A.float() if A.dtype in (torch.float16, torch.bfloat16) else A
+    M = A_fp32 * dt
     try:
         eigvals = torch.linalg.eigvals(M)
         rho = eigvals.abs().max()
         return F.relu(rho - target_rho) ** 2
-    except:
-        return torch.tensor(0.0, device=A.device)
+    except Exception:
+        return torch.tensor(0.0, device=A.device, dtype=torch.float32)
 
 
 # =============================================================================
