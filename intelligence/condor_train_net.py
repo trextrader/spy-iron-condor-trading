@@ -97,6 +97,7 @@ class CompositeCondorNetLoss(nn.Module):
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
 
         # FORCE ALL LOSS MATH TO FP32
+        device = predictions.device
         predictions = predictions.float()
         targets = targets.float()
         if gates is not None:
