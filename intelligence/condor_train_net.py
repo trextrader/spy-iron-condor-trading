@@ -96,7 +96,8 @@ class CompositeCondorNetLoss(nn.Module):
         dt: float = 1.0,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
 
-        outputs = outputs.float()
+        # FORCE ALL LOSS MATH TO FP32
+        predictions = predictions.float()
         targets = targets.float()
         if gates is not None:
             gates = gates.float()
@@ -110,10 +111,10 @@ class CompositeCondorNetLoss(nn.Module):
         # Debug Prints for first batch
         if not hasattr(self, '_printed_loss_dtype_debug'):
             print(f"\n[CompositeCondorNetLoss Debug] Dtypes (Inside Criterion):")
-            print(f"  Outputs: {outputs.dtype}")
+            print(f"  Predictions: {predictions.dtype}")
             print(f"  Targets: {targets.dtype}")
             print(f"  Gates: {gates.dtype if gates is not None else 'None'}")
-            print(f"  Autocast Active: {torch.is_autocast_enabled()}")
+            print(f"  Autocast Active: {torch.amp.is_autocast_enabled('cuda')}")
             self._printed_loss_dtype_debug = True
 
         components: Dict[str, torch.Tensor] = {}

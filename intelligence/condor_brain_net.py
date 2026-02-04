@@ -434,7 +434,7 @@ def condornet_master_step(
 
     # 2. B_θ(u_k) and ETD injection g_k = Δt φ_1(AΔt) B
     # Disable autocast for these specific matmuls to force FP32 consistency
-    with torch.cuda.amp.autocast(enabled=False):
+    with torch.amp.autocast('cuda', enabled=False):
         B_k = B_theta(u_k).float()  # (batch, d_x)
         g_k = torch.matmul(B_k, phi1.T) * dt_k  # (batch, d_x)
 
