@@ -695,12 +695,14 @@ class SuperSet(nn.Module):
             for _ in range(n_sets)
         ])
 
-        self.final = nn.Sequential(
-            nn.Linear(n_sets, n_sets * 2),
-            nn.SiLU(),
-            nn.Linear(n_sets * 2, 1),
-            nn.Sigmoid(),
-        )
+        # V20: Explicit Soft-Logic Relational Engine
+        # Features: (n_sets choose 2) * 3 [less, greater, equal]
+        n_pairs = (n_sets * (n_sets - 1)) // 2
+        relational_dim = n_pairs * 3 if n_sets > 1 else n_sets
+        
+        self.logic_projection = nn.Linear(relational_dim, 1)
+        self.gate_sigmoid = nn.Sigmoid()
+        self.steepness = nn.Parameter(torch.tensor(20.0))
 
     def forward(self, p: torch.Tensor) -> torch.Tensor:
         """
@@ -710,9 +712,33 @@ class SuperSet(nn.Module):
         Returns:
             gate: (batch, 1) final super-set gate
         """
-        set_values = [pred_set(p) for pred_set in self.sets]
-        set_values = torch.cat(set_values, dim=-1)
-        return self.final(set_values)
+        # S: (batch, n_sets)
+        S = torch.cat([pred_set(p) for pred_set in self.sets], dim=-1)
+        
+        if self.n_sets < 2:
+            return self.gate_sigmoid(self.logic_projection(S))
+
+        # Pairwise differences: D[b, i, j] = S[b, i] - S[b, j]
+        # (batch, n_sets, 1) - (batch, 1, n_sets) -> (batch, n_sets, n_sets)
+        diffs = S.unsqueeze(-1) - S.unsqueeze(-2)
+        
+        # Extract upper triangle (avoid self-comparison and double-counting)
+        batch_size = S.shape[0]
+        iu = torch.triu_indices(self.n_sets, self.n_sets, offset=1)
+        tri_diffs = diffs[:, iu[0], iu[1]] # (batch, n_pairs)
+        
+        # Soft Logic Operators
+        # 1. Less Than: sigmoid(-k * x)
+        lt = torch.sigmoid(-self.steepness * tri_diffs)
+        # 2. Greater Than: sigmoid(k * x) 
+        gt = torch.sigmoid(self.steepness * tri_diffs)
+        # 3. Equals: exp(-k * x^2) [Gaussian peak at 0]
+        eq = torch.exp(-self.steepness * (tri_diffs ** 2))
+        
+        # Combine into relational feature vector
+        relational_features = torch.cat([lt, gt, eq], dim=-1) # (batch, n_pairs * 3)
+        
+        return self.gate_sigmoid(self.logic_projection(relational_features))
 
 
 # =============================================================================
