@@ -444,8 +444,9 @@ class CanonicalPredicateGates(nn.Module):
     These gates modulate the decay in A_θ via:
         A(u, σ) = -diag(exp(η(u,σ)) · (1 + λ_p γ_t))
     """
-    def __init__(self, steepness: float = 50.0, learnable_thresholds: bool = True):
+    def __init__(self, n_predicates: int = 5, steepness: float = 50.0, learnable_thresholds: bool = True):
         super().__init__()
+        self.n_predicates = n_predicates
         self.steepness = steepness
 
         if learnable_thresholds:
@@ -460,6 +461,13 @@ class CanonicalPredicateGates(nn.Module):
             self.register_buffer('rsi_thresh', torch.tensor(25.0))
             self.register_buffer('gap_frac_thresh', torch.tensor(0.012))
             self.register_buffer('gamma_thresh', torch.tensor(0.05))
+
+        if n_predicates > 5:
+            # Extra learned predicates from physics features (8 inputs)
+            self.extra_heads = nn.Sequential(
+                nn.Linear(8, n_predicates - 5),
+                nn.Sigmoid()
+            )
 
     def forward(
         self,
@@ -499,8 +507,19 @@ class CanonicalPredicateGates(nn.Module):
         # 5. Greeks pressure: |Γ| > threshold
         gamma_gate = torch.sigmoid(self.steepness * (torch.abs(gamma) - self.gamma_thresh))
 
-        p = torch.stack([vol_spike, liq_lock, mom_rev, gap_gate, gamma_gate], dim=-1)
-        return p  # (batch, 5)
+        p_canonical = torch.stack([vol_spike, liq_lock, mom_rev, gap_gate, gamma_gate], dim=-1)
+
+        if self.n_predicates > 5:
+            # Projection for additional predicates
+            physics_features = torch.stack([
+                iv_rank, bid_ask_spread / (price + 1e-8), rsi, delta_rsi,
+                S_t, S_t_minus_1, torch.abs(S_t - S_t_minus_1) / (S_t_minus_1 + 1e-8),
+                torch.abs(gamma)
+            ], dim=-1)
+            p_extra = self.extra_heads(physics_features)
+            return torch.cat([p_canonical, p_extra], dim=-1)
+
+        return p_canonical
 
 
 class PredicateSignature(nn.Module):
@@ -823,6 +842,8 @@ class CondorNet(nn.Module):
         R_moments: int = 4,
         M_bloom: int = 16,
         n_layers: int = 2,
+        n_sets: int = 4,
+        n_super_sets: int = 1,
         enforce_sparsity: bool = True,
     ):
         super().__init__()
@@ -850,13 +871,16 @@ class CondorNet(nn.Module):
         )
 
         # === PREDICATE SYSTEM ===
-        self.pred_gates = CanonicalPredicateGates()
+        self.pred_gates = CanonicalPredicateGates(n_predicates=n_predicates)
         self.pred_signature = PredicateSignature(K=n_predicates, R=R_moments, M=M_bloom)
         self.regime_dyn = RegimeCombinatoricsDynamics(
             d_r=d_r,
             z_dim=n_predicates + R_moments + M_bloom,
         )
-        self.super_set = SuperSet(n_sets=4, n_predicates=n_predicates)
+        self.super_sets = nn.ModuleList([
+            SuperSet(n_sets=n_sets, n_predicates=n_predicates)
+            for _ in range(n_super_sets)
+        ])
 
         # === FUSION ===
         self.fusion_gate = FusionGate(d_h, M_bloom, R_moments, n_branches=3)
@@ -1011,8 +1035,11 @@ class CondorNet(nn.Module):
             r = self.regime_dyn(r.float(), z_pred.float()).float()
             z_final = self.spec.cat(h.float(), v.float(), m.float(), r.float())
 
-            # Super-set gating
-            super_gate = self.super_set(p_k).float()
+            # Super-set gating (Multi-branch intersection)
+            super_gate = torch.ones((iv_rank.shape[0], 1), device=iv_rank.device).float()
+            for ss_module in self.super_sets:
+                super_gate = super_gate * ss_module(p_k).float()
+            
             z_gated = (z_final * super_gate).float()
 
             # Output (Keep in FP32 for "Ultra-Safe Mode")
