@@ -924,6 +924,14 @@ class CondorNet(nn.Module):
         
         dtype = model_dtype
 
+        # Debug Prints for first batch
+        if not hasattr(self, '_printed_dtype_debug'):
+            print(f"\n[CondorNet Forward Debug] Dtypes:")
+            print(f"  Internal Weights: {model_dtype}")
+            print(f"  Input x: {x.dtype}")
+            print(f"  Autocast Active: {torch.is_autocast_enabled()}")
+            self._printed_dtype_debug = True
+
         # === DEFAULT INPUTS ===
         if greeks is None:
             greeks = torch.zeros(batch, seq_len, self.n_greeks, device=device, dtype=dtype)

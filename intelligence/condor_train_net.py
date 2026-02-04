@@ -99,6 +99,10 @@ class CompositeCondorNetLoss(nn.Module):
         device = predictions.device
 
         # --- FORCE ALL LOSS MATH TO FP32 ---
+        # This conversion is necessary because some loss components (e.g., group_invariant_loss)
+        # might expect FP32 inputs, and intermediate calculations can suffer from FP16 precision.
+        # The model's forward pass might be in FP16/BF16 due to autocast, but loss calculation
+        # should ideally be in FP32 for stability.
         predictions = predictions.float()
         targets = targets.float()
         if gates is not None:
@@ -109,6 +113,15 @@ class CompositeCondorNetLoss(nn.Module):
             A_matrix = A_matrix.float()
         if returns is not None:
             returns = returns.float()
+
+        # Debug Prints for first batch
+        if not hasattr(self, '_printed_loss_dtype_debug'):
+            print(f"\n[CompositeCondorNetLoss Forward Debug] Dtypes:")
+            print(f"  Predictions: {predictions.dtype}")
+            print(f"  Targets: {targets.dtype}")
+            print(f"  Gates: {gates.dtype if gates is not None else 'None'}")
+            print(f"  Autocast Active: {torch.is_autocast_enabled()}")
+            self._printed_loss_dtype_debug = True
 
         components: Dict[str, torch.Tensor] = {}
 
@@ -509,12 +522,10 @@ def train_condor_net(args):
         enforce_sparsity=not args.no_sparsity,
     ).to(device)
 
-    if use_bf16:
-        model = model.to(torch.bfloat16)
-        print("[CondorNet] Model converted to BF16")
-    elif device.type == 'cuda':
-        model = model.to(torch.float16)
-        print("[CondorNet] Model converted to FP16 (T4 compatibility)")
+    # REMOVED: Explicit conversion to bf16/fp16. 
+    # Standard AMP keeps weights in FP32 and uses autocast for operations.
+    # This is MUCH more stable for the backward pass on T4/A100.
+    print(f"[CondorNet] Model weights kept in {next(model.parameters()).dtype} (AMP Stable Mode)")
 
     # IMPORTANT: keep entire model (including pred_signature) in one dtype
     # Do NOT override model.pred_signature dtype here.
