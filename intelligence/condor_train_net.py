@@ -487,10 +487,10 @@ def train_condor_net(args):
     L = args.lookback
     B = args.batch_size
 
-    dtype_gpu = torch.bfloat16 if use_bf16 else torch.float16
-    X_train_t = torch.from_numpy(X_train).to(device=device, dtype=dtype_gpu)
+    # Standardize to FP32 for AMP (autocast handles the speedup)
+    X_train_t = torch.from_numpy(X_train).to(device=device, dtype=torch.float32)
     y_train_t = torch.from_numpy(y_train).to(device=device, dtype=torch.float32)
-    X_val_t = torch.from_numpy(X_val).to(device=device, dtype=dtype_gpu)
+    X_val_t = torch.from_numpy(X_val).to(device=device, dtype=torch.float32)
     y_val_t = torch.from_numpy(y_val).to(device=device, dtype=torch.float32)
 
     # Sequence views
@@ -581,8 +581,8 @@ def train_condor_net(args):
             batch_x = batch_x.to(device)
             batch_y = batch_y.to(device)
 
-            # --- FORWARD PASS (WITH AUTOCAST) ---
-            with torch.amp.autocast(device_type='cuda', dtype=amp_dtype):
+            # Forward pass with standard AMP
+            with torch.amp.autocast('cuda', dtype=amp_dtype):
                 outputs, diag = model(batch_x, return_diagnostics=True)
 
                 A_matrix = model.get_A_matrix()

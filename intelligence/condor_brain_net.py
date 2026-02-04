@@ -570,7 +570,7 @@ class PredicateSignature(nn.Module):
 
         # Bloom-like signature (match W_bloom dtype for matmul safely inside autocast)
         # Even if autocast is active, we force FP32 for signature stability
-        with torch.amp.autocast(device_type='cuda', enabled=False):
+        with torch.amp.autocast('cuda', enabled=False):
             w_dtype = self.W_bloom.weight.dtype
             bloom = torch.sigmoid(self.W_bloom(p_sorted_fp32.to(w_dtype)))
 
@@ -592,7 +592,7 @@ class PredicateSignature(nn.Module):
         moments_fp32 = torch.cat(moments_fp32, dim=-1)
         
         # Match W_bloom dtype
-        with torch.amp.autocast(device_type='cuda', enabled=False):
+        with torch.amp.autocast('cuda', enabled=False):
             w_dtype = self.W_bloom.weight.dtype
             bloom = torch.sigmoid(self.W_bloom(p_sorted_fp32.to(w_dtype)))
         
@@ -1036,11 +1036,11 @@ class CondorNet(nn.Module):
         outputs = self.output_head(z_gated)
 
         if return_diagnostics:
-            diagnostics['final_gate'] = super_gate.detach()
-            diagnostics['z_final'] = z_final.detach()
-            diagnostics['predicates'] = p_k.detach()
-            diagnostics['moments'] = moments.detach()
-            diagnostics['bloom'] = bloom.detach()
+            diagnostics['final_gate'] = super_gate
+            diagnostics['z_final'] = z_final
+            diagnostics['predicates'] = p_k
+            diagnostics['moments'] = moments
+            diagnostics['bloom'] = bloom
             return outputs, diagnostics
 
         return outputs
