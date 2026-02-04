@@ -970,70 +970,73 @@ class CondorNet(nn.Module):
         # === CONTROL EMBEDDING ===
         u = self.tft(x)  # (batch, d_control)
 
-        # === FEATURE INCREMENTS ===
-        dX = x[:, 1:, :] - x[:, :-1, :]  # (batch, seq-1, d_input)
+        # Force core manifold to FP32 for "Ultra-Safe Mode"
+        # Only the TFT encoder above uses Mixed Precision (autocast).
+        with torch.amp.autocast('cuda', enabled=False):
+            u = u.float()
+            x = x.float()
+            dX = x[:, 1:, :] - x[:, :-1, :]  # (batch, seq-1, d_input)
 
-        # === DIAGNOSTICS ===
-        diagnostics = {'h': [], 'v': [], 'm': [], 'r': [], 'gates': []} if return_diagnostics else None
+            # === DIAGNOSTICS ===
+            diagnostics = {'h': [], 'v': [], 'm': [], 'r': [], 'gates': []} if return_diagnostics else None
 
-        # === TIME LOOP ===
-        for t in range(seq_len - 1):
-            x_prev = self.spec.cat(h, v, m, r)
+            # === TIME LOOP ===
+            for t in range(seq_len - 1):
+                x_prev = self.spec.cat(h, v, m, r).float()
 
-            # Extract time-step inputs
-            greeks_k = greeks[:, t, :]
-            q_k = q[:, t, :]
-            dX_k = dX[:, t, :]
+                # Extract time-step inputs
+                greeks_k = greeks[:, t, :].float()
+                q_k = q[:, t, :].float()
+                dX_k = dX[:, t, :].float()
 
-            # Master update (uses r as r_{k-1} for causality)
-            x_k = condornet_master_step(
-                spec=self.spec,
-                A_theta=self.A_theta,
-                B_theta=self.B_theta,
-                G_theta=self.G_theta,
-                D_forcing=self.D_forcing,
-                x_prev=x_prev,
-                u_k=u,
-                dX_k=dX_k,
-                greeks_k=greeks_k,
-                r_prev=r,  # CRITICAL: r_{k-1} for causality
-                q_k=q_k,
-                dt_k=dt,
-            )
+                # Master update (uses r as r_{k-1} for causality)
+                x_k = condornet_master_step(
+                    spec=self.spec,
+                    A_theta=self.A_theta,
+                    B_theta=self.B_theta,
+                    G_theta=self.G_theta,
+                    D_forcing=self.D_forcing,
+                    x_prev=x_prev,
+                    u_k=u,
+                    dX_k=dX_k,
+                    greeks_k=greeks_k,
+                    r_prev=r,  # CRITICAL: r_{k-1} for causality
+                    q_k=q_k,
+                    dt_k=dt,
+                ).float()
 
-            h, v, m, r = self.spec.split(x_k)
+                h, v, m, r = self.spec.split(x_k)
 
-            if return_diagnostics:
-                diagnostics['h'].append(h.detach())
-                diagnostics['v'].append(v.detach())
-                diagnostics['m'].append(m.detach())
-                diagnostics['r'].append(r.detach())
+                if return_diagnostics:
+                    diagnostics['h'].append(h)
+                    diagnostics['v'].append(v)
+                    diagnostics['m'].append(m)
+                    diagnostics['r'].append(r)
 
-        # === FINAL PREDICATES ===
-        p_k = self.pred_gates(
-            iv_rank[:, -1],
-            bid_ask_spread[:, -1],
-            price[:, -1],
-            rsi[:, -1],
-            delta_rsi[:, -1],
-            S_t[:, -1],
-            S_t_minus_1[:, -1],
-            gamma[:, -1],
-        ).float()  # FORCE FP32 for backbone
+            # === FINAL PREDICATES ===
+            p_k = self.pred_gates(
+                iv_rank[:, -1].float(),
+                bid_ask_spread[:, -1].float(),
+                price[:, -1].float(),
+                rsi[:, -1].float(),
+                delta_rsi[:, -1].float(),
+                S_t[:, -1].float(),
+                S_t_minus_1[:, -1].float(),
+                gamma[:, -1].float(),
+            ).float()
 
-        p_sorted, moments, bloom, z_pred = self.pred_signature(p_k)
+            p_sorted, moments, bloom, z_pred = self.pred_signature(p_k)
 
-        # Update r_k with combinatorics dynamics
-        # Both r and z_pred are now FP32
-        r = self.regime_dyn(r.float(), z_pred.float())
-        z_final = self.spec.cat(h.float(), v.float(), m.float(), r.float())
+            # Update r_k with combinatorics dynamics
+            r = self.regime_dyn(r.float(), z_pred.float()).float()
+            z_final = self.spec.cat(h.float(), v.float(), m.float(), r.float())
 
-        # Super-set gating
-        super_gate = self.super_set(p_k).float()
-        z_gated = z_final * super_gate
+            # Super-set gating
+            super_gate = self.super_set(p_k).float()
+            z_gated = (z_final * super_gate).float()
 
-        # Output (Let autocast handle this part for speed)
-        outputs = self.output_head(z_gated)
+            # Output (Keep in FP32 for "Ultra-Safe Mode")
+            outputs = self.output_head(z_gated).float()
 
         if return_diagnostics:
             diagnostics['final_gate'] = super_gate
