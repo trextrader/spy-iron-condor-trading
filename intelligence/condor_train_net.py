@@ -546,6 +546,9 @@ def train_condor_net(args):
     if use_bf16:
         model = model.to(torch.bfloat16)
         print("[CondorNet] Model converted to BF16")
+    elif device.type == 'cuda':
+        model = model.to(torch.float16)
+        print("[CondorNet] Model converted to FP16 (T4 compatibility)")
 
     n_params = sum(p.numel() for p in model.parameters())
     print(f"[CondorNet] Parameters: {n_params:,}")
