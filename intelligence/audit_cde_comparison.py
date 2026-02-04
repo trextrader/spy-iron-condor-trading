@@ -80,10 +80,18 @@ def safe_nan_to_num(X: np.ndarray) -> np.ndarray:
 
 
 def load_cde_model(ckpt_path, input_dim=None):
-    """Load a CDE/CondorNet model from checkpoint.
+    """Load a CDE/CondorNet model OR its extracted logic (JSON).
     
-    Automatically detects CondorNet vs CondorBrain based on checkpoint structure.
+    Automatically detects:
+    1. JSON logic files (returns dict)
+    2. CondorNet checkpoints (returns model)
+    3. CondorBrain / Mamba checkpoints (returns model)
     """
+    if ckpt_path.endswith('.json'):
+        print(f"  [LOGIC] Loading extracted logic from {ckpt_path}")
+        with open(ckpt_path, 'r') as f:
+            return json.load(f), None, 240
+            
     if input_dim is None:
         input_dim = INPUT_DIM_V22
 
@@ -2653,13 +2661,47 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
     print("", flush=True)
 
     # =========================================================================
+    # LOAD MODELS
+    # =========================================================================
+    print("\n[1/10] Loading models...", flush=True)
+    models = {}
+    seq_lens = {}
+
+    for i, path in enumerate(model_paths):
+        name = os.path.basename(path).replace('.pth', '')
+        print(f"  [{i+1}/{len(model_paths)}] Loading {name}...", flush=True)
+        try:
+            model, ckpt, seq_len = load_cde_model(path)
+            models[name] = model
+            seq_lens[name] = seq_len
+            n_params = sum(p.numel() for p in model.parameters())
+            print(f"    - seq_len: {seq_len}", flush=True)
+            print(f"    - parameters: {n_params:,}", flush=True)
+            print(f"    - config: d_model={ckpt.get('model_config', {}).get('d_model', 'N/A')}, n_layers={ckpt.get('model_config', {}).get('n_layers', 'N/A')}", flush=True)
+            if torch.cuda.is_available():
+                print(f"    - GPU memory: {torch.cuda.memory_allocated()/1e9:.2f} GB allocated", flush=True)
+        except Exception as e:
+            print(f"    ERROR loading {name}: {e}", flush=True)
+            raise
+
+    # Use minimum seq_len for comparability
+    T_common = min(seq_lens.values())
+    print(f"\n  All models loaded successfully!", flush=True)
+    print(f"  Using T_common = {T_common} (minimum across all models)", flush=True)
+
+    # =========================================================================
     # LOAD DATA
     # =========================================================================
-    print("[1/9] Loading data...", flush=True)
-    print(f"  Reading CSV from: {data_path}", flush=True)
+    print("\n[2/10] Loading data...", flush=True)
+    # Load limited data based on samples requested to prevent OOM
+    # We load n_samples * 5 + T_common to ensure we have enough valid windows
+    # and variety after potential dropout/NaN filtering.
+    read_rows = n_samples * 10 + T_common + 2000 # Increased buffer for better variety
+    print(f"  Memory optimization: loading first {read_rows:,} rows from 5.8GB dataset", flush=True)
+    
     import time as _time
     _t0 = _time.time()
-    df = pd.read_csv(data_path)
+    df = pd.read_csv(data_path, nrows=read_rows)
     _elapsed = _time.time() - _t0
     print(f"  Loaded {len(df):,} rows, {len(df.columns)} columns in {_elapsed:.1f}s", flush=True)
     print(f"  Memory usage: {df.memory_usage(deep=True).sum() / 1e6:.1f} MB", flush=True)
@@ -2688,7 +2730,7 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
     print(f"  Feature matrix shape: {X.shape}, dtype: {X.dtype}", flush=True)
 
     # Robust scaling
-    print("\n[2/9] Applying robust scaling...", flush=True)
+    print("\n[3/10] Applying robust scaling...", flush=True)
     print(f"  Computing median...", flush=True)
     median = np.median(X, axis=0)
     print(f"  Computing MAD...", flush=True)
@@ -2714,38 +2756,9 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
         print(f"  GPU memory after data prep: {torch.cuda.memory_allocated()/1e9:.2f} GB allocated", flush=True)
 
     # =========================================================================
-    # LOAD MODELS
-    # =========================================================================
-    print("\n[3/9] Loading models...", flush=True)
-    models = {}
-    seq_lens = {}
-
-    for i, path in enumerate(model_paths):
-        name = os.path.basename(path).replace('.pth', '')
-        print(f"  [{i+1}/{len(model_paths)}] Loading {name}...", flush=True)
-        try:
-            model, ckpt, seq_len = load_cde_model(path)
-            models[name] = model
-            seq_lens[name] = seq_len
-            n_params = sum(p.numel() for p in model.parameters())
-            print(f"    - seq_len: {seq_len}", flush=True)
-            print(f"    - parameters: {n_params:,}", flush=True)
-            print(f"    - config: d_model={ckpt.get('model_config', {}).get('d_model', 'N/A')}, n_layers={ckpt.get('model_config', {}).get('n_layers', 'N/A')}", flush=True)
-            if torch.cuda.is_available():
-                print(f"    - GPU memory: {torch.cuda.memory_allocated()/1e9:.2f} GB allocated", flush=True)
-        except Exception as e:
-            print(f"    ERROR loading {name}: {e}", flush=True)
-            raise
-
-    # Use minimum seq_len for comparability
-    T_common = min(seq_lens.values())
-    print(f"\n  All models loaded successfully!", flush=True)
-    print(f"  Using T_common = {T_common} (minimum across all models)", flush=True)
-
-    # =========================================================================
     # PER-MODEL ANALYSIS
     # =========================================================================
-    print("\n[4/9] Running per-model analysis...", flush=True)
+    print("\n[4/10] Running per-model analysis...", flush=True)
     results = {
         'models': {},
         'divergence': {},
@@ -2767,6 +2780,28 @@ def run_audit(model_paths, data_path, n_samples=3000, output_path='reports/model
 
         model_results = {'seq_len': seq_len}
         import time as _time
+        
+        # Check if this is a pre-extracted logic dictionary (JSON)
+        is_logic_only = isinstance(model, dict)
+        
+        if is_logic_only:
+            print(f"    [LOGIC-MODE] Using pre-extracted logic from JSON...", flush=True)
+            model_results['importances'] = model.get('importances', model.get('rules', {}))
+            model_results['per_head_importances'] = model.get('per_head_importances', {})
+            model_results['output_stats'] = model.get('output_stats', model.get('output_head', {}).get('sensitivities', {}))
+            model_results['tree_rules'] = "\n".join(model.get('rules', [])) if isinstance(model.get('rules'), list) else str(model.get('rules'))
+            # Populate other fields as empty to prevent crashes downstream
+            model_results['tree_object'] = None
+            model_results['tree_r2'] = 0.0
+            model_results['tree_importances'] = {}
+            model_results['raw_outputs'] = None
+            model_results['gradient_saliency'] = None
+            model_results['shap_values'] = None
+            model_results['fisher_layer'] = {}
+            model_results['hessian_eigenvalues'] = None
+            
+            results['models'][name] = model_results
+            continue # Skip rest of loop for this model
 
         # Permutation importance
         print(f"    [4a] Computing permutation importance ({n_samples} samples)...", flush=True)
@@ -3174,13 +3209,13 @@ Examples:
                         help='Random seed for reproducibility')
     parser.add_argument('--skip-gradients', action='store_true',
                         help='Skip gradient saliency analysis')
-    parser.add_argument('--skip-hessian', action='store_true',
+    parser.add_argument('--skip-hessian', '--no-hessian', action='store_true',
                         help='Skip Hessian eigenspectrum analysis')
-    parser.add_argument('--skip-shap', action='store_true',
+    parser.add_argument('--skip-shap', '--no-shap', action='store_true',
                         help='Skip SHAP approximation')
-    parser.add_argument('--skip-fisher', action='store_true',
+    parser.add_argument('--skip-fisher', '--no-fisher', action='store_true',
                         help='Skip Fisher Information estimation')
-    parser.add_argument('--skip-mi', action='store_true',
+    parser.add_argument('--skip-mi', '--no-mi', action='store_true',
                         help='Skip mutual information matrix')
 
     args = parser.parse_args()
