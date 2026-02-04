@@ -59,6 +59,7 @@ class CompositeCondorNetLoss(nn.Module):
     """
     def __init__(
         self,
+        lambda_mse: float = 1.0,
         lambda_npdd: float = 1.0,
         lambda_sharpe: float = 0.2,
         lambda_dd: float = 0.3,
@@ -74,6 +75,7 @@ class CompositeCondorNetLoss(nn.Module):
         super().__init__()
         self.use_clamping = use_clamping
         self.lambdas = {
+            'mse': lambda_mse,
             'npdd': lambda_npdd,
             'sharpe': lambda_sharpe,
             'dd': lambda_dd,
@@ -124,7 +126,13 @@ class CompositeCondorNetLoss(nn.Module):
 
         components: Dict[str, torch.Tensor] = {}
 
-        # === PREPARE WEIGHTED RETURNS FOR GRADIENT FLOW ===
+        # === 0. Supervised Regression (Iron Condor Alignment) ===
+        # Ensure model learns the intended strikes (offsets), widths, and timing
+        components['mse'] = F.mse_loss(predictions, targets)
+        debug_val('mse', components['mse'])
+
+        # === 1. NPDD Loss (Weighted by Confidence) ===
+        # PREPARE WEIGHTED RETURNS FOR GRADIENT FLOW ===
         # Scale realized returns by model confidence to allow gradients to flow
         # Confidence is index 7 in predictions (B, 10)
         z_confidence = torch.sigmoid(predictions[:, 7]).view(1, -1) # (1, B)
@@ -139,7 +147,7 @@ class CompositeCondorNetLoss(nn.Module):
         cum_log_ret = cum_log_ret.clamp(-5.0, 5.0)
         cum_ret = torch.exp(cum_log_ret)
 
-        # === 1. NPDD Loss (Weighted) ===
+        # === 1. NPDD Loss (Weighted by Confidence) ===
         if returns is not None and returns.numel() > 0:
             mean_w_ret = w_returns.mean(dim=-1)
             running_max = torch.cummax(cum_ret, dim=-1)[0]
@@ -463,6 +471,7 @@ def parse_args():
     parser.add_argument("--accum-steps", type=int, default=4)
 
     # Loss weights
+    parser.add_argument("--lambda-mse", type=float, default=1.0, help="Weight for supervised regression")
     parser.add_argument("--lambda-npdd", type=float, default=1.0)
     parser.add_argument("--lambda-sharpe", type=float, default=0.2)
     parser.add_argument("--lambda-dd", type=float, default=0.3)
@@ -587,8 +596,9 @@ def train_condor_net(args):
     n_params = sum(p.numel() for p in model.parameters())
     print(f"[CondorNet] Parameters: {n_params:,}")
 
-    # Loss
+    # Loss function
     criterion = CompositeCondorNetLoss(
+        lambda_mse=args.lambda_mse,
         lambda_npdd=args.lambda_npdd,
         lambda_sharpe=args.lambda_sharpe,
         lambda_dd=args.lambda_dd,
