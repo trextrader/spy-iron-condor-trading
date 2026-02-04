@@ -111,12 +111,14 @@ class CompositeCondorNetLoss(nn.Module):
 
         # Debug Prints for first batch
         if not hasattr(self, '_printed_loss_dtype_debug'):
-            print(f"\n[CompositeCondorNetLoss Debug] Dtypes (Inside Criterion):")
-            print(f"  Predictions: {predictions.dtype}")
-            print(f"  Targets: {targets.dtype}")
-            print(f"  Gates: {gates.dtype if gates is not None else 'None'}")
+            print(f"\n[CompositeCondorNetLoss Debug] Initial Dtypes & Status:")
+            print(f"  Predictions: {predictions.dtype}, Targets: {targets.dtype}")
             print(f"  Autocast Active: {torch.is_autocast_enabled()}")
             self._printed_loss_dtype_debug = True
+
+        def debug_val(name, val):
+            if not hasattr(self, '_batch0_val_debug'):
+                print(f"  [VAL DEBUG] {name}: {val.item() if val.numel()==1 else val.mean().item()} | Inf: {torch.isinf(val).any()} | NaN: {torch.isnan(val).any()}")
 
         components: Dict[str, torch.Tensor] = {}
 
@@ -131,6 +133,8 @@ class CompositeCondorNetLoss(nn.Module):
         # log(1+r) avoids exploding cumprod
         log_ret = torch.log1p(w_returns.clamp(-0.9, 5.0))
         cum_log_ret = torch.cumsum(log_ret, dim=-1)
+        # CAP cum_log_ret to prevent exp overflow (e.g., e^20 is ~4.8e8, e^80 overflows float32)
+        cum_log_ret = cum_log_ret.clamp(-50, 50)
         cum_ret = torch.exp(cum_log_ret)
 
         # === 1. NPDD Loss (Weighted) ===
@@ -141,6 +145,7 @@ class CompositeCondorNetLoss(nn.Module):
             max_dd = dd.max(dim=-1)[0] + 1e-6
             npdd = mean_w_ret / max_dd
             components['npdd'] = -npdd.mean()
+            debug_val('npdd', components['npdd'])
         else:
             components['npdd'] = F.mse_loss(predictions, targets)
 
@@ -150,6 +155,7 @@ class CompositeCondorNetLoss(nn.Module):
             std_w_ret = w_returns.std(dim=-1) + 1e-6
             sharpe = mean_w_ret / std_w_ret * math.sqrt(252 * 78)
             components['sharpe'] = -sharpe.mean()
+            debug_val('sharpe', components['sharpe'])
         else:
             components['sharpe'] = torch.tensor(0.0, device=device)
 
@@ -160,6 +166,7 @@ class CompositeCondorNetLoss(nn.Module):
             dd = (running_max - cum_ret) / (running_max + 1e-6)
             max_dd = dd.max(dim=-1)[0]
             components['dd'] = max_dd.mean()
+            debug_val('dd', components['dd'])
         else:
             components['dd'] = torch.tensor(0.0, device=device)
 
@@ -167,16 +174,19 @@ class CompositeCondorNetLoss(nn.Module):
         entry_logits = predictions[:, 8]
         exit_logits = predictions[:, 9]
         components['turnover'] = torch.abs(entry_logits).mean() + torch.abs(exit_logits).mean()
+        debug_val('turnover', components['turnover'])
 
         # === 5. Fuzzy Loss ===
         confidence = predictions[:, 7]
         components['fuzzy'] = torch.var(confidence)
+        debug_val('fuzzy', components['fuzzy'])
 
         # === 6. Pattern Entropy ===
         if gates is not None:
             gate_probs = gates.mean(dim=0).clamp(1e-8, 1 - 1e-8)
             entropy = -(gate_probs * torch.log(gate_probs)).sum()
             components['pattern_ent'] = -entropy
+            debug_val('pattern_ent', components['pattern_ent'])
         else:
             components['pattern_ent'] = torch.tensor(0.0, device=device)
 
@@ -189,18 +199,21 @@ class CompositeCondorNetLoss(nn.Module):
                 gates_fp32,
                 n_permutations=2,
             ).float()
+            debug_val('group_inv', components['group_inv'])
         else:
             components['group_inv'] = torch.tensor(0.0, device=device)
 
         # === 8. Spectral Radius ===
         if A_matrix is not None:
             components['rho'] = spectral_radius_loss(A_matrix, dt=dt, target_rho=0.99)
+            debug_val('rho', components['rho'])
         else:
             components['rho'] = torch.tensor(0.0, device=device)
 
         # === 9. Energy Loss ===
         if state is not None:
             components['energy'] = (state ** 2).mean()
+            debug_val('energy', components['energy'])
         else:
             components['energy'] = torch.tensor(0.0, device=device)
 
@@ -208,10 +221,16 @@ class CompositeCondorNetLoss(nn.Module):
         if returns is not None and returns.numel() > 0:
             final_growth = cum_ret[..., -1].mean()
             components['growth'] = -final_growth
+            debug_val('growth', components['growth'])
         else:
             components['growth'] = torch.tensor(0.0, device=device)
 
+        # Mark debug batch complete
+        if not hasattr(self, '_batch0_val_debug'):
+            self._batch0_val_debug = True
+
         total_loss = sum(self.lambdas[k] * v for k, v in components.items())
+        debug_val('TOTAL_LOSS', total_loss)
         return total_loss, components
 
 
