@@ -623,8 +623,53 @@ class RegimeCombinatoricsDynamics(nn.Module):
 
 
 # =============================================================================
-# PART 5: PREDICATE SETS AND SUPER-SETS
+# PART 5: EXPLICIT RELATIONAL LOGIC
 # =============================================================================
+
+class RelationalLogicLayer(nn.Module):
+    """
+    Standardized Explicit Logic Engine.
+    Evaluates every pairwise relation (<, >, =) between N inputs.
+    """
+    def __init__(self, n_inputs: int, out_dim: int):
+        super().__init__()
+        self.n_inputs = n_inputs
+        self.out_dim = out_dim
+        
+        # Features: (N choose 2) * 3 [less, greater, equal]
+        self.n_pairs = (n_inputs * (n_inputs - 1)) // 2
+        relational_dim = self.n_pairs * 3 if n_inputs > 1 else n_inputs
+        
+        self.projection = nn.Linear(relational_dim, out_dim)
+        self.steepness = nn.Parameter(torch.tensor(20.0))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: (batch, N) input activations
+
+        Returns:
+            out: (batch, out_dim) projected logic signal
+        """
+        if self.n_inputs < 2:
+            return self.projection(x)
+
+        # Pairwise differences: D[b, i, j] = x[b, i] - x[b, j]
+        diffs = x.unsqueeze(-1) - x.unsqueeze(-2)
+        
+        # Extract upper triangle
+        iu = torch.triu_indices(self.n_inputs, self.n_inputs, offset=1, device=x.device)
+        tri_diffs = diffs[:, iu[0], iu[1]] 
+        
+        # Soft Logic Operators
+        lt = torch.sigmoid(-self.steepness * tri_diffs)
+        gt = torch.sigmoid(self.steepness * tri_diffs)
+        eq = torch.exp(-self.steepness * (tri_diffs ** 2))
+        
+        # Relational feature vector
+        rel_features = torch.cat([lt, gt, eq], dim=-1)
+        return self.projection(rel_features)
+
 
 class PredicateSet(nn.Module):
     """
@@ -637,18 +682,11 @@ class PredicateSet(nn.Module):
         - pnorm: generalized mean with learnable p
         - owa: ordered weighted average
     """
-    def __init__(self, n_predicates: int, aggregation: str = 'pnorm'):
+    def __init__(self, n_predicates: int):
         super().__init__()
         self.n_predicates = n_predicates
-        self.aggregation = aggregation
-
-        # Learnable soft membership
-        self.membership = nn.Parameter(torch.randn(n_predicates) * 0.1)
-
-        if aggregation == 'pnorm':
-            self.p = nn.Parameter(torch.tensor(1.0))
-        elif aggregation == 'owa':
-            self.owa_weights = nn.Parameter(torch.ones(n_predicates) / n_predicates)
+        # V21: Explicit Comparison between individual predicates
+        self.relational_logic = RelationalLogicLayer(n_predicates, 1)
 
     def forward(self, p: torch.Tensor) -> torch.Tensor:
         """
@@ -658,24 +696,8 @@ class PredicateSet(nn.Module):
         Returns:
             set_value: (batch, 1) aggregated activation
         """
-        weights = torch.softmax(self.membership, dim=0)
-        weighted_p = p * weights.unsqueeze(0)
-
-        if self.aggregation == 'mean':
-            return weighted_p.sum(dim=-1, keepdim=True)
-        elif self.aggregation == 'pnorm':
-            p_val = torch.clamp(self.p, -10, 10)
-            eps = 1e-8
-            weighted_p = torch.clamp(weighted_p, eps, 1 - eps)
-            if abs(p_val.item()) < eps:
-                return torch.exp(torch.log(weighted_p + eps).mean(dim=-1, keepdim=True))
-            else:
-                mean_powered = (weighted_p ** p_val).mean(dim=-1, keepdim=True)
-                return mean_powered ** (1.0 / p_val)
-        elif self.aggregation == 'owa':
-            sorted_p, _ = torch.sort(weighted_p, dim=-1, descending=True)
-            owa = torch.softmax(self.owa_weights, dim=0)
-            return (sorted_p * owa.unsqueeze(0)).sum(dim=-1, keepdim=True)
+        # Compare individual predicates to form set activation
+        return torch.sigmoid(self.relational_logic(p))
 
 
 class SuperSet(nn.Module):
@@ -691,18 +713,12 @@ class SuperSet(nn.Module):
         self.n_sets = n_sets
 
         self.sets = nn.ModuleList([
-            PredicateSet(n_predicates, aggregation='pnorm')
+            PredicateSet(n_predicates)
             for _ in range(n_sets)
         ])
 
-        # V20: Explicit Soft-Logic Relational Engine
-        # Features: (n_sets choose 2) * 3 [less, greater, equal]
-        n_pairs = (n_sets * (n_sets - 1)) // 2
-        relational_dim = n_pairs * 3 if n_sets > 1 else n_sets
-        
-        self.logic_projection = nn.Linear(relational_dim, 1)
-        self.gate_sigmoid = nn.Sigmoid()
-        self.steepness = nn.Parameter(torch.tensor(20.0))
+        # V21: standardized relational layer for sets
+        self.relational_logic = RelationalLogicLayer(n_sets, 1)
 
     def forward(self, p: torch.Tensor) -> torch.Tensor:
         """
@@ -714,31 +730,7 @@ class SuperSet(nn.Module):
         """
         # S: (batch, n_sets)
         S = torch.cat([pred_set(p) for pred_set in self.sets], dim=-1)
-        
-        if self.n_sets < 2:
-            return self.gate_sigmoid(self.logic_projection(S))
-
-        # Pairwise differences: D[b, i, j] = S[b, i] - S[b, j]
-        # (batch, n_sets, 1) - (batch, 1, n_sets) -> (batch, n_sets, n_sets)
-        diffs = S.unsqueeze(-1) - S.unsqueeze(-2)
-        
-        # Extract upper triangle (avoid self-comparison and double-counting)
-        batch_size = S.shape[0]
-        iu = torch.triu_indices(self.n_sets, self.n_sets, offset=1)
-        tri_diffs = diffs[:, iu[0], iu[1]] # (batch, n_pairs)
-        
-        # Soft Logic Operators
-        # 1. Less Than: sigmoid(-k * x)
-        lt = torch.sigmoid(-self.steepness * tri_diffs)
-        # 2. Greater Than: sigmoid(k * x) 
-        gt = torch.sigmoid(self.steepness * tri_diffs)
-        # 3. Equals: exp(-k * x^2) [Gaussian peak at 0]
-        eq = torch.exp(-self.steepness * (tri_diffs ** 2))
-        
-        # Combine into relational feature vector
-        relational_features = torch.cat([lt, gt, eq], dim=-1) # (batch, n_pairs * 3)
-        
-        return self.gate_sigmoid(self.logic_projection(relational_features))
+        return torch.sigmoid(self.relational_logic(S))
 
 
 # =============================================================================
@@ -903,10 +895,15 @@ class CondorNet(nn.Module):
             d_r=d_r,
             z_dim=n_predicates + R_moments + M_bloom,
         )
-        self.super_sets = nn.ModuleList([
-            SuperSet(n_sets=n_sets, n_predicates=n_predicates)
-            for _ in range(n_super_sets)
-        ])
+        if n_super_sets > 0:
+            self.super_sets = nn.ModuleList([
+                SuperSet(n_sets, n_predicates)
+                for _ in range(n_super_sets)
+            ])
+            # V21: Hierarchical Relational Logic comparing the super-sets themselves
+            self.hierarchical_logic = RelationalLogicLayer(n_super_sets, 1)
+        else:
+            self.super_sets = None
 
         # === FUSION ===
         self.fusion_gate = FusionGate(d_h, M_bloom, R_moments, n_branches=3)
