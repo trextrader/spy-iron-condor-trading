@@ -85,115 +85,115 @@ class CompositeCondorNetLoss(nn.Module):
         }
 
     def forward(
-    self,
-    predictions: torch.Tensor,
-    targets: torch.Tensor,
-    gates: torch.Tensor = None,
-    state: torch.Tensor = None,
-    A_matrix: torch.Tensor = None,
-    pred_signature: Optional[nn.Module] = None,
-    returns: torch.Tensor = None,
-    dt: float = 1.0,
-) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        self,
+        predictions: torch.Tensor,
+        targets: torch.Tensor,
+        gates: torch.Tensor = None,
+        state: torch.Tensor = None,
+        A_matrix: torch.Tensor = None,
+        pred_signature: Optional[nn.Module] = None,
+        returns: torch.Tensor = None,
+        dt: float = 1.0,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
 
-    device = predictions.device
+        device = predictions.device
 
-    # --- FORCE ALL LOSS MATH TO FP32 ---
-    predictions = predictions.float()
-    targets = targets.float()
-    if gates is not None:
-        gates = gates.float()
-    if state is not None:
-        state = state.float()
-    if A_matrix is not None:
-        A_matrix = A_matrix.float()
-    if returns is not None:
-        returns = returns.float()
+        # --- FORCE ALL LOSS MATH TO FP32 ---
+        predictions = predictions.float()
+        targets = targets.float()
+        if gates is not None:
+            gates = gates.float()
+        if state is not None:
+            state = state.float()
+        if A_matrix is not None:
+            A_matrix = A_matrix.float()
+        if returns is not None:
+            returns = returns.float()
 
-    components: Dict[str, torch.Tensor] = {}
+        components: Dict[str, torch.Tensor] = {}
 
-    # === 1. NPDD Loss ===
-    if returns is not None and returns.numel() > 0:
-        mean_ret = returns.mean(dim=-1)
-        cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
-        running_max = torch.cummax(cumulative, dim=-1)[0]
-        dd = (running_max - cumulative) / (running_max + 1e-8)
-        max_dd = dd.max(dim=-1)[0] + 1e-8
-        npdd = mean_ret / max_dd
-        components['npdd'] = -npdd.mean()
-    else:
-        components['npdd'] = F.mse_loss(predictions, targets)
+        # === 1. NPDD Loss ===
+        if returns is not None and returns.numel() > 0:
+            mean_ret = returns.mean(dim=-1)
+            cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
+            running_max = torch.cummax(cumulative, dim=-1)[0]
+            dd = (running_max - cumulative) / (running_max + 1e-8)
+            max_dd = dd.max(dim=-1)[0] + 1e-8
+            npdd = mean_ret / max_dd
+            components['npdd'] = -npdd.mean()
+        else:
+            components['npdd'] = F.mse_loss(predictions, targets)
 
-    # === 2. Sharpe Loss ===
-    if returns is not None and returns.shape[-1] > 1:
-        mean_ret = returns.mean(dim=-1)
-        std_ret = returns.std(dim=-1) + 1e-8
-        sharpe = mean_ret / std_ret * math.sqrt(252 * 78)
-        components['sharpe'] = -sharpe.mean()
-    else:
-        components['sharpe'] = torch.tensor(0.0, device=device)
+        # === 2. Sharpe Loss ===
+        if returns is not None and returns.shape[-1] > 1:
+            mean_ret = returns.mean(dim=-1)
+            std_ret = returns.std(dim=-1) + 1e-8
+            sharpe = mean_ret / std_ret * math.sqrt(252 * 78)
+            components['sharpe'] = -sharpe.mean()
+        else:
+            components['sharpe'] = torch.tensor(0.0, device=device)
 
-    # === 3. Drawdown Loss ===
-    if returns is not None and returns.numel() > 0:
-        cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
-        running_max = torch.cummax(cumulative, dim=-1)[0]
-        dd = (running_max - cumulative) / (running_max + 1e-8)
-        max_dd = dd.max(dim=-1)[0]
-        components['dd'] = max_dd.mean()
-    else:
-        components['dd'] = torch.tensor(0.0, device=device)
+        # === 3. Drawdown Loss ===
+        if returns is not None and returns.numel() > 0:
+            cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
+            running_max = torch.cummax(cumulative, dim=-1)[0]
+            dd = (running_max - cumulative) / (running_max + 1e-8)
+            max_dd = dd.max(dim=-1)[0]
+            components['dd'] = max_dd.mean()
+        else:
+            components['dd'] = torch.tensor(0.0, device=device)
 
-    # === 4. Turnover Loss ===
-    entry_logits = predictions[:, 8]
-    exit_logits = predictions[:, 9]
-    components['turnover'] = torch.abs(entry_logits).mean() + torch.abs(exit_logits).mean()
+        # === 4. Turnover Loss ===
+        entry_logits = predictions[:, 8]
+        exit_logits = predictions[:, 9]
+        components['turnover'] = torch.abs(entry_logits).mean() + torch.abs(exit_logits).mean()
 
-    # === 5. Fuzzy Loss ===
-    confidence = predictions[:, 7]
-    components['fuzzy'] = torch.var(confidence)
+        # === 5. Fuzzy Loss ===
+        confidence = predictions[:, 7]
+        components['fuzzy'] = torch.var(confidence)
 
-    # === 6. Pattern Entropy ===
-    if gates is not None:
-        gate_probs = gates.mean(dim=0).clamp(1e-8, 1 - 1e-8)
-        entropy = -(gate_probs * torch.log(gate_probs)).sum()
-        components['pattern_ent'] = -entropy
-    else:
-        components['pattern_ent'] = torch.tensor(0.0, device=device)
+        # === 6. Pattern Entropy ===
+        if gates is not None:
+            gate_probs = gates.mean(dim=0).clamp(1e-8, 1 - 1e-8)
+            entropy = -(gate_probs * torch.log(gate_probs)).sum()
+            components['pattern_ent'] = -entropy
+        else:
+            components['pattern_ent'] = torch.tensor(0.0, device=device)
 
-    # === 7. Group Invariance ===
-    if gates is not None and pred_signature is not None:
-        # FORCE gates to FP32 to match pred_signature
-        gates_fp32 = gates.float()
-        components['group_inv'] = group_invariant_loss(
-            pred_signature,
-            gates_fp32,
-            n_permutations=2,
-        ).float()
-    else:
-        components['group_inv'] = torch.tensor(0.0, device=device)
+        # === 7. Group Invariance ===
+        if gates is not None and pred_signature is not None:
+            # FORCE gates to FP32 to match pred_signature
+            gates_fp32 = gates.float()
+            components['group_inv'] = group_invariant_loss(
+                pred_signature,
+                gates_fp32,
+                n_permutations=2,
+            ).float()
+        else:
+            components['group_inv'] = torch.tensor(0.0, device=device)
 
-    # === 8. Spectral Radius ===
-    if A_matrix is not None:
-        components['rho'] = spectral_radius_loss(A_matrix, dt=dt, target_rho=0.99)
-    else:
-        components['rho'] = torch.tensor(0.0, device=device)
+        # === 8. Spectral Radius ===
+        if A_matrix is not None:
+            components['rho'] = spectral_radius_loss(A_matrix, dt=dt, target_rho=0.99)
+        else:
+            components['rho'] = torch.tensor(0.0, device=device)
 
-    # === 9. Energy Loss ===
-    if state is not None:
-        components['energy'] = (state ** 2).mean()
-    else:
-        components['energy'] = torch.tensor(0.0, device=device)
+        # === 9. Energy Loss ===
+        if state is not None:
+            components['energy'] = (state ** 2).mean()
+        else:
+            components['energy'] = torch.tensor(0.0, device=device)
 
-    # === 10. Growth Loss ===
-    if returns is not None and returns.numel() > 0:
-        cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
-        final_growth = cumulative[..., -1].mean()
-        components['growth'] = -final_growth
-    else:
-        components['growth'] = torch.tensor(0.0, device=device)
+        # === 10. Growth Loss ===
+        if returns is not None and returns.numel() > 0:
+            cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
+            final_growth = cumulative[..., -1].mean()
+            components['growth'] = -final_growth
+        else:
+            components['growth'] = torch.tensor(0.0, device=device)
 
-    total_loss = sum(self.lambdas[k] * v for k, v in components.items())
-    return total_loss, components
+        total_loss = sum(self.lambdas[k] * v for k, v in components.items())
+        return total_loss, components
 
 
 # =============================================================================
