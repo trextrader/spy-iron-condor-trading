@@ -60,7 +60,7 @@ class CompositeCondorNetLoss(nn.Module):
     def __init__(
         self,
         lambda_npdd: float = 1.0,
-        lambda_sharpe: float = 0.5,
+        lambda_sharpe: float = 0.2,
         lambda_dd: float = 0.3,
         lambda_turnover: float = 0.1,
         lambda_fuzzy: float = 0.2,
@@ -145,7 +145,8 @@ class CompositeCondorNetLoss(nn.Module):
             # CLAMP max_dd to min 0.02 (2% floor) to prevent explosion
             max_dd = dd.max(dim=-1)[0].clamp(min=0.02)
             npdd = mean_w_ret / max_dd
-            components['npdd'] = -npdd.mean()
+            # CLAMP component to prevent batch-level signal jumps
+            components['npdd'] = torch.clamp(-npdd.mean(), -50.0, 50.0)
             debug_val('npdd', components['npdd'])
         else:
             components['npdd'] = F.mse_loss(predictions, targets)
@@ -156,7 +157,8 @@ class CompositeCondorNetLoss(nn.Module):
             # CLAMP volatility to min 0.01 (1% floor) to prevent explosion
             std_w_ret = w_returns.std(dim=-1).clamp(min=0.01)
             sharpe = mean_w_ret / std_w_ret * math.sqrt(252 * 78)
-            components['sharpe'] = -sharpe.mean()
+            # CLAMP component to prevent batch-level signal jumps
+            components['sharpe'] = torch.clamp(-sharpe.mean(), -50.0, 50.0)
             debug_val('sharpe', components['sharpe'])
         else:
             components['sharpe'] = torch.tensor(0.0, device=device)
@@ -443,11 +445,11 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--lookback", type=int, default=240)
-    parser.add_argument("--accum-steps", type=int, default=1)
+    parser.add_argument("--accum-steps", type=int, default=4)
 
     # Loss weights
     parser.add_argument("--lambda-npdd", type=float, default=1.0)
-    parser.add_argument("--lambda-sharpe", type=float, default=0.5)
+    parser.add_argument("--lambda-sharpe", type=float, default=0.2)
     parser.add_argument("--lambda-dd", type=float, default=0.3)
     parser.add_argument("--lambda-turnover", type=float, default=0.1)
     parser.add_argument("--lambda-fuzzy", type=float, default=0.2)
