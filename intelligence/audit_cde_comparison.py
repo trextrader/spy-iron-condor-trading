@@ -97,15 +97,23 @@ def load_cde_model(ckpt_path, input_dim=None):
 
     ckpt = torch.load(ckpt_path, map_location=DEVICE, weights_only=False)
 
-    seq_len = ckpt.get('seq_len', 240)  # CondorNet default is 240
+    # 1. Extract config and seq_len
+    seq_len = ckpt.get('seq_len', 240)
     config = ckpt.get('model_config', ckpt.get('config', {}))
-    state_dict = ckpt.get('state_dict', ckpt)
     
-    # Clean state dict
+    # 2. Extract state_dict (check for common nesting keys)
+    state_dict = ckpt
+    for key in ['model_state_dict', 'state_dict']:
+        if key in ckpt and isinstance(ckpt[key], dict):
+            state_dict = ckpt[key]
+            # If we found model_state_dict, the config might also be at top level
+            break
+            
+    # Clean state dict (remove 'module.' prefix from DDP)
     if any(k.startswith('module.') for k in state_dict.keys()):
         state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
     
-    # Detect CondorNet vs CondorBrain based on state_dict keys
+    # 3. Detect CondorNet vs CondorBrain based on unnested state_dict keys
     is_condornet = any('super_sets' in k or 'state_block' in k for k in state_dict.keys())
     
     if is_condornet:
@@ -120,7 +128,7 @@ def load_cde_model(ckpt_path, input_dim=None):
             n_super_sets=n_super_sets,
             sets_per_super=sets_per_super
         )
-        print(f"  [CondorNet] d_hidden={d_hidden}, super_sets={n_super_sets}, sets={sets_per_super}")
+        print(f"  [CondorNet] d_hidden={d_hidden}, n_super_sets={n_super_sets}, sets_per_super={sets_per_super}")
     else:
         # CondorBrain (Mamba/CDE) architecture
         d_model = config.get('d_model', 128)
@@ -135,7 +143,7 @@ def load_cde_model(ckpt_path, input_dim=None):
             use_cde=use_cde,
             use_topk_moe=use_topk
         )
-        print(f"  [CondorBrain] d_model={d_model}, layers={n_layers}")
+        print(f"  [CondorBrain] d_model={d_model}, n_layers={n_layers}")
 
     model.load_state_dict(state_dict)
     model.to(DEVICE)
