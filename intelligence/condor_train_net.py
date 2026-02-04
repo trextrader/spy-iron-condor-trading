@@ -460,10 +460,10 @@ def parse_args():
     parser.add_argument("--d-control", type=int, default=128, help="TFT control dim")
     parser.add_argument("--n-layers", type=int, default=2, help="TFT layers")
 
-    # Training
-    parser.add_argument("--n-predicates", type=int, default=1024)
-    parser.add_argument("--n-sets", type=int, default=512)
-    parser.add_argument("--n-super-sets", type=int, default=256)
+    # Training - Logic Complexity (T4-safe defaults; scale up on A100/H100)
+    parser.add_argument("--n-predicates", type=int, default=32, help="Number of predicate gates (T4: <=64)")
+    parser.add_argument("--n-sets", type=int, default=16, help="Number of logic sets (T4: <=32)")
+    parser.add_argument("--n-super-sets", type=int, default=8, help="Number of super-sets (T4: <=16)")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4)
