@@ -145,9 +145,11 @@ class CompositeCondorNetLoss(nn.Module):
             # CLAMP max_dd to min 0.02 (2% floor) to prevent explosion
             max_dd = dd.max(dim=-1)[0].clamp(min=0.02)
             npdd = mean_w_ret / max_dd
-            # CLAMP component to prevent batch-level signal jumps
-            components['npdd'] = torch.clamp(-npdd.mean(), -50.0, 50.0)
+            # V11: Soft-Clamping (tanh) preserves gradient flow even at extreme magnitudes
+            unclamped_npdd = -npdd.mean()
+            components['npdd'] = torch.tanh(unclamped_npdd / 50.0) * 50.0
             debug_val('npdd', components['npdd'])
+            debug_val('unclamped_npdd', unclamped_npdd)
         else:
             components['npdd'] = F.mse_loss(predictions, targets)
 
@@ -157,9 +159,11 @@ class CompositeCondorNetLoss(nn.Module):
             # CLAMP volatility to min 0.01 (1% floor) to prevent explosion
             std_w_ret = w_returns.std(dim=-1).clamp(min=0.01)
             sharpe = mean_w_ret / std_w_ret * math.sqrt(252 * 78)
-            # CLAMP component to prevent batch-level signal jumps
-            components['sharpe'] = torch.clamp(-sharpe.mean(), -50.0, 50.0)
+            # V11: Soft-Clamping (tanh) preserves gradient flow even at extreme magnitudes
+            unclamped_sharpe = -sharpe.mean()
+            components['sharpe'] = torch.tanh(unclamped_sharpe / 50.0) * 50.0
             debug_val('sharpe', components['sharpe'])
+            debug_val('unclamped_sharpe', unclamped_sharpe)
         else:
             components['sharpe'] = torch.tensor(0.0, device=device)
 
