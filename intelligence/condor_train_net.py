@@ -142,7 +142,8 @@ class CompositeCondorNetLoss(nn.Module):
             mean_w_ret = w_returns.mean(dim=-1)
             running_max = torch.cummax(cum_ret, dim=-1)[0]
             dd = (running_max - cum_ret) / (running_max + 1e-6)
-            max_dd = dd.max(dim=-1)[0] + 1e-6
+            # CLAMP max_dd to min 0.02 (2% floor) to prevent explosion
+            max_dd = dd.max(dim=-1)[0].clamp(min=0.02)
             npdd = mean_w_ret / max_dd
             components['npdd'] = -npdd.mean()
             debug_val('npdd', components['npdd'])
@@ -152,7 +153,8 @@ class CompositeCondorNetLoss(nn.Module):
         # === 2. Sharpe Loss (Weighted) ===
         if returns is not None and returns.shape[-1] > 1:
             mean_w_ret = w_returns.mean(dim=-1)
-            std_w_ret = w_returns.std(dim=-1) + 1e-6
+            # CLAMP volatility to min 0.01 (1% floor) to prevent explosion
+            std_w_ret = w_returns.std(dim=-1).clamp(min=0.01)
             sharpe = mean_w_ret / std_w_ret * math.sqrt(252 * 78)
             components['sharpe'] = -sharpe.mean()
             debug_val('sharpe', components['sharpe'])
@@ -177,8 +179,9 @@ class CompositeCondorNetLoss(nn.Module):
         debug_val('turnover', components['turnover'])
 
         # === 5. Fuzzy Loss ===
-        confidence = predictions[:, 7]
-        components['fuzzy'] = torch.var(confidence)
+        # Calculate on probabilities (sigmoid) to keep bound [0, 0.25]
+        prob_conf = torch.sigmoid(predictions[:, 7])
+        components['fuzzy'] = torch.var(prob_conf)
         debug_val('fuzzy', components['fuzzy'])
 
         # === 6. Pattern Entropy ===
@@ -212,7 +215,11 @@ class CompositeCondorNetLoss(nn.Module):
 
         # === 9. Energy Loss ===
         if state is not None:
-            components['energy'] = (state ** 2).mean()
+            # Normalize by state dimension
+            d_x = state.shape[-1] if state.dim() > 1 else 128
+            components['energy'] = (state ** 2).mean() / d_x
+            # CLIP energy loss value to 100 max early in training
+            components['energy'] = components['energy'].clamp(max=100.0)
             debug_val('energy', components['energy'])
         else:
             components['energy'] = torch.tensor(0.0, device=device)
