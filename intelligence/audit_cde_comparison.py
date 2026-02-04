@@ -114,25 +114,46 @@ def load_cde_model(ckpt_path, input_dim=None):
         state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
     
     # 3. Detect CondorNet vs CondorBrain based on unnested state_dict keys
-    is_condornet = any('super_sets' in k or 'state_block' in k for k in state_dict.keys())
+    keys = state_dict.keys()
+    is_condornet = any('super_sets' in k or 'state_block' in k for k in keys)
     
     if is_condornet:
         # CondorNet V21+ architecture
-        # Extract dimensions from state_dims if available (training script format)
+        # Extract base dimensions from state_dims
         dims = ckpt.get('state_dims', {})
         d_h = dims.get('d_h', config.get('d_h', 256))
         d_v = dims.get('d_v', config.get('d_v', 32))
         d_m = dims.get('d_m', config.get('d_m', 64))
         d_r = dims.get('d_r', config.get('d_r', 32))
         
-        # Logic dimensions (from config or defaults in condor_train_net.py)
-        n_predicates = config.get('n_predicates', 512)
-        n_sets = config.get('n_sets', 256)
-        n_super_sets = config.get('n_super_sets', 128)
+        # INFER Logic Complexity from state_dict to prevent OOM from extreme defaults
+        # Find max index in super_sets.{i}.
+        super_set_indices = [int(k.split('.')[1]) for k in keys if k.startswith('super_sets.')]
+        n_super_sets = max(super_set_indices) + 1 if super_set_indices else config.get('n_super_sets', 1)
         
+        # Find max index in super_sets.0.sets.{j}.
+        set_indices = [int(k.split('.')[3]) for k in keys if k.startswith('super_sets.0.sets.')]
+        n_sets = max(set_indices) + 1 if set_indices else config.get('n_sets', 4)
+        
+        # Infer n_predicates from relational_logic weight dimension
+        # WeightDim = 3 * n * (n - 1) / 2
+        # Solve for n: n = (1.5 + sqrt(2.25 + 6 * WeightDim)) / 3
+        n_predicates = 5 # Default
+        target_key = 'super_sets.0.sets.0.relational_logic.projection.weight'
+        if target_key in state_dict:
+            weight_dim = state_dict[target_key].shape[1]
+            if weight_dim > 1:
+                import math as _math
+                inferred_n = (1.5 + _math.sqrt(2.25 + 6 * weight_dim)) / 3
+                n_predicates = int(round(inferred_n))
+        elif config.get('n_predicates'):
+            n_predicates = config.get('n_predicates')
+
         # Shared params
         d_control = config.get('d_control', 128)
         n_layers = config.get('n_layers', 2)
+        
+        print(f"  [CondorNet] Inferred: d_h={d_h}, n_super_sets={n_super_sets}, n_sets={n_sets}, n_predicates={n_predicates}")
         
         model = CondorNet(
             d_input=input_dim,
@@ -146,7 +167,6 @@ def load_cde_model(ckpt_path, input_dim=None):
             n_sets=n_sets,
             n_super_sets=n_super_sets
         )
-        print(f"  [CondorNet] d_h={d_h}, n_sets={n_sets}, n_super_sets={n_super_sets}")
     else:
         # CondorBrain (Mamba/CDE) architecture
         d_model = config.get('d_model', 128)
