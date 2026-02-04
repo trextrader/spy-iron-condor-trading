@@ -357,28 +357,24 @@ def etd1_kernel(A: torch.Tensor, dt: float) -> Tuple[torch.Tensor, torch.Tensor]
     """
     original_dtype = A.dtype
     
-    # Cast to fp32 if needed (pinv/matrix_exp don't support bf16/fp16)
-    if A.dtype in (torch.bfloat16, torch.float16):
-        A = A.float()
+    # ALWAYS compute in FP32 for numerical stability (matrix_exp, pinv)
+    A = A.float()
     
     # Ensure dt is tensor
     if not torch.is_tensor(dt):
-        dt = torch.tensor(dt, device=A.device, dtype=A.dtype)
+        dt = torch.tensor(dt, device=A.device, dtype=torch.float32)
+    else:
+        dt = dt.float()
     
     M = A * dt
     expM = torch.linalg.matrix_exp(M)
-    I = torch.eye(M.shape[-1], device=M.device, dtype=M.dtype)
+    I = torch.eye(M.shape[-1], device=M.device, dtype=torch.float32)
 
     # φ_1(M) = M⁺(e^M - I)
-    # Use pinv for numerical stability when M is singular/near-singular
     phi1 = torch.linalg.pinv(M) @ (expM - I)
 
-    # Cast back to original dtype
-    if original_dtype in (torch.bfloat16, torch.float16):
-        expM = expM.to(original_dtype)
-        phi1 = phi1.to(original_dtype)
-
-    return expM, phi1
+    # ALWAYS return FP32 for the master step matmuls to avoid Half/Float mismatch
+    return expM.float(), phi1.float()
 
 
 def condornet_master_step(
@@ -424,29 +420,39 @@ def condornet_master_step(
     """
     batch = x_prev.shape[0]
 
+    # Force all math to FP32 for the master step to avoid autocast mismatches
+    x_prev = x_prev.float()
+    u_k = u_k.float()
+    dX_k = dX_k.float()
+    greeks_k = greeks_k.float()
+    r_prev = r_prev.float()
+    q_k = q_k.float()
+
     # 1. Build A(u_k) as full [d_x, d_x] (shared across batch)
-    A_full = A_theta.full_matrix()  # (d_x, d_x)
+    A_full = A_theta.full_matrix().float()  # (d_x, d_x)
     F_k, phi1 = etd1_kernel(A_full, dt_k)  # (d_x, d_x), (d_x, d_x)
 
     # 2. B_θ(u_k) and ETD injection g_k = Δt φ_1(AΔt) B
-    B_k = B_theta(u_k)  # (batch, d_x)
-    g_k = torch.matmul(B_k, phi1.T) * dt_k  # (batch, d_x)
+    # Disable autocast for these specific matmuls to force FP32 consistency
+    with torch.cuda.amp.autocast(enabled=False):
+        B_k = B_theta(u_k).float()  # (batch, d_x)
+        g_k = torch.matmul(B_k, phi1.T) * dt_k  # (batch, d_x)
 
-    # 3. Linear propagation F_k x_{k-1}
-    x_lin = torch.matmul(x_prev, F_k.T)  # (batch, d_x)
+        # 3. Linear propagation F_k x_{k-1}
+        x_lin = torch.matmul(x_prev, F_k.T)  # (batch, d_x)
 
-    # 4. Controlled response G_θ(x_{k-1}, u_k) ΔX_k
-    G_k = G_theta(x_prev, u_k)  # (batch, d_x, d_input)
-    dX_vec = dX_k.unsqueeze(-1)  # (batch, d_input, 1)
-    cde_term = torch.bmm(G_k, dX_vec).squeeze(-1)  # (batch, d_x)
+        # 4. Controlled response G_θ(x_{k-1}, u_k) ΔX_k
+        G_k = G_theta(x_prev, u_k).float()  # (batch, d_x, d_input)
+        dX_vec = dX_k.unsqueeze(-1)  # (batch, d_input, 1)
+        cde_term = torch.bmm(G_k, dX_vec).squeeze(-1)  # (batch, d_x)
 
-    # 5. Full forcing D(Greeks_k, r_{k-1}, q_k)
-    D_k = D_forcing(greeks_k, r_prev, q_k)  # (batch, d_x)
+        # 5. Full forcing D(Greeks_k, r_{k-1}, q_k)
+        D_k = D_forcing(greeks_k, r_prev, q_k).float()  # (batch, d_x)
 
-    # 6. Master update
-    x_k = x_lin + g_k + cde_term + D_k
+        # 6. Master update
+        x_k = x_lin + g_k + cde_term + D_k
 
-    return x_k
+    return x_k.float()
 
 
 # =============================================================================
