@@ -125,6 +125,19 @@ class CompositeCondorNetLoss(nn.Module):
             components: dict of individual losses
         """
         device = predictions.device
+        
+        # Cast all inputs to fp32 for loss computation (mixed precision safety)
+        predictions = predictions.float()
+        targets = targets.float()
+        if gates is not None:
+            gates = gates.float()
+        if state is not None:
+            state = state.float()
+        if A_matrix is not None:
+            A_matrix = A_matrix.float()
+        if returns is not None:
+            returns = returns.float()
+        
         components = {}
 
         # === 1. NPDD Loss ===
