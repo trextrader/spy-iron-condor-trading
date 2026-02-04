@@ -31,6 +31,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.amp import autocast, GradScaler
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 # Add project root
@@ -460,10 +461,10 @@ def parse_args():
     parser.add_argument("--d-control", type=int, default=128, help="TFT control dim")
     parser.add_argument("--n-layers", type=int, default=2, help="TFT layers")
 
-    # Training - Logic Complexity (T4-safe defaults; scale up on A100/H100)
-    parser.add_argument("--n-predicates", type=int, default=32, help="Number of predicate gates (T4: <=64)")
-    parser.add_argument("--n-sets", type=int, default=16, help="Number of logic sets (T4: <=32)")
-    parser.add_argument("--n-super-sets", type=int, default=8, help="Number of super-sets (T4: <=16)")
+    # Training - Logic Complexity (Scale down if OOM on smaller GPUs)
+    parser.add_argument("--n-predicates", type=int, default=512, help="Number of predicate gates")
+    parser.add_argument("--n-sets", type=int, default=256, help="Number of logic sets")
+    parser.add_argument("--n-super-sets", type=int, default=128, help="Number of super-sets")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-4)
@@ -628,6 +629,11 @@ def train_condor_net(args):
     print(f"Output: {args.output}")
     print(f"{'='*60}\n")
 
+    # TensorBoard
+    run_name = f"condor_dh{args.d_h}_lr{args.lr}_bs{args.batch_size}"
+    writer = SummaryWriter(log_dir=f"runs/condor_net/{run_name}")
+    global_step = 0
+
     best_val_loss = float('inf')
     patience_counter = 0
 
@@ -714,6 +720,15 @@ def train_condor_net(args):
             for k, v in components.items():
                 epoch_components[k] += v.item() if torch.is_tensor(v) else v
 
+            # TensorBoard: log every 100 steps
+            if global_step % 100 == 0:
+                writer.add_scalar('train/loss', loss.item(), global_step)
+                for k, v in components.items():
+                    val = v.item() if torch.is_tensor(v) else v
+                    writer.add_scalar(f'train/{k}', val, global_step)
+                writer.add_scalar('train/lr', scheduler.get_last_lr()[0], global_step)
+            global_step += 1
+
             pbar.set_postfix({'loss': f'{loss.item():.4f}'})
 
             if getattr(args, 'verbose', False) and (batch_idx + 1) % 10 == 0:
@@ -761,6 +776,12 @@ def train_condor_net(args):
                 val_loss += loss.item()
 
         avg_val_loss = val_loss / min(n_val_batches, 50)
+
+        # TensorBoard: epoch-level metrics
+        writer.add_scalar('epoch/train_loss', avg_train_loss, epoch)
+        writer.add_scalar('epoch/val_loss', avg_val_loss, epoch)
+        for k, v in epoch_components.items():
+            writer.add_scalar(f'epoch/{k}', v / n_train_batches, epoch)
 
         print(f"Epoch {epoch+1:3d} | Train: {avg_train_loss:.4f} | Val: {avg_val_loss:.4f} | "
               f"LR: {scheduler.get_last_lr()[0]:.2e}")
