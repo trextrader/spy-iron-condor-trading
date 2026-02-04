@@ -705,9 +705,24 @@ def train_condor_net(args):
                 batch_x = X_val_seq[s:e]
                 batch_y = y_val_t[s + L:e + L]
 
-                with autocast(device_type='cuda', dtype=amp_dtype):
-                    outputs = model(batch_x)
-                    loss, _ = criterion(outputs.float(), batch_y)
+                roi_returns = batch_y[:, 5].unsqueeze(0)
+
+                with torch.amp.autocast('cuda', dtype=amp_dtype):
+                    outputs, diag = model(batch_x, return_diagnostics=True)
+                    
+                    A_matrix = model.get_A_matrix()
+                    gates = diag.get('predicates')
+                    state = diag.get('z_final')
+
+                    loss, _ = criterion(
+                        outputs.float(), 
+                        batch_y,
+                        gates=gates,
+                        state=state,
+                        A_matrix=A_matrix,
+                        pred_signature=model.pred_signature,
+                        returns=roi_returns
+                    )
 
                 val_loss += loss.item()
 
