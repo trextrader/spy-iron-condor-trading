@@ -120,32 +120,44 @@ class CompositeCondorNetLoss(nn.Module):
 
         components: Dict[str, torch.Tensor] = {}
 
-        # === 1. NPDD Loss ===
+        # === PREPARE WEIGHTED RETURNS FOR GRADIENT FLOW ===
+        # Scale realized returns by model confidence to allow gradients to flow
+        # Confidence is index 7 in predictions (B, 10)
+        z_confidence = torch.sigmoid(predictions[:, 7]).view(1, -1) # (1, B)
+        # Weight returns by confidence (Broadcast returns: (1, B))
+        w_returns = returns * z_confidence
+
+        # Log-space stability for cumulative metrics
+        # log(1+r) avoids exploding cumprod
+        log_ret = torch.log1p(w_returns.clamp(-0.9, 5.0))
+        cum_log_ret = torch.cumsum(log_ret, dim=-1)
+        cum_ret = torch.exp(cum_log_ret)
+
+        # === 1. NPDD Loss (Weighted) ===
         if returns is not None and returns.numel() > 0:
-            mean_ret = returns.mean(dim=-1)
-            cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
-            running_max = torch.cummax(cumulative, dim=-1)[0]
-            dd = (running_max - cumulative) / (running_max + 1e-8)
-            max_dd = dd.max(dim=-1)[0] + 1e-8
-            npdd = mean_ret / max_dd
+            mean_w_ret = w_returns.mean(dim=-1)
+            running_max = torch.cummax(cum_ret, dim=-1)[0]
+            dd = (running_max - cum_ret) / (running_max + 1e-6)
+            max_dd = dd.max(dim=-1)[0] + 1e-6
+            npdd = mean_w_ret / max_dd
             components['npdd'] = -npdd.mean()
         else:
             components['npdd'] = F.mse_loss(predictions, targets)
 
-        # === 2. Sharpe Loss ===
+        # === 2. Sharpe Loss (Weighted) ===
         if returns is not None and returns.shape[-1] > 1:
-            mean_ret = returns.mean(dim=-1)
-            std_ret = returns.std(dim=-1) + 1e-8
-            sharpe = mean_ret / std_ret * math.sqrt(252 * 78)
+            mean_w_ret = w_returns.mean(dim=-1)
+            std_w_ret = w_returns.std(dim=-1) + 1e-6
+            sharpe = mean_w_ret / std_w_ret * math.sqrt(252 * 78)
             components['sharpe'] = -sharpe.mean()
         else:
             components['sharpe'] = torch.tensor(0.0, device=device)
 
-        # === 3. Drawdown Loss ===
+        # === 3. Drawdown Loss (Weighted) ===
         if returns is not None and returns.numel() > 0:
-            cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
-            running_max = torch.cummax(cumulative, dim=-1)[0]
-            dd = (running_max - cumulative) / (running_max + 1e-8)
+            # Re-calculate DD on weighted series
+            running_max = torch.cummax(cum_ret, dim=-1)[0]
+            dd = (running_max - cum_ret) / (running_max + 1e-6)
             max_dd = dd.max(dim=-1)[0]
             components['dd'] = max_dd.mean()
         else:
@@ -192,10 +204,9 @@ class CompositeCondorNetLoss(nn.Module):
         else:
             components['energy'] = torch.tensor(0.0, device=device)
 
-        # === 10. Growth Loss ===
+        # === 10. Growth Loss (Weighted) ===
         if returns is not None and returns.numel() > 0:
-            cumulative = torch.cumprod(1 + returns.clamp(-0.99, 10), dim=-1)
-            final_growth = cumulative[..., -1].mean()
+            final_growth = cum_ret[..., -1].mean()
             components['growth'] = -final_growth
         else:
             components['growth'] = torch.tensor(0.0, device=device)
