@@ -114,7 +114,7 @@ class CompositeCondorNetLoss(nn.Module):
             print(f"  Predictions: {predictions.dtype}")
             print(f"  Targets: {targets.dtype}")
             print(f"  Gates: {gates.dtype if gates is not None else 'None'}")
-            print(f"  Autocast Active: {torch.amp.is_autocast_enabled('cuda')}")
+            print(f"  Autocast Active: {torch.is_autocast_enabled()}")
             self._printed_loss_dtype_debug = True
 
         components: Dict[str, torch.Tensor] = {}
