@@ -5,15 +5,16 @@ This directory contains the visual specifications for the CondorBrain system. Be
 ## 🗺️ Master Maps
 - **[diagram_map.png](diagram_map.png)**: The master navigational map that links all other diagrams together, organized by functional cluster (Data, Intelligence, Logic, Execution, Optimization).
 - **[system_overview.png](system_overview.png)**: A high-level conceptual view of the entire system, showing the interaction between Data, Intelligence, and Execution layers.
-- **[full_system_architecture.png](full_system_architecture.png)**: The detailed V2.2 specification diagram, acting as the primary reference for the complete system architecture including Neural CDE and Diffusion components.
+- **[full_system_architecture.png](full_system_architecture.png)**: The detailed V4.0 specification diagram, acting as the primary reference for the complete system architecture including CondorNet™ and Diffusion components.
 - **[phase2_phase3_architecture.png](phase2_phase3_architecture.png)**: Roadmap diagram outlining the transition from basic indicator logic (Phase 2) to advanced risk controls and execution (Phase 3).
 
-## 🧠 Intelligence Core
-- **[enhanced_architecture.png](enhanced_architecture.png)**: Focuses specifically on the Neural CDE backbone and its connection to the new specialized output heads (Diffusion, TopKMoE).
-- **[cde_engine_logic.png](cde_engine_logic.png)**: Internal schematic of the Neural CDE engine, showing the explicit Euler integration and continuous vector fields.
+## 🧠 Intelligence Core (CondorNet™ v4.0)
+- **[enhanced_architecture.png](enhanced_architecture.png)**: Focuses specifically on the CondorNet™ backbone (ETD-1 + TFT + Neural CDE fusion) and its connection to the specialized output heads (Diffusion, TopKMoE).
+- **[CondorNet_EquationGraph.png](CondorNet_EquationGraph.png)**: CondorNet™ equation data flow diagram showing ETD-1 × Neural CDE × Predicate Gates integration.
+- **[CondorNet_Operator_Block.png](CondorNet_Operator_Block.png)**: CondorNet™ master update cycle showing the ETD-1 exponential integrator + Neural CDE + TFT Control.
 - **[condor_intelligence_flow_premium.png](condor_intelligence_flow_premium.png)**: Enhanced version of the intelligence flow including Topological Data Analysis (TDA) and Generative Diffusion components.
-- **[condor_intelligence_flow.png](condor_intelligence_flow.png)**: Standard logical flow through the Neural Intelligence Core, detailing the transformation from input tensors to trading signals.
-- **[audit_cde_comparison_flow.png](audit_cde_comparison_flow.png)**: Complete architecture diagram for the Multi-Model CDE Comparison Audit tool (`intelligence/audit_cde_comparison.py`). Shows the 9-stage pipeline from CLI input through data preprocessing, per-model analysis (permutation importance, gradient saliency, SHAP, Fisher, Hessian), pairwise comparisons (divergence, stability), technical assessment, 16 visualization types, and final report generation.
+- **[condor_intelligence_flow.png](condor_intelligence_flow.png)**: Standard logical flow through the CondorNet™ Intelligence Core, detailing the transformation from input tensors to trading signals.
+- **[audit_cde_comparison_flow.png](audit_cde_comparison_flow.png)**: Complete architecture diagram for the Multi-Model Comparison Audit tool. Shows the 9-stage pipeline from CLI input through data preprocessing, per-model analysis (permutation importance, gradient saliency, SHAP, Fisher, Hessian), pairwise comparisons (divergence, stability), technical assessment, 16 visualization types, and final report generation.
 
 ## 💧 Data Pipeline
 - **[pipeline_diagram.png](pipeline_diagram.png)**: Illustrates the ETL (Extract, Transform, Load) scripts and processes that fetch raw data from Alpaca/IVolatility and prepare it for the model.

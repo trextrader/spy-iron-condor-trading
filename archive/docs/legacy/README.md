@@ -1,8 +1,8 @@
-# Legacy Documentation (Mamba-2 Era)
+# Legacy Documentation (Mamba-2 → Neural CDE → CondorNet™ Era)
 
-**Archived:** 2026-01-27
+**Archived:** 2026-02-04
 
-This directory contains documentation from the previous Mamba-2 SSM backbone architecture used prior to the Neural CDE switch (January 2026).
+This directory contains documentation from the previous Mamba-2 SSM and Neural CDE backbone architectures, prior to the **CondorNet™ v4.0** unified architecture (February 2026).
 
 ## Status
 
@@ -10,20 +10,29 @@ This directory contains documentation from the previous Mamba-2 SSM backbone arc
 
 ## Superseded By
 
-- **Neural CDE backbone:** `intelligence/models/neural_cde.py`
-- **Current architecture docs:** `docs/architecture/cde_engine_logic.dot`
-- **Current spec:** `docs/scientific_spec.md` (updated with CDE mathematics)
+- **CondorNet™ backbone:** `intelligence/condor_brain_net.py`
+- **Current architecture docs:** `docs/condor_brain_architecture.md`
+- **Current spec:** `docs/scientific_spec.md` (updated with CondorNet™ mathematics)
+
+## Architecture Evolution
+
+| Version | Architecture | Status |
+|---------|--------------|--------|
+| v1.x | TFT (Temporal Fusion Transformer) | Failed to converge |
+| v2.x | Mamba-2 SSM | NaN explosions during training |
+| v3.x | Neural CDE | Overfitting, insufficient for complex regime dynamics |
+| **v4.0** | **CondorNet™** | Unified fusion of all three paradigms with ETD-1 stability |
 
 ## Why The Switch?
 
-The Mamba-2 State Space Model was replaced with Neural Controlled Differential Equations (CDE) due to:
+The Mamba-2 State Space Model and Neural CDE were replaced with **CondorNet™** due to:
 
-| Issue | Mamba-2 | Neural CDE |
-|-------|---------|------------|
-| **Gradient Stability** | Exploding/vanishing gradients, required clip=1.0 | Tanh-bounded vector field, inherently stable |
-| **Feature Collapse** | Frequent constant-output predictions | Continuous dynamics prevent collapse |
-| **Time Modeling** | Discrete steps (ignores market gaps) | Continuous integral (natural time handling) |
-| **Code Complexity** | Hardware-specific CUDA kernels | Simple PyTorch ops (50 lines) |
+| Issue | Mamba-2 | Neural CDE | CondorNet™ |
+|-------|---------|------------|------------|
+| **Gradient Stability** | Exploding/vanishing gradients, NaN explosions | Tanh-bounded vector field | ETD-1 exponential integrator guarantees stability |
+| **Feature Collapse** | Frequent constant-output predictions | Occasional overfitting | TFT control synthesis prevents collapse |
+| **Regime Dynamics** | Implicit only | Insufficient | Explicit r_k combinatorics with 5 predicate gates |
+| **Time Modeling** | Discrete steps | Continuous integral | Unified: TFT + CDE path response + ETD-1 |
 
 ## Archived Files
 
@@ -55,12 +64,17 @@ Selective Scan:
   y_t = Ch_t
 ```
 
-This has been replaced by the Neural CDE formulation:
+This has been replaced by the **CondorNet™** formulation:
 
 ```
-dZ_t = f(Z_t) dX_t
+Master Equation (ETD-1):
+x_k = e^{A_θ(u_k)Δt_k} x_{k-1} + Δt_k φ₁(A_θ(u_k)Δt_k) B_θ(u_k) + G_θ(x_{k-1}, u_k) ΔX_k + D(Greeks_k, r_{k-1}, q_k)
 
-Z_T = Z_0 + ∫₀ᵀ f(Z_t) dX_t
+Where:
+- φ₁(M) = M⁻¹(e^M - I) is the ETD-1 basis function
+- u_k = TFT(X_{1:k}) is the TFT control embedding
+- G_θ(x, u) · ΔX_k is the Neural CDE path response
+- D is the 4-block forcing term
 ```
 
-See `docs/scientific_spec.md` for current mathematical specification.
+See `docs/scientific_spec.md` and `docs/condor_brain_architecture.md` for current mathematical specification.

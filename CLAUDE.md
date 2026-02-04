@@ -79,15 +79,15 @@ The system uses two separate data sources that must be understood together:
 - **Technical Analysis**: `pandas-ta` (Indicators: RSI, ADX, BBands, Stoch, etc.)
 - **Intelligence**:
   - **Fuzzy Logic**: 10-Factor Inference Engine (`qtmf.facade`)
-  - **Neural**: Neural CDE (Controlled Differential Equations) backbone (`intelligence/models/neural_cde.py`)
+  - **Neural**: CondorNet™ v4.0 unified architecture (`intelligence/condor_brain_net.py`) - ETD-1 + TFT + Neural CDE fusion
 
 ## Architecture
 - **Core**: `main.py` -> `RunConfig` -> `BacktestEngine`
 - **Data Layer**: `MTFSyncEngine` (1m, 5m, 15m) + `SyntheticOptionsEngine` (Pricing)
 - **Intelligence Layer**:
   - `qtmf/`: Central Neuro-Fuzzy Facade (Adaptive Credit Logic + 10-Factor Filters)
-  - `intelligence/condor_brain.py`: CondorBrain with Neural CDE backbone + MoE decoder
-  - `intelligence/models/neural_cde.py`: Neural CDE implementation (continuous-time dynamics)
+  - `intelligence/condor_brain_net.py`: CondorNet™ unified backbone (ETD-1 exponential integrator + TFT control + Neural CDE path response)
+  - `intelligence/condor_brain.py`: CondorBrain facade with CondorNet™ backbone + MoE decoder
   - `intelligence/fuzzy_engine.py`: Membership Functions (unchanged - runs alongside neural)
 - **Strategy**: `ZeroDTE_IC` (Iron Condor) located in `core/backtest_engine.py`
    - Provides theoretical option prices (Black-Scholes model)

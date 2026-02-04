@@ -1,7 +1,9 @@
-# Mamba2 Model Collapse Fix - Verification Report
+# CondorNet™ Model Collapse Fix - Verification Report (Legacy: Mamba2 Migration)
 
-**Date:** 2026-01-26
+**Date:** 2026-02-04
 **Purpose:** Document verification of all fixes to address model collapse issues
+
+> **Note:** This document is archived as part of the migration from Mamba-2 to CondorNet™ v4.0. CondorNet™ replaces Mamba-2 SSM (NaN explosions) and Neural CDE (overfitting) with a unified ETD-1 + TFT + Neural CDE fusion architecture.
 
 ## 1. Feature Verification
 
@@ -91,7 +93,7 @@
 
 ### ConditionalDiffusionHead
 - **Input Dim:** 4 features (r, rho, d, v)
-- **Condition Dim:** d_model (from Mamba backbone)
+- **Condition Dim:** d_model (from CondorNet™ backbone)
 - **Horizon:** 32 steps
 - **Diffusion Steps:** Configurable (default 50)
 

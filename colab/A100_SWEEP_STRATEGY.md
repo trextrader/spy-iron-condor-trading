@@ -1,7 +1,9 @@
 # A100 GPU Training Sweep Strategy
 
 ## Objective
-Systematically explore hyperparameter space on A100 GPU to find optimal CondorBrain configuration.
+Systematically explore hyperparameter space on A100 GPU to find optimal CondorNet™ configuration.
+
+> **Note:** CondorNet™ v4.0 replaces the previous Mamba-2 SSM (NaN explosions) and Neural CDE (overfitting) with a unified ETD-1 + TFT + Neural CDE fusion architecture.
 
 ---
 

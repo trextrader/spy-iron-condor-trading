@@ -1,6 +1,8 @@
 # ⚡ Lightning AI / Cloud Processing Instructions
 
-Follow these steps to run the modern **CondorBrain v2.2 (Neural CDE + Predicate Discovery)** on Lightning AI.
+Follow these steps to run the modern **CondorBrain v4.0 (CondorNet™ Unified Architecture)** on Lightning AI.
+
+> **Architecture Evolution:** CondorNet™ replaces the previous Mamba-2 SSM (NaN explosions) and Neural CDE (overfitting) with a mathematically principled fusion of ETD-1 exponential integration, TFT control synthesis, and Neural CDE path response.
 
 ## 1. Fast-Track Training (3M+ Rows)
 

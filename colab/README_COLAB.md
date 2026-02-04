@@ -1,6 +1,8 @@
 # ☁️ Running SPY Option Trader on Google Colab
 
-This guide explains how to migrate your local project to Google Colab to leverage high-performance GPUs (T4/A100) for Mamba Neural Network training and generic optimization.
+This guide explains how to migrate your local project to Google Colab to leverage high-performance GPUs (T4/A100) for CondorNet™ Neural Network training and generic optimization.
+
+> **Note:** CondorNet™ v4.0 replaces the previous Mamba-2 SSM (NaN explosions) and Neural CDE (overfitting) with a unified ETD-1 + TFT + Neural CDE fusion architecture.
 
 ## 1. Prepare Google Drive
 1.  **Zip your project**: Compress your entire `SPYOptionTrader_test` folder.
@@ -38,7 +40,7 @@ This guide explains how to migrate your local project to Google Colab to leverag
 4.  **Save**: Run Cell 4 to copy results back to Drive.
 
 ## 💡 Troubleshooting
-*   **"Mamba-SSM not found"**: Ensure you selected a **GPU Runtime**. The pre-built wheels for Mamba require CUDA.
+*   **"CondorNet not found"**: Ensure you selected a **GPU Runtime**. The CondorNet architecture requires CUDA.
 *   **"Drive not mounted"**: Re-run Cell 1 and ensure you completed the pop-up authorization.
 *   **Slow Uploads**: If you have massive CSVs (10GB+), consider uploading only the files you need for the backtest (e.g., `spy_options_intraday_large_with_greeks_m1.csv`) or using `gdown` if the file is hosted elsewhere.
 
@@ -52,18 +54,14 @@ This guide explains how to migrate your local project to Google Colab to leverag
    - The Neural Engine doesn't need 1-minute resolution. The optimizer automatically **resamples spot data to 15-minute bars (`15T`)**.
    - This reduces simulation time from ~90s to ~10s per run without losing signal quality.
 
-3. **Mamba Compilation**
-   - Mamba requires `causal-conv1d` to be compiled against the specific CUDA version.
-   - If you see `TypeError: NoneType object is not callable`, run:
-     ```bash
-     !pip uninstall -y causal-conv1d mamba-ssm
-     !pip install causal-conv1d>=1.2.0 mamba-ssm --no-binary :all:
-     ```
+3. **CondorNet Compilation**
+   - CondorNet requires PyTorch with CUDA support.
+   - If you see CUDA-related errors, ensure your runtime has GPU enabled.
 
 ---
 **Why Cloud?**
 *   **Speed**: Faster CPU cores for the backtest loop.
-*   **GPU**: 10x-50x speedup for the Mamba Neural Network inference.
+*   **GPU**: 10x-50x speedup for the CondorNet™ Neural Network inference.
 *   **Offloading**: Frees up your local PC.
 
 

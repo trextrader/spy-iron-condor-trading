@@ -7,10 +7,10 @@
 - [x] **Event Loop**: `precompute_all` for fast batch processing.
 - [x] **Fuzzy Logic**: 10-factor position sizing system.
 
-### Neural Intelligence (Mamba 2)
-- [x] **Model Architecture**: Integrated `DeepMamba` (SSM) with Mamba 2 blocks.
+### Neural Intelligence (CondorNet™ v4.0)
+- [x] **Model Architecture**: Integrated `CondorNet™` unified architecture (ETD-1 + TFT + Neural CDE fusion).
 - [x] **GPU Acceleration**: Implemented batch inference (`precompute_all`) to saturate T4/A100 GPUs.
-- [x] **Training Pipeline**: Created `intelligence/train_mamba.py` for end-to-end training.
+- [x] **Training Pipeline**: Created `intelligence/train_condor_brain.py` for end-to-end training.
 - [x] **Data Feeds**: Added Alpaca 15-Minute Intraday fetcher (`--save-only` workflow).
 - [x] **Inference**: Configurable `d_model`/`layers` for model sizing (256/12 vs 1024/32).
 
@@ -18,7 +18,7 @@
 - [x] **Segmentation**: 6-Phase serial optimization strategy.
 - [x] **Phase 6**: Fuzzy Weight Optimization (Neural, MTF, IV, Regime, RSI, ADX).
 - [x] **Metrics**: Net Profit / Max Drawdown targeting.
-- [x] **Integration**: Seamless loading of `models/mamba_active.pth`.
+- [x] **Integration**: Seamless loading of `models/condor_brain_active.pth`.
 - [x] **Performance**: Optimized backtest loop (300x speedup via deduplication).
 - [x] **Critical Fixes**: Resolved "Zero Trades" bug, implemented explicit Expiration Exit logic, and fixed Python/Pandas timestamp synchronization.
 - [x] **Intraday Support**: Full support for Alpaca-style intraday options data in the optimizer.
@@ -30,9 +30,9 @@
 ## 🚧 In Progress
 
 ### Alpha Generation
-- [ ] **Feature Engineering**: Add VIX Term Structure (Contango/Backwardation) to Mamba inputs.
-- [ ] **Classification**: Switch Mamba target from "Log Return regression" to "Classify Regime (Bull/Bear)".
-- [ ] **Hyperparameter Tuning**: Run a dedicated sweep for Mamba (Learning Rate, Dropout).
+- [ ] **Feature Engineering**: Add VIX Term Structure (Contango/Backwardation) to CondorNet inputs.
+- [ ] **Classification**: Switch CondorNet target from "Log Return regression" to "Classify Regime (Bull/Bear)".
+- [ ] **Hyperparameter Tuning**: Run a dedicated sweep for CondorNet (Learning Rate, Dropout).
 
 ### Live Trading
 - [ ] **Alpaca Execution**: Verify order routing in live paper account.

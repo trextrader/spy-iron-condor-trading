@@ -191,14 +191,14 @@ Where:
 | SMA Distance | 0.06 | Linear Decay |
 | **Parabolic SAR** | **0.07** | **Crossover** |
 
-## 5.3 Mamba 2 Neural Integration
-- **Architecture**: **DeepMamba** State-Space Model (6 Layers, d_model=256)
-- **Backend**: PyTorch + Mamba-SSM (CUDA Accelerated)
+## 5.3 CondorNet™ Neural Integration
+- **Architecture**: **CondorNet™** Unified Architecture (ETD-1 + TFT + Neural CDE fusion)
+- **Backend**: PyTorch (CUDA Accelerated)
 - **Input**: 8-bar context window (price, RSI, ATR, volume)
 - **Output**: `ForecastState(prob_bull, prob_bear, prob_neutral, confidence)`
 
 ### Fusion Formula:
-$$G_{fused} = 0.60 \times G_{gaussian} + 0.40 \times F_t + w_{neural} \times Confidence_{mamba}$$
+$$G_{fused} = 0.60 \times G_{gaussian} + 0.40 \times F_t + w_{neural} \times Confidence_{condornet}$$
 
 ## 5.4 Exit Priority Decision Tree
 
@@ -220,7 +220,7 @@ $$G_{fused} = 0.60 \times G_{gaussian} + 0.40 \times F_t + w_{neural} \times Con
 
 | Task | Priority | Notes |
 |------|----------|-------|
-| **Mamba GPU Support** | High | ✅ Upgraded to **DeepMamba** (6-layer, 256-dim) on Colab T4 |
+| **CondorNet GPU Support** | High | ✅ Upgraded to **CondorNet™** (ETD-1 unified) on Colab T4 |
 | **Backtest Speedup** | High | ✅ Implemented 15-min resampling (15x speedup) |
 | **Memory Optimization** | High | ✅ Chunked Loading + Date Filtering for >2GB datasets |
 | Parallelize Optimizer | High | `joblib` or `ray` (Next Step) |

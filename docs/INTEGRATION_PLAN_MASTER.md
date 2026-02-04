@@ -43,7 +43,7 @@ Key modules already present in the repo that this design must hook into:
 - Fuzzy sizing helpers: `intelligence/fuzzy_engine.py` and `qtmf/facade.py`
 - FIS pipeline: `intelligence/fuzzifier.py`, `intelligence/defuzzifier.py`, `intelligence/fis_sizer.py`
 - Rule engine: `intelligence/rule_engine/executor.py`
-- Model: `intelligence/condor_brain.py`
+- Model: `intelligence/condor_brain_net.py` (CondorNet™ unified backbone)
 - Loss: `intelligence/condor_loss.py`
 - Strategy entry/exit: `strategies/options_strategy.py`
 - Backtest: `core/backtest_engine.py`
@@ -78,7 +78,7 @@ Sizing (Fuzzy Measure) ? Execution (Order Router) ? Risk Tracking
 
 **Decision:** Use **V2.2** schema (54 features: 32 V2.1 base + 22 V2.2 primitives) from `intelligence/canonical_feature_registry.py`.
 
-This prevents mismatches between training/inference/backtest/mamba input, which currently use mixed 24/32/54 feature sets.
+This prevents mismatches between training/inference/backtest/CondorNet input, which currently use mixed 24/32/54 feature sets.
 
 ### 4.1.1 V2.2 Column Replacements
 
@@ -257,7 +257,7 @@ S_{trade}(x) = S_{max} \cdot \mu_I(x) \cdot \mu_{fuzzy}(x) \cdot \phi_{mamba}(x)
 
 - \(\mu_I\) = prediction set membership
 - \(\mu_{fuzzy}\) = 10-factor or 11-factor membership sum
-- \(\phi_{mamba}\) = neural confidence
+- \(\phi_{condornet}\) = neural confidence (CondorNet™ output)
 - \(r(x)\) = risk multiplier (drawdown, volatility, governance)
 
 ### 9.3 Integration Path (Recommended)
@@ -690,7 +690,7 @@ digraph S {
 - Add FeatureFlags to `core/config.py`
 - Align feature schema in:
   - `intelligence/canonical_feature_registry.py`
-  - `intelligence/mamba_engine.py`
+  - `intelligence/condor_brain_net.py`
   - `core/backtest_engine.py`
 
 ### Phase 1: Robust Pricing
@@ -1039,8 +1039,8 @@ This section enumerates concrete mismatches found between documentation/diagrams
 
 ### 27.3 Architecture Version Drift
 
-- Docs describe 24-layer Mamba-2 with 23 heads; code uses **32 layers** by default and outputs 8 IC params + regime + optional forecast.
-- `CondorBrainEngine` in code uses **12 layers** by default for production, while docs emphasize 24.
+- Docs describe CondorNet™ unified architecture; code uses **32 layers** by default and outputs 8 IC params + regime + optional forecast.
+- `CondorBrainEngine` in code uses **12 layers** by default for production, while docs may vary.
 
 **Action:** Add explicit model version metadata and reconcile documentation with actual production configs.
 

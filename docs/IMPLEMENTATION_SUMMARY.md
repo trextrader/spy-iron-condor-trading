@@ -1,7 +1,7 @@
 # Implementation Summary: Rule Documentation & Primitive Library
 
-**Date:** 2026-01-19
-**Version:** 2.5
+**Date:** 2026-02-04
+**Version:** 4.0
 **Status:** ✅ COMPLETE (Parts A, B, C)
 
 ---
@@ -9,7 +9,7 @@
 ## Executive Summary
 
 Successfully transformed 13 institutional trading rules from conceptual descriptions into:
-1. **Fully updated rule specifications** (Part A) aligned with DeepMamba v2.5
+1. **Fully updated rule specifications** (Part A) aligned with CondorNet™ v4.0
 2. **52-primitive canonical library** (Part B) for composable rule building
 3. **Declarative Rule DSL** (Part C) for AntiGrav ingestion
 
@@ -337,10 +337,10 @@ docs/
 
 ### Alignment
 
-- DeepMamba v2.5 ✅
+- CondorNet™ v4.0 ✅
 - Phase 2.5 Lag-Alignment ✅
 - FIS 11-Factor System ✅
-- v2.1 Feature Schema ✅
+- v2.2 Feature Schema ✅
 
 ### Deliverables
 

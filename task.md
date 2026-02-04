@@ -89,7 +89,7 @@
 - [x] **Live Execution Engine (`run_live_alpaca.py`)** <!-- id: 2 -->
     - [x] Refactor for 11-Factor Hybrid Logic <!-- id: 3 -->
     - [x] Implement "Eagle" style live logging <!-- id: 4 -->
-    - [x] Integrate Neural CDE Backbone (V2.2) <!-- id: 9 -->
+    - [x] Integrate CondorNet™ Backbone (V4.0) <!-- id: 9 -->
     - [x] Add Data Recorder for Live Option Chains <!-- id: 10 -->
 - [ ] Integrate Meta-Forecaster into Backtest Engine (PAUSED: Sync with Training)
 - [x] Verify ensemble switching logic (Local Unit Test Passed)

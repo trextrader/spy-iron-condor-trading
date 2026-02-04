@@ -1,9 +1,9 @@
-# Canonical Rule Primitive Library (v2.5)
-## For CondorBrain/DeepMamba & AntiGrav Integration
+# Canonical Rule Primitive Library (v4.0)
+## For CondorBrain/CondorNet™ & AntiGrav Integration
 
-**Version:** 2.5
-**Last Updated:** 2026-01-19
-**Alignment:** DeepMamba v2.5, Phase 2.5 Lag-Alignment, FIS 11-Factor System
+**Version:** 4.0
+**Last Updated:** 2026-02-04
+**Alignment:** CondorNet™ v4.0 (ETD-1 + TFT + Neural CDE), Phase 2.5 Lag-Alignment, FIS 11-Factor System
 
 ---
 

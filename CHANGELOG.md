@@ -6,7 +6,7 @@ This release introduces six advanced modules that significantly improve model ex
 
 #### New Modules
 - **CompositeCondorLoss** (`intelligence/condor_loss.py`): Multi-objective loss combining Huber prediction, Sharpe proxy, drawdown penalty, and turnover penalty. Expected +15-25% Sharpe improvement.
-- **VolGatedAttn** (`intelligence/vol_gated_attn.py`): Dynamic volatility-gated attention inserted after Mamba layers 7, 15, 23. Adapts receptive field based on market regime.
+- **VolGatedAttn** (`intelligence/vol_gated_attn.py`): Dynamic volatility-gated attention inserted after CondorNet layers 7, 15, 23. Adapts receptive field based on market regime.
 - **TopKMoE** (`intelligence/topk_moe.py`): Sparse mixture-of-experts with top-k routing. Activates only 1 of 3 experts per sample for 3x inference efficiency.
 - **Manifold Volatility** (`intelligence/indicators/manifold_volatility.py`): Menger curvature proxy, volatility energy, and dynamic RSI features.
 - **TDA Signature** (`intelligence/indicators/tda_signature.py`): Persistent homology regime detection using Takens embedding and H1 cycles.

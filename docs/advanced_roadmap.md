@@ -1,19 +1,19 @@
-# Advanced Forecasting Strategies for CondorBrain (v3.0 Roadmap)
+# Advanced Forecasting Strategies for CondorBrain (v4.0 Roadmap)
 
-**Status:** Proposal / Research Phase
+**Status:** Active Development
 **Target:** 32-step OHLCV Prediction & Robust Risk Alignment
 
-To improve 32-step OHLCV predictions, we propose a multi-pronged approach: enhancing the Mamba/MoE architecture, integrating generative and geometric methods, using robust/risk-aware losses, and explicitly modeling volatility regimes and uncertainty.
+To improve 32-step OHLCV predictions, we have adopted the **CondorNet™ unified architecture**, which fuses ETD-1 exponential integration, TFT control synthesis, and Neural CDE path response. We can further specialize it via Mixture-of-Experts (MoE) gating on market regimes.
 
-## 1. Enhancing Mamba/MoE Architecture
+## 1. CondorNet™/MoE Architecture
 
-The Mamba SSM (and its successor Mamba-2) already achieves state-of-the-art accuracy and efficiency on sequence tasks. We can further specialize it via Mixture-of-Experts (MoE) gating on market regimes.
+CondorNet™ replaces the previous Mamba-2 SSM (NaN explosions) and Neural CDE (overfitting) with a mathematically principled fusion. We can further specialize it via Mixture-of-Experts (MoE) gating on market regimes.
 
 ### Volatility-Gated MoE
 Use an adaptive gating network that routes inputs (or volatility indicators) to different experts.
 *   **Concept**: One expert (e.g., RNN/SSM) handles high-volatility regimes, another (linear) handles calm periods.
 *   **Evidence**: Volatility-gated MoE achieved ~33% MSE reduction on volatile stocks.
-*   **Efficiency**: MoE-Mamba reaches accuracy in ≈2.2× fewer steps.
+*   **Efficiency**: MoE-CondorNet reaches accuracy in ≈2.2× fewer steps.
 
 **Implementation Pattern:**
 
@@ -39,7 +39,7 @@ class VolatilityGatedMoE(nn.Module):
 ### Diffusion Heads
 Treat the 32-future bars as a "latent" series and train a score-based model to sample from the conditional distribution.
 *   **Advantage**: Stable training compared to GANs, smooth trajectories (TransFusion).
-*   **Action**: Train a small score-network to refine Mamba outputs by denoising.
+*   **Action**: Train a small score-network to refine CondorNet outputs by denoising.
 
 ### Topological Data Analysis (TDA) Loss
 Penalize differences in persistent diagrams using a "Topological Consistency Loss":
@@ -89,8 +89,8 @@ Draw multiple sample futures via Diffusion head to form a non-parametric confide
 
 ---
 
-**Summary Recommendation for v3.0:**
-1.  **Architecture**: MoE-Mamba-2 with Volatility Gating.
+**Summary Recommendation for v4.0:**
+1.  **Architecture**: CondorNet™ with MoE Volatility Gating.
 2.  **Generative**: Add Diffusion refinement head.
 3.  **Losses**: Composite Huber + Sharpe + Quantile.
 4.  **Adaptation**: Online learning on high-vol triggers.

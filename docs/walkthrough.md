@@ -126,8 +126,8 @@ CSV → MarketSnapshot → Trading Decision with sample data.
 
 ## Next Steps (Phase 3+)
 
-4. **Neural CDE Migration**: Replaced legacy Mamba-2 SSM backbone with continuous-time Neural CDE for superior stability.
-5. **Documentation Audit**: Completed a thorough audit to remove Mamba/SSM references from core specifications.
+4. **CondorNet™ Migration**: Replaced legacy Mamba-2 SSM and Neural CDE with unified CondorNet™ architecture (ETD-1 exponential integrator + TFT control synthesis + Neural CDE path response).
+5. **Documentation Audit**: Completed a thorough audit to update all architecture documentation for CondorNet™ v4.0.
 
 ## Commits
 - `feat: Multi-timeframe support (1/5/15m) with auto file selection`
