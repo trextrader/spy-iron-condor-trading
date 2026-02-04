@@ -550,8 +550,8 @@ class PredicateSignature(nn.Module):
             moments.append(mu_r)
         moments = torch.cat(moments, dim=-1)  # (batch, R)
 
-        # Bloom-like signature
-        bloom = torch.sigmoid(self.W_bloom(p))  # (batch, M)
+        # Bloom-like signature (use sorted for invariance)
+        bloom = torch.sigmoid(self.W_bloom(p_sorted))  # (batch, M)
 
         # Full signature
         z_pred = torch.cat([p, moments, bloom], dim=-1)
@@ -566,7 +566,7 @@ class PredicateSignature(nn.Module):
             mu_r = (p_sorted ** r).mean(dim=-1, keepdim=True)
             moments.append(mu_r)
         moments = torch.cat(moments, dim=-1)
-        bloom = torch.sigmoid(self.W_bloom(p))
+        bloom = torch.sigmoid(self.W_bloom(p_sorted))
         return torch.cat([moments, bloom], dim=-1)
 
 
