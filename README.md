@@ -1,13 +1,37 @@
-> **"The H100-Optimized Neural CDE Intelligence"**
+> **"CondorNet™ - The Unified Neural Architecture for Options Intelligence"**
 
-## 🚀 New in v2.0 (Scientific Update)
-Full technical details available in [Scientific Specification](docs/scientific_spec.md).
+![CondorNet™ Equation Graph](docs/architecture/condornet_equation_graph_premium_1770200590388.png)
 
-- **🧠 Neural CDE Architecture:** Replaced Mamba-2 with **Neural Controlled Differential Equations (CDE)**, achieving superior numerical stability and continuous-time modeling.
-- **⚡ H100 Optimization:** Custom `TF32`, `cuDNN Benchmark`, and `LazySequenceDataset` allow training on **10 Million Rows** (1.2B tokens) entirely in-memory.
-- **🛡️ Robust Stability:** Implemented Z-Score Scaling ($x \leftarrow \frac{x-\mu}{\sigma}$) + Tanh Clipping to solve FP16 NaN divergence.
-- **📊 Advanced Monitoring:** Real-time TensorBoard logging for per-head loss, regime expert activations, and 45-day price trajectories.
-- **🔥 Production Sweep:** Automated hyperparameter tuning infrastructure capable of training 100M+ parameter models.
+## 🚀 New in v4.0 (CondorNet™ - Unified Architecture)
+
+**CondorNet™** is a first-of-its-kind unified neural architecture that fuses three paradigms:
+
+$$x_k = e^{A_\theta(u_k)\Delta t_k} x_{k-1} + \Delta t_k \varphi_1(A_\theta(u_k)\Delta t_k) B_\theta(u_k) + G_\theta(x_{k-1}, u_k) \Delta X_k + D(\text{Greeks}_k, r_{k-1}, q_k)$$
+
+### Architecture Evolution
+| Version | Architecture | Outcome |
+|---------|-------------|---------|
+| v1.x | TFT (Temporal Fusion Transformer) | Failed to converge |
+| v2.x | Mamba-2 SSM | NaN explosions |
+| v3.x | Neural CDE | Overfitting, poor regime adaptation |
+| **v4.0** | **CondorNet™** | **Unified fusion with ETD-1 stability** |
+
+### Key Innovations
+- **ETD-1 Exponential Integrator**: φ₁(M) = M⁻¹(e^M - I) for guaranteed numerical stability
+- **4-Block Augmented State**: x_k = [h_k; v_k; m_k; r_k] - latent, portfolio, memory, regime
+- **5 Canonical Predicate Gates**: Volatility spike, liquidity compression, momentum reversal, gap risk, Greeks pressure
+- **TFT Control Synthesis**: Long-range temporal context without direct prediction
+- **Neural CDE Path Response**: G_θ(x, u) · ΔX_k for market-driven state evolution
+
+Full technical details in [CondorNet Implementation Plan](docs/CONDORNET_IMPLEMENTATION_PLAN.md) and [Scientific Specification](docs/scientific_spec.md).
+
+## 🆕 Previous Versions (v3.0 - Neural CDE)
+
+- **Neural CDE Architecture:** Replaced Mamba-2 with Neural Controlled Differential Equations
+- **⚡ H100 Optimization:** Custom `TF32`, `cuDNN Benchmark`, and `LazySequenceDataset` for 10M+ rows
+- **🛡️ Robust Stability:** Z-Score Scaling + Tanh Clipping to solve FP16 NaN divergence
+- **📊 Advanced Monitoring:** Real-time TensorBoard logging for per-head loss
+- **🔥 Production Sweep:** Automated hyperparameter tuning for 100M+ parameter models
 
 ## 🔍 Interpretability Engine (v3.0)
 **"Physics-Inspired Auditing for Neural Policy Networks"**
@@ -89,29 +113,30 @@ CondorBrain is an advanced algorithmic trading system designed for SPY Iron Cond
 - **High-Fidelity Backtesting**: 5-minute bar simulation with accurate mark-to-market P&L, leg-by-leg exit logic, and realistic slippage/commissions
 - **Phased Serial Optimization**: Grid-search engine optimizing for **Net Profit / Max Drawdown** ratio with hardware benchmarking
 - **10-Factor Fuzzy Intelligence**: Dynamic position sizing based on MTF Consensus, IV Rank, VIX Regime, RSI, ADX, Bollinger Bands, Stochastic, Volume, SMA Distance, and **Parabolic SAR**
-- **Neural CDE Forecasting**: Continuous-time state-space modeling with **Diffusion Head** for trajectory refinement and **Topological Data Analysis (TDA)** for regime detection.
+- **CondorNet™ Forecasting**: Unified ETD-1 + Neural CDE + TFT architecture with **5 Predicate Gates** for regime detection and **4-Block Augmented State** for comprehensive market modeling.
 
-## 🧠 Neural CDE Core Engine
+## 🧠 CondorNet™ Core Engine
 
-The system uses a custom **Neural CDE** architecture. Unlike discrete models, CDEs treat the market as a continuous control path, allowing the model to digest weeks of 1-minute bars (Lookback: 60-500) with guaranteed stability.
+The system uses the novel **CondorNet™** architecture that unifies three previously separate approaches (TFT, Neural CDE, Mamba/SSD) into a single mathematically principled framework.
 
 ### Mathematical Foundation
-The core mechanism is a Neural Controlled Differential Equation:
+The core mechanism is the CondorNet™ Master Equation:
 
-$$
-z_{t+1} = z_t + f(z_t) \cdot dx_t
-$$
+$$x_k = e^{A_\theta(u_k)\Delta t_k} x_{k-1} + \Delta t_k \varphi_1(A_\theta(u_k)\Delta t_k) B_\theta(u_k) + G_\theta(x_{k-1}, u_k) \Delta X_k + D(\text{Greeks}_k, r_{k-1}, q_k)$$
 
 Where:
-*   $z_t$ is the latent status (memory)
-*   $x_t$ is the control path (Log Returns, RSI, ATR, Vol Ratio)
-*   $f(z)$ is a tanh-bounded neural vector field (Linear → SiLU → Linear → Tanh)
-*   $dx_t$ is the increment $(x_{t+1} - x_t)$
+*   $x_k = [h_k; v_k; m_k; r_k]$ is the **4-block augmented state** (latent, portfolio, memory, regime)
+*   $e^{A_\theta \Delta t}$ is the **ETD-1 matrix exponential** for stable time evolution
+*   $\varphi_1(M) = M^{-1}(e^M - I)$ is the **ETD-1 basis function**
+*   $u_k = \text{TFT}(X_{1:k})$ is the **control embedding** from Temporal Fusion Transformer
+*   $G_\theta(x, u) \cdot \Delta X_k$ is the **Neural CDE path response**
+*   $D(\text{Greeks}, r_{k-1}, q)$ is the **4-block forcing** (uses $r_{k-1}$ for causality)
 
-In the **CondorBrain** implementation:
-*   **Input**: $(B, T, 52)$ tensor [V2.2 Feature Set]
-*   **Backbone**: Neural CDE Solver (Explicit Euler)
-*   **Output**: Multi-head predictive distribution (8-head policy + 3-head MoE + 12-head Horizon)
+In the **CondorNet™** implementation (`intelligence/condor_brain_net.py`):
+*   **Input**: $(B, T, 54)$ tensor [V2.2 Feature Set]
+*   **Backbone**: ETD-1 Integrator + Neural CDE + TFT Control
+*   **State**: 4-block augmented $[h; v; m; r]$ with d_total = 384
+*   **Output**: 10-head policy (IC parameters + confidence + entry/exit)
 
 ### Training Workflow (v2.2 Fast-Track)
 

@@ -1,0 +1,84 @@
+digraph CondorNet_NN_Architecture \{
+    rankdir=TB;
+    splines=curved;
+    bgcolor="#000000";
+    compound=true;
+    node [shape=box, style="filled,rounded", color="#333333", fillcolor="#1a1a1a", fontcolor="#ffffff", fontname="Helvetica", fontsize=10, penwidth=1.5];
+    edge [color="#777777", penwidth=1.2, arrowsize=0.8, fontname="Helvetica", fontsize=9, fontcolor="#bbbbbb"];
+
+    subgraph cluster_input {
+        label="Data Layer";
+        fontcolor="#00d4ff";
+        color="#00d4ff";
+        style="rounded,dashed";
+        bgcolor="#0a1a2a";
+        Market[label="SPY Market Data\n(O,H,L,C,V, Options, Greeks)", fillcolor="#1e2a3a"];
+        Features[label="Ψ: Feature Engineering\n58-D vector", fillcolor="#1e2a3a"];
+        Market -> Features;
+    \}
+
+    subgraph cluster_control \{
+        label="Control Synthesis (TFT)";
+        fontcolor="#4a6cff";
+        color="#4a6cff";
+        style="rounded,dashed";
+        bgcolor="#0a0a2a";
+        TFT[label="Temporal Fusion Transformer Gate", fillcolor="#1a2a4a"];
+        Control[label="u_t: Control Vector", fillcolor="#1a2a4a"];
+        Features -> TFT -> Control;
+    \}
+
+    subgraph cluster_dynamics \{
+        label="Latent Dynamics (Neural CDE + SSD)";
+        fontcolor="#48bb78";
+        color="#48bb78";
+        style="rounded,dashed";
+        bgcolor="#0a2a1a";
+        A[label="A(u_t,σ_t): Stability Operator", fillcolor="#1a4a2a"];
+        B[label="B(u_t): Input Map", fillcolor="#1a4a2a"];
+        Integrator[label="Integrator\nexp(AΔt), φ₁(AΔt)", fillcolor="#1a4a2a", shape=component];
+        Latent[label="h_t: Latent Risk State", fillcolor="#1a4a2a", shape=cylinder];
+        Control -> A;
+        Control -> B;
+        A -> Integrator;
+        B -> Integrator;
+        Integrator -> Latent;
+    \}
+
+    subgraph cluster_decision \{
+        label="Decision Module";
+        fontcolor="#ed8936";
+        color="#ed8936";
+        style="rounded,dashed";
+        bgcolor="#2a1a0a";
+        Projection[label="Projection: y_t = C h_t", fillcolor="#4a2a1a"];
+        Predicate[label="Predicate Gating (p_t)", fillcolor="#4a2a1a"];
+        Fuzzy[label="Fuzzy Logic Fusion\n y_t^final", fillcolor="#4a2a1a"];
+        Action[label="a_t: Trade Signal / Position Size", fillcolor="#4a2a1a", shape=doubleoctagon];
+        Latent -> Projection -> Fuzzy -> Action;
+        Predicate -> Fuzzy;
+    \}
+
+    subgraph cluster_training \{
+        label="Training Objectives & Diagnostics";
+        fontcolor="#a0aec0";
+        color="#a0aec0";
+        style="rounded,dashed";
+        bgcolor="#1a1a1a";
+        Loss[label="Composite Loss λ_i L_i\n[Pred, Sharpe, Drawdown, Turnover, Fuzzy]", fillcolor="#2d3748"];
+        Spectral[label="Spectral Radius Monitor ρ(AΔt)≤1", fillcolor="#2d3748"];
+        Energy[label="Energy Regularizer", fillcolor="#2d3748"];
+        Loss -> Spectral;
+        Loss -> Energy;
+    \}
+
+    Action -> Loss [style=dotted, xlabel="Backprop reward", color="#ff6b6b"];
+
+    // Copyright Notice
+    subgraph cluster_copyright \{
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 CondorBrain™ Intelligence Engine"];
+    \}
+}

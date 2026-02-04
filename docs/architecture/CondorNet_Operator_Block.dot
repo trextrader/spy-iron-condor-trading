@@ -1,0 +1,117 @@
+digraph CondorNet_Operator_Block \{
+    rankdir=TB;
+    splines=curved;
+    bgcolor="#000000";
+    fontname="Arial,Sans-Serif";
+    fontsize=28;
+    labelloc="t";
+    label="CondorNet™ Master Update Cycle\n(ETD-1 Exponential Integrator + Neural CDE + TFT Control)";
+    fontcolor="#ffffff";
+    nodesep=0.5;
+    ranksep=1.0;
+    compound=true;
+
+    // GLOBAL NODE STYLE
+    node [
+        fontname="Arial,Sans-Serif",
+        fontsize=18,
+        shape=box,
+        style="filled,rounded",
+        fillcolor="#1a1a1a",
+        color="#555555",
+        fontcolor="#ffffff",
+        penwidth=2.5,
+        margin="0.4,0.2"
+    ];
+
+    // GLOBAL EDGE STYLE
+    edge [
+        color="#999999",
+        penwidth=2.0,
+        arrowsize=1.2,
+        fontname="Arial,Sans-Serif",
+        fontsize=16,
+        fontcolor="#dddddd"
+    ];
+
+    // -----------------------------
+    // Input Groupings (Vertical Stack)
+    // -----------------------------
+    Xkm1    [label="Features (k-1)", fillcolor="#2a2a2a"];
+    Xk      [label="Features (k)",   fillcolor="#2a2a2a"];
+    dXk     [label="Feature Delta (ΔX)", fillcolor="#1e2a3a", color="#00d4ff"];
+
+    tkm1    [label="Time (k-1)", fillcolor="#2a2a2a"];
+    tk      [label="Time (k)",   fillcolor="#2a2a2a"];
+    dtk     [label="Time Delta (Δt)", fillcolor="#1e2a3a", color="#00d4ff"];
+
+    // State & Control
+    xkm1    [label="Previous State x_{k-1\}", fillcolor="#1a2a4a", color="#4a6cff", fontsize=22, width=3.0];
+    uk      [label="Control u_k (TFT)",    fillcolor="#1a4a2a", color="#48bb78", fontsize=22, width=3.0];
+
+    // -----------------------------
+    // Core Logic (Vertical)
+    // -----------------------------
+    subgraph cluster_logic \{
+        style=invis;
+        
+        Atheta  [label="A_θ(u_k)\nDynamics Matrix", fillcolor="#1a2a4a"];
+        Btheta  [label="B_θ(u_k)\nInput Map", fillcolor="#1a2a4a"];
+        
+        coreOut [label="core_k = F_k x_{k-1\} + g_k\n(ETD-1: F=exp(AΔt), g=Δtφ₁B)", fillcolor="#2a4a6a", color="#4a6cff", fontsize=22];
+        ctrlOut [label="ctrl_k = G_θ(x_\{k-1\}, u_k) · ΔX_k\n(Neural CDE Path Response)", fillcolor="#2a6a4a", color="#48bb78", fontsize=22];
+        Dforce  [label="D(Greeks_k, r_\{k-1\}, q_k)\n(Full 4-Block Forcing)", fillcolor="#4a2a1a", color="#ed8936", fontsize=22];
+
+        // r_k Regime Dynamics
+        regimeDyn [label="r_k Dynamics\nα_k ⊙ r_\{k-1\} + β_k\n(Predicate Combinatorics)", fillcolor="#4a1a4a", color="#9f7aea", fontsize=18];
+    }
+
+    // Output Combined
+    sumNode  [label="Summation Node\nx_k = core + ctrl + forcing", fillcolor="#333333", color="#ffffff", fontsize=24, penwidth=4, width=4.0];
+    xk       [label="NEW STATE x_k", fillcolor="#1a2a4a", color="#4a6cff", fontsize=28, penwidth=4, width=4.5];
+
+    // -----------------------------
+    // Vertical Wiring
+    // -----------------------------
+    Xkm1 -> Xk -> dXk;
+    tkm1 -> tk -> dtk;
+    
+    Xk -> uk [xlabel="context"];
+    uk -> Atheta;
+    uk -> Btheta;
+    dtk -> coreOut [xlabel="scaling"];
+    Atheta -> coreOut;
+    Btheta -> coreOut;
+    xkm1 -> coreOut;
+    
+    uk -> ctrlOut;
+    xkm1 -> ctrlOut;
+    dXk -> ctrlOut [xlabel="driving signal"];
+    
+    // 5 Canonical Predicate Gates
+    predicates [label="5 Canonical Predicates\n[VolSpike|Liquidity|Reversal|Gap|Greeks]", fillcolor="#2a1a4a", color="#9f7aea", fontsize=16];
+    Xk -> predicates [xlabel="features"];
+    predicates -> regimeDyn [xlabel="z_pred"];
+    regimeDyn -> Dforce [xlabel="r_\{k-1\}"];
+
+    Dforce -> sumNode;
+    coreOut -> sumNode;
+    ctrlOut -> sumNode;
+    sumNode -> xk;
+
+    // Bottom Manifold Summary - Full 4-Block Augmented State
+    manifold [label="4-Block Augmented State x_k = [h_k; v_k; m_k; r_k]\n| h_k (Latent Risk Manifold) | v_k (Portfolio State) | m_k (Risk Memory) | r_k (Regime Combinatorics) |", shape=record, fillcolor="#1a1a1a", color="#888888", fontsize=14];
+    xk -> manifold;
+
+    // Master Equation Annotation
+    equation [label="Master Equation (ETD-1):\nx_k = e^\{A_θ(u_k)Δt_k\} x_\{k-1\} + Δt_k φ₁(A_θ(u_k)Δt_k) B_θ(u_k)\n      + G_θ(x_\{k-1\}, u_k) ΔX_k + D(Greeks_k, r_\{k-1\}, q_k)\n\nφ₁(M) = M⁻¹(e^M - I)  |  ETD-1 Basis Function", shape=note, fillcolor="#0a0a1a", color="#4a6cff", fontcolor="#aabbff", fontsize=12];
+    manifold -> equation [style=invis];
+
+    // Copyright
+    subgraph cluster_copyright \{
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=14, fontcolor="#888888"];
+        copyright_note [label="© 2026 CondorBrain™ Differential Intelligence"];
+    \}
+}

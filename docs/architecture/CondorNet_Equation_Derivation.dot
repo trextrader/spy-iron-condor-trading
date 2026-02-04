@@ -1,0 +1,120 @@
+digraph CondorNet_Math_Fusion \{
+  rankdir=TB;
+  fontsize=18;
+  labelloc="t";
+  label="CondorNet™ Mathematical Fusion: TFT × Neural CDE × Mamba/SSD";
+
+  node [
+    shape=box,
+    style="rounded,filled",
+    fontsize=13,
+    margin="0.22,0.14"
+  ];
+
+  // =====================================================
+  // REGION I — TFT CONTROL SYNTHESIS
+  // =====================================================
+  subgraph cluster_tft {
+    label="Region I — TFT Control Synthesis";
+    style="dashed,rounded";
+    color="#22c55e";
+    fontcolor="#22c55e";
+
+    Xk      [label="Feature Path X_\{1:k\\}", fillcolor="#ecfdf5"];
+    uk      [label="u_k := TFT(X_\\{1:k\\})\n(Control Summary)", fillcolor="#bbf7d0"];
+  }
+
+  // =====================================================
+  // REGION II — NEURAL CDE RESPONSE
+  // =====================================================
+  subgraph cluster_cde \{
+    label="Region II — Neural CDE (Controlled Response)";
+    style="dashed,rounded";
+    color="#3b82f6";
+    fontcolor="#3b82f6";
+
+    dXk     [label="ΔX_k := X_k − X_\{k−1\\}", fillcolor="#eff6ff"];
+    Gtheta  [label="G_θ(x_\\{k−1\\}, u_k)\n∈ ℝ^\\{d_x×F\\}", fillcolor="#dbeafe"];
+    cdeOut  [label="G_θ(x_\\{k−1\\},u_k) · ΔX_k", fillcolor="#bfdbfe"];
+  }
+
+  // =====================================================
+  // REGION III — MAMBA / SSD / ETD CORE
+  // =====================================================
+  subgraph cluster_mamba \{
+    label="Region III — Mamba / SSD / ETD Time Evolution";
+    style="dashed,rounded";
+    color="#f59e0b";
+    fontcolor="#f59e0b";
+
+    xprev   [label="Previous State x_\{k−1\\}", fillcolor="#fff7ed"];
+    dt      [label="Δt_k", fillcolor="#ffedd5"];
+    Atheta  [label="A_θ(u_k)\n(Generator)", fillcolor="#fed7aa"];
+    Btheta  [label="B_θ(u_k)\n(Affine Forcing)", fillcolor="#fed7aa"];
+
+    etdOut  [label="ETD-1 Core\nexp(AΔt)x + Δtϕ₁(AΔt)B", fillcolor="#fdba74"];
+  }
+
+  // =====================================================
+  // EXECUTION / RISK FORCING
+  // =====================================================
+  // =====================================================
+  // REGION IV — PREDICATE GATES & REGIME DYNAMICS
+  // =====================================================
+  subgraph cluster_predicates \{
+    label="Region IV — Predicate Gates & Regime Dynamics";
+    style="dashed,rounded";
+    color="#9333ea";
+    fontcolor="#9333ea";
+
+    predicates [label="5 Canonical Predicates p_k\n[VolSpike|Liquidity|Reversal|Gap|Greeks]", fillcolor="#f3e8ff"];
+    signature [label="Predicate Signature\nz_pred = [p; moments; bloom]", fillcolor="#e9d5ff"];
+    regimeDyn [label="r_k = α_k ⊙ r_\{k-1\\} + β_k\n(Regime Combinatorics)", fillcolor="#d8b4fe"];
+  }
+
+  // =====================================================
+  // EXECUTION / RISK FORCING (uses r_\{k-1\} for causality)
+  // =====================================================
+  force [label="D(Greeks_k, r_\\{k−1\\}, q_k)\nFull 4-Block Forcing\n(Uses r_\\{k-1\\} for causality)", fillcolor="#fecaca"];
+
+  // =====================================================
+  // CONDORNET FUSION
+  // =====================================================
+  sum [label="CondorNet™ Fusion\nx_k = F_k x_\{k-1\} + g_k + G·ΔX + D", fillcolor="#e5e7eb"];
+  xk  [label="NEW STATE x_k = [h_k; v_k; m_k; r_k]\n(4-Block Augmented State)", fillcolor="#c7d2fe"];
+
+  // =====================================================
+  // MASTER EQUATION ANNOTATION
+  // =====================================================
+  masterEq [label="CondorNet™ Master Equation (Appendix C):\n\nx_k = e^\\{A_θ(u_k)Δt_k\\} x_\\{k-1\\} + Δt_k φ₁(A_θ(u_k)Δt_k) B_θ(u_k)\n        + G_θ(x_\\{k-1\\}, u_k) ΔX_k + D(Greeks_k, r_\\{k-1\\}, q_k)\n\nwhere φ₁(M) = M⁻¹(e^M − I) is the ETD-1 basis function", shape=note, fillcolor="#1e293b", fontcolor="#94a3b8"];
+
+  // ---------------- Wiring ----------------
+  Xk -> uk;
+  Xk -> dXk;
+  Xk -> predicates;
+
+  uk -> Atheta;
+  uk -> Btheta;
+  uk -> Gtheta;
+
+  xprev -> etdOut;
+  dt -> etdOut;
+  Atheta -> etdOut;
+  Btheta -> etdOut;
+
+  xprev -> Gtheta;
+  Gtheta -> cdeOut;
+  dXk -> cdeOut;
+
+  // Predicate chain
+  predicates -> signature;
+  signature -> regimeDyn;
+  regimeDyn -> force [label="r_\\{k-1\\}"];
+
+  etdOut -> sum;
+  cdeOut -> sum;
+  force -> sum;
+
+  sum -> xk;
+  masterEq -> sum [style=invis];
+}

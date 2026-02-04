@@ -1,0 +1,83 @@
+digraph CondorNet_Mathematical_Integrator_Flow \{
+    rankdir=TB;
+    splines=curved;
+    bgcolor="#000000";
+    fontname="Helvetica";
+    fontsize=12;
+    nodesep=0.5;
+    ranksep=0.7;
+    compound=true;
+
+    // GLOBAL NODE STYLE
+    node [
+        fontname="Helvetica",
+        fontsize=10,
+        shape=box,
+        style="filled,rounded",
+        fillcolor="#1a1a1a",
+        color="#333333",
+        fontcolor="#ffffff",
+        penwidth=1.5
+    ];
+
+    // GLOBAL EDGE STYLE
+    edge [
+        color="#777777",
+        penwidth=1.2,
+        arrowsize=0.8,
+        fontname="Helvetica",
+        fontsize=9,
+        fontcolor="#bbbbbb"
+    ];
+
+    ST [label="s_t (Market State)", fillcolor="#1e2a3a"];
+    Psi [label="Ψ(s_t): Feature Map", fillcolor="#1e2a3a"];
+    TFT [label="TFT Gating", fillcolor="#1a3a5a", color="#4a6cff"];
+    UT_Sigma [label="u_t, σ_t (Control & Vol)", fillcolor="#1a3a5a", color="#4a6cff"];
+    
+    subgraph cluster_dynamics {
+        label="Operator Synthesis";
+        fontcolor="#48bb78";
+        color="#48bb78";
+        style="rounded,dashed";
+        bgcolor="#0a2a1a";
+        
+        AB [label="A(u_t, σ_t), B(u_t)\n(Stability & Input Maps)", fillcolor="#1a4a2a"];
+    \}
+
+    Greeks [label="Greeks_t (θ, ρ, γ)", fillcolor="#1e2a3a"];
+    
+    Integrator [label="Differential Integrator\n(expA & φ₁)", fillcolor="#2f5a4a", color="#68d391", shape=component];
+    H [label="h_t (Latent Risk Manifold)", fillcolor="#2d3748", shape=cylinder];
+    
+    subgraph cluster_decision \{
+        label="Policy Heads";
+        fontcolor="#ed8936";
+        color="#ed8936";
+        style="rounded,dashed";
+        bgcolor="#2a1a0a";
+        
+        Proj [label="Projection C → y_t", fillcolor="#4a2a1a"];
+        Heads [label="Decision Heads", fillcolor="#4a2a1a"];
+    \}
+
+    Action [label="a_t (Final Action)", fillcolor="#5a1a1a", color="#e53e3e", shape=doubleoctagon];
+
+    ST -> Psi -> TFT -> UT_Sigma;
+    UT_Sigma -> AB [xlabel="u_t integration"];
+    UT_Sigma -> Integrator [xlabel="σ_t pressure", style=dashed];
+    Greeks -> Integrator [xlabel="Greeks influence"];
+    AB -> Integrator;
+    Integrator -> H;
+    H -> Proj;
+    Proj -> Heads;
+    Heads -> Action;
+
+    // Copyright Notice
+    subgraph cluster_copyright \{
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 CondorBrain™ Intelligence Engine"];
+    \}
+}

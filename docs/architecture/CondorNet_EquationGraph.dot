@@ -1,0 +1,92 @@
+digraph CondorNet_EquationGraph \{
+    rankdir=TB;
+    splines=curved;
+    bgcolor="#000000";
+    fontname="Helvetica";
+    fontsize=14;
+    nodesep=0.4;
+    ranksep=0.6;
+    compound=true;
+    labelloc="t";
+    label="CondorNet™ Equation Data Flow\n(ETD-1 × Neural CDE × Predicate Gates)";
+
+    // GLOBAL NODE STYLE
+    node [
+        fontname="Helvetica",
+        fontsize=10,
+        shape=box,
+        style="filled,rounded",
+        fillcolor="#1a1a1a",
+        color="#333333",
+        fontcolor="#ffffff",
+        penwidth=1.5
+    ];
+
+    // GLOBAL EDGE STYLE
+    edge [
+        color="#777777",
+        penwidth=1.2,
+        arrowsize=0.8,
+        fontname="Helvetica",
+        fontsize=9,
+        fontcolor="#bbbbbb"
+    ];
+
+    S [label="s_t (Market State)\n[S, σ, R, macro, micro]", fillcolor="#1e2a3a"];
+    Psi [label="Ψ(s_t): 58-D Feature Map", fillcolor="#1e2a3a"];
+    TFT [label="TFT Variable Selection\n(control-path synthesizer)", fillcolor="#1a3a5a", color="#4a6cff"];
+    UT [label="u_t\n(Control Vector)", fillcolor="#1a3a5a", color="#4a6cff"];
+    Sigma [label="σ_t (Implied Vol)", fillcolor="#1e2a3a"];
+    Greeks [label="Greeks_t\n(θ, ρ, γ)", fillcolor="#1e2a3a"];
+    
+    Ablock [label="A(u_t,σ_t)\nSelective Stability Matrix", fillcolor="#1a5a3a", color="#48bb78"];
+    Bblock [label="B(u_t)\nExcitation Map", fillcolor="#1a5a3a", color="#48bb78"];
+    Dinp [label="D(Greeks_t)\nGreeks Pressure", fillcolor="#1a5a3a", color="#48bb78"];
+    
+    Integrator [label="ETD-1 Integrator\nF_k = exp(A_θ(u_k)Δt_k)\nφ₁(M) = M⁻¹(e^M - I)", fillcolor="#2f5a4a", color="#68d391", shape=component];
+
+    // CDE Response
+    CDE [label="G_θ(x_{k-1\}, u_k)\nNeural CDE Response", fillcolor="#1a4a3a", color="#38b2ac"];
+    dX [label="ΔX_k = X_k - X_\{k-1\}\nControl Path Increment", fillcolor="#1a3a4a", color="#38b2ac"];
+
+    // Full 4-Block State
+    H [label="x_k = [h_k; v_k; m_k; r_k]\n4-Block Augmented State", fillcolor="#2d3748", shape=cylinder];
+    
+    Cproj [label="C h_t\nLinear Projection", fillcolor="#5a3a1a", color="#ed8936"];
+    Y [label="y_t\nPolicy Vector [10 Heads]", fillcolor="#5a3a1a", color="#ed8936"];
+    Decision [label="Predicate/Fuzzy Logic\nRule Fusion", fillcolor="#5a1a1a", color="#e53e3e"];
+    Action [label="a_t\n(Trade Signal/Position)", fillcolor="#5a1a1a", color="#e53e3e", shape=doubleoctagon];
+
+    // Master Equation Node
+    MasterEq [label="CondorNet™ Master Equation:\nx_k = e^\{A_θ(u_k)Δt_k\} x_\{k-1\}\n     + Δt_k φ₁(A_θ(u_k)Δt_k) B_θ(u_k)\n     + G_θ(x_\{k-1\}, u_k) ΔX_k\n     + D(Greeks_k, r_\{k-1\}, q_k)", fillcolor="#0a0a2a", color="#6b8cff", fontcolor="#aabbff", shape=note];
+
+    // Predicate Gates
+    Predicates [label="5 Canonical Predicates\n(Vol Spike, Liquidity, Reversal, Gap, Greeks)", fillcolor="#3a1a4a", color="#9f7aea"];
+    RegimeDyn [label="r_k = α_k ⊙ r_\{k-1\} + β_k\nRegime Combinatorics", fillcolor="#3a1a4a", color="#9f7aea"];
+
+    S -> Psi -> TFT -> UT;
+    Psi -> dX [xlabel="features"];
+    UT -> Ablock;
+    UT -> Bblock;
+    UT -> CDE;
+    Sigma -> Ablock;
+    Greeks -> Dinp;
+    Psi -> Predicates;
+    Predicates -> RegimeDyn;
+    RegimeDyn -> Dinp [xlabel="r_\{k-1\}"];
+    Ablock -> Integrator;
+    Bblock -> Integrator;
+    dX -> CDE;
+    CDE -> Integrator [xlabel="CDE response"];
+    Dinp -> Integrator;
+    Integrator -> H -> Cproj -> Y -> Decision -> Action;
+    MasterEq -> Integrator [style=invis];
+
+    // Copyright Notice
+    subgraph cluster_copyright \{
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 CondorBrain™ Intelligence Engine"];
+    \}
+}

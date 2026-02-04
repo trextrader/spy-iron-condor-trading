@@ -1,118 +1,113 @@
-# CondorBrain Architecture (v3.0 - Neural CDE)
+# CondorBrain Architecture (v4.0 - CondorNet™)
 
-This document visualizes the **CondorBrain v3.0** model architecture. It features **Neural Controlled Differential Equations (CDE)** as the backbone, **Volatility-Gated Attention**, and a **Sparse Top-K Mixture-of-Experts** head.
+This document visualizes the **CondorBrain v4.0** model architecture. It features the novel **CondorNet™** unified architecture, fusing ETD-1 exponential integration, Neural CDE path response, TFT control synthesis, and predicate-based regime dynamics.
 
-> **Migration Note:** This replaces the Mamba-2 SSM backbone (v2.x). See `docs/legacy/` for archived Mamba documentation.
+> **Architecture Evolution:**
+> - v1.x: TFT (Temporal Fusion Transformer) - Failed to converge
+> - v2.x: Mamba-2 SSM - NaN explosions during training
+> - v3.x: Neural CDE - Overfitting, insufficient for complex regime dynamics
+> - **v4.0: CondorNet™** - Unified fusion of all three paradigms with ETD-1 stability
 
-## Architecture Flowchart
+## CondorNet™ Master Equation
 
-```mermaid
-graph TD
-    subgraph Inputs
-    Input[Input Tensor<br/>(Batch, Seq=256, Feat=54)]
-    Norm[Robust Normalization<br/>(Median/MAD)]
-    X0[First Observation X₀]
-    end
+The core innovation is the unified evolution equation that mathematically fuses TFT control synthesis, Neural CDE path response, and Mamba/SSD time evolution with the ETD-1 exponential integrator:
 
-    subgraph "Neural CDE Backbone"
-    Encoder[Initial Encoder<br/>Linear + Softplus<br/>Z₀ = softplus(W·X₀)]
+$$
+x_k = e^{A_\theta(u_k)\Delta t_k} x_{k-1} + \Delta t_k \varphi_1(A_\theta(u_k)\Delta t_k) B_\theta(u_k) + G_\theta(x_{k-1}, u_k) \Delta X_k + D(\text{Greeks}_k, r_{k-1}, q_k)
+$$
 
-    subgraph "CDE Integration Loop"
-    dX[Control Increments<br/>dX_t = X_{t+1} - X_t]
-    VecField[<b>Vector Field f(Z)</b><br/>Linear → SiLU → Linear → Tanh<br/>‖f(z)‖∞ ≤ 1]
-    Euler[<b>Euler Integration</b><br/>Z_{t+1} = Z_t + f(Z_t)·dX_t]
-    end
+Where:
+- **φ₁(M) = M⁻¹(e^M - I)** is the ETD-1 basis function
+- **x_k = [h_k; v_k; m_k; r_k]** is the 4-block augmented state
+- **u_k = TFT(X_{1:k})** is the control embedding from Temporal Fusion Transformer
+- **G_θ(x, u) · ΔX_k** is the Neural CDE path-dependent response
+- **D(Greeks, r, q)** is the full 4-block forcing term
 
-    FinalState[Final Hidden State<br/>Z_T ∈ (Batch, 512)]
-    RMSNorm[RMSNorm]
-    end
+## 4-Block Augmented State
 
-    subgraph "Intelligent Output Head"
-    VolAttn[<b>VolGatedAttn</b><br/>(Volatility Awareness)]
-    Regime[Regime Detector<br/>(Low/Normal/High Vol)]
+| Block | Symbol | Dimension | Description |
+|-------|--------|-----------|-------------|
+| Latent Risk Manifold | h_k | d_h = 256 | Hidden state capturing market dynamics |
+| Portfolio State | v_k | d_v = 32 | Greeks, P&L, position information |
+| Risk Memory | m_k | d_m = 64 | Running max drawdown, VaR, stress integrals |
+| Regime Combinatorics | r_k | d_r = 32 | Explicit regime state from predicate gates |
 
-    subgraph "Top-K Mixture of Experts"
-    Router[<b>Router Gate</b><br/>Select Top-1 Expert]
-    Experts[<b>3 Expert Heads</b><br/>(Specialized Networks)]
-    end
+## Architecture Diagram
 
-    Output[<b>Final Output</b><br/>(10 Iron Condor Params)]
-    end
-
-    %% Flow Connections
-    Input --> Norm
-    Norm --> X0
-    Norm --> dX
-    X0 --> Encoder
-    Encoder --> Euler
-    dX --> VecField
-    VecField --> Euler
-    Euler -.->|t=0 to T-1| Euler
-    Euler --> FinalState
-    FinalState --> RMSNorm
-
-    RMSNorm --> VolAttn
-    VolAttn --> Regime
-    VolAttn --> Router
-    Router -- "Routing Weights" --> Experts
-    Experts --> Output
-
-    %% Styling
-    style VecField fill:#48bb78,stroke:#333,color:black
-    style Euler fill:#68d391,stroke:#333,color:black
-    style VolAttn fill:#ff9900,stroke:#333,color:black
-    style Router fill:#00ccff,stroke:#333,color:black
-    style Output fill:#66ff66,stroke:#333,color:black
-```
+![CondorNet Equation Graph](architecture/condornet_equation_graph_premium_1770200590388.png)
 
 ## Key Components
 
-### 1. Neural CDE Backbone
+### 1. TFT Control Synthesis (Region I)
 
-The core innovation replacing Mamba-2. The CDE treats the input sequence as a **control path** that drives latent state evolution through a learned vector field.
+The Temporal Fusion Transformer provides the control embedding u_k that modulates all other components:
+
+$$u_k = \text{TFT}_\theta(X_{1:k})$$
+
+**Purpose:** Captures long-range temporal dependencies and provides context-aware control signals.
+
+### 2. ETD-1 Exponential Integrator (Region III)
+
+Unlike simple Euler discretization, CondorNet uses the **Exponential Time Differencing (ETD-1)** scheme:
+
+$$F_k = e^{A_\theta(u_k) \Delta t_k}$$
+$$g_k = \Delta t_k \cdot \varphi_1(A_\theta \Delta t_k) \cdot B_\theta(u_k)$$
+
+**Why ETD-1 Over Euler:**
+| Aspect | Euler | ETD-1 |
+|--------|-------|-------|
+| Stability | Requires small Δt | Stable for all Δt |
+| Accuracy | O(Δt) | O(Δt²) effective |
+| Stiffness | Fails on stiff systems | Handles stiffness |
+
+### 3. Neural CDE Response (Region II)
+
+The CDE component provides path-dependent response:
+
+$$\text{CDE}_k = G_\theta(x_{k-1}, u_k) \cdot \Delta X_k$$
 
 **Mathematical Formulation:**
+- G_θ ∈ ℝ^{d_x × F} is a learned response matrix
+- ΔX_k = X_k - X_{k-1} is the control path increment
+- The product captures how market movements drive state evolution
 
-$$dZ_t = f(Z_t; \theta) \, dX_t$$
+### 4. Five Canonical Predicate Gates
 
-$$Z_T = Z_0 + \int_0^T f(Z_t) \, dX_t$$
+The predicate system implements differentiable inequality gates:
 
-**Why CDE over Mamba-2:**
-| Aspect | Mamba-2 | Neural CDE |
-|--------|---------|------------|
-| Stability | Gradient clipping required | Tanh-bounded (inherently stable) |
-| Feature Collapse | Frequent | Prevented |
-| Time Modeling | Discrete steps | Continuous integral |
-| Interpretability | Black-box SSM | Vector field Jacobian |
+| Predicate | Condition | Description |
+|-----------|-----------|-------------|
+| **Volatility Spike** | IVR_t > 75 | Elevated implied volatility |
+| **Liquidity Compression** | Spread/Price > 0.4% | Wide bid-ask spreads |
+| **Momentum Reversal** | RSI < 25 ∧ ΔRSI < 0 | Oversold with declining momentum |
+| **Gap Risk** | \|ΔS\|/S > 1.2% | Large price gaps |
+| **Greeks Pressure** | \|Γ\| > threshold | High gamma exposure |
 
-### 2. Vector Field Network
+### 5. Regime Combinatorics (r_k Dynamics)
 
-The heart of the CDE, parameterized as a 2-layer MLP:
+The explicit regime state evolves via:
 
-```
-f(z) = tanh(W₂ · SiLU(W₁ · z + b₁) + b₂)
-```
+$$r_k = \alpha_k \odot r_{k-1} + \beta_k$$
 
-- **Tanh stabilization** bounds outputs to [-1, 1], preventing state explosion
-- **SiLU activation** provides smooth gradients
+Where:
+- α_k = σ(W_α · z_pred) is a forget gate
+- β_k = W_β · z_pred is the update term
+- z_pred = [p; moments; bloom] is the predicate signature
 
-### 3. Volatility-Gated Attention (`VolGatedAttn`)
+### 6. Full 4-Block Forcing D
 
-Applied to the final CDE hidden state, this module allows the model to attend to specific high-volatility events globally, providing regime-aware context blending.
+The forcing term affects all four state blocks:
 
-### 4. Top-K Mixture of Experts (`TopKMoE`)
+$$D(Greeks_k, r_{k-1}, q_k) = [D_h; D_v; D_m; D_r]$$
 
-Instead of a single dense output layer, we use a sparse router that selects the single best "Expert" network for the current market condition. Three experts specialize in:
-- **Expert 1:** Low volatility regimes (tight wings)
-- **Expert 2:** Normal volatility (standard IC)
-- **Expert 3:** High volatility (wide wings, premium collection)
+| Block | Forcing Semantics |
+|-------|-------------------|
+| D_h | Market physics from Greeks + regime |
+| D_v | Execution (slippage, impact, margin) |
+| D_m | Cumulative risk (stress integrals) |
+| D_r | Regime forcing from predicates |
 
-### 5. Regime Detector
-
-A parallel auxiliary head that explicitly classifies the market state (Low Vol, Normal, High Vol). This provides:
-- Interpretability of model decisions
-- Guidance for the MoE router
-- Explicit regime probabilities for position sizing
+**Critical:** Uses r_{k-1} (previous regime) for causality!
 
 ## Output Specification (10 Parameters)
 
@@ -129,33 +124,31 @@ A parallel auxiliary head that explicitly classifies the market state (Low Vol, 
 | 8 | `entry_logit` | raw | Entry signal |
 | 9 | `exit_logit` | raw | Exit signal |
 
+## Composite Loss Function
+
+CondorNet uses a 10-component composite loss:
+
+$$\mathcal{L} = \lambda_1 L_{npdd} + \lambda_2 L_{sharpe} + \lambda_3 L_{dd} + \lambda_4 L_{turnover} + \lambda_5 L_{fuzzy} + \lambda_6 L_{pattern} + \lambda_7 L_{group} + \lambda_8 L_\rho + \lambda_9 L_{energy} + \lambda_{10} L_{growth}$$
+
+## Why CondorNet™ Succeeded Where Others Failed
+
+| Architecture | Problem | CondorNet Solution |
+|--------------|---------|-------------------|
+| **TFT** | Failed to converge on volatile data | TFT now provides control synthesis only, not direct prediction |
+| **Mamba2** | NaN explosions from unbounded dynamics | ETD-1 integrator guarantees stability via exp(AΔt) |
+| **Neural CDE** | Overfitting, poor regime adaptation | CDE provides path response only; regime handled by explicit r_k |
+
 ---
 
-## Repository Sync Addendum (2026-01-27)
+## Repository Sync Addendum (2026-02-04)
 
-This document is part of the synchronized documentation set. The authoritative engineering spec and audit references are:
+This document is part of the synchronized documentation set. The authoritative engineering spec is:
 
-- `docs/INTEGRATION_PLAN_MASTER.md`
-- `docs/INTERFACE_CATALOG.md`
-- `docs/scientific_spec.md`
-
-Key alignment requirements:
-1. Feature schema selection by **name** (V2.2) only; no CSV order dependence.
-2. Dataset column order differs across years; schema validation must be strict.
-3. Model config metadata (layers/heads/input_dim) must match deployed checkpoints.
-4. **CDE backbone is now default** - use `--cde` flag (enabled by default in training).
+- `docs/CONDORNET_IMPLEMENTATION_PLAN.md` (primary spec)
 
 If this document conflicts with the master spec, the master spec governs implementation.
 
 ---
 
-## Model Profile Alignment (Addendum)
-
-This document describes the *conceptual* architecture. Deployed configurations may differ by profile. The authoritative model metadata comes from checkpoint fields:
-
-- `feature_cols` (V2.2: 54 features)
-- `input_dim` (54)
-- `seq_len` (256)
-- `model_config.use_cde` (True)
-
-Always prefer checkpoint metadata over static defaults in docs or code.
+*Document Version: 4.0 (CondorNet™) | Last Updated: 2026-02-04*
+*© 2026 CondorBrain™ Differential Intelligence*

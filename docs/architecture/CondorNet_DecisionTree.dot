@@ -1,0 +1,41 @@
+digraph CondorNet_DecisionTree \{
+    rankdir=TB;
+    splines=curved;
+    bgcolor="#000000";
+    fontname="Helvetica";
+    fontsize=12;
+    node [shape=box, style="filled,rounded", color="#333333", fillcolor="#1a1a1a", fontcolor="#ffffff", fontname="Helvetica", fontsize=10, penwidth=1.5];
+    edge [color="#777777", penwidth=1.2, arrowsize=0.8, fontname="Helvetica", fontsize=9, fontcolor="#bbbbbb"];
+
+    Y [label="y_k (Neural Outputs)", fillcolor="#2d3748"];
+    Confidence [label="Confidence Head", fillcolor="#2d3748"];
+    
+    Chaos [label="Predicate: chaos_membership > τ ?", fillcolor="#4a2a1a", color="#ed8936"];
+    RiskOverride [label="Predicate: risk_override = 1 ?", fillcolor="#4a2a1a", color="#ed8936"];
+    
+    FuzzyScore [label="Fuzzy Score μ_fuzzy", fillcolor="#1a3a5a", color="#4a6cff"];
+    Combine [label="Combine Neural Confidence + Fuzzy μ", fillcolor="#1a3a5a", color="#4a6cff"];
+    
+    STrade [label="Compute Final Trade Size S_trade", fillcolor="#1a4a2a", color="#48bb78"];
+    EntryExit [label="Entry / Exit Decision", fillcolor="#1a4a2a", color="#48bb78", shape=doubleoctagon];
+    
+    Block [label="BLOCK Trade", fillcolor="#5a1a1a", color="#e53e3e", fontcolor="#ffffff", penwidth=3];
+    Exit [label="FORCE EXIT", fillcolor="#5a1a1a", color="#e53e3e", fontcolor="#ffffff", penwidth=3];
+
+    Y -> Confidence -> Chaos;
+    Chaos -> Block [xlabel="Yes", color="#e53e3e", fontcolor="#ff6b6b"];
+    Chaos -> RiskOverride [xlabel="No", color="#48bb78", fontcolor="#9ae6b4"];
+    
+    RiskOverride -> Exit [xlabel="Yes", color="#e53e3e", fontcolor="#ff6b6b"];
+    RiskOverride -> FuzzyScore [xlabel="No", color="#48bb78", fontcolor="#9ae6b4"];
+    
+    FuzzyScore -> Combine -> STrade -> EntryExit;
+
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 CondorBrain™ Intelligence Engine"];
+    \}
+}
