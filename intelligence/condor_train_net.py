@@ -61,7 +61,7 @@ class CompositeCondorNetLoss(nn.Module):
         self,
         lambda_mse: float = 1.0,
         lambda_npdd: float = 1.0,
-        lambda_sharpe: float = 0.2,
+        lambda_sharpe: float = 0.1,
         lambda_dd: float = 0.3,
         lambda_turnover: float = 0.1,
         lambda_fuzzy: float = 0.2,
@@ -473,7 +473,7 @@ def parse_args():
     # Loss weights
     parser.add_argument("--lambda-mse", type=float, default=1.0, help="Weight for supervised regression")
     parser.add_argument("--lambda-npdd", type=float, default=1.0)
-    parser.add_argument("--lambda-sharpe", type=float, default=0.2)
+    parser.add_argument("--lambda-sharpe", type=float, default=0.1)
     parser.add_argument("--lambda-dd", type=float, default=0.3)
     parser.add_argument("--lambda-turnover", type=float, default=0.1)
     parser.add_argument("--lambda-fuzzy", type=float, default=0.2)
