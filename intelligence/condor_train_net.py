@@ -588,6 +588,18 @@ def train_condor_net(args):
                     pred_signature=model.pred_signature,
                 )
 
+            # Debug Prints for Crash (only once or every 100 batches)
+            if batch_idx == 0:
+                print(f"\n[DEBUG BATCH 0] Dtypes:")
+                print(f"  Outputs: {outputs.dtype}")
+                print(f"  Targets: {batch_y.dtype}")
+                if gates is not None: print(f"  Gates: {gates.dtype}")
+                if state is not None: print(f"  State: {state.dtype}")
+                if A_matrix is not None: print(f"  A_matrix: {A_matrix.dtype}")
+                print(f"  Loss: {loss.dtype}")
+                for k, v in components.items():
+                    print(f"    - {k}: {v.dtype}")
+
             if scaler is not None:
                 scaler.scale(loss).backward()
                 if (batch_idx + 1) % args.accum_steps == 0:

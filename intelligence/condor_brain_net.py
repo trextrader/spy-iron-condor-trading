@@ -549,39 +549,47 @@ class PredicateSignature(nn.Module):
         self.d_out = K + R + M
 
     def forward(self, p: torch.Tensor):
-        # FORCE FP32 for all signature math
-        p = p.float()
+        # Math in float32 for stability
+        original_dtype = p.dtype
+        p_fp32 = p.float()
 
         # Sort for permutation invariance
-        p_sorted, _ = torch.sort(p, dim=-1, descending=True)
+        p_sorted_fp32, _ = torch.sort(p_fp32, dim=-1, descending=True)
 
         # Power moments μ_r = E[p^r]
-        moments = []
+        moments_fp32 = []
         for r in range(1, self.R + 1):
-            mu_r = (p_sorted ** r).mean(dim=-1, keepdim=True)
-            moments.append(mu_r)
-        moments = torch.cat(moments, dim=-1)  # (batch, R)
+            mu_r = (p_sorted_fp32 ** r).mean(dim=-1, keepdim=True)
+            moments_fp32.append(mu_r)
+        moments_fp32 = torch.cat(moments_fp32, dim=-1)  # (batch, R)
 
-        # Bloom-like signature (use sorted for invariance)
-        # Match weight dtype for mixed precision safely
+        # Bloom-like signature (match W_bloom dtype for matmul)
         w_dtype = self.W_bloom.weight.dtype
-        bloom = torch.sigmoid(self.W_bloom(p_sorted.to(w_dtype)))  # (batch, M)
+        bloom = torch.sigmoid(self.W_bloom(p_sorted_fp32.to(w_dtype)))
 
         # Full signature
-        z_pred = torch.cat([p, moments, bloom.float()], dim=-1)
+        z_pred = torch.cat([p_fp32, moments_fp32, bloom.float()], dim=-1)
 
-        return p_sorted, moments, bloom.float(), z_pred
+        # Return results in the original dtype of p to avoid hidden state pollution
+        return p_sorted_fp32.to(original_dtype), moments_fp32.to(original_dtype), bloom.to(original_dtype), z_pred.to(original_dtype)
 
     def signature_only(self, p: torch.Tensor) -> torch.Tensor:
         """Return just the invariant part (moments + bloom)."""
-        p_sorted, _ = torch.sort(p, dim=-1, descending=True)
-        moments = []
+        original_dtype = p.dtype
+        p_fp32 = p.float()
+        
+        p_sorted_fp32, _ = torch.sort(p_fp32, dim=-1, descending=True)
+        moments_fp32 = []
         for r in range(1, self.R + 1):
-            mu_r = (p_sorted ** r).mean(dim=-1, keepdim=True)
-            moments.append(mu_r)
-        moments = torch.cat(moments, dim=-1)
-        bloom = torch.sigmoid(self.W_bloom(p_sorted))
-        return torch.cat([moments, bloom], dim=-1)
+            mu_r = (p_sorted_fp32 ** r).mean(dim=-1, keepdim=True)
+            moments_fp32.append(mu_r)
+        moments_fp32 = torch.cat(moments_fp32, dim=-1)
+        
+        # Match W_bloom dtype
+        w_dtype = self.W_bloom.weight.dtype
+        bloom = torch.sigmoid(self.W_bloom(p_sorted_fp32.to(w_dtype)))
+        
+        return torch.cat([moments_fp32.to(original_dtype), bloom.to(original_dtype)], dim=-1)
 
 
 class RegimeCombinatoricsDynamics(nn.Module):
