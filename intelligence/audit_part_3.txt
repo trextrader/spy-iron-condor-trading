@@ -95,7 +95,7 @@ class CondorNet(nn.Module):
         if tensor is not None:
             # Stats for the tensor
             mu, std = tensor.mean().item(), tensor.std().item()
-            print(f"{prefix}       Shape: {list(tensor.shape)} | μ={mu:.4f}, σ={std:.4f}")
+            print(f"{prefix}       Shape: {list(tensor.shape)} | ={mu:.4f}, ={std:.4f}")
 
     def forward(
         self,
@@ -196,7 +196,7 @@ class CondorNet(nn.Module):
             
             F_k, phi1 = etd1_kernel(A_full, dt)
             self.log_math("TRANSITION", "F_k = exp(A_full * deltat)", F_k)
-            self.log_math("PHI_1", "phi1 = (exp(Adeltat) - I)A⁻¹", phi1)
+            self.log_math("PHI_1", "phi1 = (exp(Adeltat) - I)A", phi1)
 
             # === TIME LOOP ===
             for t in range(seq_len - 1):
@@ -262,7 +262,7 @@ class CondorNet(nn.Module):
                 # Use Hierarchical Logic if available, else product
                 if hasattr(self, 'hierarchical_logic'):
                     super_gate = torch.sigmoid(self.hierarchical_logic(gates))
-                    self.log_math("HIERARCHICAL_LOGIC", "λ = σ(RELATION(S))", super_gate)
+                    self.log_math("HIERARCHICAL_LOGIC", " = (RELATION(S))", super_gate)
                 else:
                     super_gate = gates.prod(dim=-1, keepdim=True)
             else:
