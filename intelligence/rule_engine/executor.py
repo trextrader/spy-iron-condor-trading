@@ -11,7 +11,7 @@ Rule execution engine implementing the 6-phase execution flow:
 
 import re
 import logging
-from typing import Dict, Any, Callable, Optional, Union
+from typing import Dict, List, Any, Optional, Union, Tuple, Callable
 
 import pandas as pd
 import numpy as np
@@ -140,18 +140,37 @@ class LogicEvaluator:
             return None
         
         expr = expr.strip()
+        return self._eval_expr(expr)
 
-        # Logical operators
-        # Logical operators
+    def _split_args(self, s: str) -> List[str]:
+        """Split strings by comma while respecting nested parentheses."""
+        parts = []
+        depth = 0
+        current = []
+        for char in s:
+            if char == "," and depth == 0:
+                parts.append("".join(current).strip())
+                current = []
+            else:
+                if char == "(": depth += 1
+                elif char == ")": depth -= 1
+                current.append(char)
+        if current:
+            parts.append("".join(current).strip())
+        return parts
+
+    def _eval_expr(self, expr: str) -> pd.Series:
+        expr = expr.strip()
+
+        # Logical operators (AND, OR, NOT)
         if expr.startswith("AND(") and expr.endswith(")"):
             inner = expr[4:-1]
-            parts = [self.evaluate(p.strip()) for p in inner.split(",")]
-            # Filter out dicts (failures)
+            args = self._split_args(inner)
+            parts = [self._eval_expr(a) for a in args]
             parts = [p if not isinstance(p, dict) else False for p in parts]
             
             res = parts[0]
             if hasattr(res, 'astype'): res = res.fillna(0).astype(bool)
-            
             for p in parts[1:]:
                 if hasattr(p, 'astype'): p = p.fillna(0).astype(bool)
                 res = res & p
@@ -159,13 +178,12 @@ class LogicEvaluator:
             
         if expr.startswith("OR(") and expr.endswith(")"):
             inner = expr[3:-1]
-            parts = [self.evaluate(p.strip()) for p in inner.split(",")]
-            # Filter out dicts (failures)
+            args = self._split_args(inner)
+            parts = [self._eval_expr(a) for a in args]
             parts = [p if not isinstance(p, dict) else False for p in parts]
             
             res = parts[0]
             if hasattr(res, 'astype'): res = res.fillna(0).astype(bool)
-            
             for p in parts[1:]:
                 if hasattr(p, 'astype'): p = p.fillna(0).astype(bool)
                 res = res | p
@@ -173,8 +191,8 @@ class LogicEvaluator:
             
         if expr.startswith("NOT(") and expr.endswith(")"):
             inner = expr[4:-1]
-            val = self.evaluate(inner)
-            if isinstance(val, dict): val = False # Handle failure
+            val = self._eval_expr(inner)
+            if isinstance(val, dict): val = False
             return ~val
             
         # Comparison logic
@@ -190,14 +208,13 @@ class LogicEvaluator:
                 if op == ">=": return l_val >= r_val
                 if op == "<=": return l_val <= r_val
                 if op == "==": return l_val == r_val
-            except TypeError:
-                # Handle mixed types (e.g. dict vs float) by treating as False
-                logger.warning(f"Comparison error in {expr}: {type(l_val)} vs {type(r_val)}")
+            except Exception as e:
+                logger.warning(f"Comparison error in {expr}: {e}")
                 return False
             
-        # SEQ operator (Placeholder: treat as AND for MVP)
+        # SEQ operator (Placeholder: treat as AND)
         if expr.startswith("SEQ("):
-            return self.evaluate(expr.replace("SEQ(", "AND("))
+            return self._eval_expr(expr.replace("SEQ(", "AND("))
 
         return self._get_value(expr)
 
