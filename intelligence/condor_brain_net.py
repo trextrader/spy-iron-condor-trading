@@ -135,6 +135,14 @@ class BlockMatrixA(nn.Module):
         self.A_rv = nn.Linear(d_v, d_r, bias=False)
         self.A_rm = nn.Linear(d_m, d_r, bias=False)
 
+        # === CONTROL MODULATOR (V41) ===
+        # Modulates the diagonal of A based on control context u_k
+        self.control_modulator = nn.Sequential(
+            nn.Linear(d_r, d_h), # Using regime dimensions as modulator source
+            nn.SiLU(),
+            nn.Linear(d_h, spec.d_x)
+        )
+
         # Stability initialization
         self._init_stable()
 
@@ -147,32 +155,37 @@ class BlockMatrixA(nn.Module):
             elif 'diag' in name:
                 nn.init.zeros_(param)
 
-    def _apply_A_hm(self, m: torch.Tensor) -> torch.Tensor:
-        """Apply A_hm (diagonal or full depending on sparsity mode)."""
-        if self.enforce_sparsity:
-            # Diagonal parameterization: pad to (d_h, d_m) implicitly
-            d = len(self.A_hm_diag)
-            diag_expanded = torch.diag(self.A_hm_diag)  # (d, d)
-            # Pad to (d_h, d_m)
-            d_h, d_m = self.spec.d_h, self.spec.d_m
-            A_hm_mat = torch.zeros(d_h, d_m, device=m.device, dtype=m.dtype)
-            A_hm_mat[:d, :d] = diag_expanded
-            return F.linear(m, A_hm_mat)
-        else:
-            return self.A_hm(m)
-
-    def forward_blocks(self, x: torch.Tensor) -> torch.Tensor:
+    def forward_blocks(self, x: torch.Tensor, u_k: torch.Tensor = None) -> torch.Tensor:
         """
-        Apply A_θ in block form to x = [h, v, m, r].
-        This is the drift operator A @ x (no Δt yet).
+        Apply A_theta in block form to x = [h, v, m, r].
+        
+        Args:
+            x: current full state
+            u_k: optional time-local control embedding for diagonal modulation
         """
         h, v, m, r = self.spec.split(x)
+
+        # Apply diagonal modulation from control u_k if provided
+        if u_k is not None:
+            # Shift = diag(f(u_k)) * x
+            diag_shift = torch.tanh(self.control_modulator(u_k)) * 0.1
+            x = x * (1.0 + diag_shift)
+            h, v, m, r = self.spec.split(x)
 
         # h block
         h_new = self.A_hh(h)
         if self.A_hv is not None:
             h_new = h_new + self.A_hv(v)
-        h_new = h_new + self._apply_A_hm(m) + self.A_hr(r)
+        
+        # Apply A_hm (diagonal or full)
+        if self.enforce_sparsity:
+            d = len(self.A_hm_diag)
+            # Manual diagonal matmul for efficiency
+            h_new[..., :d] = h_new[..., :d] + self.A_hm_diag * m[..., :d]
+        else:
+            h_new = h_new + self.A_hm(m)
+            
+        h_new = h_new + self.A_hr(r)
 
         # v block
         v_new = self.A_vh(h) + self.A_vv(v) + self.A_vm(m) + self.A_vr(r)
@@ -305,8 +318,17 @@ class FullForcingD(nn.Module):
             nn.Tanh(),
         )
 
-        # D_r: Regime forcing
+        # D_r: Regime forcing from Greeks (continuous part)
         self.D_r = nn.Linear(d_in, spec.d_r)
+
+        # === RA ENFORCEMENT ===
+        # D_h (physics) and D_r (regime) are invariant to position size q
+        self.d_in_h = n_greeks + spec.d_r
+        self.D_h_phys = nn.Sequential(
+            nn.Linear(self.d_in_h, spec.d_h),
+            nn.Tanh(),
+        )
+        self.D_r_phys = nn.Linear(self.d_in_h, spec.d_r)
 
         self.spec = spec
 
@@ -315,17 +337,19 @@ class FullForcingD(nn.Module):
         """
         Args:
             greeks: (batch, n_greeks) [delta, gamma, theta, vega, rho]
-            r_prev: (batch, d_r) PREVIOUS regime state (causality!)
+            r_prev: (batch, d_r) PREVIOUS regime state
             q: (batch, d_q) position size
-
-        Returns:
-            D: (batch, d_x) full forcing vector
         """
-        z = torch.cat([greeks, r_prev, q], dim=-1)
-        Dh = self.D_h(z)
-        Dv = self.D_v(z)
-        Dm = self.D_m(z)
-        Dr = self.D_r(z)
+        # RA: MARKET PHYSICS (D_h, D_r) ARE INVARIANT TO q
+        z_phys = torch.cat([greeks, r_prev], dim=-1)
+        Dh = self.D_h_phys(z_phys)
+        Dr = self.D_r_phys(z_phys)
+
+        # EXECUTION DRAG (D_v, D_m) CAN SEE q
+        z_exec = torch.cat([greeks, r_prev, q], dim=-1)
+        Dv = self.D_v(z_exec)
+        Dm = self.D_m(z_exec)
+        
         return self.spec.cat(Dh, Dv, Dm, Dr)
 
 
@@ -352,8 +376,8 @@ def etd1_kernel(A: torch.Tensor, dt: float) -> Tuple[torch.Tensor, torch.Tensor]
         dt: time increment
 
     Returns:
-        F: (d_x, d_x) state transition matrix e^{AΔt}
-        phi1: (d_x, d_x) ETD-1 basis function φ_1(AΔt)
+        F: (d_x, d_x) state transition matrix e^{AΔt} (Always FP32)
+        phi1: (d_x, d_x) ETD-1 basis function φ_{1}(AΔt) (Always FP32)
     """
     original_dtype = A.dtype
     
@@ -391,9 +415,13 @@ def condornet_master_step(
     F_k: torch.Tensor,
     phi1: torch.Tensor,
     dt_k: float,
+    A_theta: Optional[BlockMatrixA] = None,
 ) -> torch.Tensor:
     """
     Update x_{k-1} → x_k using precomputed ETD-1 kernels.
+    Includes control-dependent diagonal modulation.
+    
+    NOTE: All internal math is forced to FP32 for numerical stability.
     """
     # Force all math to FP32
     x_prev = x_prev.float()
@@ -406,6 +434,13 @@ def condornet_master_step(
     with torch.amp.autocast('cuda', enabled=False):
         # 1. Linear propagation F_k x_{k-1}
         x_lin = torch.matmul(x_prev, F_k.T)  # (batch, d_x)
+
+        # 1b. Control-Dependent Diagonal Modulation (V41)
+        if A_theta is not None:
+            # Shift = diag(f(u_k)) * dt_k * x_prev
+            # Approximation for u_k modulation in precomputed A_full context
+            diag_shift = torch.tanh(A_theta.control_modulator(r_prev)) * 0.1
+            x_lin = x_lin + (diag_shift * x_prev * dt_k)
 
         # 2. B_θ(u_k) and ETD injection (Squashed for stability)
         # Apply tanh to forcing to prevent energy explosion over T=240
@@ -1040,7 +1075,8 @@ class CondorNet(nn.Module):
         h, v, m, r = self.spec.split(z)
 
         # === CONTROL EMBEDDING ===
-        u = self.tft(x)  # (batch, d_control)
+        # Produces sequence (batch, seq, d_control) for time-local modulation
+        u = self.tft(x, return_sequence=True)  
 
         # Force core manifold to FP32 for "Ultra-Safe Mode"
         # Only the TFT encoder above uses Mixed Precision (autocast).
@@ -1058,8 +1094,8 @@ class CondorNet(nn.Module):
             self.log_math("MATRIX_A", "A_full = [A_hh A_hv; A_vh A_vv ...]", A_full)
             
             F_k, phi1 = etd1_kernel(A_full, dt)
-            self.log_math("TRANSITION", "F_k = exp(A_full * Δt)", F_k)
-            self.log_math("PHI_1", "φ1 = (exp(AΔt) - I)A⁻¹", phi1)
+            self.log_math("TRANSITION", "F_k = exp(A_full * deltat)", F_k)
+            self.log_math("PHI_1", "phi1 = M_pinv @ (expM - I)", phi1)
 
             # === TIME LOOP ===
             for t in range(seq_len - 1):
@@ -1069,22 +1105,41 @@ class CondorNet(nn.Module):
                 greeks_k = greeks[:, t, :].float()
                 q_k = q[:, t, :].float()
                 dX_k = dX[:, t, :].float()
+                u_k = u[:, t, :].float()
+                
+                # Per-step Predicate Evaluation (V41)
+                p_k = self.pred_gates(
+                    iv_rank[:, t].float(),
+                    bid_ask_spread[:, t].float(),
+                    price[:, t].float(),
+                    rsi[:, t].float(),
+                    delta_rsi[:, t].float(),
+                    S_t[:, t].float(),
+                    S_t_minus_1[:, t].float(),
+                    gamma[:, t].float(),
+                ).float()
+                
+                _, _, _, z_pred = self.pred_signature(p_k)
+                
+                # Update r_k with combinatorics dynamics IN LOOP
+                r = self.regime_dyn(r.float(), z_pred.float()).float()
 
-                # Master update (uses r as r_{k-1} for causality)
+                # Master update
                 x_k = condornet_master_step(
                     spec=self.spec,
                     B_theta=self.B_theta,
                     G_theta=self.G_theta,
                     D_forcing=self.D_forcing,
                     x_prev=x_prev,
-                    u_k=u,
+                    u_k=u_k,
                     dX_k=dX_k,
                     greeks_k=greeks_k,
-                    r_prev=r,  # CRITICAL: r_{k-1} for causality
+                    r_prev=r, # updated r for forcing
                     q_k=q_k,
                     F_k=F_k,
                     phi1=phi1,
                     dt_k=dt,
+                    A_theta=self.A_theta,
                 ).float()
 
                 # V7: Manifold Squashing - Keep state in [-1, 1] range to prevent energy explosion
@@ -1098,8 +1153,13 @@ class CondorNet(nn.Module):
                     diagnostics['m'].append(m)
                     diagnostics['r'].append(r)
 
-            # === FINAL PREDICATES ===
-            p_k = self.pred_gates(
+            # === FINAL STATE ===
+            # r has already been updated in-loop
+            z_final = self.spec.cat(h.float(), v.float(), m.float(), r.float())
+
+            # Hierarchical Relational Logic (HAL) Gating
+            # (Remains at end of path for final policy decision)
+            p_final = self.pred_gates(
                 iv_rank[:, -1].float(),
                 bid_ask_spread[:, -1].float(),
                 price[:, -1].float(),
@@ -1109,12 +1169,6 @@ class CondorNet(nn.Module):
                 S_t_minus_1[:, -1].float(),
                 gamma[:, -1].float(),
             ).float()
-
-            p_sorted, moments, bloom, z_pred = self.pred_signature(p_k)
-
-            # Update r_k with combinatorics dynamics
-            r = self.regime_dyn(r.float(), z_pred.float()).float()
-            z_final = self.spec.cat(h.float(), v.float(), m.float(), r.float())
 
             # Hierarchical Relational Logic (HAL) Gating
             if self.super_sets is not None:
