@@ -34,7 +34,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 # Attempt imports - skip tests if dependencies unavailable
 try:
-    from intelligence.condor_brain_net import CondorNet, AugmentedStateSpec
+    from intelligence.condor_brain_net import CondorNet
     HAS_MODEL = True
 except ImportError as e:
     HAS_MODEL = False
@@ -96,16 +96,14 @@ def small_model(device):
 
     set_deterministic_seed(42)
 
-    spec = AugmentedStateSpec(
-        d_h=32,  # Small for testing
+    # Use small dimensions for fast testing
+    model = CondorNet(
+        d_input=54,
+        d_h=32,
         d_v=8,
         d_m=16,
-        d_r=8
-    )
-
-    model = CondorNet(
-        input_dim=54,
-        spec=spec,
+        d_r=8,
+        d_control=32,
         n_predicates=16,
         n_sets=8,
         n_super_sets=4
