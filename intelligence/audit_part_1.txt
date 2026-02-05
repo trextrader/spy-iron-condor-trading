@@ -1,0 +1,436 @@
+
+
+================================================================================
+FILE: intelligence/condor_brain_net.py
+================================================================================
+
+"""
+CondorNet™ - Mathematically Faithful Implementation
+
+This module implements the complete CondorNet architecture as specified in the
+canonical PDF/Word document. Key features:
+
+- True ETD-1 with matrix_exp(AΔt) and φ_1(M) = M⁺(e^M - I)
+- 4-block augmented state [h_k; v_k; m_k; r_k] with explicit block semantics
+- Block-partitioned operators: A_θ, B_θ, G_θ, D
+- 5 canonical inequality gates (vol spike, liquidity, reversal, gap, Greeks)
+- Predicate combinatorics with group-invariant signatures
+- r_k dynamics: r_k = α_k ⊙ r_{k-1} + β_k
+- Full 4-block forcing with causality (r_{k-1} in D)
+
+Master equation:
+    x_k = e^{A_θ Δt_k} x_{k-1} + Δt_k φ_1(A_θ Δt_k) B_θ(u_k)
+        + G_θ(x_{k-1}, u_k) ΔX_k + D(Greeks_k, r_{k-1}, q_k)
+
+Author: Claude Code (Opus 4.5)
+Version: 1.0.0
+Date: 2026-02-03
+"""
+
+import math
+from typing import Tuple, Dict, Optional, List, Union, Callable
+from dataclasses import dataclass
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+# =============================================================================
+# PART 1: CORE DIMENSIONS AND BLOCK HELPERS
+# =============================================================================
+
+class AugmentedStateSpec:
+    """
+    Pure specification: dimensions and block slicing helpers.
+
+    The 4-block state is the audit enforcement mechanism:
+    - h: latent risk-manifold (market physics)
+    - v: portfolio state (PnL, Greeks, positions)
+    - m: risk memory (drawdown, cumulative Greeks)
+    - r: regime/combinatorics (vol regime, predicate memory)
+    """
+    def __init__(self, d_h: int, d_v: int, d_m: int, d_r: int):
+        self.d_h = d_h
+        self.d_v = d_v
+        self.d_m = d_m
+        self.d_r = d_r
+        self.d_x = d_h + d_v + d_m + d_r
+
+    def split(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Split x into (h, v, m, r) blocks.
+
+        Args:
+            x: (..., d_x) state tensor
+
+        Returns:
+            (h, v, m, r) with matching leading dims
+        """
+        dh, dv, dm = self.d_h, self.d_v, self.d_m
+        h = x[..., :dh]
+        v = x[..., dh:dh+dv]
+        m = x[..., dh+dv:dh+dv+dm]
+        r = x[..., dh+dv+dm:]
+        return h, v, m, r
+
+    def cat(self, h: torch.Tensor, v: torch.Tensor,
+            m: torch.Tensor, r: torch.Tensor) -> torch.Tensor:
+        """Concatenate (h, v, m, r) into full state x."""
+        return torch.cat([h, v, m, r], dim=-1)
+
+
+# =============================================================================
+# PART 2: BLOCK OPERATORS (A_θ, B_θ, G_θ, D)
+# =============================================================================
+
+class BlockMatrixA(nn.Module):
+    """
+    4×4 block transition operator A_θ(u_k).
+
+    Structure:
+        A_θ = [A_hh  A_hv  A_hm  A_hr]
+              [A_vh  A_vv  A_vm  A_vr]
+              [A_mh  A_mv  A_mm  A_mr]
+              [A_rh  A_rv  A_rm  A_rr]
+
+    Sparsity rules (RA-RD from spec):
+        RA: D_v carries execution drag, D_h does NOT absorb slippage
+        RB: A_hr free (regime→physics), A_hv ≈ 0 (PnL doesn't rewrite physics)
+        RC: A_hm small/diagonal (memory throttles, doesn't rewrite physics)
+        RD: Entry/exit via G_k ΔX_k (CDE response dominates signals)
+    """
+    def __init__(self, spec: AugmentedStateSpec, enforce_sparsity: bool = True):
+        super().__init__()
+        d_h, d_v, d_m, d_r = spec.d_h, spec.d_v, spec.d_m, spec.d_r
+        self.spec = spec
+        self.enforce_sparsity = enforce_sparsity
+
+        # === DIAGONAL BLOCKS (self-dynamics) ===
+        self.A_hh = nn.Linear(d_h, d_h, bias=False)
+        self.A_vv = nn.Linear(d_v, d_v, bias=False)
+        self.A_mm = nn.Linear(d_m, d_m, bias=False)
+        self.A_rr = nn.Linear(d_r, d_r, bias=False)
+
+        # === OFF-DIAGONAL BLOCKS ===
+        # h row: what affects latent physics
+        if enforce_sparsity:
+            # RB: Constrain A_hv to near-zero (PnL shouldn't rewrite physics)
+            self.A_hv = None  # Explicitly disabled
+            # RC: A_hm small/diagonal - use diagonal parameterization
+            self.A_hm_diag = nn.Parameter(torch.zeros(min(d_h, d_m)))
+        else:
+            self.A_hv = nn.Linear(d_v, d_h, bias=False)
+            self.A_hm = nn.Linear(d_m, d_h, bias=False)
+
+        # RB: A_hr free (regime → physics allowed)
+        self.A_hr = nn.Linear(d_r, d_h, bias=False)
+
+        # v row: what affects portfolio
+        self.A_vh = nn.Linear(d_h, d_v, bias=False)
+        self.A_vm = nn.Linear(d_m, d_v, bias=False)
+        self.A_vr = nn.Linear(d_r, d_v, bias=False)
+
+        # m row: what affects memory
+        self.A_mh = nn.Linear(d_h, d_m, bias=False)
+        self.A_mv = nn.Linear(d_v, d_m, bias=False)
+        self.A_mr = nn.Linear(d_r, d_m, bias=False)
+
+        # r row: what affects regime
+        self.A_rh = nn.Linear(d_h, d_r, bias=False)
+        self.A_rv = nn.Linear(d_v, d_r, bias=False)
+        self.A_rm = nn.Linear(d_m, d_r, bias=False)
+
+        # Stability initialization
+        self._init_stable()
+
+    def _init_stable(self):
+        """Initialize for spectral stability (ρ(A) < 1)."""
+        scale = 0.001  # Tighter for V5 stability
+        for name, param in self.named_parameters():
+            if param.dim() >= 2:
+                nn.init.xavier_uniform_(param, gain=scale)
+            elif 'diag' in name:
+                nn.init.zeros_(param)
+
+    def _apply_A_hm(self, m: torch.Tensor) -> torch.Tensor:
+        """Apply A_hm (diagonal or full depending on sparsity mode)."""
+        if self.enforce_sparsity:
+            # Diagonal parameterization: pad to (d_h, d_m) implicitly
+            d = len(self.A_hm_diag)
+            diag_expanded = torch.diag(self.A_hm_diag)  # (d, d)
+            # Pad to (d_h, d_m)
+            d_h, d_m = self.spec.d_h, self.spec.d_m
+            A_hm_mat = torch.zeros(d_h, d_m, device=m.device, dtype=m.dtype)
+            A_hm_mat[:d, :d] = diag_expanded
+            return F.linear(m, A_hm_mat)
+        else:
+            return self.A_hm(m)
+
+    def forward_blocks(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Apply A_θ in block form to x = [h, v, m, r].
+        This is the drift operator A @ x (no Δt yet).
+        """
+        h, v, m, r = self.spec.split(x)
+
+        # h block
+        h_new = self.A_hh(h)
+        if self.A_hv is not None:
+            h_new = h_new + self.A_hv(v)
+        h_new = h_new + self._apply_A_hm(m) + self.A_hr(r)
+
+        # v block
+        v_new = self.A_vh(h) + self.A_vv(v) + self.A_vm(m) + self.A_vr(r)
+
+        # m block
+        m_new = self.A_mh(h) + self.A_mv(v) + self.A_mm(m) + self.A_mr(r)
+
+        # r block
+        r_new = self.A_rh(h) + self.A_rv(v) + self.A_rm(m) + self.A_rr(r)
+
+        return self.spec.cat(h_new, v_new, m_new, r_new)
+
+
+    def full_matrix(self) -> torch.Tensor:
+        """
+        Construct full [d_x, d_x] matrix for ETD-1.
+        Required for exact matrix_exp(AΔt).
+        """
+        d_x = self.spec.d_x
+        device = next(self.parameters()).device
+        dtype = next(self.parameters()).dtype
+
+        # Build by applying to basis vectors
+        eye = torch.eye(d_x, device=device, dtype=dtype)
+        cols = []
+        for i in range(d_x):
+            e_i = eye[:, i]
+            col = self.forward_blocks(e_i)
+            cols.append(col.unsqueeze(-1))
+        A_full = torch.cat(cols, dim=-1)  # [d_x, d_x]
+        return A_full
+
+
+class BlockVectorB(nn.Module):
+    """
+    B_θ(u_k) ∈ ℝ^{d_x}, partitioned into [B_h, B_v, B_m, B_r].
+
+    This is the control injection vector for the ETD-1 term.
+    """
+    def __init__(self, spec: AugmentedStateSpec, d_control: int):
+        super().__init__()
+        self.B_h = nn.Linear(d_control, spec.d_h, bias=True)
+        self.B_v = nn.Linear(d_control, spec.d_v, bias=True)
+        self.B_m = nn.Linear(d_control, spec.d_m, bias=True)
+        self.B_r = nn.Linear(d_control, spec.d_r, bias=True)
+        self.spec = spec
+
+    def forward(self, u: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            u: (batch, d_control) control embedding
+
+        Returns:
+            B: (batch, d_x) block-partitioned forcing vector
+        """
+        Bh = self.B_h(u)
+        Bv = self.B_v(u)
+        Bm = self.B_m(u)
+        Br = self.B_r(u)
+        return self.spec.cat(Bh, Bv, Bm, Br)
+
+
+class CDEResponseG(nn.Module):
+    """
+    G_θ(x, u) ∈ ℝ^{d_x × F}, the CDE controlled response matrix.
+
+    Rule RD: Entry/exit features MUST enter via G @ dX, not via drift.
+    This ensures CDE response dominates signal injection.
+    """
+    def __init__(self, spec: AugmentedStateSpec, d_input: int, d_control: int):
+        super().__init__()
+        self.spec = spec
+        self.d_state = spec.d_x
+        self.d_input = d_input
+
+        # MLP to produce response matrix
+        self.net = nn.Sequential(
+            nn.Linear(self.d_state + d_control, self.d_state * 2),
+            nn.SiLU(),
+            nn.Linear(self.d_state * 2, self.d_state * d_input),
+        )
+
+    def forward(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: (batch, d_x) current state
+            u: (batch, d_control) control embedding
+
+        Returns:
+            G: (batch, d_x, d_input) response matrix
+        """
+        z = torch.cat([x, u], dim=-1)
+        G_flat = self.net(z)
+        G = G_flat.view(-1, self.d_state, self.d_input)
+        return torch.tanh(G)  # Bound for stability
+
+
+class FullForcingD(nn.Module):
+    """
+    D(Greeks_k, r_{k-1}, q_k) ∈ ℝ^{d_x}, the full 4-block forcing.
+
+    Block semantics:
+        D_h: Market physics forcing from Greeks + regime
+        D_v: PRIMARY execution location (slippage, impact, margin) - Rule RA
+        D_m: Cumulative risk (stress integrals, drawdown-weighted)
+        D_r: Regime forcing (from predicate combinatorics)
+
+    CRITICAL: Uses r_{k-1} (previous regime) for causality.
+    """
+    def __init__(self, spec: AugmentedStateSpec, n_greeks: int = 5, d_q: int = 1):
+        super().__init__()
+        d_in = n_greeks + spec.d_r + d_q
+
+        # D_h: Market physics (NO execution drag here - Rule RA)
+        self.D_h = nn.Sequential(
+            nn.Linear(d_in, spec.d_h),
+            nn.Tanh(),  # Bounded
+        )
+
+        # D_v: PRIMARY execution location (slippage, impact, margin)
+        self.D_v = nn.Sequential(
+            nn.Linear(d_in, spec.d_v * 2),
+            nn.SiLU(),
+            nn.Linear(spec.d_v * 2, spec.d_v),
+        )
+
+        # D_m: Cumulative risk
+        self.D_m = nn.Sequential(
+            nn.Linear(d_in, spec.d_m),
+            nn.Tanh(),
+        )
+
+        # D_r: Regime forcing
+        self.D_r = nn.Linear(d_in, spec.d_r)
+
+        self.spec = spec
+
+    def forward(self, greeks: torch.Tensor, r_prev: torch.Tensor,
+                q: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            greeks: (batch, n_greeks) [delta, gamma, theta, vega, rho]
+            r_prev: (batch, d_r) PREVIOUS regime state (causality!)
+            q: (batch, d_q) position size
+
+        Returns:
+            D: (batch, d_x) full forcing vector
+        """
+        z = torch.cat([greeks, r_prev, q], dim=-1)
+        Dh = self.D_h(z)
+        Dv = self.D_v(z)
+        Dm = self.D_m(z)
+        Dr = self.D_r(z)
+        return self.spec.cat(Dh, Dv, Dm, Dr)
+
+
+# =============================================================================
+# PART 3: TRUE ETD-1 CORE
+# =============================================================================
+
+def etd1_kernel(A: torch.Tensor, dt: float) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    True ETD-1 kernel computation.
+
+    Computes:
+        M = A Δt
+        F = exp(M)
+        φ_1(M) = M⁺ (exp(M) - I)
+
+    CRITICAL: Compute M = AΔt first, then pinv(M), NOT pinv(A).
+
+    Supports mixed precision: bf16/fp16 inputs are computed in fp32
+    for numerical stability in linalg ops, then cast back.
+
+    Args:
+        A: (d_x, d_x) drift matrix
+        dt: time increment
+
+    Returns:
+        F: (d_x, d_x) state transition matrix e^{AΔt}
+        phi1: (d_x, d_x) ETD-1 basis function φ_1(AΔt)
+    """
+    original_dtype = A.dtype
+    
+    # ALWAYS compute in FP32 for numerical stability (matrix_exp, pinv)
+    A = A.float()
+    
+    # Ensure dt is tensor
+    if not torch.is_tensor(dt):
+        dt = torch.tensor(dt, device=A.device, dtype=torch.float32)
+    else:
+        dt = dt.float()
+    
+    M = A * dt
+    expM = torch.linalg.matrix_exp(M)
+    I = torch.eye(M.shape[-1], device=M.device, dtype=torch.float32)
+
+    # φ_1(M) = M⁺(e^M - I)
+    phi1 = torch.linalg.pinv(M) @ (expM - I)
+
+    # ALWAYS return FP32 for the master step matmuls to avoid Half/Float mismatch
+    return expM.float(), phi1.float()
+
+
+def condornet_master_step(
+    spec: AugmentedStateSpec,
+    B_theta: BlockVectorB,
+    G_theta: CDEResponseG,
+    D_forcing: FullForcingD,
+    x_prev: torch.Tensor,
+    u_k: torch.Tensor,
+    dX_k: torch.Tensor,
+    greeks_k: torch.Tensor,
+    r_prev: torch.Tensor,
+    q_k: torch.Tensor,
+    F_k: torch.Tensor,
+    phi1: torch.Tensor,
+    dt_k: float,
+) -> torch.Tensor:
+    """
+    Update x_{k-1} → x_k using precomputed ETD-1 kernels.
+    """
+    # Force all math to FP32
+    x_prev = x_prev.float()
+    u_k = u_k.float()
+    dX_k = dX_k.float()
+    greeks_k = greeks_k.float()
+    r_prev = r_prev.float()
+    q_k = q_k.float()
+
+    with torch.amp.autocast('cuda', enabled=False):
+        # 1. Linear propagation F_k x_{k-1}
+        x_lin = torch.matmul(x_prev, F_k.T)  # (batch, d_x)
+
+        # 2. B_θ(u_k) and ETD injection (Squashed for stability)
+        # Apply tanh to forcing to prevent energy explosion over T=240
+        B_k = torch.tanh(B_theta(u_k).float())
+        g_k = torch.matmul(B_k, phi1.T) * dt_k
+
+        # 3. Controlled response G_θ(x_{k-1}, u_k) ΔX_k (Squashed for stability)
+        G_k = G_theta(x_prev, u_k).float()
+        dX_vec = dX_k.unsqueeze(-1)
+        cde_term = torch.tanh(torch.bmm(G_k, dX_vec).squeeze(-1))
+
+        # 4. Full forcing D(Greeks_k, r_{k-1}, q_k) (Squashed for stability)
+        D_k = torch.tanh(D_forcing(greeks_k, r_prev, q_k).float())
+
+        # 5. Master update
+        x_k = x_lin + g_k + cde_term + D_k
+
+    return x_k.float()
+
+
+# =============================================================================
+# PART 4: PREDICATE COMBINATORICS AND r_k DYNAMICS

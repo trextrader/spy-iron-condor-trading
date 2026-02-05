@@ -1,0 +1,486 @@
+        # Ensure correct shape: (B, T, D)
+        if features.ndim == 2:
+            features = features[np.newaxis, ...]
+        
+        # Enforce expected dims
+        if features.shape[-1] != self.input_dim:
+             # Basic safety pad/crop if minor mismatch
+             pass
+             
+        # Apply training-time normalization if available
+        features = self._robust_norm_np(features.astype(np.float32))
+
+        # Convert to tensor with correct dtype
+        dtype = torch.float16 if self.use_fp16 else torch.float32
+        x = torch.from_numpy(features).to(dtype).to(self.device, non_blocking=True)
+
+        with torch.no_grad():
+            # === SINGLE PASS (no redundant forward calls) ===
+            # Always run with fixed forecast_days to avoid double-pass
+            actual_forecast_days = forecast_days if forecast_days > 0 else 14
+
+            outputs, regime_logits, horizon = self.model(
+                x, return_regime=True, forecast_days=actual_forecast_days
+            )
+        
+        # Convert to numpy (CPU)
+        out = outputs[0].float().cpu().numpy()
+        reg = regime_logits[0].float().cpu().numpy()
+        
+        # Determine regime
+        regime_idx = int(np.argmax(reg))
+        
+        # === EARLY EXIT: Skip trajectory processing if low confidence ===
+        confidence = float(out[7])
+        daily_forecast = None
+        max_high_pct = 0.0
+        max_low_pct = 0.0
+        
+        if confidence >= self.min_confidence_threshold or not skip_trajectory_if_low_conf:
+            # Only process trajectory if confidence passes threshold
+            if horizon is not None:
+                daily_forecast = horizon['daily_forecast'][0].float().cpu().numpy()
+                max_range = horizon['max_range'][0].float().cpu().numpy()
+                max_high_pct = float(max_range[0]) * 100.0
+                max_low_pct = float(max_range[1]) * 100.0
+        
+        return CondorSignal(
+            short_call_offset=float(out[0]),
+            short_put_offset=float(out[1]),
+            wing_width=float(out[2]),
+            dte_selection=float(out[3]),
+            prob_profit=float(out[4]),
+            expected_roi=float(out[5]),
+            max_loss_pct=float(out[6]),
+            confidence=confidence,
+            regime=self._regime_names[regime_idx],
+            daily_forecast=daily_forecast,
+            max_high_pct=max_high_pct,
+            max_low_pct=max_low_pct
+        )
+    
+    def predict_batch(self, features_batch: np.ndarray, forecast_days: int = 14) -> list:
+        """
+        Batch inference for multiple samples (even faster per-sample).
+        
+        Args:
+            features_batch: (Batch, SeqLen, InputDim) numpy array
+            
+        Returns:
+            List of CondorSignal objects
+        """
+        dtype = torch.float16 if self.use_fp16 else torch.float32
+        x = torch.from_numpy(features_batch.astype(np.float32)).to(dtype).to(self.device)
+        
+        with torch.no_grad():
+            outputs, regime_probs, horizon = self.model(
+                x, return_regime=True, forecast_days=forecast_days
+            )
+        
+        # Batch convert
+        out_np = outputs.float().cpu().numpy()
+        reg_np = regime_probs.float().cpu().numpy()
+        
+        signals = []
+        for i in range(len(out_np)):
+            regime_idx = int(np.argmax(reg_np[i]))
+            
+            daily_forecast = None
+            max_high_pct = 0.0
+            max_low_pct = 0.0
+            if horizon is not None:
+                daily_forecast = horizon['daily_forecast'][i].float().cpu().numpy()
+                max_range = horizon['max_range'][i].float().cpu().numpy()
+                max_high_pct = float(max_range[0]) * 100.0
+                max_low_pct = float(max_range[1]) * 100.0
+            
+            signals.append(CondorSignal(
+                short_call_offset=float(out_np[i, 0]),
+                short_put_offset=float(out_np[i, 1]),
+                wing_width=float(out_np[i, 2]),
+                dte_selection=float(out_np[i, 3]),
+                prob_profit=float(out_np[i, 4]),
+                expected_roi=float(out_np[i, 5]),
+                max_loss_pct=float(out_np[i, 6]),
+                confidence=float(out_np[i, 7]),
+                regime=self._regime_names[regime_idx],
+                daily_forecast=daily_forecast,
+                max_high_pct=max_high_pct,
+                max_low_pct=max_low_pct
+            ))
+        
+        return signals
+    
+    def get_discovered_predicates(self, threshold: float = 0.1) -> List[str]:
+        """
+        Return human-readable list of discovered predicates, 
+        unrolling recursive definitions.
+        """
+        if not self.use_predicate_discovery or self.predicate_selector is None:
+            return []
+            
+        from intelligence.recursive_evaluator import trace_recursive_rule
+        
+        # 1. Get raw params
+        importance, params = self.predicate_selector(return_params=True)
+        # Select active (Only those actually used by the model)
+        k = min(self.max_active_predicates, params.shape[0])
+        
+        _, top_idx = torch.topk(importance, k)
+        active_params = params[top_idx]
+        active_imp = importance[top_idx]  
+        
+        # 2. Trace all active rules
+        # We need the feature names from somewhere... 
+        # CondorBrainEngine has them. CondorBrain might not store them explicitly?
+        # We can assume standard names if not passed.
+        # Ideally, we pass feature_names to this function.
+        # Since I can't easily change the signature in the call site (train_condor_brain), 
+        # I will try to infer or use placeholders.
+        # Actually, CondorBrain usually knows its input_dim, but maybe not names.
+        # I'll use F0..FN if needed.
+        
+        # Checking if self has feature_names - use FEATURE_COLS_V22 as default
+        feature_names = getattr(self, 'feature_names', FEATURE_COLS_V22)  # Human-readable names
+        
+        names = []
+        for i in range(k):
+            if active_imp[i] > -10.0: # Filter very low importance
+                # Trace!
+                rule_str = trace_recursive_rule(i, active_params, feature_names, [], depth=0)
+                names.append(f"[R{i}] {rule_str} (imp={active_imp[i]:.2f})")
+        
+        # 3. Get combined logic sets (Combiner) - Still valuable for AND/OR logic
+        # For the Combiner, we just pass the names we generated
+        # logic_sets = self.predicate_combiner.get_logic_sets(names)
+        
+        return names # + logic_sets
+
+    def benchmark(self, n_iterations: int = 100) -> dict:
+        """Benchmark inference latency."""
+        import time
+        
+        # Warmup
+        for _ in range(10):
+            _ = self.model(self._dummy_input, return_regime=True, forecast_days=14)
+        
+        if self.device.type == 'cuda':
+            torch.cuda.synchronize()
+        
+        # Benchmark
+        times = []
+        for _ in range(n_iterations):
+            start = time.perf_counter()
+            with torch.no_grad():
+                _ = self.model(self._dummy_input, return_regime=True, forecast_days=14)
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize()
+            times.append((time.perf_counter() - start) * 1000)  # ms
+        
+        return {
+            'mean_ms': np.mean(times),
+            'std_ms': np.std(times),
+            'min_ms': np.min(times),
+            'max_ms': np.max(times),
+            'p99_ms': np.percentile(times, 99)
+        }
+
+
+# ============================================================================
+# EXPORTS
+# ============================================================================
+
+__all__ = [
+    'CondorBrain',
+    'CondorBrainEngine', 
+    'CondorSignal',
+    'CondorLoss',
+    'HorizonForecaster',
+    'HAS_CDE',
+    'HAS_MAMBA' # Kept for backward compatibility
+]
+
+
+
+================================================================================
+FILE: intelligence/generative/diffusion.py
+================================================================================
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import math
+
+class SinusoidalPositionEmbeddings(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, time):
+        device = time.device
+        half_dim = self.dim // 2
+        embeddings = math.log(10000) / (half_dim - 1)
+        embeddings = torch.exp(torch.arange(half_dim, device=device) * -embeddings)
+        embeddings = time[:, None] * embeddings[None, :]
+        embeddings = torch.cat((embeddings.sin(), embeddings.cos()), dim=-1)
+        return embeddings
+
+class ConditionalDiffusionHead(nn.Module):
+    """
+    Conditional Diffusion Model for Time Series Forecasting.
+    
+    Refines a latent trajectory using a denoising process conditioned on the 
+    Neural CDE backbone's latent state.
+    
+    Architecture:
+    - Epsilon-Predictor: Residual MLP taking (x_t, t, condition)
+    - Schedule: Linear Beta Schedule
+    """
+    def __init__(
+        self, 
+        input_dim: int = 4,    # e.g., r, rho, d, v (4 features)
+        cond_dim: int = 512,   # Neural CDE hidden state dim
+        hidden_dim: int = 256,
+        horizon: int = 32, 
+        n_steps: int = 100     # Diffusion steps (keep small for speed)
+    ):
+        super().__init__()
+        self.input_dim = input_dim
+        self.horizon = horizon
+        self.n_steps = n_steps
+        
+        # Time Embeddings
+        self.time_mlp = nn.Sequential(
+            SinusoidalPositionEmbeddings(hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        
+        # Condition Projection (Neural CDE -> Hidden)
+        self.cond_proj = nn.Linear(cond_dim, hidden_dim)
+        
+        # Denoising Network (Residual MLP)
+        # Input: Flat trajectory (horizon * input_dim) to keep correlations
+        flat_dim = horizon * input_dim
+        
+        self.net = nn.Sequential(
+            nn.Linear(flat_dim + hidden_dim + hidden_dim, hidden_dim * 2),
+            nn.SiLU(),
+            nn.Linear(hidden_dim * 2, hidden_dim * 2),
+            nn.SiLU(),
+            nn.Linear(hidden_dim * 2, flat_dim)
+        )
+        
+        # Diffusion Constants (no parameters)
+        self.register_buffer('betas', torch.linspace(1e-4, 0.02, n_steps))
+        self.register_buffer('alphas', 1. - self.betas)
+        self.register_buffer('alphas_cumprod', torch.cumprod(self.alphas, axis=0))
+        self.register_buffer('sqrt_alphas_cumprod', torch.sqrt(self.alphas_cumprod))
+        self.register_buffer('sqrt_one_minus_alphas_cumprod', torch.sqrt(1. - self.alphas_cumprod))
+
+    def forward(self, x_start, condition, t=None):
+        """
+        Training Forward Pass:
+        1. Sample random t
+        2. Add noise to x_start -> x_t
+        3. Predict noise epsilon
+        
+        Args:
+            x_start: Ground truth trajectory (B, H, F)
+            condition: Neural CDE latent state (B, D)
+            t: Optional time steps (B,). If None, sampled uniformly.
+            
+        Returns:
+            loss: MSE(noise, predicted_noise)
+        """
+        B, H, n_feats = x_start.shape
+        device = x_start.device
+        
+        # 1. Sample t
+        if t is None:
+            t = torch.randint(0, self.n_steps, (B,), device=device).long()
+            
+        # 2. Add Noise
+        noise = torch.randn_like(x_start)
+        
+        sqrt_alpha_bar_t = self.sqrt_alphas_cumprod[t][:, None, None]
+        sqrt_one_minus_alpha_bar_t = self.sqrt_one_minus_alphas_cumprod[t][:, None, None]
+        
+        x_t = sqrt_alpha_bar_t * x_start + sqrt_one_minus_alpha_bar_t * noise
+        
+        # 3. Predict Noise
+        # Flatten x_t for MLP: (B, H*F)
+        x_flat = x_t.view(B, -1)
+        
+        # Conditioning
+        c_emb = self.cond_proj(condition) # (B, Hidden)
+        t_emb = self.time_mlp(t)          # (B, Hidden)
+        
+        # Concatenate: [Noisy_Input, Condition, Time]
+        inp = torch.cat([x_flat, c_emb, t_emb], dim=-1)
+        
+        pred_noise_flat = self.net(inp)
+        pred_noise = pred_noise_flat.view(B, H, n_feats)
+        
+        # return pred_noise
+        return F.mse_loss(pred_noise, noise)
+
+    @torch.no_grad()
+    def sample(self, condition, n_samples=1):
+        """
+        Generate trajectory via reverse diffusion.
+        
+        Args:
+            condition: Mamba embedding (B, D)
+            n_samples: Number of samples per condition (default 1)
+            
+        Returns:
+            x_final: Generated trajectory (B, H, F)
+        """
+        B = condition.shape[0]
+        device = condition.device
+        
+        # Start from pure noise
+        x = torch.randn((B, self.horizon, self.input_dim), device=device)
+        
+        # Reverse Loop
+        for i in reversed(range(self.n_steps)):
+            t = torch.full((B,), i, device=device, dtype=torch.long)
+            
+            # Predict noise
+            x_flat = x.view(B, -1)
+            c_emb = self.cond_proj(condition)
+            t_emb = self.time_mlp(t)
+            inp = torch.cat([x_flat, c_emb, t_emb], dim=-1)
+            
+            eps_theta = self.net(inp).view(B, self.horizon, self.input_dim)
+            
+            # Update x_{t-1}
+            beta_t = self.betas[i]
+            alpha_t = self.alphas[i]
+            alpha_bar_t = self.alphas_cumprod[i]
+            
+            # Mean
+            coef1 = 1 / torch.sqrt(alpha_t)
+            coef2 = (1 - alpha_t) / torch.sqrt(1 - alpha_bar_t)
+            mean = coef1 * (x - coef2 * eps_theta)
+            
+            if i > 0:
+                noise = torch.randn_like(x)
+                sigma_t = torch.sqrt(beta_t)
+                x = mean + sigma_t * noise
+            else:
+                x = mean
+                
+        return x
+
+
+
+================================================================================
+FILE: intelligence/rule_engine/dsl_parser.py
+================================================================================
+
+# intelligence/rule_engine/dsl_parser.py
+"""
+DSL parser for rule YAML files (V2.5 Schema).
+Loads Complete_Ruleset_DSL.yaml and constructs rule objects.
+"""
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Any, Optional
+import yaml
+import logging
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class PrimitiveSpec:
+    """Specification for a single primitive invocation"""
+    id: str
+    alias: str
+    func: Optional[str] = None  # Resolved function name
+    inputs: Dict[str, str] = field(default_factory=dict)
+    params: Dict[str, Any] = field(default_factory=dict)
+
+@dataclass
+class SignalLogicSpec:
+    """Specification for signal entry/exit logic"""
+    entry_long: Optional[str] = None
+    entry_short: Optional[str] = None
+    exit: Optional[str] = None
+    min_confidence: float = 0.5
+
+@dataclass
+class GateSpec:
+    """Specification for a gate in the execution stack"""
+    id: str
+    params: Dict[str, Any] = field(default_factory=dict)
+    type: str = "BLOCK"  # BLOCK, FILTER, ADJUST
+    action: str = "block" # block, dampen
+
+@dataclass
+class RuleSpec:
+    """Specification for a single rule"""
+    id: str
+    name: str
+    category: str
+    strategy_type: str
+    primitives: List[PrimitiveSpec]
+    signal_logic: SignalLogicSpec
+    gate_stack: List[GateSpec]
+    sizing_logic: Dict[str, Any]
+    requires: Dict[str, List[str]]
+
+@dataclass
+class Ruleset:
+    """Complete ruleset containing all rules"""
+    version: str
+    rules: Dict[str, RuleSpec]
+
+class RuleDSLParser:
+    """
+    Parses YAML rule files into Ruleset objects.
+    Handles V2.5 schema with nested primitive definitions.
+    """
+
+    def __init__(self, path: str):
+        self.path = path
+
+    def load(self) -> Ruleset:
+        """Load and parse the YAML ruleset file"""
+        with open(self.path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+
+        rules = {}
+        metadata = data.get("ruleset_metadata", {})
+        version = metadata.get("version", "unknown")
+
+        # Iterate over all top-level keys that look like rules (RULE_*)
+        for key, rule_def in data.items():
+            if not key.startswith("RULE_"):
+                continue
+
+            rule_id = rule_def.get("id", key)
+            
+            # Parse Primitives
+            primitives = []
+            for p in rule_def.get("primitives", []):
+                primitives.append(PrimitiveSpec(
+                    id=p["id"],
+                    alias=p.get("alias", p["id"]),
+                    params=p.get("params", {})
+                ))
+
+            # Parse Signal Logic
+            signals = rule_def.get("signals", {})
+            entry = signals.get("entry", {})
+            exit_logic = signals.get("exit", {}).get("logic")
+            
+            signal_spec = SignalLogicSpec(
+                entry_long=entry.get("long", {}).get("logic"),
+                entry_short=entry.get("short", {}).get("logic"),
+                exit=exit_logic,
+                min_confidence=entry.get("long", {}).get("min_confidence", 0.5) 
+            )
+

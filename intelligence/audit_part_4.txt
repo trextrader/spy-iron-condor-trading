@@ -1,0 +1,426 @@
+# =============================================================================
+
+if __name__ == '__main__':
+    print("=" * 70)
+    print("CondorNet™ - Mathematically Faithful Implementation")
+    print("=" * 70)
+
+    # Create model
+    model = CondorNet(
+        d_input=54,
+        d_h=128,
+        d_v=16,
+        d_m=32,
+        d_r=16,
+        d_control=64,
+    )
+
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"\nModel parameters: {n_params:,}")
+    print(f"State dimension: {model.spec.d_x}")
+
+    # Test forward pass
+    batch, seq = 4, 64
+    x = torch.randn(batch, seq, 54)
+
+    print(f"\nTest forward pass:")
+    print(f"  Input: ({batch}, {seq}, 54)")
+
+    with torch.no_grad():
+        outputs, diag = model(x, return_diagnostics=True)
+
+    print(f"  Output: {outputs.shape}")
+    print(f"  Final gate: {diag['final_gate'].mean().item():.4f}")
+    print(f"  Predicates: {diag['predicates'].mean(0).tolist()}")
+
+    # Test ETD-1 kernel
+    print(f"\nTest ETD-1 kernel:")
+    A = model.get_A_matrix()
+    F_k, phi1 = etd1_kernel(A, dt=1.0)
+    print(f"  A shape: {A.shape}")
+    print(f"  F = exp(AΔt) shape: {F_k.shape}")
+    print(f"  φ_1(AΔt) shape: {phi1.shape}")
+
+    # Test spectral radius
+    rho_loss = spectral_radius_loss(A, dt=1.0)
+    print(f"  Spectral radius loss: {rho_loss.item():.6f}")
+
+    # Test group invariance
+    p = torch.rand(batch, 5)
+    gi_loss = group_invariant_loss(model.pred_signature, p)
+    print(f"\nGroup invariance loss: {gi_loss.item():.6f}")
+
+    print("\n" + "=" * 70)
+    print("Implementation complete and tested.")
+    print("=" * 70)
+
+
+
+================================================================================
+FILE: intelligence/condor_brain.py
+================================================================================
+
+"""
+CondorBrain: Advanced Multi-Output Neural CDE Architecture for Iron Condor Optimization
+
+This module implements a specialized neural architecture (Neural Controlled Differential Equations)
+that directly outputs Iron Condor trading parameters instead of just price predictions.
+
+Enhancements (2026-01-27):
+- Neural CDE: Continuous-time backbone for superior temporal stability
+- VolGatedAttn: Dynamic volatility-gated attention after layers 8, 16, 24
+- TopKMoE: Sparse mixture-of-experts for regime-specialized output
+"""
+import sys
+import os
+import torch
+import torch.nn as nn
+import numpy as np
+import pandas as pd
+try:
+    import pandas_ta as ta
+    HAS_PANDAS_TA = True
+except ImportError:
+    HAS_PANDAS_TA = False
+import logging
+from dataclasses import dataclass
+from typing import Optional, Tuple, Any, List
+
+# Ensure project root is in path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Check for Neural CDE
+try:
+    from intelligence.models.neural_cde import NeuralCDE
+    HAS_CDE = True
+except ImportError:
+    HAS_CDE = False
+    logger.warning("NeuralCDE not found. CDE backbone will not be available.")
+
+# Check for Mamba (Legacy support)
+try:
+    from mamba_ssm import Mamba
+    HAS_MAMBA = True
+except ImportError:
+    HAS_MAMBA = False
+
+# Import enhancement modules
+from intelligence.vol_gated_attn import VolGatedAttn
+from intelligence.topk_moe import TopKMoE, BatchedTopKMoE
+from intelligence.generative.diffusion import ConditionalDiffusionHead
+from intelligence.predicate_discovery import PredicateSelector, PredicateCombiner
+from intelligence.canonical_feature_registry import FEATURE_COLS_V22
+
+
+# ============================================================================
+# BF16-FRIENDLY RMSNORM (Critical for throughput)
+# ============================================================================
+
+class RMSNorm(nn.Module):
+    """
+    BF16-friendly RMSNorm (no mean subtraction; stable without FP32 casts).
+    y = x * rsqrt(mean(x^2) + eps) * weight
+
+    Unlike nn.RMSNorm, this returns the same dtype as input (BF16 stays BF16).
+    """
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Keep stats in FP32 for stability, but return in original dtype
+        dtype = x.dtype
+        x_fp32 = x.float()
+        rms = torch.rsqrt(x_fp32.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+        y = (x_fp32 * rms).to(dtype)
+        return y * self.weight.to(dtype)
+
+
+# ============================================================================
+# FEATURE GROUP DROPOUT (2026-01-26: Anti-collapse regularization)
+# ============================================================================
+
+class FeatureGroupDropout(nn.Module):
+    """
+    Drops entire feature groups during training to encourage redundancy learning.
+
+    Feature groups for V2.2 (52 features):
+    - market_primitives: indices 0-4 (open, high, low, close, volume)
+    - greeks: indices 5-13 (delta, gamma, vega, theta, iv, ivr, spread_ratio, te, strike)
+    - targets_risk: indices 14-15 (target_spot, max_dd_60m)
+    - dynamic_regime: indices 16-31 (log_return, vol_ewma, ..., breakout_score)
+    - v22_primitives: indices 32-51 (bb_percentile, bw_expansion_rate, ...)
+
+    During training, randomly masks entire groups with probability p.
+    """
+
+    # Define feature group slices for V2.2 schema
+    FEATURE_GROUPS = {
+        'market_primitives': slice(0, 5),      # OHLCV
+        'greeks': slice(5, 14),                # Delta, gamma, etc.
+        'targets_risk': slice(14, 16),         # Target spot, max DD
+        'dynamic_regime': slice(16, 32),       # Dynamic features
+        'v22_primitives': slice(32, 52),       # V2.2 new features
+    }
+
+    def __init__(self, group_drop_prob: float = 0.15, input_dim: int = 52):
+        """
+        Args:
+            group_drop_prob: Probability of dropping each group (default 0.15)
+            input_dim: Expected input dimension (for validation)
+        """
+        super().__init__()
+        self.group_drop_prob = group_drop_prob
+        self.input_dim = input_dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Apply feature-group dropout during training.
+
+        Args:
+            x: (B, T, D) input tensor
+
+        Returns:
+            Tensor with same shape, some feature groups zeroed out
+        """
+        if not self.training or self.group_drop_prob <= 0:
+            return x
+
+        B, T, D = x.shape
+        device = x.device
+        dtype = x.dtype
+
+        # Create mask (start with all 1s)
+        mask = torch.ones(D, device=device, dtype=dtype)
+
+        # Randomly drop each group
+        for group_name, group_slice in self.FEATURE_GROUPS.items():
+            if torch.rand(1).item() < self.group_drop_prob:
+                # Check bounds
+                start = group_slice.start
+                stop = min(group_slice.stop, D)
+                if start < D:
+                    mask[start:stop] = 0.0
+
+        # Apply mask (broadcast across batch and time)
+        # Scale remaining features to maintain expected magnitude
+        remaining_frac = mask.mean().clamp(min=0.1)
+        x = x * mask.view(1, 1, D) / remaining_frac
+
+        return x
+
+# ============================================================================
+# OUTPUT DATA STRUCTURES
+# ============================================================================
+
+@dataclass
+class CondorSignal:
+    """Output structure for Iron Condor predictions with price trajectory."""
+    # Iron Condor Parameters
+    short_call_offset: float   # % distance from spot for short call
+    short_put_offset: float    # % distance from spot for short put
+    wing_width: float          # $ width of wings
+    dte_selection: float       # Optimal days to expiry
+    prob_profit: float         # Probability of profit (0-1)
+    expected_roi: float        # Expected ROI if trade executes
+    max_loss_pct: float        # Predicted max loss scenario (0-1)
+    confidence: float          # Model confidence (0-1)
+    regime: str                # Detected regime: 'low', 'normal', 'high'
+    
+    # Multi-Horizon Price Trajectory (Optional)
+    daily_forecast: Optional[np.ndarray] = None  # (num_days, 4) [close, high, low, vol]
+    max_high_pct: float = 0.0   # Max % price could go above current over DTE
+    max_low_pct: float = 0.0    # Max % price could go below current over DTE
+    
+    def is_valid_trade(self, min_confidence: float = 0.6, min_pop: float = 0.5) -> bool:
+        """Check if this signal meets minimum trade criteria."""
+        return self.confidence >= min_confidence and self.prob_profit >= min_pop
+    
+    def strikes_are_safe(self, spot_price: float) -> Tuple[bool, bool]:
+        """
+        Check if predicted price range stays within strike boundaries.
+        
+        Returns:
+            (call_safe, put_safe): True if strikes are outside predicted range
+        """
+        call_strike = spot_price * (1 + self.short_call_offset / 100)
+        put_strike = spot_price * (1 - self.short_put_offset / 100)
+        
+        predicted_max = spot_price * (1 + self.max_high_pct / 100)
+        predicted_min = spot_price * (1 - self.max_low_pct / 100)
+        
+        call_safe = predicted_max < call_strike
+        put_safe = predicted_min > put_strike
+        
+        return call_safe, put_safe
+    
+    def to_dict(self) -> dict:
+        return {
+            'short_call_offset': self.short_call_offset,
+            'short_put_offset': self.short_put_offset,
+            'wing_width': self.wing_width,
+            'dte_selection': self.dte_selection,
+            'prob_profit': self.prob_profit,
+            'expected_roi': self.expected_roi,
+            'max_loss_pct': self.max_loss_pct,
+            'confidence': self.confidence,
+            'regime': self.regime,
+            'max_high_pct': self.max_high_pct,
+            'max_low_pct': self.max_low_pct
+        }
+
+
+# ============================================================================
+# REGIME DETECTOR
+# ============================================================================
+
+class RegimeDetector(nn.Module):
+    """Classifies current market regime based on IVR and volatility features."""
+    def __init__(self, d_model: int = 1024):
+        super().__init__()
+        self.classifier = nn.Sequential(
+            nn.Linear(d_model, 256),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, 3)  # Low, Normal, High (Logits)
+        )
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, d_model) - the last hidden state
+        return self.classifier(x)  # (B, 3)
+
+# ============================================================================
+# MULTI-HORIZON FORECASTER (Price Trajectory Prediction)
+# ============================================================================
+
+class HorizonForecaster(nn.Module):
+    """
+    Predicts future price trajectory up to max_horizon days ahead.
+    
+    This allows the model to 'see' the entire life of an options contract
+    and make informed strike selections based on predicted price range.
+    """
+    
+    def __init__(self, d_model: int = 1024, max_horizon: int = 45, bars_per_day: int = 390):
+        super().__init__()
+        self.max_horizon = max_horizon
+        self.bars_per_day = bars_per_day
+        
+        # Horizon encoding
+        self.horizon_embed = nn.Embedding(max_horizon, 64)
+        
+        # Recurrent forecaster (predicts daily summaries)
+        self.forecast_rnn = nn.GRU(
+            input_size=d_model + 64,  # Hidden state + horizon embedding
+            hidden_size=512,
+            num_layers=2,
+            batch_first=True,
+            dropout=0.1
+        )
+        
+        # Output heads per day
+        self.price_head = nn.Linear(512, 4)  # [expected_close, high, low, volatility]
+        self.range_head = nn.Linear(512, 2)  # [max_high_pct, max_low_pct] from current
+        
+    def forward(self, hidden: torch.Tensor, num_days: int = 45) -> dict:
+        """
+        Predict price trajectory for next num_days.
+        
+        Args:
+            hidden: (B, d_model) - hidden state from backbone
+            num_days: Number of days to forecast (typically matches DTE)
+            
+        Returns:
+            dict with:
+                - daily_forecast: (B, num_days, 4) - [close, high, low, vol] per day
+                - max_range: (B, 2) - max high/low % over entire horizon
+        """
+        B = hidden.size(0)
+        device = hidden.device
+        
+        # Generate horizon embeddings
+        day_indices = torch.arange(num_days, device=device).unsqueeze(0).expand(B, -1)
+        day_embed = self.horizon_embed(day_indices)  # (B, num_days, 64)
+        
+        # Expand hidden for each day
+        hidden_expanded = hidden.unsqueeze(1).expand(-1, num_days, -1)  # (B, num_days, d_model)
+        
+        # Concat and forecast
+        rnn_input = torch.cat([hidden_expanded, day_embed], dim=-1)  # (B, num_days, d_model+64)
+        # cuDNN GRU requires FP32 contiguous input (BF16 not supported)
+        rnn_input = rnn_input.float().contiguous()
+        rnn_out, _ = self.forecast_rnn(rnn_input)  # (B, num_days, 512)
+        
+        # Daily predictions
+        daily_forecast = self.price_head(rnn_out)  # (B, num_days, 4)
+        
+        # Max range over horizon (for strike selection)
+        max_range = self.range_head(rnn_out[:, -1, :])  # Use final day's hidden
+        
+        return {
+            'daily_forecast': daily_forecast,
+            'max_range': max_range
+        }
+
+# ============================================================================
+# EXPERT HEADS (Regime-Specific)
+# ============================================================================
+
+class CondorExpertHead(nn.Module):
+    """Single expert head that outputs 10 IC parameters (8 original + explicit ENTRY/EXIT)."""
+
+    # Output indices for external reference
+    IDX_CALL_OFFSET = 0
+    IDX_PUT_OFFSET = 1
+    IDX_WING_WIDTH = 2
+    IDX_DTE = 3
+    IDX_PROB_PROFIT = 4
+    IDX_EXPECTED_ROI = 5
+    IDX_MAX_LOSS = 6
+    IDX_CONFIDENCE = 7
+    IDX_ENTRY_LOGIT = 8   # NEW: Explicit entry signal (logit, not derived)
+    IDX_EXIT_LOGIT = 9    # NEW: Explicit exit signal (logit, not derived)
+
+    NUM_OUTPUTS = 10
+
+    def __init__(self, d_model: int = 1024):
+        super().__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(d_model, 512),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, self.NUM_OUTPUTS)  # 10 outputs (was 8)
+        )
+
+        # Output activations (applied post-forward)
+        self.offset_activation = nn.Sigmoid()  # Constrain to 0-1, then scale
+        self.prob_activation = nn.Sigmoid()    # 0-1 probabilities
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        raw = self.fc(x)  # (B, 10)
+
+        # Apply appropriate activations per output
+        out = torch.zeros_like(raw)
+        out[:, 0] = self.offset_activation(raw[:, 0]) * 5.0    # short_call_offset: 0-5%
+        out[:, 1] = self.offset_activation(raw[:, 1]) * 5.0    # short_put_offset: 0-5%
+        out[:, 2] = self.offset_activation(raw[:, 2]) * 10.0   # wing_width: 0-$10
+        out[:, 3] = self.offset_activation(raw[:, 3])           # dte: 0-1 (normalized)
+        out[:, 4] = self.prob_activation(raw[:, 4])            # prob_profit: 0-1
+        out[:, 5] = torch.tanh(raw[:, 5]) * 0.5                # expected_roi: -50% to +50%
+        out[:, 6] = self.prob_activation(raw[:, 6])            # max_loss_pct: 0-1
+        out[:, 7] = self.prob_activation(raw[:, 7])            # confidence: 0-1
+        # NEW: Explicit entry/exit logits (no activation - raw logits for BCEWithLogitsLoss)
+        out[:, 8] = raw[:, 8]                                  # entry_logit: raw logit
+        out[:, 9] = raw[:, 9]                                  # exit_logit: raw logit
+
+        return out
+
+# ============================================================================
+# CONDORBRAIN: MAIN ARCHITECTURE

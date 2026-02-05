@@ -1,0 +1,455 @@
+# =============================================================================
+
+def calculate_atr_stop_multiplier(atr_pct: float, base_multiplier: float = 1.5) -> float:
+    """
+    Calculate dynamic stop-loss multiplier based on ATR.
+    
+    Low volatility (ATR < 0.5%) → Tight stop (1.0x)
+    Medium volatility (ATR 0.5-2%) → Standard stop (1.5x)
+    High volatility (ATR > 2%) → Wide stop (2.0x)
+    """
+    if atr_pct is None or np.isnan(atr_pct):
+        return base_multiplier
+    
+    # Low volatility: Tighter stop
+    if atr_pct <= 0.005:  # 0.5%
+        return max(1.0, base_multiplier - 0.5)
+    
+    # High volatility: Wider stop
+    elif atr_pct >= 0.02:  # 2.0%
+        return min(2.5, base_multiplier + 0.5)
+    
+    # Medium volatility: Linear interpolation
+    else:
+        adjustment = ((atr_pct - 0.005) / 0.015) * 0.5
+        return base_multiplier + adjustment
+
+
+def check_bbands_breakout(bb_position: float, touch_threshold: float = 0.95) -> bool:
+    """
+    Check if price has touched Bollinger Bands (breakout signal).
+    """
+    if bb_position is None or np.isnan(bb_position):
+        return False
+    
+    # Upper band touch
+    if bb_position >= touch_threshold:
+        return True
+    
+    # Lower band touch
+    if bb_position <= (1.0 - touch_threshold):
+        return True
+    
+    return False
+
+
+def classify_market_regime(adx: float, rsi: float, vix: float) -> str:
+    """
+    Classify market state into simplified regimes.
+    
+    Regimes:
+    - VOLATILE: High VIX (>25)
+    - TRENDING: Strong ADX (>25)
+    - RANGING: Low ADX (<25) and Neutral RSI (40-60)
+    - NEUTRAL: default
+    """
+    if vix is not None and vix > 25.0:
+        return "VOLATILE"
+    
+    if adx is not None and adx > 25.0:
+        if rsi is not None and (rsi > 60 or rsi < 40):
+             return "TRENDING"
+        return "TRENDING_WEAK"
+        
+    if adx is not None and adx < 25.0:
+        if rsi is not None and 40 <= rsi <= 60:
+            return "RANGING"
+            
+    return "NEUTRAL"
+
+
+# Backward Compatibility
+get_fuzzy_consensus = calculate_mtf_membership
+
+
+
+
+================================================================================
+FILE: kaggle/condor_brain_backtest_v2.py
+================================================================================
+
+"""
+CondorBrain V2.2 Backtest (with Rule Engine)
+============================================
+Integrates CondorBrain V2.2 Model (52 features) with Rule Engine V2.5.
+Vectorized execution for Rules + Model Inference.
+
+Usage:
+1. Upload to Kaggle/Colab.
+2. Ensure `condor_brain_retrain_v22_e3.pth` (or similar) is present.
+3. Ensure `intelligence/` and `docs/Complete_Ruleset_DSL.yaml` are present.
+"""
+
+import os
+import sys
+import json
+import uuid
+import hashlib
+import subprocess
+import torch
+import pandas as pd
+import numpy as np
+import yaml
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+
+# Add repo to path
+# 0. Setup Path
+try:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.abspath(os.path.join(script_dir, '..'))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+except NameError:
+    pass
+
+sys.path.insert(0, '/content/spy-iron-condor-trading')
+sys.path.insert(0, '/kaggle/working/spy-iron-condor-trading')
+sys.path.insert(0, os.getcwd())
+
+from intelligence.condor_brain import CondorBrain
+from intelligence.canonical_feature_registry import (
+    FEATURE_COLS_V22,
+    INPUT_DIM_V22,
+    VERSION_V22,
+    apply_semantic_nan_fill,
+    get_neutral_fill_value_v22,
+)
+from intelligence.features.dynamic_features import (
+    compute_all_dynamic_features,
+    compute_all_primitive_features_v22
+)
+from intelligence.rule_engine.dsl_parser import RuleDSLParser
+from intelligence.rule_engine.executor import RuleExecutionEngine
+try:
+    from torch.utils.tensorboard import SummaryWriter # Added for TB support
+except ImportError:
+    class SummaryWriter:
+        def __init__(self, log_dir=None): pass
+        def add_scalar(self, tag, scalar_value, global_step=None): pass
+        def close(self): pass
+try:
+    from audit.decision_trace_logger import DecisionTraceLogger, TraceConfig
+    HAS_TRACE_LOGGER = True
+except Exception:
+    HAS_TRACE_LOGGER = False
+from audit.contract_snapshot import generate_contract_snapshot
+from audit.generate_decision_factor_attribution import generate_attribution_csv
+from audit.schema.validate_decision_factor_attribution import validate_decision_factor_attribution
+from audit.schema.validate_decision_trace import validate_decision_trace
+
+# --- SCALING HELPERS (Matched to training) ---
+def robust_zscore_fit(X):
+    median = np.nanmedian(X, axis=0)
+    diff = np.abs(X - median)
+    mad = np.nanmedian(diff, axis=0)
+    return median, mad
+
+def robust_zscore_transform(X, median, mad, clip_val=10.0):
+    mad = np.where(mad < 1e-6, 1.0, mad) # Avoid div0
+    z = (X - median) / (mad * 1.4826)
+    return np.clip(z, -clip_val, clip_val)
+
+# --- CONFIG ---
+MODEL_PATH = "condor_brain_retrain_v22_e3.pth" # Default
+DATA_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
+RULESET_PATH = "docs/Complete_Ruleset_DSL.yaml"
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Output directory
+REPORTS_DIR = "reports"
+os.makedirs(REPORTS_DIR, exist_ok=True)
+DECISION_TRACE_PATH = os.path.join(REPORTS_DIR, "decision_trace.jsonl")
+BAR_TRACE_PATH = os.path.join(REPORTS_DIR, "bar_trace.jsonl")
+
+# Iron Condor P&L Config
+IC_CREDIT_PER_SPREAD = 1.50  # $1.50 credit per spread (typical)
+IC_CONTRACTS = 10  # Number of contracts per trade
+IC_MULTIPLIER = 100  # Options multiplier
+RULE_FEATURES = ["rule_long_consensus", "rule_short_consensus", "rule_exit_consensus", "rule_block_any"]
+
+# Trace + outcome labeling config
+TRACE_PER_BAR = True
+TOP_N_FEATURES = 20
+BAR_TRACE_ENABLED = True
+BAR_TRACE_INCLUDE_ROW = True
+ENTRY_ALPHA_R = 0.25
+ENTRY_BETA_R = 0.25
+EXIT_EVAL_HOLD_BARS = 30
+EXIT_RISK_LAMBDA = 0.5
+SIZING_RISK_LAMBDA = 0.5
+CONF_ENTRY_MIN = 0.35      # Lowered from 0.4 - model outputs ~0.5-0.65
+PROB_ENTRY_MIN = 0.40      # Lowered from 0.45 - main blocker for entries
+MIN_HOLD_BARS = 30
+
+# === DEBUG INFERENCE FLAGS ===
+DEBUG_INFERENCE = True      # Set to True to see detailed feature/model output analysis
+DEBUG_SAMPLE_EVERY = 500    # Print debug info every N bars (reduce noise)
+DEBUG_FIRST_N = 20          # Always print first N bars for initial analysis
+DEBUG_LOG_FILE = "debug_inference.log"  # Output file for debug logs
+MIN_BARS_BETWEEN_TRADES = 5
+
+def _sha256_file(path):
+    if not path or not os.path.exists(path):
+        return None
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+def _git_commit():
+    try:
+        out = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL)
+        return out.decode("utf-8").strip()
+    except Exception:
+        return "unknown"
+
+def _append_jsonl(path, record):
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=True) + "\n")
+
+def _json_safe(val):
+    if isinstance(val, (np.floating, np.integer)):
+        return val.item()
+    if isinstance(val, (np.ndarray,)):
+        return val.tolist()
+    if isinstance(val, (pd.Timestamp,)):
+        return str(val)
+    return val
+
+def _json_safe_dict(d):
+    return {k: _json_safe(v) for k, v in d.items()}
+
+def load_data_and_features(data_path, rows=None):
+    print(f"Loading data from {data_path}...")
+    print(f"Loading data from {data_path}...")
+    
+    # FIX: Use nrows to prevent OOM on huge files
+    if rows is not None:
+        print(f"   [Memory Opt] Reading first {rows} rows only...")
+        df = pd.read_csv(data_path, nrows=rows)
+    else:
+        df = pd.read_csv(data_path)
+    
+    # --- STANDARDIZE DATE COLUMN ---
+    if 'dt' not in df.columns and 'timestamp' in df.columns:
+        print("   ⚠️ Standardizing 'timestamp' -> 'dt'...")
+        df.rename(columns={'timestamp': 'dt'}, inplace=True)
+
+    if 'dt' in df.columns:
+        # Ensure UTC standard
+        df['dt'] = pd.to_datetime(df['dt'], utc=True)
+    
+    # if rows is not None:
+    #    df = df.iloc[-rows:].reset_index(drop=True)
+    
+    # Compute missing V2.2 features (dynamic + primitives) on unique spot bars, then merge back.
+    missing_v22 = [c for c in FEATURE_COLS_V22 if c not in df.columns]
+
+    # SMART CHECK: Also detect if existing V2.2 columns have suspicious constant values
+    # These key features should have variance if properly computed
+    validation_cols = ['exec_allow', 'friction_ratio', 'gap_risk_score', 'rsi_dyn', 'adx_adaptive']
+    suspicious_cols = []
+    for col in validation_cols:
+        if col in df.columns:
+            col_std = df[col].std()
+            col_unique = df[col].nunique()
+            if col_std < 0.001 or col_unique <= 2:
+                suspicious_cols.append(f"{col}(std={col_std:.4f}, unique={col_unique})")
+
+    if suspicious_cols and not missing_v22:
+        print(f"⚠️ V2.2 columns exist but have SUSPICIOUS constant values:")
+        for s in suspicious_cols:
+            print(f"   - {s}")
+        print(f"   FORCING RECOMPUTATION of primitives...")
+        # Force recomputation by pretending these are missing
+        missing_v22 = validation_cols
+
+    if not missing_v22:
+        print("✅ V2.2 Features already present with valid variance. Skipping computation.")
+        return df
+
+    print(f"⚠️ Missing/Invalid {len(missing_v22)} V2.2 features; computing on spot bars...")
+
+    # Determine datetime column for spot keying
+    dt_col = None
+    for c in ['dt', 'timestamp', 'datetime', 'date']:
+        if c in df.columns:
+            dt_col = c
+            break
+
+    ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
+    aux_cols = [c for c in ["spread_ratio", "lag_minutes"] if c in df.columns]
+
+    if dt_col is None:
+        print("⚠️ No datetime column found; computing on full dataframe.")
+        df = compute_all_dynamic_features(df, close_col="close", high_col="high", low_col="low")
+        df = compute_all_primitive_features_v22(
+            df,
+            close_col="close", high_col="high", low_col="low",
+            volume_col="volume",
+            spread_col="spread_ratio" if "spread_ratio" in df.columns else "close",
+            inplace=True
+        )
+        return df
+
+    spot_key_cols = ['symbol', dt_col] if 'symbol' in df.columns else [dt_col]
+    spot_df = df.drop_duplicates(subset=spot_key_cols)[spot_key_cols + ohlcv_cols + aux_cols].copy()
+    spot_df = spot_df.sort_values(spot_key_cols).reset_index(drop=True)
+
+    print("   Computing dynamic features on spot bars...")
+    spot_df = compute_all_dynamic_features(spot_df, close_col="close", high_col="high", low_col="low")
+
+    print("   Computing V2.2 primitive features on spot bars...")
+    spot_df = compute_all_primitive_features_v22(
+        spot_df,
+        close_col="close", high_col="high", low_col="low",
+        volume_col="volume",
+        spread_col="spread_ratio" if "spread_ratio" in spot_df.columns else "close",
+        inplace=True
+    )
+
+    # Merge computed columns back without clobbering existing values
+    exclude_cols = spot_key_cols + ohlcv_cols + aux_cols
+    computed_cols = [c for c in spot_df.columns if c not in exclude_cols]
+    merge_df = spot_df[spot_key_cols + computed_cols]
+    df = df.merge(merge_df, on=spot_key_cols, how='left', suffixes=('', '_calc'))
+    for col in computed_cols:
+        calc_col = f"{col}_calc"
+        if calc_col in df.columns:
+            if col in df.columns:
+                df[col] = df[col].fillna(df[calc_col])
+            else:
+                df[col] = df[calc_col]
+            df.drop(columns=[calc_col], inplace=True)
+    
+    return df
+
+def run_rule_engine(df, ruleset_path):
+    print(f"Initializing Rule Engine from {ruleset_path}...")
+    if not os.path.exists(ruleset_path):
+        # Try local path variations
+        if os.path.exists(f"spy-iron-condor-trading/{ruleset_path}"):
+            ruleset_path = f"spy-iron-condor-trading/{ruleset_path}"
+        else:
+            print(f"⚠️ Warning: Ruleset not found at {ruleset_path}. Skipping rules.")
+            return df, None
+            
+    parser = RuleDSLParser(ruleset_path)
+    try:
+        ruleset = parser.load()
+    except Exception as e:
+        print(f"❌ Error loading ruleset: {e}")
+        return df, None
+        
+    engine = RuleExecutionEngine(ruleset)
+    
+    print("Executing Rules Vectorized...")
+    
+    # If options rows include duplicates per timestamp, execute rules on unique spot bars.
+    dt_col = None
+    for c in ['dt', 'timestamp', 'datetime', 'date']:
+        if c in df.columns:
+            dt_col = c
+            break
+    spot_key_cols = ['symbol', dt_col] if dt_col and 'symbol' in df.columns else ([dt_col] if dt_col else None)
+    if spot_key_cols and df.duplicated(subset=spot_key_cols).any():
+        use_spot_df = df.drop_duplicates(subset=spot_key_cols).copy()
+        use_spot_df = use_spot_df.sort_values(spot_key_cols).reset_index(drop=True)
+    else:
+        use_spot_df = df
+
+    results = engine.execute(use_spot_df)
+    
+    # Parse Results into DataFrame Columns
+    
+    rule_signals = pd.DataFrame(index=use_spot_df.index)
+    long_signals = []
+    short_signals = []
+    exit_signals = []
+    block_signals = []
+    
+    for rule_id, rule in ruleset.rules.items():
+        r_res = results.get(rule_id)
+        if r_res is None:
+            continue
+        
+        # Entry Signal (1=Long, -1=Short, 0=None)
+        long_s = r_res.get('signal_long', pd.Series(False, index=use_spot_df.index))
+        short_s = r_res.get('signal_short', pd.Series(False, index=use_spot_df.index))
+        exit_s = r_res.get('signal_exit', pd.Series(False, index=use_spot_df.index))
+        block_s = r_res.get('blocked', pd.Series(False, index=use_spot_df.index))
+        
+        if hasattr(long_s, 'fillna'):
+            long_s = long_s.fillna(False).astype(int)
+        else:
+            long_s = pd.Series(0, index=use_spot_df.index)
+        if hasattr(short_s, 'fillna'):
+            short_s = short_s.fillna(False).astype(int)
+        else:
+            short_s = pd.Series(0, index=use_spot_df.index)
+        if hasattr(exit_s, 'fillna'):
+            exit_s = exit_s.fillna(False).astype(int)
+        else:
+            exit_s = pd.Series(0, index=use_spot_df.index)
+        if hasattr(block_s, 'fillna'):
+            block_s = block_s.fillna(False).astype(int)
+        else:
+            block_s = pd.Series(0, index=use_spot_df.index)
+        
+        # Combine: Long=1, Short=-1
+        sig = long_s - short_s
+        rule_signals[f"{rule_id}_signal"] = sig
+        long_signals.append(long_s.values)
+        short_signals.append(short_s.values)
+        exit_signals.append(exit_s.values)
+        block_signals.append(block_s.values)
+            
+    if long_signals:
+        spot_consensus = pd.DataFrame({
+            "rule_long_consensus": np.mean(long_signals, axis=0),
+            "rule_short_consensus": np.mean(short_signals, axis=0),
+            "rule_exit_consensus": np.mean(exit_signals, axis=0),
+            "rule_block_any": np.max(block_signals, axis=0),
+        }, index=use_spot_df.index)
+    else:
+        spot_consensus = pd.DataFrame({
+            "rule_long_consensus": 0.0,
+            "rule_short_consensus": 0.0,
+            "rule_exit_consensus": 0.0,
+            "rule_block_any": 0.0,
+        }, index=use_spot_df.index)
+
+    # If we used spot_df, merge signals back to full df
+    if spot_key_cols and len(use_spot_df) != len(df):
+        spot_join = use_spot_df[spot_key_cols].copy()
+        spot_join = spot_join.join(spot_consensus)
+        df = df.merge(spot_join, on=spot_key_cols, how='left')
+
+        rule_signals_full = use_spot_df[spot_key_cols].copy()
+        rule_signals_full = rule_signals_full.join(rule_signals)
+        rule_signals_full = df[spot_key_cols].merge(rule_signals_full, on=spot_key_cols, how='left')
+        rule_signals_full = rule_signals_full.drop(columns=spot_key_cols)
+        rule_signals_full.index = df.index
+    else:
+        df["rule_long_consensus"] = spot_consensus["rule_long_consensus"].values
+        df["rule_short_consensus"] = spot_consensus["rule_short_consensus"].values
+        df["rule_exit_consensus"] = spot_consensus["rule_exit_consensus"].values
+        df["rule_block_any"] = spot_consensus["rule_block_any"].values
+        rule_signals_full = rule_signals
+
+    print(f"Generated signals for {len(ruleset.rules)} rules.")
+    return df, rule_signals_full, ruleset
+
+

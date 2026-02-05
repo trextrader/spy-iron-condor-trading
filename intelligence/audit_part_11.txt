@@ -1,0 +1,435 @@
+# --- P&L ESTIMATION ---
+def estimate_condor_pnl(spot, short_call, long_call, short_put, long_put, credit_received, max_loss, days_held, total_dte):
+    """
+    Estimate P&L for Iron Condor based on Linear Theta Decay and Intrinsic Value.
+    """
+    # 1. Theta Decay (Profit)
+    time_frac = min(max(days_held / total_dte, 0.0), 1.0) if total_dte > 0 else 1.0
+    
+    # 2. Intrinsic Value (Loss)
+    call_spread_width = long_call - short_call
+    intrinsic_call = max(0, spot - short_call)
+    real_call_loss = min(intrinsic_call, call_spread_width)
+    
+    put_spread_width = short_put - long_put
+    intrinsic_put = max(0, short_put - spot)
+    real_put_loss = min(intrinsic_put, put_spread_width)
+    
+    # credit_received and max_loss are total dollars for the full position
+    total_intrinsic_loss = (real_call_loss + real_put_loss) * IC_MULTIPLIER * IC_CONTRACTS
+    credit_dollar = credit_received
+    
+    potential_profit = credit_dollar * time_frac
+    net_pnl = potential_profit - total_intrinsic_loss
+    
+    # Cap to max loss / max profit
+    actual_max_loss = -max_loss
+    net_pnl = max(net_pnl, actual_max_loss)
+    net_pnl = min(net_pnl, credit_dollar)
+    
+    return net_pnl
+
+def find_best_legs(chain_df, spot, call_off, put_off, width):
+    """
+    Search the 100-row options chain for the 4 legs matching model suggestions.
+    Uses close prices for pricing.
+    """
+    if chain_df.empty:
+        return None
+
+    # Suggested strikes
+    s_call_target = spot + (call_off * spot * 0.01)
+    s_put_target = spot - (put_off * spot * 0.01)
+    
+    # Filter by CP
+    calls = chain_df[chain_df['call_put'] == 'C']
+    puts = chain_df[chain_df['call_put'] == 'P']
+    
+    if calls.empty or puts.empty:
+        return None
+        
+    # Find closest short strikes
+    short_call_row = calls.iloc[(calls['strike'] - s_call_target).abs().argsort()[:1]]
+    short_put_row = puts.iloc[(puts['strike'] - s_put_target).abs().argsort()[:1]]
+    
+    s_call = short_call_row['strike'].values[0]
+    s_put = short_put_row['strike'].values[0]
+    
+    # Find matching long strikes (strike + width)
+    l_call_target = s_call + width
+    l_put_target = s_put - width
+    
+    long_call_row = calls.iloc[(calls['strike'] - l_call_target).abs().argsort()[:1]]
+    long_put_row = puts.iloc[(puts['strike'] - l_put_target).abs().argsort()[:1]]
+    
+    l_call = long_call_row['strike'].values[0]
+    l_put = long_put_row['strike'].values[0]
+    
+    # Package legs
+    return {
+        'short_call': s_call, 'short_call_close': short_call_row['close'].values[0], 'short_call_symbol': short_call_row['option_symbol'].values[0],
+        'long_call': l_call, 'long_call_close': long_call_row['close'].values[0], 'long_call_symbol': long_call_row['option_symbol'].values[0],
+        'short_put': s_put, 'short_put_close': short_put_row['close'].values[0], 'short_put_symbol': short_put_row['option_symbol'].values[0],
+        'long_put': l_put, 'long_put_close': long_put_row['close'].values[0], 'long_put_symbol': long_put_row['option_symbol'].values[0],
+        'width': abs(l_call - s_call) 
+    }
+
+# --- M1 BACKTEST CORE ---
+
+class Trade:
+    def __init__(self, trade_id, entry_dt, legs, entry_credit, max_loss, rules=None, scores=None, dte=None):
+        self.trade_id = trade_id
+        self.entry_dt = entry_dt
+        self.legs = legs
+        self.net_credit = entry_credit
+        self.max_loss = max_loss
+        self.qty = IC_CONTRACTS
+        
+        self.realized_pnl = 0.0
+        self.exit_dt = None
+        self.exit_reason = None
+        self.is_closed = False
+        self.dte_entry = dte
+        
+        self.rules = rules or {}
+        self.scores = scores or {}
+        
+        self.unrealized_pnl = 0.0
+        self.pnl_pct = 0.0
+        self.max_dd_pct = 0.0
+
+    def update_mark(self, current_dt, marks_dict):
+        """Update unrealized PnL using current O(1) mark cache."""
+        # Price 4 legs
+        sc = marks_dict.get(self.legs['short_call_symbol'])
+        lc = marks_dict.get(self.legs['long_call_symbol'])
+        sp = marks_dict.get(self.legs['short_put_symbol'])
+        lp = marks_dict.get(self.legs['long_put_symbol'])
+        
+        # If any leg missing, carry forward logic (simplified: skip update)
+        if None in [sc, lc, sp, lp]:
+            return
+            
+        # Cost to close = Buy Shorts - Sell Longs
+        debit = (sc + sp) - (lc + lp)
+        
+        # PnL = Credit - Debit
+        pnl_per_share = self.net_credit - debit
+        self.unrealized_pnl = pnl_per_share * self.qty * IC_MULTIPLIER
+        
+        # DD tracking
+        if self.max_loss > 0:
+            self.pnl_pct = self.unrealized_pnl / self.max_loss
+            self.max_dd_pct = min(self.max_dd_pct, self.pnl_pct)
+
+    def should_risk_close(self, current_equity):
+        # HARD STOP: 5% of Account Equity
+        limit = -0.05 * current_equity
+        return self.unrealized_pnl < limit
+
+def build_ts_ranges(df, time_col='dt'):
+    """Build O(1) lookup index for timestamp ranges."""
+    print("Building O(1) option chain index...")
+    ts_ranges = {}
+    cur_ts = None
+    start = 0
+    vals = df[time_col].values
+    n = len(df)
+    
+    for idx, ts in enumerate(tqdm(vals, desc="Indexing")):
+        if cur_ts is None:
+            cur_ts = ts
+            start = idx
+        elif ts != cur_ts:
+            ts_ranges[cur_ts] = (start, idx)
+            cur_ts = ts
+            start = idx
+    if cur_ts is not None:
+        ts_ranges[cur_ts] = (start, n)
+    return ts_ranges
+
+
+def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None, 
+                 use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None):
+    
+    # 1. PREPARE DATA (M1-Centric)
+    print("Sorting and Indexing Data...")
+    time_col = 'dt' if 'dt' in df.columns else 'timestamp'
+    df = df.sort_values(time_col).reset_index(drop=True)
+    
+    # Build O(1) Chain Index
+    ts_ranges = build_ts_ranges(df, time_col)
+    
+    # Build Spot Bars (1 row per minute)
+    # Correctness: Use FIRST row for OHLCV (or explicit spot cols if robust)
+    spot_bars = df.drop_duplicates(subset=[time_col]).sort_values(time_col).reset_index(drop=True)
+    
+    if limit:
+        spot_bars = spot_bars.iloc[:limit+256] # approx buffer
+        print(f"Limiting to {len(spot_bars)} bars.")
+
+    # 2. PRE-COMPUTE MODEL OUTPUTS
+    # We need features for every unique bar.
+    # We'll re-extract features from spot_bars to ensure alignment.
+    print("Preparing Features...")
+    # Fill missing columns in spot_bars if any (usually duplicates of option row 0)
+    missing_cols = [c for c in feature_cols if c not in spot_bars.columns]
+    if missing_cols:
+         # Attempt to merge from first occurrence in df? No, spot_bars IS first occurrence.
+         # Just fill defaults if missing.
+         for c in missing_cols: spot_bars[c] = 0.0
+         
+    X_np = spot_bars[feature_cols].values.astype(np.float32)
+    X_np = np.where(np.isfinite(X_np), X_np, 0.0) # Simple sanitize
+    
+    # Normalize
+    if norm_stats:
+        mu = np.array(norm_stats['median']).reshape(-1)
+        mad = np.array(norm_stats['mad']).reshape(-1)
+        # Handle shape mismatch if any
+        if len(mu) != X_np.shape[1]: 
+             # fallback
+             mu = np.median(X_np, axis=0)
+             mad = np.median(np.abs(X_np - mu), axis=0)
+    else:
+        mu = np.median(X_np, axis=0)
+        mad = np.median(np.abs(X_np - mu), axis=0)
+    
+    mad = np.maximum(mad, 1e-6)
+    X_norm = (X_np - mu) / (1.4826 * mad)
+    X_norm = np.clip(X_norm, -10.0, 10.0)
+    
+    # Batch Inference
+    print("Running Batched Inference...")
+    SEQ_LEN = 256
+    BATCH_SIZE = 128
+    num_bars = len(spot_bars)
+    all_policy = []
+    
+    X_tensor = torch.tensor(X_norm, device=device)
+    
+    for b_start in tqdm(range(SEQ_LEN, num_bars, BATCH_SIZE), desc="Inference"):
+        b_end = min(b_start + BATCH_SIZE, num_bars)
+        batch_seqs = []
+        valid_indices = []
+        
+        for i in range(b_start, b_end):
+            # Sequence: [i-SEQ_LEN : i]
+            # Warning: checks bounds
+            batch_seqs.append(X_tensor[i-SEQ_LEN : i])
+            valid_indices.append(i)
+            
+        if not batch_seqs: continue
+            
+        batch_input = torch.stack(batch_seqs).float().to(DEVICE)
+        with torch.no_grad():
+            # Model returns tuple, 0-index is policy
+            out = model(batch_input)[0].cpu().numpy()
+            all_policy.append(out)
+            
+    # Concatenate all batches
+    if all_policy:
+        policy_matrix = np.concatenate(all_policy, axis=0)
+    else:
+        policy_matrix = np.zeros((0, 10))
+    
+    # DEBUG: Diagnostic on Model Outputs
+    print(f"\n[DEBUG] Policy Matrix Shape: {policy_matrix.shape}")
+    entry_logits = policy_matrix[:, 8]
+    entry_probs = 1.0 / (1.0 + np.exp(-entry_logits))
+    print(f"[DEBUG] Entry Prob Stats: Min={entry_probs.min():.4f}, Max={entry_probs.max():.4f}, Mean={entry_probs.mean():.4f}")
+    print(f"[DEBUG] > 0.40 count: {(entry_probs > 0.40).sum()}")
+    print(f"[DEBUG] > 0.50 count: {(entry_probs > 0.50).sum()}")
+        
+    # Map back to bar index: policy_matrix[k] corresponds to spot_bars.iloc[SEQ_LEN + k]
+    
+    # 3. SIMULATION LOOP
+    print("Starting M1 Simulation Loop...")
+    
+    equity = 100_000.0
+    starting_equity = equity
+    open_trades = [] # List of Trade objects
+    closed_trades = [] # List of dicts
+    equity_curve = [] # List of dicts
+    
+    # Warmup
+    sim_start_idx = SEQ_LEN
+    
+    # Helpers
+    def _sigmoid(x): return 1 / (1 + np.exp(-x))
+    
+    # Pre-extract spot timestamps as numpy array to ensure type match with ts_ranges (built from .values)
+    spot_timestamps = spot_bars[time_col].values
+    
+    for i in tqdm(range(sim_start_idx, num_bars), desc="Simulating"):
+         # Adjust index for policy
+         pol_idx = i - SEQ_LEN
+         if pol_idx >= len(policy_matrix): break
+         
+         # 1. Get Bar Data
+         ts = spot_timestamps[i]
+         spot = float(spot_bars['close'].iloc[i])
+         
+         # 2. Get Option Chain (O(1))
+         s, e = ts_ranges.get(ts, (None, None))
+         if s is None: 
+             continue # No chain this minute?
+             
+         chain_slice = df.iloc[s:e]
+         
+         # 3. Build Marks (Transient)
+         # dict comprehension is fast enough for ~100 items
+         marks = dict(zip(chain_slice['option_symbol'], chain_slice['close']))
+         
+         # 4. Update Open Trades
+         active_trades = []
+         for tr in open_trades:
+             tr.update_mark(ts, marks)
+             
+             # Check Risk Stop (5%)
+             if tr.should_risk_close(equity):
+                 tr.exit_dt = ts
+                 tr.exit_reason = "RISK_5PCT"
+                 tr.realized_pnl = tr.unrealized_pnl
+                 tr.is_closed = True
+                 
+                 equity += tr.realized_pnl
+                 # Log close
+                 closed_trades.append({
+                     'trade_id': tr.trade_id,
+                     'entry_dt': tr.entry_dt,
+                     'exit_dt': ts,
+                     'pnl': tr.realized_pnl,
+                     'pnl_pct': tr.pnl_pct * 100, # % of max risk
+                     'reason': "RISK_STOP",
+                     'max_dd': tr.max_dd_pct * 100,
+                     'held_bars': -1 # TODO
+                 })
+                 continue # Trade is gone
+            
+             # Check Model Exit Signal (optional)
+             # pol = policy_matrix[pol_idx]
+             # exit_logit = pol[9]
+             # if exit_logit > 1.0: ...
+             
+             # Check Expiration (DTE < 0.1)
+             # Approximation: if we hold > DTE (in bars) ??
+             # Better: check days passed.
+             days_held = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
+             if days_held > tr.dte_entry:
+                 # Expired (Exit at mark)
+                 tr.exit_dt = ts
+                 tr.exit_reason = "EXPIRED"
+                 tr.realized_pnl = tr.unrealized_pnl
+                 tr.is_closed = True
+                 equity += tr.realized_pnl
+                 closed_trades.append({
+                     'trade_id': tr.trade_id,
+                     'entry_dt': tr.entry_dt,
+                     'exit_dt': ts,
+                     'pnl': tr.realized_pnl,
+                     'pnl_pct': tr.pnl_pct * 100,
+                     'reason': "EXPIRED",
+                     'max_dd': tr.max_dd_pct * 100
+                 })
+                 continue
+                 
+             active_trades.append(tr)
+         
+         open_trades = active_trades
+         
+         # 5. Entry Logic
+         # Only if no open positions (simplification for robustness first)
+         if len(open_trades) == 0:
+             pol = policy_matrix[pol_idx]
+             entry_logit = pol[8]
+             prob = _sigmoid(pol[4])
+             conf = _sigmoid(pol[7])
+             
+             # Min thresholds
+             if entry_logit > 0.0 and prob > 0.4 and conf > 0.35:
+                 # Attempt Entry
+                 # Decode Model Params
+                 call_off = pol[0] * 5.0
+                 put_off = pol[1] * 5.0
+                 width = pol[2] * 10.0
+                 dte = pol[3] * 45.0 # Denormalized
+                 
+                 # Leg Selection
+                 legs = find_best_legs(chain_slice, spot, call_off, put_off, width)
+                 
+                 if legs:
+                    # Calculate Credit
+                    # Short Call + Short Put - Long Call - Long Put
+                    cre = legs['short_call_close'] + legs['short_put_close'] - legs['long_call_close'] - legs['long_put_close']
+                    
+                    if cre > 0.10: # Min credit filter
+                        max_loss = (legs['width'] - cre) * IC_MULTIPLIER * IC_CONTRACTS
+                        net_credit = cre
+                        trade_id = f"TR_{i}"
+                        
+                        new_trade = Trade(
+                            trade_id, ts, legs, net_credit, max_loss, 
+                            dte=dte,
+                            scores={'entry': entry_logit, 'prob': prob}
+                        )
+                        open_trades.append(new_trade)
+         
+         # 6. Record Equity Curve
+         unrealized = sum(t.unrealized_pnl for t in open_trades)
+         equity_curve.append({
+             'dt': ts,
+             'equity': equity + unrealized,
+             'cash': equity,
+             'open_pnl': unrealized,
+             'open_count': len(open_trades)
+         })
+         
+    # End Simulation
+    print(f"Simulation Complete. Final Equity: ${equity:,.2f}")
+    
+    # Helper to return list of values for legacy main compatibility?
+    # Old main expects (equity_list, trades_list)
+    # We should return simple lists or update main.
+    # The old main did `equity[-1]`. 
+    # Let's return just the equity values list for plot, and full trades dicts.
+    equity_vals = [e['equity'] for e in equity_curve]
+    
+    # Save CSVs (GUI Artifacts) inside run_backtest?
+    # Or rely on main. New Plan says "Implement GUI-Ready Exports".
+    # Let's save them here to be sure.
+    pd.DataFrame(equity_curve).to_csv(os.path.join(REPORTS_DIR, "equity_curve.csv"), index=False)
+    pd.DataFrame(closed_trades).to_csv(os.path.join(REPORTS_DIR, "trades.csv"), index=False)
+    
+    return equity_vals, closed_trades
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="CondorBrain Backtest V2.2")
+    parser.add_argument("--input", type=str, default=None, help="Path to input CSV data")
+    parser.add_argument("--data", type=str, default=None, help="Alias for --input")
+    parser.add_argument("--model", type=str, default=None, help="Path to model checkpoint (.pth)")
+    parser.add_argument("--ruleset", type=str, default=None, help="Path to ruleset YAML")
+    parser.add_argument("--rules-only", action="store_true", help="Run in logic-only mode without neural model")
+    
+    # New Toggles for Hybrid Logic
+    parser.add_argument("--use-fuzzy-sizing", action="store_true", default=False, help="Enable 11-factor fuzzy position sizing")
+    parser.add_argument("--use-trade-rules", action="store_true", default=False, help="Enable rule-based entry/exit logic")
+    parser.add_argument("--use-diffusion", action="store_true", default=False, help="Enable diffusion-based parameter refinement")
+    parser.add_argument("--limit", type=int, default=None, help="Limit the number of bars to simulate")
+    
+    args = parser.parse_args()
+
+    # --- GPU CHECK ---
+    print("="*60)
+    print("HARDWARE STATUS CHECK")
+    print("="*60)
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+        print(f"✅ GPU DETECTED: {gpu_name} ({gpu_mem:.1f} GB)")
+        print(f"   CUDA Version: {torch.version.cuda}")
+    else:
+        print("⚠️ GPU NOT DETECTED! Running on CPU (Will be slow).")
+    print("="*60)
+

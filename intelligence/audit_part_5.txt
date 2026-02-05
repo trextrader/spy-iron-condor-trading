@@ -1,0 +1,343 @@
+# ============================================================================
+
+class CondorBrain(nn.Module):
+    """
+    Advanced Neural CDE architecture for direct Iron Condor optimization.
+    
+    - Backbone: Neural CDE (Continuous Time) with optional Mamba fallback
+    - 3 regime-specific expert heads (Low/Normal/High volatility)
+    - Gated mixture-of-experts output
+    - 10-dimensional output for complete IC parameterization
+    """
+
+    def __init__(
+        self,
+        d_model: int = 1024,
+        n_layers: int = 32,
+        d_state: int = 32,
+        d_conv: int = 4,
+        expand: int = 2,
+        input_dim: int = 24,
+        use_vol_gated_attn: bool = True,
+        vol_attn_layers: List[int] = None,
+        use_topk_moe: bool = False,
+        moe_n_experts: int = 3,
+        moe_k: int = 1,
+        use_diffusion: bool = False,
+        diffusion_steps: int = 50,
+        diffusion_input_dim: int = 4,
+        diffusion_horizon: int = 32,
+        feature_group_dropout: float = 0.0,
+        use_cde: bool = True,              # NEW: Default to CDE given recent success
+        use_predicate_discovery: bool = False, # NEW: Toggle for inequality templates
+        n_predicate_slots: int = 2048,
+        max_active_predicates: int = 512  # Paper: 800+, using 512 for memory balance
+    ):
+        super().__init__()
+
+        self.d_model = d_model
+        self.n_layers = n_layers
+        self.input_dim = input_dim
+        self.use_vol_gated_attn = use_vol_gated_attn
+        self.use_topk_moe = use_topk_moe
+        self.use_cde = use_cde and HAS_CDE
+
+        # Default attention insertion points (Temporal backbone only)
+        if vol_attn_layers is None:
+            self.vol_attn_layers = [i for i in [7, 15, 23] if i < n_layers]
+        else:
+            self.vol_attn_layers = vol_attn_layers
+
+        # Feature-group dropout
+        self.feature_dropout = FeatureGroupDropout(
+            group_drop_prob=feature_group_dropout,
+            input_dim=input_dim
+        ) if feature_group_dropout > 0 else None
+
+        # Standard Feature Names (Mamba-V3) for Interpretability
+        self.feature_names = [
+            "Open", "High", "Low", "Close", "Volume", 
+            "RSI", "MACD", "Signal", "Hist", "BB_Up", "BB_Mid", "BB_Low", "BB_Width",
+            "ATR", "ADX", "Obv", "Slope", "VIX", "VIX_Slope", "PutCallRatio",
+            "NetDelta", "NetGamma", "NetVega", "NetTheta",
+            "DTE_0_IV", "DTE_0_De", "DTE_0_Ga", "DTE_0_Ve", "DTE_0_Th",
+            "DTE_1_IV", "DTE_1_De", "DTE_1_Ga", "DTE_1_Ve", "DTE_1_Th",
+            "DTE_2_IV", "DTE_2_De", "DTE_2_Ga", "DTE_2_Ve", "DTE_2_Th",
+            "DTE_3_IV", "DTE_3_De", "DTE_3_Ga", "DTE_3_Ve", "DTE_3_Th",
+            "DTE_4_IV", "DTE_4_De", "DTE_4_Ga", "DTE_4_Ve", "DTE_4_Th",
+            "DayOfWeek", "HourOfDay", "MinuteOfHour", "IsRegularHours", 
+            "TimeFromOpen", "TimeToClose"
+        ]
+        # Pad if input_dim > len(feature_names)
+        if input_dim > len(self.feature_names):
+            self.feature_names.extend([f"F{i}" for i in range(len(self.feature_names), input_dim)])
+
+
+        # Predicate Discovery (Structural Templates)
+        self.use_predicate_discovery = use_predicate_discovery
+        if use_predicate_discovery:
+            logger.info(f"[CondorBrain] Initializing Predicate Discovery ({n_predicate_slots} slots)")
+            self.predicate_selector = PredicateSelector(
+                n_slots=n_predicate_slots,
+                max_active=max_active_predicates,
+                n_fields=input_dim
+            )
+            self.max_active_predicates = max_active_predicates
+            
+            # Nested Logic Combiner (Depth 8 chains)
+            self.predicate_combiner = PredicateCombiner(
+                n_predicates=max_active_predicates,
+                d_model=d_model // 4,
+                n_heads=4,
+                max_chain_depth=8,
+                n_output_heads=max_active_predicates # Map back to same feature space
+            )
+            
+            # Adjust effective input dim for backbone (Original + Predicates + Logical Sets)
+            backbone_in_dim = input_dim + (2 * max_active_predicates)
+        else:
+            self.predicate_selector = None
+            backbone_in_dim = input_dim
+
+        # ----------------------------------------------------------------
+        # BACKBONE SELECTION
+        # ----------------------------------------------------------------
+        if self.use_cde:
+            logger.info(f"[CondorBrain] Initializing Neural CDE Backbone (In={backbone_in_dim}, Hidden={d_model})")
+            self.cde_backbone = NeuralCDE(
+                input_dim=backbone_in_dim,
+                hidden_dim=d_model,
+                output_dim=d_model, # Dummy output dim, we use latent state
+                n_layers=n_layers,   # Doesn't affect CDE much, maybe depth of vector field?
+                dropout=0.0
+            )
+            # Mamba components are not initialized to save memory
+            self.input_proj = None
+            self.layers = None
+            self.vol_attn_modules = None
+            self.norm = RMSNorm(d_model) # Still needed for CDE output
+            
+        else:
+            # Standard Mamba Implementation
+            self.input_proj = nn.Linear(backbone_in_dim, d_model)
+            
+            if HAS_MAMBA:
+                self.layers = nn.ModuleList([
+                    Mamba(
+                        d_model=d_model,
+                        d_state=d_state,
+                        d_conv=d_conv,
+                        expand=expand
+                    ) for _ in range(n_layers)
+                ])
+            else:
+                self.layers = nn.ModuleList([
+                    nn.Linear(d_model, d_model) for _ in range(n_layers)
+                ])
+            
+            if use_vol_gated_attn:
+                self.vol_attn_modules = nn.ModuleDict({
+                    str(layer_idx): VolGatedAttn(d_model, n_heads=8)
+                    for layer_idx in self.vol_attn_layers
+                })
+            else:
+                self.vol_attn_modules = None
+            
+            self.norm = RMSNorm(d_model)
+
+        # ----------------------------------------------------------------
+        # HEADS (Shared)
+        # ----------------------------------------------------------------
+        self.regime_detector = RegimeDetector(d_model)
+        self.horizon_forecaster = HorizonForecaster(d_model, max_horizon=45)
+        self.feature_head = nn.Linear(d_model, 4)
+        
+        # Expert Heads
+        if use_topk_moe:
+            self.moe_head = BatchedTopKMoE(
+                d_model=d_model,
+                output_dim=CondorExpertHead.NUM_OUTPUTS,
+                n_experts=moe_n_experts,
+                k=moe_k
+            )
+            self.expert_low = None
+            self.expert_normal = None
+            self.expert_high = None
+        else:
+            self.moe_head = None
+            self.expert_low = CondorExpertHead(d_model)
+            self.expert_normal = CondorExpertHead(d_model)
+            self.expert_high = CondorExpertHead(d_model)
+        
+        # Diffusion Head
+        self.use_diffusion = use_diffusion
+        if use_diffusion:
+            self.diffusion_head = ConditionalDiffusionHead(
+                input_dim=diffusion_input_dim,
+                cond_dim=d_model,
+                hidden_dim=256,
+                horizon=diffusion_horizon,
+                n_steps=diffusion_steps
+            )
+        else:
+            self.diffusion_head = None
+        
+        self.legacy_head = nn.Linear(d_model, 1)
+        
+    def forward(self, x: torch.Tensor, return_regime: bool = True, return_experts: bool = False, return_features: bool = False, forecast_days: int = 20, diffusion_target: Optional[torch.Tensor] = None, return_predicates: bool = False) -> Any:
+        """
+        Forward pass.
+        Args:
+            x: Input tensor (B, SeqLen, InputDim)
+        """
+        # --- Predicate Discovery Path ---
+        pred_logits = None
+        if self.use_predicate_discovery and self.predicate_selector is not None:
+            # from intelligence.predicate_discovery import evaluate_predicates_gpu
+            # Use the Recursive Logic Evaluator (Depth=4)
+            from intelligence.recursive_evaluator import evaluate_predicates_recursive
+            
+            # Get decoded rules and importance
+            importance, params = self.predicate_selector(return_params=True)
+            
+            # CRITICAL: Only evaluate ACTIVE predicates (TopK) to save memory/dims
+            k_active = min(self.max_active_predicates, params.shape[0])
+            _, top_idx = torch.topk(importance, k_active)
+            active_params = params[top_idx]
+            active_imp = importance[top_idx]
+            
+            # Evaluate templates on normalized input data
+            pred_features = evaluate_predicates_recursive(
+                x, active_params, active_imp, max_active=self.max_active_predicates
+            )
+            pred_logits = pred_features
+            # Apply nested logical combinations
+            logic_features = self.predicate_combiner(pred_features)
+            
+            # Concatenate raw + simple rules + nested logical sets
+            x = torch.cat([x, pred_features, logic_features], dim=-1)
+
+        # Apply dropout to augmented features
+        if self.feature_dropout is not None:
+            x = self.feature_dropout(x)
+
+        # ----------------------------------------------------------------
+        # BACKBONE FOWARD PASS
+        # ----------------------------------------------------------------
+        if self.use_cde:
+            # Neural CDE: (B, T, In) -> (B, Hidden)
+            # CDE handles its own projection via encoder
+            last_hidden = self.cde_backbone(x)
+            
+            # Normalize the final state
+            last_hidden = self.norm(last_hidden)
+            
+        else:
+            # Backbone logic: Neural CDE (Continuous) OR Mamba (Legacy Discrete)
+            x = self.input_proj(x)
+
+            for i, layer in enumerate(self.layers):
+                if self.training and getattr(self, 'gradient_checkpointing', False):
+                    from torch.utils.checkpoint import checkpoint
+                    x = checkpoint(layer, x, use_reentrant=False)
+                else:
+                    x = layer(x)
+                
+                if self.use_vol_gated_attn and self.vol_attn_modules is not None:
+                    if str(i) in self.vol_attn_modules:
+                        x = self.vol_attn_modules[str(i)](x)
+            
+            x = self.norm(x)
+            last_hidden = x[:, -1, :]
+
+        # ----------------------------------------------------------------
+        # HEAD PROCESSING (Unified)
+        # ----------------------------------------------------------------
+        
+        # Detect regime
+        regime_logits = self.regime_detector(last_hidden)
+        regime_probs = torch.softmax(regime_logits.float(), dim=-1).to(last_hidden.dtype)
+        
+        # Horizon Forecast
+        horizon_forecast = None
+        if forecast_days > 0:
+            horizon_forecast = self.horizon_forecaster(last_hidden, num_days=forecast_days)
+        
+        # Expert Outputs
+        moe_routing_info = None
+        if self.use_topk_moe and self.moe_head is not None:
+            if return_experts and hasattr(self.moe_head, 'forward_with_routing'):
+                outputs, moe_probs, moe_indices = self.moe_head.forward_with_routing(last_hidden)
+                moe_routing_info = {'routing_weights': moe_probs, 'selected_indices': moe_indices}
+            else:
+                outputs = self.moe_head(last_hidden)
+
+            # Activations
+            raw = outputs
+            outputs = torch.zeros_like(raw)
+            outputs[:, 0] = torch.sigmoid(raw[:, 0]) * 5.0
+            outputs[:, 1] = torch.sigmoid(raw[:, 1]) * 5.0
+            outputs[:, 2] = torch.sigmoid(raw[:, 2]) * 10.0
+            outputs[:, 3] = 2 + torch.sigmoid(raw[:, 3]) * 43
+            outputs[:, 4] = torch.sigmoid(raw[:, 4])
+            outputs[:, 5] = torch.tanh(raw[:, 5]) * 0.5
+            outputs[:, 6] = torch.sigmoid(raw[:, 6])
+            outputs[:, 7] = torch.sigmoid(raw[:, 7])
+            if raw.size(1) >= 10:
+                outputs[:, 8] = raw[:, 8]
+                outputs[:, 9] = raw[:, 9]
+        else:
+            out_low = self.expert_low(last_hidden)
+            out_normal = self.expert_normal(last_hidden)
+            out_high = self.expert_high(last_hidden)
+            
+            if out_low.dtype != last_hidden.dtype:
+                out_low = out_low.to(last_hidden.dtype)
+                out_normal = out_normal.to(last_hidden.dtype)
+                out_high = out_high.to(last_hidden.dtype)
+            
+            outputs = (
+                regime_probs[:, 0:1] * out_low +
+                regime_probs[:, 1:2] * out_normal +
+                regime_probs[:, 2:3] * out_high
+            )
+        
+        # Feature Prediction
+        feature_pred = None
+        if return_features:
+             feature_pred = self.feature_head(last_hidden)
+        
+        # Diffusion
+        diffusion_out = None
+        if self.use_diffusion and self.diffusion_head is not None:
+            if diffusion_target is not None:
+                diffusion_out = self.diffusion_head(diffusion_target, last_hidden)
+            elif forecast_days > 0:
+                diffusion_out = self.diffusion_head.sample(last_hidden, n_samples=1)
+
+        # Return construction
+        res = [outputs]
+        if return_regime: res.append(regime_logits)
+        else: res.append(None)
+        res.append(horizon_forecast)
+        if return_features: res.append(feature_pred)
+        if self.use_diffusion: res.append(diffusion_out)
+        
+        if return_experts:
+            if self.use_topk_moe: res.append(moe_routing_info)
+            else: res.append({'low': out_low, 'normal': out_normal, 'high': out_high})
+            
+        if return_predicates:
+            res.append(pred_logits)
+
+        return tuple(res) if len(res) > 1 else outputs
+    
+    def predict_legacy(self, x: torch.Tensor) -> torch.Tensor:
+        """Legacy single-output prediction for backward compatibility."""
+        x = self.input_proj(x)
+        for layer in self.layers:
+            x = layer(x)
+        # Final normalization stays in model dtype (BF16) for throughput; loss is cast to FP32 externally
+        x = self.norm(x)
+        return self.legacy_head(x[:, -1, :])
+
