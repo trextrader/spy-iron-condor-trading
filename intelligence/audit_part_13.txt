@@ -1,0 +1,71 @@
+
+# =============================================================================
+# PART 13: REGIME DYNAMICS & PREDICATE SYSTEM
+# =============================================================================
+
+class CanonicalPredicateGates(nn.Module):
+    """5 canonical inequality gates from v4.0 spec."""
+    def __init__(self, n_predicates: int = 5, steepness: float = 50.0):
+        super().__init__()
+        self.n_predicates = n_predicates
+        self.steepness = steepness
+        self.iv_rank_thresh = nn.Parameter(torch.tensor(75.0))
+        self.spread_frac_thresh = nn.Parameter(torch.tensor(0.004))
+        self.rsi_thresh = nn.Parameter(torch.tensor(25.0))
+        self.gap_frac_thresh = nn.Parameter(torch.tensor(0.012))
+        self.gamma_thresh = nn.Parameter(torch.tensor(0.05))
+
+    def forward(self, iv_rank, bid_ask_spread, price, rsi, delta_rsi, S_t, S_t_minus_1, gamma):
+        vol_spike = torch.sigmoid(self.steepness * (iv_rank - self.iv_rank_thresh))
+        spread_frac = bid_ask_spread / (price + 1e-8)
+        liq_lock = torch.sigmoid(self.steepness * (spread_frac - self.spread_frac_thresh))
+        rsi_gate = torch.sigmoid(self.steepness * (self.rsi_thresh - rsi))
+        drsi_gate = torch.sigmoid(self.steepness * (-delta_rsi))
+        mom_rev = rsi_gate * drsi_gate
+        gap_frac = torch.abs(S_t - S_t_minus_1) / (S_t_minus_1 + 1e-8)
+        gap_gate = torch.sigmoid(self.steepness * (gap_frac - self.gap_frac_thresh))
+        gamma_gate = torch.sigmoid(self.steepness * (torch.abs(gamma) - self.gamma_thresh))
+        return torch.stack([vol_spike, liq_lock, mom_rev, gap_gate, gamma_gate], dim=-1)
+
+class PredicateSignature(nn.Module):
+    """Group-invariant signature [p; s; B]."""
+    def __init__(self, K, R=4, M=16):
+        super().__init__()
+        self.W_bloom = nn.Linear(K, M)
+        self.R, self.M = R, M
+
+    def forward(self, p):
+        p_sorted, _ = torch.sort(p.float(), dim=-1, descending=True)
+        moments = torch.cat([(p_sorted**r).mean(dim=-1, keepdim=True) for r in range(1, self.R+1)], dim=-1)
+        bloom = torch.sigmoid(self.W_bloom(p_sorted))
+        return p_sorted, moments, bloom, torch.cat([p, moments, bloom], dim=-1)
+
+class RegimeCombinatoricsDynamics(nn.Module):
+    """r_k = alpha_k * r_{k-1} + beta_k."""
+    def __init__(self, d_r, z_dim):
+        super().__init__()
+        self.W_alpha = nn.Linear(z_dim, d_r)
+        self.W_beta = nn.Linear(z_dim, d_r)
+
+    def forward(self, r_prev, z_pred):
+        alpha = torch.sigmoid(self.W_alpha(z_pred))
+        beta = self.W_beta(z_pred)
+        return alpha * r_prev + beta
+
+class RelationalLogicLayer(nn.Module):
+    """Explicit pairwise logic engine."""
+    def __init__(self, n_in, out_dim):
+        super().__init__()
+        self.n_in = n_in
+        self.n_pairs = (n_in * (n_in - 1)) // 2
+        rel_dim = self.n_pairs * 3 if n_in > 1 else n_in
+        self.projection = nn.Linear(rel_dim, out_dim)
+        self.steepness = nn.Parameter(torch.tensor(20.0))
+
+    def forward(self, x):
+        if self.n_in < 2: return self.projection(x)
+        iu = torch.triu_indices(self.n_in, self.n_in, offset=1, device=x.device)
+        diffs = x[:, iu[0]] - x[:, iu[1]]
+        lt, gt = torch.sigmoid(-self.steepness * diffs), torch.sigmoid(self.steepness * diffs)
+        eq = torch.exp(-self.steepness * (diffs ** 2))
+        return self.projection(torch.cat([lt, gt, eq], dim=-1))
