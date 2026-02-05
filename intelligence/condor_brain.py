@@ -392,6 +392,7 @@ class CondorBrain(nn.Module):
         diffusion_input_dim: int = 4,
         diffusion_horizon: int = 32,
         feature_group_dropout: float = 0.0,
+        diffusion_cond_drop_prob: float = 0.2, # V42: CFG for diffusion
         use_cde: bool = True,              # NEW: Default to CDE given recent success
         use_predicate_discovery: bool = False, # NEW: Toggle for inequality templates
         n_predicate_slots: int = 2048,
@@ -541,18 +542,27 @@ class CondorBrain(nn.Module):
                 cond_dim=d_model,
                 hidden_dim=256,
                 horizon=diffusion_horizon,
-                n_steps=diffusion_steps
+                n_steps=diffusion_steps,
+                cond_drop_prob=diffusion_cond_drop_prob
             )
         else:
             self.diffusion_head = None
         
         self.legacy_head = nn.Linear(d_model, 1)
         
-    def forward(self, x: torch.Tensor, return_regime: bool = True, return_experts: bool = False, return_features: bool = False, forecast_days: int = 20, diffusion_target: Optional[torch.Tensor] = None, return_predicates: bool = False) -> Any:
+    def forward(self, x: torch.Tensor, return_regime: bool = True, return_experts: bool = False, 
+                return_features: bool = False, forecast_days: int = 20, 
+                diffusion_target: Optional[torch.Tensor] = None, 
+                return_predicates: bool = False, guidance_scale: float = 2.0,
+                timestep_mask: Optional[torch.Tensor] = None,
+                bar_index: Optional[torch.Tensor] = None) -> Any:
         """
         Forward pass.
         Args:
             x: Input tensor (B, SeqLen, InputDim)
+            guidance_scale: w factor for Classifier-Free Guidance in Diffusion.
+            timestep_mask: Binary mask for BCS (Phase 5).
+            bar_index: Bar grouping index (Phase 5).
         """
         # --- Predicate Discovery Path ---
         pred_logits = None
@@ -591,7 +601,7 @@ class CondorBrain(nn.Module):
         if self.use_cde:
             # Neural CDE: (B, T, In) -> (B, Hidden)
             # CDE handles its own projection via encoder
-            last_hidden = self.cde_backbone(x)
+            last_hidden = self.cde_backbone(x, timestep_mask=timestep_mask)
             
             # Normalize the final state
             last_hidden = self.norm(last_hidden)
@@ -677,7 +687,7 @@ class CondorBrain(nn.Module):
             if diffusion_target is not None:
                 diffusion_out = self.diffusion_head(diffusion_target, last_hidden)
             elif forecast_days > 0:
-                diffusion_out = self.diffusion_head.sample(last_hidden, n_samples=1)
+                diffusion_out = self.diffusion_head.sample(last_hidden, n_samples=1, guidance_scale=guidance_scale)
 
         # Return construction
         res = [outputs]
@@ -695,6 +705,72 @@ class CondorBrain(nn.Module):
             res.append(pred_logits)
 
         return tuple(res) if len(res) > 1 else outputs
+
+    def get_initial_state(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Computes Z_0 from initial features for stateful inference (Phase 5).
+        x: (B, D) or (B, 1, D) initial features
+        """
+        if x.ndim == 3:
+            x = x[:, 0, :]
+            
+        if self.use_cde:
+            return self.cde_backbone.encoder(x)
+        else:
+            # Mamba fallback: project first sample
+            return self.input_proj(x.unsqueeze(1))[:, 0, :]
+
+    @torch.no_grad()
+    def step(self, x_prev: torch.Tensor, x_curr: torch.Tensor, h_prev: torch.Tensor) -> Tuple[Any, torch.Tensor]:
+        """
+        Stateful incremental update (Phase 5).
+        Returns (outputs, h_curr)
+        """
+        # Predicate Discovery (if used)
+        # For numerical parity, we must apply the same augmentation to x_prev and x_curr
+        def _augment(val):
+            if self.use_predicate_discovery and self.predicate_selector is not None:
+                from intelligence.recursive_evaluator import evaluate_predicates_recursive
+                importance, params = self.predicate_selector(return_params=True)
+                k_active = min(self.max_active_predicates, params.shape[0])
+                _, top_idx = torch.topk(importance, k_active)
+                # Expand val to (B, 1, D) for evaluator
+                v_seq = val if val.ndim == 3 else val.unsqueeze(1)
+                pred_features = evaluate_predicates_recursive(v_seq, params[top_idx], importance[top_idx], max_active=self.max_active_predicates)
+                logic_features = self.predicate_combiner(pred_features)
+                aug = torch.cat([v_seq, pred_features, logic_features], dim=-1)
+                return aug[:, 0, :]
+            return val
+
+        x_p_aug = _augment(x_prev)
+        x_c_aug = _augment(x_curr)
+
+        if self.use_cde:
+            h_curr = self.cde_backbone.step(x_p_aug, x_c_aug, h_prev)
+            last_hidden = self.norm(h_curr)
+        else:
+            # Fallback for Mamba (sequential update simulation)
+            h_curr = h_prev
+            last_hidden = h_prev
+
+        # Regime/Head processing (matches forward)
+        regime_logits = self.regime_detector(last_hidden)
+        outputs = self.moe_head(last_hidden) if self.use_topk_moe else self.expert_normal(last_hidden)
+        
+        return outputs, h_curr
+
+    def update_moe_temperature(self, step: int, max_steps: int, T_start: float = 2.0, T_end: float = 0.5):
+        """
+        Update MoE routing temperature using an exponential annealing schedule (V47).
+        Start smooth (high T) and end decisive (low T).
+        """
+        if not self.use_topk_moe or self.moe_head is None:
+            return
+            
+        # Exponential annealing
+        t_val = T_start * (T_end / T_start)**(min(step, max_steps) / max_steps)
+        self.moe_head.set_temperature(t_val)
+        return t_val
     
     def predict_legacy(self, x: torch.Tensor) -> torch.Tensor:
         """Legacy single-output prediction for backward compatibility."""
@@ -800,7 +876,9 @@ class CondorLoss(nn.Module):
         prob_weight: float = 1.0,
         regime_weight: float = 0.5,
         entry_exit_weight: float = 1.0,  # NEW: weight for entry/exit losses
-        entropy_weight: float = 0.1      # NEW: anti-collapse regularization
+        entropy_weight: float = 0.1,      # NEW: anti-collapse regularization
+        moe_bal_weight: float = 0.5, # V42: MoE load balancing weight
+        moe_entropy_weight: float = 0.1 # V47: MoE routing entropy weight
     ):
         super().__init__()
         self.strike_weight = strike_weight
@@ -810,6 +888,8 @@ class CondorLoss(nn.Module):
         self.regime_weight = regime_weight
         self.entry_exit_weight = entry_exit_weight
         self.entropy_weight = entropy_weight
+        self.moe_bal_weight = moe_bal_weight
+        self.moe_entropy_weight = moe_entropy_weight
 
         self.huber = nn.HuberLoss(delta=1.0)
         self.bce = nn.BCELoss()
@@ -821,7 +901,8 @@ class CondorLoss(nn.Module):
         pred: torch.Tensor,
         target: torch.Tensor,
         regime_probs: Optional[torch.Tensor] = None,
-        regime_labels: Optional[torch.Tensor] = None
+        regime_labels: Optional[torch.Tensor] = None,
+        model: Optional[nn.Module] = None # Added for MoE load balancing loss
     ) -> torch.Tensor:
         """
         Compute composite loss.
@@ -831,6 +912,7 @@ class CondorLoss(nn.Module):
             target: (B, 10) target IC parameters
             regime_probs: (B, 3) predicted regime probabilities
             regime_labels: (B,) ground truth regime indices
+            model: The CondorBrain model instance, required for MoE load balancing loss.
         """
         # Strike offset loss (indices 0, 1)
         l_strike = self.huber(pred[:, 0:2], target[:, 0:2])
@@ -889,6 +971,14 @@ class CondorLoss(nn.Module):
                 var_penalty += torch.relu(0.1 - pred[:, 8].var()) + torch.relu(0.1 - pred[:, 9].var())
             l_entropy = var_penalty
 
+        # 5. MoE Load Balancing & Entropy (V42/V47)
+        moe_bal_loss = torch.tensor(0.0, device=pred.device)
+        moe_ent_loss = torch.tensor(0.0, device=pred.device)
+        if model is not None and hasattr(model, 'moe_head') and model.moe_head is not None:
+             moe_bal_loss = model.moe_head.get_load_balancing_loss()
+             if hasattr(model.moe_head, 'get_routing_entropy_loss'):
+                 moe_ent_loss = model.moe_head.get_routing_entropy_loss()
+
         # Combine
         total_loss = (
             self.strike_weight * (l_strike + l_width + l_dte) +
@@ -897,7 +987,9 @@ class CondorLoss(nn.Module):
             self.prob_weight * (l_prob + l_conf) +  # Include confidence Brier score
             self.regime_weight * l_regime +
             self.entry_exit_weight * (l_entry + l_exit) +  # NEW: entry/exit supervision
-            self.entropy_weight * l_entropy  # NEW: anti-collapse regularization
+            self.entropy_weight * l_entropy +  # NEW: anti-collapse regularization
+            self.moe_bal_weight * moe_bal_loss + # V47: Quadratic Balance
+            self.moe_entropy_weight * moe_ent_loss # V47: Routing Entropy
         )
 
         return total_loss

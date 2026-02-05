@@ -34,12 +34,14 @@ class ConditionalDiffusionHead(nn.Module):
         cond_dim: int = 512,   # Neural CDE hidden state dim
         hidden_dim: int = 256,
         horizon: int = 32, 
-        n_steps: int = 100     # Diffusion steps (keep small for speed)
+        n_steps: int = 100,     # Diffusion steps (keep small for speed)
+        cond_drop_prob: float = 0.2 # V42: For classifier-free guidance
     ):
         super().__init__()
         self.input_dim = input_dim
         self.horizon = horizon
         self.n_steps = n_steps
+        self.cond_drop_prob = cond_drop_prob
         
         # Time Embeddings
         self.time_mlp = nn.Sequential(
@@ -53,11 +55,17 @@ class ConditionalDiffusionHead(nn.Module):
         self.cond_proj = nn.Linear(cond_dim, hidden_dim)
         
         # Denoising Network (Residual MLP)
-        # Input: Flat trajectory (horizon * input_dim) to keep correlations
         flat_dim = horizon * input_dim
         
+        # V42: FiLM modulation parameters (Scale and Shift)
+        self.film_net = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.SiLU(),
+            nn.Linear(hidden_dim * 2, flat_dim * 2) # produces [scale, shift]
+        )
+        
         self.net = nn.Sequential(
-            nn.Linear(flat_dim + hidden_dim + hidden_dim, hidden_dim * 2),
+            nn.Linear(flat_dim + hidden_dim, hidden_dim * 2), # x_t + time
             nn.SiLU(),
             nn.Linear(hidden_dim * 2, hidden_dim * 2),
             nn.SiLU(),
@@ -105,12 +113,23 @@ class ConditionalDiffusionHead(nn.Module):
         # Flatten x_t for MLP: (B, H*F)
         x_flat = x_t.view(B, -1)
         
-        # Conditioning
+        # Conditioning (V42: Conditioning Dropout for CFG)
+        if self.training and self.cond_drop_prob > 0:
+            mask = (torch.rand(B, 1, device=device) > self.cond_drop_prob).float()
+            condition = condition * mask
+            
+        # V42: FiLM Bridge (Conditioning scale/shift)
         c_emb = self.cond_proj(condition) # (B, Hidden)
+        film_params = self.film_net(c_emb) # (B, 2 * flat_dim)
+        gamma, beta = film_params.chunk(2, dim=-1)
+        
+        # Apply FiLM to noisy input: x' = scale * x + shift
+        x_modulated = x_flat * (1 + gamma) + beta
+        
         t_emb = self.time_mlp(t)          # (B, Hidden)
         
-        # Concatenate: [Noisy_Input, Condition, Time]
-        inp = torch.cat([x_flat, c_emb, t_emb], dim=-1)
+        # Concatenate: [Modulated_Input, Time]
+        inp = torch.cat([x_modulated, t_emb], dim=-1)
         
         pred_noise_flat = self.net(inp)
         pred_noise = pred_noise_flat.view(B, H, n_feats)
@@ -119,13 +138,14 @@ class ConditionalDiffusionHead(nn.Module):
         return F.mse_loss(pred_noise, noise)
 
     @torch.no_grad()
-    def sample(self, condition, n_samples=1):
+    def sample(self, condition, n_samples=1, guidance_scale=2.0):
         """
-        Generate trajectory via reverse diffusion.
+        Generate trajectory via reverse diffusion using Classifier-Free Guidance (CFG).
         
         Args:
-            condition: Mamba embedding (B, D)
-            n_samples: Number of samples per condition (default 1)
+            condition: CDE latent state (B, D)
+            n_samples: Number of samples per condition
+            guidance_scale: w factor for CFG (amplifies conditioning). 1.0 = no guidance.
             
         Returns:
             x_final: Generated trajectory (B, H, F)
@@ -140,13 +160,26 @@ class ConditionalDiffusionHead(nn.Module):
         for i in reversed(range(self.n_steps)):
             t = torch.full((B,), i, device=device, dtype=torch.long)
             
-            # Predict noise
+            # V42: Classifier-Free Guidance step
+            # 1. Prediction with conditioning
             x_flat = x.view(B, -1)
             c_emb = self.cond_proj(condition)
+            film_cond = self.film_net(c_emb)
+            gamma_c, beta_c = film_cond.chunk(2, dim=-1)
+            x_cond = x_flat * (1 + gamma_c) + beta_c
             t_emb = self.time_mlp(t)
-            inp = torch.cat([x_flat, c_emb, t_emb], dim=-1)
+            eps_cond = self.net(torch.cat([x_cond, t_emb], dim=-1)).view(B, self.horizon, self.input_dim)
             
-            eps_theta = self.net(inp).view(B, self.horizon, self.input_dim)
+            # 2. Prediction without conditioning (null-mask)
+            null_cond = torch.zeros_like(condition)
+            c_emb_null = self.cond_proj(null_cond)
+            film_null = self.film_net(c_emb_null)
+            gamma_n, beta_n = film_null.chunk(2, dim=-1)
+            x_null = x_flat * (1 + gamma_n) + beta_n
+            eps_null = self.net(torch.cat([x_null, t_emb], dim=-1)).view(B, self.horizon, self.input_dim)
+            
+            # 3. CFG combination: eps = eps_null + w * (eps_cond - eps_null)
+            eps_theta = eps_null + guidance_scale * (eps_cond - eps_null)
             
             # Update x_{t-1}
             beta_t = self.betas[i]

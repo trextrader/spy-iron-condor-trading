@@ -1,6 +1,6 @@
 # intelligence/fuzzy_engine.py
 import numpy as np
-from typing import Dict
+from typing import Dict, List, Optional
 
 # =============================================================================
 # QUANTOR-MTFUZZ™: Fuzzy Position Sizing Logic
@@ -29,23 +29,36 @@ def compute_base_quantity(
 
 def compute_fuzzy_confidence(
     memberships: Dict[str, float],
-    weights: Dict[str, float]
+    weights: Dict[str, float],
+    veto_factors: Optional[List[str]] = None
 ) -> float:
     """
     Compute fuzzy confidence score Ft in [0, 1] (Stage 4).
-    Ft = sum(w_j * mu_j)
+    
+    Hardened (V47):
+    - Enforces FP32 for accumulation.
+    - Implements "Hard Risk Veto" (T-norm aggregation): 
+      If any veto_factors membership is 0.0, the total confidence is 0.0.
     """
-    confidence = 0.0
+    # Force FP32 accumulation
+    confidence = np.float32(0.0)
+    
+    # Default veto factors: things that should kill a trade if extreme
+    if veto_factors is None:
+        veto_factors = ["iv_rank", "adx", "vix"] # Regime/Trend killers
 
+    # 1. Check for Hard Veto (Constitutional Protection)
+    for key in veto_factors:
+        if key in memberships and memberships[key] <= 0.001:  # Deep risk
+            return 0.0
+
+    # 2. Weighted Trade-off (Soft Logic)
     for key, mu in memberships.items():
-        w = weights.get(key, 0.0)
-        confidence += w * mu
+        w = np.float32(weights.get(key, 0.0))
+        confidence += w * np.float32(mu)
 
-    # Hard clamp
-    if confidence < 0.0: return 0.0
-    if confidence > 1.0: return 1.0
-
-    return confidence
+    # Hard clamp in FP32
+    return float(np.clip(confidence, 0.0, 1.0))
 
 
 def normalize_volatility(
@@ -76,13 +89,18 @@ def compute_scaling_factor(
     """
     Compute g(Ft, sigma_star) (Stage 6).
     g = Ft * (1 - sigma_star)
+    
+    Hardened (V47): Enforced FP32 floor to prevent precision drift.
     """
-    g = confidence * (1.0 - volatility_penalty)
+    c = np.float32(confidence)
+    v = np.float32(volatility_penalty)
+    
+    g = c * (np.float32(1.0) - v)
 
-    if g < min_scale: g = min_scale
-    if g > 1.0: g = 1.0
+    if g < min_scale: g = np.float32(min_scale)
+    if g > 1.0: g = np.float32(1.0)
 
-    return g
+    return float(g)
 
 
 def compute_position_size(

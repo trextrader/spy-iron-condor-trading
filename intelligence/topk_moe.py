@@ -174,6 +174,7 @@ class BatchedTopKMoE(nn.Module):
         self.k = min(k, n_experts)
         
         self.gate = nn.Linear(d_model, n_experts)
+        self.temperature = nn.Parameter(torch.tensor(1.0)) # V42: Routing temperature
         
         # Batched expert weights
         hidden_dim = d_model * hidden_ratio
@@ -190,9 +191,13 @@ class BatchedTopKMoE(nn.Module):
         
         B = E_gate.shape[0]
         
-        # Routing
-        logits = self.gate(E_gate)
+        # Routing with temperature scaling
+        logits = self.gate(E_gate) / (self.temperature.abs() + 1e-6)
         probs = F.softmax(logits, dim=-1)
+        
+        # Load Balancing Info (V42) - tracked for CondorLoss
+        self.last_probs = probs
+        
         topv, topi = torch.topk(probs, self.k, dim=-1)
         topv = topv / (topv.sum(dim=-1, keepdim=True) + 1e-9)
         
@@ -214,3 +219,66 @@ class BatchedTopKMoE(nn.Module):
         output = (topv.unsqueeze(-1) * selected_out).sum(dim=1)  # (B, O)
         
         return output
+
+    def get_load_balancing_loss(self) -> torch.Tensor:
+        """
+        Compute Quadratic Load Balancing Loss (V42/V47) - User Spec.
+        Penalizes non-uniform expert utilization.
+        L = sum((u_e - 1/E)^2)
+        """
+        if not hasattr(self, 'last_probs'):
+            return torch.tensor(0.0)
+            
+        # Utilization = average routing probability per expert over the batch
+        utilization = self.last_probs.mean(dim=0) # (n_experts,)
+        target_uniform = 1.0 / self.n_experts
+        
+        # Quadratic penalty (V47)
+        loss = torch.sum((utilization - target_uniform).pow(2))
+        return loss
+
+    def get_routing_entropy_loss(self) -> torch.Tensor:
+        """
+        Compute Routing Entropy Loss (V47) - User Spec.
+        L = Mean(sum(p_be * log(p_be)))
+        Minimizing this encourages uniform distribution per sample (max entropy).
+        """
+        if not hasattr(self, 'last_probs'):
+            return torch.tensor(0.0)
+            
+        probs = self.last_probs
+        # Entropy sum_{e} p_e log(p_e)
+        entropy = torch.sum(probs * torch.log(probs + 1e-9), dim=-1)
+        return entropy.mean()
+
+    def set_temperature(self, T: float):
+        """Update routing temperature for annealing schedule."""
+        self.temperature.data.fill_(T)
+
+    def forward_with_routing(self, E: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Forward pass that also returns routing info for logging (V42).
+        """
+        if E.dim() == 3:
+            E_gate = E[:, -1, :]
+        else:
+            E_gate = E
+        
+        # Routing with temperature
+        logits = self.gate(E_gate) / (self.temperature.abs() + 1e-6)
+        probs = F.softmax(logits, dim=-1)
+        topv, topi = torch.topk(probs, self.k, dim=-1)
+        
+        # We call standard forward to get the output
+        output = self.forward(E)
+        
+        return output, probs, topi
+
+    def get_expert_stats(self) -> dict:
+        """
+        Return diagnostic statistics for expert utilization (V42).
+        """
+        if not hasattr(self, 'last_probs'):
+            return {}
+        util = self.last_probs.mean(dim=0).detach().cpu().numpy()
+        return {f"expert_{i}_util": float(util[i]) for i in range(len(util))}
