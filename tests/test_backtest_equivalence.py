@@ -31,23 +31,6 @@ from copy import deepcopy
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# ==============================================================================
-# PYTEST CONFIGURATION
-# ==============================================================================
-
-def pytest_addoption(parser):
-    """Add --cpu flag to force CPU execution."""
-    parser.addoption(
-        "--cpu",
-        action="store_true",
-        default=False,
-        help="Force CPU execution (useful when GPU is busy with training)"
-    )
-
-@pytest.fixture
-def force_cpu(request):
-    """Check if --cpu flag was passed."""
-    return request.config.getoption("--cpu")
 
 # Attempt imports - skip tests if dependencies unavailable
 try:
@@ -95,15 +78,6 @@ def set_deterministic_seed(seed: int = 42):
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-
-
-@pytest.fixture
-def device(request):
-    """Get compute device. Respects --cpu flag."""
-    force_cpu = request.config.getoption("--cpu", default=False)
-    if force_cpu:
-        return torch.device('cpu')
-    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 @pytest.fixture

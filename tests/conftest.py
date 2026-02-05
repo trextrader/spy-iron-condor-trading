@@ -1,6 +1,26 @@
 import numpy as np
 import pandas as pd
 import pytest
+import torch
+
+
+def pytest_addoption(parser):
+    """Add --cpu flag to force CPU execution."""
+    parser.addoption(
+        "--cpu",
+        action="store_true",
+        default=False,
+        help="Force CPU execution (useful when GPU is busy with training)"
+    )
+
+
+@pytest.fixture
+def device(request):
+    """Get compute device. Respects --cpu flag."""
+    force_cpu = request.config.getoption("--cpu", default=False)
+    if force_cpu:
+        return torch.device('cpu')
+    return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 @pytest.fixture
