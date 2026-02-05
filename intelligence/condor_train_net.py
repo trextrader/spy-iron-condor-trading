@@ -18,7 +18,7 @@ import os
 import math
 import time
 import argparse
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List, Sequence
 
 # CUDA optimizations before torch import
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
@@ -31,7 +31,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.amp import autocast, GradScaler
-from torch.utils.tensorboard import SummaryWriter
+try:
+    from torch.utils.tensorboard import SummaryWriter
+    TENSORBOARD_AVAILABLE = True
+except ImportError:
+    TENSORBOARD_AVAILABLE = False
+    class SummaryWriter:
+        def __init__(self, *args, **kwargs): pass
+        def add_scalar(self, *args, **kwargs): pass
+        def close(self): pass
 from tqdm import tqdm
 
 # Add project root
@@ -44,6 +52,7 @@ from intelligence.condor_brain_net import (
 )
 from intelligence.canonical_feature_registry import (
     FEATURE_COLS_V22,
+    NEUTRAL_FILL_VALUES_V22,
     select_feature_frame,
 )
 
@@ -309,12 +318,12 @@ def clamp_targets(y: np.ndarray) -> np.ndarray:
     return y.astype(np.float32)
 
 
-def prepare_features(df: pd.DataFrame) -> tuple:
+def prepare_features(df: pd.DataFrame, feature_cols: List[str]) -> tuple:
     """
     Prepare features and targets for CondorNet training.
 
     Returns:
-        (X, y, regime, med, scale)
+        (X, y, regime, bar_index, med, scale)
     """
     print("[CondorNet] Preparing features...")
 
@@ -413,7 +422,11 @@ def prepare_features(df: pd.DataFrame) -> tuple:
             labels=[0, 1, 2]
         ).fillna(1).astype(int)
 
-    df = df.ffill().bfill().fillna(0)
+    # REPLACED: df.ffill().bfill().fillna(0) -> Avoid doubling memory
+    # Only fill critical columns if they have NaNs
+    for c in ['rsi', 'adx', 'ivr']:
+        if c in df.columns:
+            df[c] = df[c].ffill().fillna(NEUTRAL_FILL_VALUES_V22.get(c, 0.0))
 
     # Build arrays
     target_cols = [
@@ -422,24 +435,34 @@ def prepare_features(df: pd.DataFrame) -> tuple:
         'entry_target', 'exit_target'
     ]
 
-    X = select_feature_frame(df, FEATURE_COLS, strict=True).values.astype(np.float32)
+    X = select_feature_frame(df, feature_cols, strict=True).values.astype(np.float32)
     y = df[target_cols].values.astype(np.float32)
     regime = df['regime_label'].values.astype(np.int64)
+
+    # TIMESTAMPS -> bar_index
+    if 'dt' in df.columns or 'timestamp' in df.columns:
+        time_col = 'dt' if 'dt' in df.columns else 'timestamp'
+        bar_index = df.groupby(time_col).ngroup().values.astype(np.int64)
+    else:
+        bar_index = (np.arange(n) // 100).astype(np.int64)
+
+    # FREE DATAFRAME IMMEDIATELY
+    del df
 
     # Sanitize
     X = safe_nan_to_num(X)
     y = clamp_targets(y)
 
-    # Scale volume
+    # Scale volume (inplace where possible)
     if X.shape[1] > 4:
         X[:, 4] = np.log1p(np.clip(X[:, 4], 0.0, 1e9)).astype(np.float32)
 
-    # Robust normalization
+    # Robust normalization (inplace transform)
     med, scale = robust_zscore_fit(X)
     X = robust_zscore_transform(X, med, scale)
 
     print(f"[CondorNet] Features: {X.shape}, Targets: {y.shape}")
-    return X, y, regime, med, scale
+    return X, y, regime, bar_index, med, scale
 
 
 # =============================================================================
@@ -533,21 +556,36 @@ def train_condor_net(args):
 
     amp_dtype = torch.bfloat16 if use_bf16 else torch.float16
 
-    # Load data
-    print(f"\n[CondorNet] Loading data from {args.local_data}...")
+    # Load data with usecols optimization
+    target_cols = [
+        'target_call_offset', 'target_put_offset', 'target_wing_width', 'target_dte',
+        'was_profitable', 'realized_roi', 'realized_max_loss', 'confidence_target',
+        'entry_target', 'exit_target'
+    ]
+    aux_cols = ['dt', 'timestamp', 'regime_label', 'ivr', 'vix', 'rsi', 'adx', 'call_put']
+    
+    # Merge all required cols
+    load_cols = list(set(FEATURE_COLS + target_cols + aux_cols))
+    
+    # Check what's actually in the CSV to avoid FileNotFoundError on missing aux cols
+    header = pd.read_csv(args.local_data, nrows=0).columns
+    use_cols = [c for c in load_cols if c in header]
+    
+    print(f"\n[CondorNet] Loading data from {args.local_data} (using {len(use_cols)}/ {len(header)} columns)...")
     if args.max_rows > 0:
-        df = pd.read_csv(args.local_data, nrows=args.max_rows)
+        df = pd.read_csv(args.local_data, nrows=args.max_rows, usecols=use_cols)
     else:
-        df = pd.read_csv(args.local_data)
+        df = pd.read_csv(args.local_data, usecols=use_cols)
     print(f"[CondorNet] Loaded {len(df):,} rows")
 
-    X, y, regime, med, scale = prepare_features(df)
-    del df
+    X, y, regime, bar_index, med, scale = prepare_features(df, FEATURE_COLS)
+    # del df # Done inside prepare_features now
 
     # Split
     split_row = int(len(X) * 0.8)
     X_train, X_val = X[:split_row], X[split_row:]
     y_train, y_val = y[:split_row], y[split_row:]
+    bar_train, bar_val = bar_index[:split_row], bar_index[split_row:]
 
     # Move to GPU
     L = args.lookback
@@ -564,6 +602,18 @@ def train_condor_net(args):
     n_val_seq = len(X_val) - L
     X_train_seq = X_train_t.unfold(0, L, 1).permute(0, 2, 1)
     X_val_seq = X_val_t.unfold(0, L, 1).permute(0, 2, 1)
+
+    # bar_index views to create timestep_mask
+    bar_train_t = torch.from_numpy(bar_train).to(device=device, dtype=torch.long)
+    bar_val_t = torch.from_numpy(bar_val).to(device=device, dtype=torch.long)
+    
+    # Unfold bar_index to create views (B, L)
+    bar_train_seq = bar_train_t.unfold(0, L, 1)
+    bar_val_seq = bar_val_t.unfold(0, L, 1)
+    
+    # LAZY MASK: We compute specific batch masks in the loop to save RAM/VRAM
+    # mask_train_seq = (bar_train_seq[:, 1:] != bar_train_seq[:, :-1]).float()
+    # mask_val_seq = (bar_val_seq[:, 1:] != bar_val_seq[:, :-1]).float()
 
     n_train_batches = n_train_seq // B
     n_val_batches = max(1, n_val_seq // B)
@@ -649,32 +699,27 @@ def train_condor_net(args):
         for batch_idx in pbar:
             s = batch_idx * B
             e = s + B
+            x_b = X_train_seq[s:e].to(device)
+            y_b = y_train_t[s + L - 1 : e + L - 1].to(device)
+            
+            # LAZY MASK CALCULATION (Per batch)
+            bar_b = bar_train_seq[s:e].to(device)
+            mask_b = (bar_b[:, 1:] != bar_b[:, :-1]).float()
 
-            batch_x = X_train_seq[s:e]  # (B, L, F)
-            batch_y = y_train_t[s + L:e + L]  # (B, 10)
-
-            # Move to device (KEEP AS FLOAT32 for stable backward pass)
-            batch_x = batch_x.to(device)
-            batch_y = batch_y.to(device)
-
-            # Forward pass with standard AMP
-            with torch.amp.autocast('cuda', dtype=amp_dtype):
-                outputs, diag = model(batch_x, return_diagnostics=True)
-
-                A_matrix = model.get_A_matrix()
-                gates = diag.get('predicates')
-                state = diag.get('z_final')
+            with torch.amp.autocast(device_type='cuda', dtype=amp_dtype):
+                # BCS: Pass timestep_mask and bar_index to forward
+                outputs, diag = model(x_b, return_diagnostics=True, timestep_mask=mask_b, bar_index=bar_b)
 
             # --- LOSS CALCULATION (OUTSIDE AUTOCAST FOR PRECISION) ---
             # Synthetic return series for Sharpe/Drawdown (across the batch)
-            roi_returns = batch_y[:, 5].unsqueeze(0)  # (1, B)
+            roi_returns = y_b[:, 5].unsqueeze(0)  # (1, B)
 
             loss, components = criterion(
                 outputs,
-                batch_y,
-                gates=gates,
-                state=state,
-                A_matrix=A_matrix,
+                y_b,
+                gates=diag.get('predicates'),
+                state=diag.get('z_final'),
+                A_matrix=model.get_A_matrix(),
                 pred_signature=model.pred_signature,
                 returns=roi_returns,
             )
@@ -682,7 +727,7 @@ def train_condor_net(args):
             # Debug Prints for Crash
             if batch_idx == 0:
                 print(f"\n[DEBUG BATCH 0] System Inventory:")
-                print(f"  Input batch_x: {batch_x.dtype}")
+                print(f"  Input x_b: {x_b.dtype}")
                 print(f"  Model Weights: {next(model.parameters()).dtype}")
                 print(f"  Outputs (Raw): {outputs.dtype}")
                 print(f"  Final Loss: {loss.item():.6f} ({loss.dtype}), GradFn: {loss.grad_fn}")
@@ -745,19 +790,18 @@ def train_condor_net(args):
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
-            for batch_idx in range(min(n_val_batches, 50)):
+            for batch_idx in range(n_val_batches):
                 s = batch_idx * B
-                e = min(s + B, n_val_seq)
-                if e <= s:
-                    break
+                e = s + B
+                x_b = X_val_seq[s:e].to(device)
+                y_b = y_val_t[s + L - 1 : e + L - 1].to(device)
+                
+                # LAZY MASK CALCULATION (Per batch)
+                bar_b = bar_val_seq[s:e].to(device)
+                mask_b = (bar_b[:, 1:] != bar_b[:, :-1]).float()
 
-                batch_x = X_val_seq[s:e]
-                batch_y = y_val_t[s + L:e + L]
-
-                roi_returns = batch_y[:, 5].unsqueeze(0)
-
-                with torch.amp.autocast('cuda', dtype=amp_dtype):
-                    outputs, diag = model(batch_x, return_diagnostics=True)
+                with torch.amp.autocast(device_type='cuda', dtype=amp_dtype):
+                    outputs, diag = model(x_b, return_diagnostics=True, timestep_mask=mask_b, bar_index=bar_b)
                     
                     A_matrix = model.get_A_matrix()
                     gates = diag.get('predicates')
@@ -765,12 +809,12 @@ def train_condor_net(args):
 
                     loss, _ = criterion(
                         outputs.float(), 
-                        batch_y,
+                        y_b, 
                         gates=gates,
                         state=state,
                         A_matrix=A_matrix,
                         pred_signature=model.pred_signature,
-                        returns=roi_returns
+                        returns=y_b[:, 5].unsqueeze(0) # Calc per batch in val too
                     )
 
                 val_loss += loss.item()

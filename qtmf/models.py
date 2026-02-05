@@ -36,6 +36,7 @@ class TradeIntent:
     
     # Neural Market State
     neural_forecast: Optional[Dict[str, Any]] = None  # {regime: 'volatile', trend: 'bull', conf: 0.8}
+    direction_probs: Optional[Sequence[float]] = None # [down, neutral, up]
 
     # Optional suggested ceiling from caller (e.g., RL); QTMF can clamp
     suggested_total_qty: Optional[int] = None
