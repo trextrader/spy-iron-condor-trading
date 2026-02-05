@@ -21,13 +21,13 @@ $$x_k = e^{A_\theta(u_k)\Delta t_k} x_{k-1} + \Delta t_k \varphi_1(A_\theta(u_k)
 - **4-Block Augmented State**: x_k = [h_k; v_k; m_k; r_k] - latent, portfolio, memory, regime
 - **5 Canonical Predicate Gates**: Volatility spike, liquidity compression, momentum reversal, gap risk, Greeks pressure
 - **TFT Control Synthesis**: Long-range temporal context without direct prediction
-- **Neural CDE Path Response**: G_θ(x, u) · ΔX_k for market-driven state evolution
+- **HAL-SNN Path Response**: G_θ(x, u) · ΔX_k for market-driven state evolution
 
 Full technical details in [CondorNet Implementation Plan](docs/CONDORNET_IMPLEMENTATION_PLAN.md) and [Scientific Specification](docs/scientific_spec.md).
 
 ## 🆕 Previous Versions (v3.0 - Neural CDE)
 
-- **Neural CDE Architecture:** Replaced Mamba-2 with Neural Controlled Differential Equations
+- **HAL-SNN Architecture:** Upgraded legacy Neural CDE to Hierarchical Augmented Logic
 - **⚡ H100 Optimization:** Custom `TF32`, `cuDNN Benchmark`, and `LazySequenceDataset` for 10M+ rows
 - **🛡️ Robust Stability:** Z-Score Scaling + Tanh Clipping to solve FP16 NaN divergence
 - **📊 Advanced Monitoring:** Real-time TensorBoard logging for per-head loss
@@ -36,10 +36,10 @@ Full technical details in [CondorNet Implementation Plan](docs/CONDORNET_IMPLEME
 ## 🔍 Interpretability Engine (v3.0)
 **"Physics-Inspired Auditing for Neural Policy Networks"**
 
-We don't just train models; we interrogate them. The new Audit System (`intelligence/audit_cde_comparison.py`) provides a granular view into the Neural CDE's decision-making process:
+We don't just train models; we interrogate them. The new Audit System (`intelligence/audit_cde_comparison.py`) provides a granular view into the HAL-SNN's decision-making process:
 
 - **Attribution Stability:** Uses **Permutation Importance** and **Gradient Saliency** to prove the model is trading based on Greeks (Delta/Theta) and not noise.
-- **Surrogate Distillation:** Trains a white-box Decision Tree ($R^2 \approx 0.70$) to extract human-readable rules from the Neural CDE's latent state.
+- **Surrogate Distillation:** Trains a white-box Decision Tree ($R^2 \approx 0.70$) to extract human-readable rules from the HAL-SNN's latent state.
 - **Drift Forensics:** Measures **Wasserstein Distance** and **Energy (MSD)** between model epochs to detect "personality shifts" before deployment.
 - **Visual Diagnostics:** A complete guide to the 30+ generated diagnostic plots (Gradient Heatmaps, Fisher Information, etc.) is available in **[Section 13.3 of the Scientific Spec](docs/scientific_spec.md#133-visual-guide-to-audit-plots)**.
 
@@ -117,7 +117,7 @@ CondorBrain is an advanced algorithmic trading system designed for SPY Iron Cond
 
 ## 🧠 CondorNet™ Core Engine
 
-The system uses the novel **CondorNet™** architecture that unifies three previously separate approaches (TFT, Neural CDE, Mamba/SSD) into a single mathematically principled framework.
+The system uses the novel **CondorNet™** architecture that unifies three previously separate approaches (TFT, HAL-SNN, Mamba/SSD) into a single mathematically principled framework.
 
 ### Mathematical Foundation
 The core mechanism is the CondorNet™ Master Equation:
@@ -129,12 +129,12 @@ Where:
 *   $e^{A_\theta \Delta t}$ is the **ETD-1 matrix exponential** for stable time evolution
 *   $\varphi_1(M) = M^{-1}(e^M - I)$ is the **ETD-1 basis function**
 *   $u_k = \text{TFT}(X_{1:k})$ is the **control embedding** from Temporal Fusion Transformer
-*   $G_\theta(x, u) \cdot \Delta X_k$ is the **Neural CDE path response**
+*   $G_\theta(x, u) \cdot \Delta X_k$ is the **HAL-SNN path response**
 *   $D(\text{Greeks}, r_{k-1}, q)$ is the **4-block forcing** (uses $r_{k-1}$ for causality)
 
 In the **CondorNet™** implementation (`intelligence/condor_brain_net.py`):
 *   **Input**: $(B, T, 54)$ tensor [V2.2 Feature Set]
-*   **Backbone**: ETD-1 Integrator + Neural CDE + TFT Control
+*   **Backbone**: ETD-1 Integrator + HAL-SNN + TFT Control
 *   **State**: 4-block augmented $[h; v; m; r]$ with d_total = 384
 *   **Output**: 10-head policy (IC parameters + confidence + entry/exit)
 
@@ -327,7 +327,7 @@ Optimizes the 11-factor fuzzy weight blend including Neural Network influence.
 
 ## 🏗️ Architecture: Quantor-MTFuzz Specification
 
-The system architecture is tiered into four layers of intelligence, combining high-fidelity **Neural CDE** forecasting with a robust Neural-Fuzzy decision suite.
+The system architecture is tiered into four layers of intelligence, combining high-fidelity **CondorNet (HAL-SNN)** forecasting with a robust Neural-Fuzzy decision suite.
 
 - **[Weekly Technical Progress Report (Jan 13)](docs/internal/WEEKLY_SUMMARY_2026-01-13.md):** Summary of recent high-impact work.
 - **[Technical Architecture Summary](docs/architecture/technical_architecture_summary.md):** A one-page engineering overview.
@@ -360,7 +360,7 @@ intelligence/
 ├── fuzzifier.py      → Feature extraction (ADX/RSI/IV Rank)
 ├── fuzzy_engine.py   → Fuzzy position sizing
 ├── regime_filter.py  → Market regime classification
-└── condor_brain.py   → Neural forecasting (Neural CDE)
+└── condor_brain.py   → Neural forecasting (HAL-SNN)
 
 analytics/            [Phase 1]
 ├── realized_vol.py   → Realized volatility calculator
@@ -598,12 +598,12 @@ F_t = \sum_{j=1}^{10} w_j \cdot \mu_j
 $$
 
 $$
-C = 0.10 \cdot \mu_{\mathrm{CDE}} + 0.90 \cdot F_t
+C = 0.10 \cdot \mu_{\mathrm{HAL-SNN}} + 0.90 \cdot F_t
 $$
 
 | # | Factor | Weight | Description |
 |---|--------|--------|-------------|
-| 1 | **Neural CDE** | 0.10 (Rel) | Neural forecast confidence |
+| 1 | **CondorNet (HAL-SNN)** | 0.10 (Rel) | Neural forecast confidence |
 | 2 | MTF Consensus | 0.10 | Multi-timeframe alignment |
 | 3 | IV Rank | 0.10 | Implied volatility percentile |
 | 4 | VIX Regime | 0.08 | Market fear index |
@@ -879,49 +879,40 @@ print(f"Fuzzy Confidence: {Ft:.2f}")  # → 0.71
 
 ---
 
-## 🧠 7. Neural CDE Forecasting Engine
+## 🧠 7. CondorNet™ (HAL-SNN) Core Engine
 
-The system leverages a **Neural Controlled Differential Equation (CDE)** architecture for high-fidelity market forecasting. Unlike discrete RNNs or SSMs, CDEs model market dynamics as continuous processes, treating input sequences as control paths that drive latent state evolution.
+The system leverages the **HAL-SNN** (Hierarchical Augmented Logic - Super Neural Network) architecture, implemented via **CondorNet™**. This next-generation engine unifies State-Space Models (SSM), Neural CDEs, and Temporal Fusion Transformers into a single, mathematically faithful framework.
 
 ### 7.1 Architecture Details
-*   **Model**: `CondorBrain` (Neural CDE Implementation)
-*   **Solver**: Explicit Euler Integration
-*   **Vector Field**: 2-layer MLP (SiLU → Tanh)
-*   **Latent Dim** ($Z$): 512–1024
-*   **Activation**: Tanh-bounded continuous evolution
+*   **Model**: `CondorNet` (HAL-SNN Implementation)
+*   **Integrator**: **ETD-1** (Exponential Time Differencing)
+*   **Vector Field**: $G_\theta(x, u)$ [Neural CDE Path Response]
+*   **Logic Hierarchy**: 3-Tier (Predicate $\to$ Set $\to$ SuperSet)
+*   **State Space**: 4-Block Augmented $x = [h; v; m; r]$
 
-### 7.2 Mathematical Foundation
+### 7.2 Mathematical Foundation (HAL-SNN Master Equation)
 
-Unlike discrete models, the Neural CDE treats the input sequence as a **control path** $X$ that drives the latent state $Z$:
+Unlike simple CDEs, **CondorNet™** solves the physics of the market using a unified master equation:
 
-#### Path-Driven Integration
+$$x_k = e^{A_\theta(u_k)\Delta t_k} x_{k-1} + \Delta t_k \varphi_1(A_\theta(u_k)\Delta t_k) B_\theta(u_k) + G_\theta(x_{k-1}, u_k) \Delta X_k + D(\text{Greeks}_k, r_{k-1}, q_k)$$
 
-$$
-Z_{t+1} = Z_t + f(Z_t) \cdot (X_{t+1} - X_t)
-$$
+#### A. The ETD-1 Engine
+To ensure absolute numerical stability, we use the **$\phi_1$ Basis Function**:
+$$\varphi_1(M) = M^{-1}(e^M - I)$$
+This ensures the hidden state transition is solved exactly through the matrix exponential $\exp(A\Delta t)$, preventing the typical "vanishing gradient" or "NaN explosion" of discrete models.
 
-Where:
-*   $Z_t \in \mathbb{R}^{512}$ is the latent status (memory)
-*   $X_t \in \mathbb{R}^{52}$ is the input vector (v2.2 schema)
-*   $f(Z)$ is the learned vector field
+#### B. Hierarchical Relational Logic
+The model evaluates explicit pairwise relations ($<, >, =$) across canonical features:
+1.  **Predicates**: Individual feature comparisons ($K=512$).
+2.  **Sets**: Grouped logical statements ($S=256$).
+3.  **SuperSets**: High-level regime filters ($SS=128$) that gate the final policy.
 
-#### Vector Field Network
-The vector field $f$ is constrained to ensure stability:
-$$
-f(Z) = \text{Tanh}(W \cdot \text{SiLU}(Z) + b)
-$$
-The Tanh activation ensures $\|f(Z)\|_\infty \leq 1$, preventing numerical explosion over long sequences.
+### 7.3 Feature Engineering (V2.2 Schema)
+The model consumes a 54-parameter manifold including Curvature Proxy, Volatility EWMA, and 20 primitive indicators:
+$$\vec{V}_t = [ \text{open, close, IVR, VIX, Greeks, } \dots ]$$
 
-### 7.3 Feature Engineering (Input Vector)
-The model consumes a 52-parameter manifold including Curvature Proxy and Volatility EWMA:
-
-$$
-\vec{V}_t = [ \ln(C_t/C_{t-1}), \sigma_{ewma}, \kappa_{proxy}, \text{IVR}, \text{VIX} ]
-$$
-
-
-### 7.4 Generative Diffusion Head
-A conditional diffusion module (DDPM) refines the **CDE latent status** into a probabilistic price trajectory (32 steps), capturing uncertainty in high-volatility regimes.
+### 7.4 Latent Manifold Squashing
+To prevent numerical overflow in the latent logic, all state transitions are bounded by a sigmoid/tanh manifold: $x_k = \text{tanh}(x_k)$.
 
 ---
 
