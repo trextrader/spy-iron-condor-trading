@@ -2,20 +2,20 @@
 
 class CondorNet(nn.Module):
     """
-    CondorNet™: Mathematically faithful implementation.
+    CondorNet(TM): Mathematically faithful implementation.
 
     Master equation:
-        x_k = e^{A_θ Δt_k} x_{k-1} + Δt_k φ_1(A_θ Δt_k) B_θ(u_k)
-            + G_θ(x_{k-1}, u_k) ΔX_k + D(Greeks_k, r_{k-1}, q_k)
+        x_k = e^{A_theta deltat_k} x_{k-1} + deltat_k phi_1(A_theta deltat_k) B_theta(u_k)
+            + G_theta(x_{k-1}, u_k) deltaX_k + D(Greeks_k, r_{k-1}, q_k)
 
     with 4-block state: x_k = [h_k; v_k; m_k; r_k]
 
     Features:
-        - True ETD-1 with matrix_exp and φ_1
+        - True ETD-1 with matrix_exp and phi_1
         - Block-partitioned operators
         - 5 canonical predicate gates
         - Group-invariant signatures
-        - r_k dynamics: α_k ⊙ r_{k-1} + β_k
+        - r_k dynamics: alpha_k * r_{k-1} + beta_k
         - Full 4-block forcing with causality
     """
     def __init__(
@@ -190,13 +190,13 @@ class CondorNet(nn.Module):
             diagnostics = {'h': [], 'v': [], 'm': [], 'r': [], 'gates': []} if return_diagnostics else None
 
             # === PRECOMPUTE KERNELS (V5 Performance Opt) ===
-            # A_θ is shared across sequence, dt is constant
+            # A_theta is shared across sequence, dt is constant
             A_full = self.A_theta.full_matrix().float()
             self.log_math("MATRIX_A", "A_full = [A_hh A_hv; A_vh A_vv ...]", A_full)
             
             F_k, phi1 = etd1_kernel(A_full, dt)
-            self.log_math("TRANSITION", "F_k = exp(A_full * Δt)", F_k)
-            self.log_math("PHI_1", "φ1 = (exp(AΔt) - I)A⁻¹", phi1)
+            self.log_math("TRANSITION", "F_k = exp(A_full * deltat)", F_k)
+            self.log_math("PHI_1", "phi1 = (exp(Adeltat) - I)A⁻¹", phi1)
 
             # === TIME LOOP ===
             for t in range(seq_len - 1):
@@ -285,7 +285,7 @@ class CondorNet(nn.Module):
 
     def get_A_matrix(self, dt: float = 1.0) -> torch.Tensor:
         """
-        Return the full drift matrix A_θ as fp32 for loss computations.
+        Return the full drift matrix A_theta as fp32 for loss computations.
 
         This is used by spectral_radius_loss; we keep it in fp32 to avoid
         mixed-precision matmul issues in autograd.
