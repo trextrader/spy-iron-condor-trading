@@ -10,6 +10,10 @@ Invariants tested:
     INV-2: Trade P&L independent of concurrent trades
     INV-3: Equity curve deterministic given same seed
     INV-4: No hidden state carries between inference batches
+
+Usage:
+    pytest tests/test_backtest_equivalence.py -v -s          # Auto-detect device
+    pytest tests/test_backtest_equivalence.py -v -s --cpu    # Force CPU
 """
 
 import sys
@@ -26,6 +30,24 @@ from copy import deepcopy
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+# ==============================================================================
+# PYTEST CONFIGURATION
+# ==============================================================================
+
+def pytest_addoption(parser):
+    """Add --cpu flag to force CPU execution."""
+    parser.addoption(
+        "--cpu",
+        action="store_true",
+        default=False,
+        help="Force CPU execution (useful when GPU is busy with training)"
+    )
+
+@pytest.fixture
+def force_cpu(request):
+    """Check if --cpu flag was passed."""
+    return request.config.getoption("--cpu")
 
 # Attempt imports - skip tests if dependencies unavailable
 try:
@@ -76,8 +98,11 @@ def set_deterministic_seed(seed: int = 42):
 
 
 @pytest.fixture
-def device():
-    """Get compute device."""
+def device(request):
+    """Get compute device. Respects --cpu flag."""
+    force_cpu = request.config.getoption("--cpu", default=False)
+    if force_cpu:
+        return torch.device('cpu')
     return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
