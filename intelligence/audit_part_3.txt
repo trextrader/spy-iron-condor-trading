@@ -1,3 +1,4 @@
+
 # =============================================================================
 
 class CondorNet(nn.Module):
@@ -25,7 +26,7 @@ class CondorNet(nn.Module):
         d_v: int = 32,
         d_m: int = 64,
         d_r: int = 32,
-        d_control: int = 128,
+        d_input_control: int = 128,
         n_greeks: int = 5,
         d_q: int = 1,
         n_predicates: int = 5,
@@ -43,17 +44,17 @@ class CondorNet(nn.Module):
         # State specification
         self.spec = AugmentedStateSpec(d_h, d_v, d_m, d_r)
         self.d_input = d_input
-        self.d_control = d_control
+        self.d_control = d_input_control
         self.n_greeks = n_greeks
 
         # === CORE OPERATORS ===
         self.A_theta = BlockMatrixA(self.spec, enforce_sparsity=enforce_sparsity)
-        self.B_theta = BlockVectorB(self.spec, d_control)
-        self.G_theta = CDEResponseG(self.spec, d_input, d_control)
+        self.B_theta = BlockVectorB(self.spec, d_input_control)
+        self.G_theta = CDEResponseG(self.spec, d_input, d_input_control)
         self.D_forcing = FullForcingD(self.spec, n_greeks=n_greeks, d_q=d_q)
 
         # === CONTROL ===
-        self.tft = TFTControlEncoder(d_input, d_control, n_layers=n_layers)
+        self.tft = TFTControlEncoder(d_input, d_input_control, n_layers=n_layers)
 
         # === INITIAL STATE ===
         self.initial_encoder = nn.Sequential(
@@ -87,7 +88,7 @@ class CondorNet(nn.Module):
 
     def log_math(self, label: str, equation: str, tensor: torch.Tensor = None):
         """Print mathematical derivation step in LaTeX style."""
-        if not self.verbose_math or not hasattr(self, 'verbose_math') or not self.verbose_math:
+        if not self.verbose_math:
             return
         
         prefix = "  [MATH] "
@@ -95,7 +96,7 @@ class CondorNet(nn.Module):
         if tensor is not None:
             # Stats for the tensor
             mu, std = tensor.mean().item(), tensor.std().item()
-            print(f"{prefix}       Shape: {list(tensor.shape)} | ={mu:.4f}, ={std:.4f}")
+            print(f"{prefix}       Shape: {list(tensor.shape)} | mu={mu:.4f}, std={std:.4f}")
 
     def forward(
         self,
