@@ -229,14 +229,14 @@ class TestMicrostructureModel:
         """Prices should round to valid ticks."""
         model = MicrostructureModel()
 
-        # Above $3: $0.05 ticks
-        assert model.round_to_tick(5.03) == 5.05
-        assert model.round_to_tick(5.07) == 5.05
-        assert model.round_to_tick(5.08) == 5.10
+        # Above $3: $0.05 ticks (use approx for floating point)
+        assert abs(model.round_to_tick(5.03) - 5.05) < 1e-9
+        assert abs(model.round_to_tick(5.07) - 5.05) < 1e-9
+        assert abs(model.round_to_tick(5.08) - 5.10) < 1e-9
 
         # Below $3: $0.01 ticks
-        assert model.round_to_tick(2.003) == 2.00
-        assert model.round_to_tick(2.007) == 2.01
+        assert abs(model.round_to_tick(2.003) - 2.00) < 1e-9
+        assert abs(model.round_to_tick(2.007) - 2.01) < 1e-9
 
 
 # ==============================================================================
