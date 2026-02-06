@@ -789,8 +789,9 @@ def train_condor_net(args):
         # Validation
         model.eval()
         val_loss = 0.0
+        vbar = tqdm(range(n_val_batches), desc="Validation", leave=False)
         with torch.no_grad():
-            for batch_idx in range(n_val_batches):
+            for batch_idx in vbar:
                 s = batch_idx * B
                 e = s + B
                 x_b = X_val_seq[s:e].to(device)
@@ -818,8 +819,9 @@ def train_condor_net(args):
                     )
 
                 val_loss += loss.item()
+                vbar.set_postfix({'val_loss': f'{loss.item():.4f}'})
 
-        avg_val_loss = val_loss / min(n_val_batches, 50)
+        avg_val_loss = val_loss / n_val_batches
 
         # TensorBoard: epoch-level metrics
         writer.add_scalar('epoch/train_loss', avg_train_loss, epoch)
