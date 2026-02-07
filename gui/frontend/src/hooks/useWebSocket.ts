@@ -36,9 +36,25 @@ interface UseWebSocketReturn {
   disconnect: () => void;
 }
 
+// Compute the WebSocket URL based on environment
+function getDefaultWsUrl(): string {
+  const hostname = window.location.hostname;
+
+  // Lightning AI cloudspaces: frontend is 5173-xxx, backend is 8000-xxx
+  if (hostname.includes('.cloudspaces.litng.ai')) {
+    // Replace 5173- prefix with 8000-
+    const backendHost = hostname.replace(/^5173-/, '8000-');
+    // Use wss:// for secure connection on Lightning AI
+    return `wss://${backendHost}/ws`;
+  }
+
+  // Local development: same hostname, different port
+  return `ws://${hostname}:8000/ws`;
+}
+
 export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketReturn {
   const {
-    url = `ws://${window.location.hostname}:8000/ws`,
+    url = getDefaultWsUrl(),
     autoConnect = true,
     reconnectInterval = 3000,
     maxReconnectAttempts = 10,

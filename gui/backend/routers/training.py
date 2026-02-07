@@ -81,6 +81,21 @@ async def receive_training_complete(data: Dict[str, Any]):
     return {"status": "broadcast"}
 
 
+@router.post("/telemetry/fuzzy")
+async def receive_fuzzy_activations(data: Dict[str, Any]):
+    """Receive fuzzy gate activations from external training script and broadcast to WebSocket."""
+    from gui.backend.routers.websocket import get_ws_manager
+    manager = get_ws_manager()
+
+    message = {
+        "type": "data",
+        "channel": "training.fuzzy",
+        "data": data,
+    }
+    await manager.broadcast_to_channel("training.fuzzy", message)
+    return {"status": "broadcast"}
+
+
 @router.get("/diagnostics/list")
 async def list_diagnostics():
     """List available training diagnostic files."""
