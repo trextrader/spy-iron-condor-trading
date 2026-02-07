@@ -18,6 +18,8 @@ import os
 import math
 import time
 import argparse
+from datetime import datetime
+from pathlib import Path
 from typing import Dict, Tuple, Optional, List, Sequence
 
 # CUDA optimizations before torch import
@@ -54,6 +56,14 @@ except ImportError:
     GUI_TELEMETRY_AVAILABLE = False
     def get_emitter():
         return None
+
+# Training Diagnostics (for Model Introspection page)
+try:
+    from intelligence.training.diagnostics import TrainingDiagnostics
+    DIAGNOSTICS_AVAILABLE = True
+except ImportError:
+    DIAGNOSTICS_AVAILABLE = False
+    TrainingDiagnostics = None
 
 from intelligence.condor_brain_net import (
     CondorNet,
@@ -531,6 +541,8 @@ def parse_args():
                         help="Verbose per-batch logging")
     parser.add_argument("--gui-telemetry", action="store_true",
                         help="Send training metrics to GUI via WebSocket")
+    parser.add_argument("--save-diagnostics", action="store_true",
+                        help="Save diagnostics to models/diagnostics/ for GUI Model Introspection")
 
     args = parser.parse_args()
 
@@ -555,6 +567,29 @@ def train_condor_net(args):
         print("[CondorNet] GUI telemetry enabled")
     elif getattr(args, 'gui_telemetry', False):
         print("[CondorNet] GUI telemetry requested but not available (GUI backend not running)")
+
+    # Training Diagnostics setup (for Model Introspection)
+    diagnostics = None
+    if getattr(args, 'save_diagnostics', False) and DIAGNOSTICS_AVAILABLE:
+        diagnostics = TrainingDiagnostics(
+            num_fuzzy_gates=args.n_predicates,
+            smoothing_window=200,
+            log_interval=10,
+        )
+        diagnostics.metadata = {
+            "model": "CondorNet",
+            "d_h": args.d_h,
+            "d_v": args.d_v,
+            "d_m": args.d_m,
+            "d_r": args.d_r,
+            "n_predicates": args.n_predicates,
+            "epochs": args.epochs,
+            "batch_size": args.batch_size,
+            "lr": args.lr,
+        }
+        print("[CondorNet] Diagnostics logging enabled")
+    elif getattr(args, 'save_diagnostics', False):
+        print("[CondorNet] Diagnostics requested but module not available")
 
     # Device setup
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -816,6 +851,34 @@ def train_condor_net(args):
                 )
                 print(f"  [B{batch_idx+1:04d}] loss={loss.item():.4f} | {comp_str}")
 
+            # Diagnostics: log every 10 batches
+            if diagnostics and (batch_idx + 1) % 10 == 0:
+                diagnostics.log_loss(
+                    step=global_step,
+                    epoch=epoch + 1,
+                    loss=loss,
+                    mse=components['mse'],
+                    npdd=components['npdd'],
+                    sharpe=components['sharpe'],
+                    dd=components['dd'],
+                    turnover=components['turnover'],
+                    fuzzy=components['fuzzy'],
+                    pattern_ent=components['pattern_ent'],
+                    group_inv=components['group_inv'],
+                    rho=components['rho'],
+                    energy=components['energy'],
+                    growth=components['growth'],
+                    lr=scheduler.get_last_lr()[0],
+                    scaler_scale=scaler.get_scale() if scaler else None,
+                )
+                # Log fuzzy activations if available
+                if 'predicates' in diag and diag['predicates'] is not None:
+                    diagnostics.log_fuzzy(
+                        step=global_step,
+                        epoch=epoch + 1,
+                        fuzzy_activations=diag['predicates'],
+                    )
+
             # GUI Telemetry: emit every 10 batches
             if emitter and (batch_idx + 1) % 10 == 0:
                 elapsed = time.time() - training_start_time
@@ -955,6 +1018,15 @@ def train_condor_net(args):
             total_steps=total_steps,
             progress_pct=100.0,
         )
+
+    # Save diagnostics to file for Model Introspection
+    if diagnostics:
+        diagnostics_dir = Path("models/diagnostics")
+        diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        diagnostics_path = diagnostics_dir / f"condornet_{timestamp}.json"
+        diagnostics.save(str(diagnostics_path))
+        print(f"[CondorNet] Diagnostics saved to {diagnostics_path}")
 
 
 # =============================================================================
