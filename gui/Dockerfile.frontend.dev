@@ -1,0 +1,16 @@
+# CondorBrain GUI Frontend - Development Dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies first (for better caching)
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
+
+# Copy source files
+COPY frontend/ .
+COPY shared/ ../shared/
+
+EXPOSE 5173
+
+CMD ["npm", "run", "dev", "--", "--host"]

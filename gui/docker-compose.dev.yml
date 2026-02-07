@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend.dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app/gui/backend
+      - ../core:/app/core:ro
+      - ../intelligence:/app/intelligence:ro
+      - ../data:/app/data:ro
+      - ../models:/app/models:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CONDORBRAIN_ENV=development
+      - CONDORBRAIN_DEBUG=true
+    command: uvicorn gui.backend.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend.dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - ./shared:/app/../shared
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+    command: npm run dev -- --host
+    depends_on:
+      - backend
+
+networks:
+  default:
+    name: condorbrain-gui-network
