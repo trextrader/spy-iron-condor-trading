@@ -45,6 +45,16 @@ from tqdm import tqdm
 # Add project root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# GUI Telemetry (optional - only if GUI backend is available)
+try:
+    from gui.backend.services.training_emitter import get_emitter, init_emitter
+    from gui.backend.routers.websocket import get_ws_manager
+    GUI_TELEMETRY_AVAILABLE = True
+except ImportError:
+    GUI_TELEMETRY_AVAILABLE = False
+    def get_emitter():
+        return None
+
 from intelligence.condor_brain_net import (
     CondorNet,
     group_invariant_loss,
@@ -519,6 +529,8 @@ def parse_args():
                         help="Early stopping patience")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Verbose per-batch logging")
+    parser.add_argument("--gui-telemetry", action="store_true",
+                        help="Send training metrics to GUI via WebSocket")
 
     args = parser.parse_args()
 
@@ -535,6 +547,14 @@ def parse_args():
 
 def train_condor_net(args):
     """Main training function for CondorNet."""
+
+    # GUI Telemetry setup
+    emitter = None
+    if getattr(args, 'gui_telemetry', False) and GUI_TELEMETRY_AVAILABLE:
+        emitter = get_emitter()
+        print("[CondorNet] GUI telemetry enabled")
+    elif getattr(args, 'gui_telemetry', False):
+        print("[CondorNet] GUI telemetry requested but not available (GUI backend not running)")
 
     # Device setup
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -683,9 +703,22 @@ def train_condor_net(args):
     run_name = f"condor_dh{args.d_h}_lr{args.lr}_bs{args.batch_size}"
     writer = SummaryWriter(log_dir=f"runs/condor_net/{run_name}")
     global_step = 0
+    training_start_time = time.time()
 
     best_val_loss = float('inf')
     patience_counter = 0
+    total_steps = args.epochs * n_train_batches
+
+    # Emit training start
+    if emitter:
+        emitter.emit_status(
+            is_training=True,
+            current_epoch=1,
+            current_step=0,
+            total_steps=total_steps,
+            progress_pct=0.0,
+            eta_seconds=None,
+        )
 
     for epoch in range(args.epochs):
         model.train()
@@ -783,6 +816,42 @@ def train_condor_net(args):
                 )
                 print(f"  [B{batch_idx+1:04d}] loss={loss.item():.4f} | {comp_str}")
 
+            # GUI Telemetry: emit every 10 batches
+            if emitter and (batch_idx + 1) % 10 == 0:
+                elapsed = time.time() - training_start_time
+                steps_done = epoch * n_train_batches + batch_idx + 1
+                steps_remaining = total_steps - steps_done
+                eta_seconds = int((elapsed / steps_done) * steps_remaining) if steps_done > 0 else None
+                progress_pct = (steps_done / total_steps) * 100
+
+                emitter.emit_step(
+                    step=global_step,
+                    epoch=epoch + 1,
+                    loss=loss.item(),
+                    mse=components['mse'].item() if torch.is_tensor(components['mse']) else components['mse'],
+                    npdd=components['npdd'].item() if torch.is_tensor(components['npdd']) else components['npdd'],
+                    sharpe=components['sharpe'].item() if torch.is_tensor(components['sharpe']) else components['sharpe'],
+                    dd=components['dd'].item() if torch.is_tensor(components['dd']) else components['dd'],
+                    turnover=components['turnover'].item() if torch.is_tensor(components['turnover']) else components['turnover'],
+                    fuzzy=components['fuzzy'].item() if torch.is_tensor(components['fuzzy']) else components['fuzzy'],
+                    pattern_ent=components['pattern_ent'].item() if torch.is_tensor(components['pattern_ent']) else components['pattern_ent'],
+                    group_inv=components['group_inv'].item() if torch.is_tensor(components['group_inv']) else components['group_inv'],
+                    rho=components['rho'].item() if torch.is_tensor(components['rho']) else components['rho'],
+                    energy=components['energy'].item() if torch.is_tensor(components['energy']) else components['energy'],
+                    growth=components['growth'].item() if torch.is_tensor(components['growth']) else components['growth'],
+                    lr=scheduler.get_last_lr()[0],
+                    scaler_scale=scaler.get_scale() if scaler else None,
+                )
+
+                emitter.emit_status(
+                    is_training=True,
+                    current_epoch=epoch + 1,
+                    current_step=steps_done,
+                    total_steps=total_steps,
+                    progress_pct=progress_pct,
+                    eta_seconds=eta_seconds,
+                )
+
         scheduler.step()
         avg_train_loss = epoch_loss / n_train_batches
 
@@ -832,6 +901,16 @@ def train_condor_net(args):
         print(f"Epoch {epoch+1:3d} | Train: {avg_train_loss:.4f} | Val: {avg_val_loss:.4f} | "
               f"LR: {scheduler.get_last_lr()[0]:.2e}")
 
+        # GUI Telemetry: epoch summary
+        if emitter:
+            emitter.emit_epoch_summary(
+                epoch=epoch + 1,
+                train_loss=avg_train_loss,
+                val_loss=avg_val_loss,
+                metrics={k: v / n_train_batches for k, v in epoch_components.items()},
+                is_best=(avg_val_loss < best_val_loss),
+            )
+
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             patience_counter = 0
@@ -859,6 +938,23 @@ def train_condor_net(args):
     print(f"Training complete. Best val loss: {best_val_loss:.4f}")
     print(f"Model saved to: {args.output}")
     print(f"{'='*60}")
+
+    # GUI Telemetry: training complete
+    if emitter:
+        total_duration = int(time.time() - training_start_time)
+        emitter.emit_complete(
+            epochs=epoch + 1,
+            final_loss=avg_train_loss,
+            best_val_loss=best_val_loss,
+            duration_seconds=total_duration,
+        )
+        emitter.emit_status(
+            is_training=False,
+            current_epoch=epoch + 1,
+            current_step=total_steps,
+            total_steps=total_steps,
+            progress_pct=100.0,
+        )
 
 
 # =============================================================================
