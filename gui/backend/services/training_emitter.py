@@ -2,18 +2,21 @@
 Training Telemetry Emitter
 Phase 6.7 - Model Introspection
 
-Provides functions to emit training updates via WebSocket.
+Provides functions to emit training updates via HTTP to backend.
 Can be imported by training scripts to broadcast real-time metrics.
+Uses HTTP POST to backend API, which then broadcasts to WebSocket clients.
 """
 
-import asyncio
+import requests
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+import threading
 
 
 class TrainingEmitter:
     """
-    Emits training telemetry to connected WebSocket clients.
+    Emits training telemetry via HTTP to the backend server.
+    The backend then broadcasts to connected WebSocket clients.
 
     Usage:
         from gui.backend.services.training_emitter import get_emitter
@@ -22,49 +25,26 @@ class TrainingEmitter:
         emitter.emit_step(step=100, epoch=1, loss=0.5, mse=0.3, ...)
     """
 
-    def __init__(self):
-        self._manager = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+    def __init__(self, backend_url: str = "http://localhost:8000"):
+        self.backend_url = backend_url
+        self._session = requests.Session()
 
-    def set_manager(self, manager):
-        """Set the WebSocket connection manager."""
-        self._manager = manager
-
-    def _get_loop(self) -> asyncio.AbstractEventLoop:
-        """Get or create event loop."""
-        try:
-            return asyncio.get_running_loop()
-        except RuntimeError:
-            if self._loop is None or self._loop.is_closed():
-                self._loop = asyncio.new_event_loop()
-            return self._loop
-
-    def _broadcast(self, channel: str, data: dict):
-        """Broadcast data to a channel (sync wrapper)."""
-        if self._manager is None:
-            return
-
-        message = {
-            "type": "data",
-            "channel": channel,
-            "data": data,
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-
-        try:
-            loop = self._get_loop()
-            if loop.is_running():
-                asyncio.ensure_future(
-                    self._manager.broadcast_to_channel(channel, message),
-                    loop=loop
+    def _post(self, endpoint: str, data: dict):
+        """Send POST request to backend (non-blocking via thread)."""
+        def _do_post():
+            try:
+                self._session.post(
+                    f"{self.backend_url}/api/training{endpoint}",
+                    json=data,
+                    timeout=2,
                 )
-            else:
-                loop.run_until_complete(
-                    self._manager.broadcast_to_channel(channel, message)
-                )
-        except Exception as e:
-            # Silently fail - training should continue even if broadcast fails
-            pass
+            except Exception:
+                # Silently fail - training should continue even if telemetry fails
+                pass
+
+        # Run in thread to avoid blocking training
+        thread = threading.Thread(target=_do_post, daemon=True)
+        thread.start()
 
     def emit_step(
         self,
@@ -111,7 +91,7 @@ class TrainingEmitter:
         if scaler_scale is not None:
             data["scaler_scale"] = scaler_scale
 
-        self._broadcast("training.step", data)
+        self._post("/telemetry/step", data)
 
     def emit_fuzzy(
         self,
@@ -120,7 +100,7 @@ class TrainingEmitter:
         activations: List[float],
     ):
         """Emit fuzzy gate activations."""
-        self._broadcast("training.fuzzy", {
+        self._post("/telemetry/fuzzy", {
             "step": step,
             "epoch": epoch,
             "activations": activations,
@@ -147,7 +127,7 @@ class TrainingEmitter:
         if eta_seconds is not None:
             data["etaSeconds"] = eta_seconds
 
-        self._broadcast("training.status", data)
+        self._post("/telemetry/status", data)
 
     def emit_complete(
         self,
@@ -157,7 +137,7 @@ class TrainingEmitter:
         duration_seconds: int,
     ):
         """Emit training complete notification."""
-        self._broadcast("training.complete", {
+        self._post("/telemetry/complete", {
             "epochs": epochs,
             "finalLoss": final_loss,
             "bestValLoss": best_val_loss,
@@ -173,7 +153,7 @@ class TrainingEmitter:
         is_best: bool = False,
     ):
         """Emit end-of-epoch summary."""
-        self._broadcast("training.epoch", {
+        self._post("/telemetry/epoch", {
             "epoch": epoch,
             "trainLoss": train_loss,
             "valLoss": val_loss,
@@ -186,16 +166,14 @@ class TrainingEmitter:
 _emitter: Optional[TrainingEmitter] = None
 
 
-def get_emitter() -> TrainingEmitter:
+def get_emitter(backend_url: str = "http://localhost:8000") -> TrainingEmitter:
     """Get the global training emitter instance."""
     global _emitter
     if _emitter is None:
-        _emitter = TrainingEmitter()
+        _emitter = TrainingEmitter(backend_url=backend_url)
     return _emitter
 
 
-def init_emitter(manager):
-    """Initialize the emitter with the WebSocket manager."""
-    emitter = get_emitter()
-    emitter.set_manager(manager)
-    return emitter
+def init_emitter(manager=None, backend_url: str = "http://localhost:8000"):
+    """Initialize the emitter. Manager param kept for backwards compatibility."""
+    return get_emitter(backend_url)

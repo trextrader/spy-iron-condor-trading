@@ -17,6 +17,70 @@ router = APIRouter()
 DIAGNOSTICS_DIR = Path(__file__).parent.parent.parent.parent / "models" / "diagnostics"
 
 
+# ============================================================================
+# Live Training Telemetry (receives from training script, broadcasts to WS)
+# ============================================================================
+
+@router.post("/telemetry/step")
+async def receive_training_step(data: Dict[str, Any]):
+    """Receive training step from external training script and broadcast to WebSocket."""
+    from gui.backend.routers.websocket import get_ws_manager
+    manager = get_ws_manager()
+
+    message = {
+        "type": "data",
+        "channel": "training.step",
+        "data": data,
+    }
+    await manager.broadcast_to_channel("training.step", message)
+    return {"status": "broadcast"}
+
+
+@router.post("/telemetry/status")
+async def receive_training_status(data: Dict[str, Any]):
+    """Receive training status from external training script and broadcast to WebSocket."""
+    from gui.backend.routers.websocket import get_ws_manager
+    manager = get_ws_manager()
+
+    message = {
+        "type": "data",
+        "channel": "training.status",
+        "data": data,
+    }
+    await manager.broadcast_to_channel("training.status", message)
+    return {"status": "broadcast"}
+
+
+@router.post("/telemetry/epoch")
+async def receive_epoch_summary(data: Dict[str, Any]):
+    """Receive epoch summary from external training script and broadcast to WebSocket."""
+    from gui.backend.routers.websocket import get_ws_manager
+    manager = get_ws_manager()
+
+    message = {
+        "type": "data",
+        "channel": "training.epoch",
+        "data": data,
+    }
+    await manager.broadcast_to_channel("training.epoch", message)
+    return {"status": "broadcast"}
+
+
+@router.post("/telemetry/complete")
+async def receive_training_complete(data: Dict[str, Any]):
+    """Receive training complete from external training script and broadcast to WebSocket."""
+    from gui.backend.routers.websocket import get_ws_manager
+    manager = get_ws_manager()
+
+    message = {
+        "type": "data",
+        "channel": "training.complete",
+        "data": data,
+    }
+    await manager.broadcast_to_channel("training.complete", message)
+    return {"status": "broadcast"}
+
+
 @router.get("/diagnostics/list")
 async def list_diagnostics():
     """List available training diagnostic files."""
