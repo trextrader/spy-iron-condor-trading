@@ -19,7 +19,12 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    allowedHosts: 'all',
+    allowedHosts: [
+      'localhost',
+      '127.0.0.1',
+      '.cloudspaces.litng.ai',
+      '5173-01kfn6phn9h4xsrqdawgddfa4p.cloudspaces.litng.ai',
+    ],
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
