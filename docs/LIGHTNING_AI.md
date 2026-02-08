@@ -4,6 +4,53 @@ Follow these steps to run the modern **CondorBrain v4.0 (CondorNet™ Unified Ar
 
 > **Architecture Evolution:** CondorNet™ replaces the previous Mamba-2 SSM (NaN explosions) and Neural CDE (overfitting) with a mathematically principled fusion of ETD-1 exponential integration, TFT control synthesis, and Neural CDE path response.
 
+---
+
+## 0. CondorBrain GUI (Real-time Training Dashboard)
+
+The CondorBrain GUI provides real-time training visualization on Lightning AI.
+
+### Start the GUI
+
+```bash
+# Terminal 1: Start backend
+cd /teamspace/studios/this_studio/SPYOptionTrader_test
+uvicorn gui.backend.main:app --host 0.0.0.0 --port 8000 &
+
+# Terminal 2: Start frontend
+cd /teamspace/studios/this_studio/SPYOptionTrader_test/gui/frontend
+npm run dev -- --host 0.0.0.0
+```
+
+### Access URLs
+
+The GUI auto-detects Lightning AI cloudspace URLs:
+- **Frontend**: `https://5173-{LIGHTNING_CLOUDSPACE_HOST}/`
+- **Backend**: `https://8000-{LIGHTNING_CLOUDSPACE_HOST}/`
+
+### Training with GUI Telemetry
+
+```bash
+# Start training with real-time telemetry
+python intelligence/condor_train_net.py \
+  --config configs/condor_net_config_v46.yaml \
+  --gui-telemetry lightai \
+  --save-diagnostics \
+  --checkpoint-every 1
+```
+
+The `--gui-telemetry lightai` flag automatically constructs the backend URL from `LIGHTNING_CLOUDSPACE_HOST`.
+
+### GUI Features
+
+| Page | Description |
+|------|-------------|
+| Dashboard | System overview, equity curves, activity feed |
+| Training | Real-time metrics, loss charts, fuzzy heatmaps |
+| Model Introspection | Post-training diagnostics, gate distributions |
+
+---
+
 ## 1. Fast-Track Training (3M+ Rows)
 
 We use a specialized "Fast-Track" training loop designed for large datasets on T4/A10G GPUs. This system uses:

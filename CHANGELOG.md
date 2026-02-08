@@ -1,5 +1,44 @@
 # Changelog
 
+## [v2.3.0] - 2026-02-07
+### Phase 6: CondorBrain GUI - Real-time Training Visualization
+
+This release introduces the **CondorBrain GUI** - a full-stack dashboard for visualizing, configuring, and controlling the CondorNet training system.
+
+#### GUI Features
+- **Dashboard**: Real-time system overview with equity curves, metrics, and activity feed
+- **Training Page**: Dedicated real-time training visualization with:
+  - Live metric cards for all 12 loss components with sparklines
+  - Streaming loss trajectory chart (Recharts)
+  - Real-time fuzzy gate activation heatmap (Canvas)
+  - Diagnostics panel (LR, gradient norm, scaler)
+  - Training controls (Start/Stop simulation)
+- **Model Introspection**: Post-training diagnostics with loss trajectories, fuzzy heatmaps, gate distributions, epoch summaries
+- **WebSocket Real-time Updates**: Auto-reconnect with channel-based subscriptions
+- **Lightning AI Support**: Auto-detection of cloudspace URLs for remote deployment
+
+#### Training Enhancements
+- **Epoch Checkpointing**: `--checkpoint-every N` saves checkpoint every N epochs
+- **Environment-based Telemetry**: `--gui-telemetry local|lightai|kaggle|colab`
+- **Diagnostics Export**: `--save-diagnostics` saves JSON for Model Introspection
+
+#### New CLI Flags
+```bash
+# Training with GUI telemetry and checkpoints
+python intelligence/condor_train_net.py \
+  --config configs/condor_net_config_v46.yaml \
+  --gui-telemetry lightai \
+  --save-diagnostics \
+  --checkpoint-every 1 \
+  --checkpoint-dir models/checkpoints
+```
+
+#### Tech Stack
+- **Backend**: FastAPI + Pydantic v2 + WebSockets
+- **Frontend**: React 18 + TypeScript + TailwindCSS + Zustand + Recharts
+
+---
+
 ## [v2.2.0] - 2026-01-16
 ### Major Enhancements: Advanced Model Architecture
 This release introduces six advanced modules that significantly improve model expressivity, regime detection, and risk-adjusted optimization.
