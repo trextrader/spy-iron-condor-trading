@@ -67,17 +67,11 @@ def infer_architecture_from_state_dict(state_dict: dict) -> dict:
             set_idx = int(sets_match.group(1))
             n_sets = max(n_sets, set_idx + 1)
 
-    # Infer n_features from relational_logic.projection.weight shape
-    # Shape is [1, n_pairs * 3] where n_pairs = n_features * (n_features - 1) / 2
+    # Infer n_features (d_input) from initial_encoder or tft.input_proj weights
+    # These layers have shape [hidden_dim, d_input]
     for key, tensor in state_dict.items():
-        if 'relational_logic.projection.weight' in key and tensor.dim() == 2:
-            total_size = tensor.shape[1]
-            n_pairs = total_size // 3
-            # Solve: n_features * (n_features - 1) / 2 = n_pairs
-            # n_features^2 - n_features - 2*n_pairs = 0
-            # Using quadratic formula: n = (1 + sqrt(1 + 8*n_pairs)) / 2
-            import math
-            n_features = int((1 + math.sqrt(1 + 8 * n_pairs)) / 2)
+        if ('initial_encoder.0.weight' in key or 'tft.input_proj.weight' in key) and tensor.dim() == 2:
+            n_features = tensor.shape[1]  # Second dimension is input features
             break
 
     # Infer n_predicates from pred_gates.extra_heads shape
