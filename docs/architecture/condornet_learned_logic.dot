@@ -1,0 +1,419 @@
+// CondorNet Learned Logic Architecture
+// Generated from condor_epoch3_logic.json - Trained Model Interpretability
+// © 2026 Dr. T. Jerry Mahabub, Ph.D
+
+digraph CondorNetLearnedLogic {
+    rankdir=TB;
+    compound=true;
+    splines=ortho;
+    nodesep=0.5;
+    ranksep=0.8;
+    fontname="Helvetica";
+    node [fontname="Helvetica", fontsize=10];
+    edge [fontname="Helvetica", fontsize=9];
+
+    // ===== TITLE =====
+    labelloc="t";
+    label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0">
+        <TR><TD><FONT POINT-SIZE="24" FACE="Helvetica-Bold">CondorNet™ Learned Decision Logic</FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="14" COLOR="gray40">Epoch 3 Checkpoint - 8 SuperSets × 32 Sets × Relational Logic</FONT></TD></TR>
+    </TABLE>>;
+
+    // ===== INPUT FEATURES =====
+    subgraph cluster_input {
+        label=<<B>Input Features (54 dimensions)</B>>;
+        style=filled;
+        fillcolor="#E3F2FD";
+        color="#1565C0";
+
+        node [shape=box, style="rounded,filled", fillcolor="#BBDEFB", color="#1565C0"];
+
+        input_price [label="Price Features\n(open, high, low, close, volume)"];
+        input_greeks [label="Greeks\n(delta, gamma, theta, vega, ivr)"];
+        input_tech [label="Technical Indicators\n(rsi_dyn, stoch_k_dyn, adx_adaptive\nbb_upper/lower/mu/sigma_dyn)"];
+        input_momentum [label="Momentum Features\n(macd_norm, macd_histogram\nmacd_signal_norm, ret_z)"];
+        input_regime [label="Regime Features\n(iv_confidence, mtf_consensus\npsar_adaptive, psar_trend)"];
+        input_risk [label="Risk Features\n(max_dd_60m, gap_risk_score\nbreakout_score, friction_ratio)"];
+    }
+
+    // ===== PREDICATE GATES =====
+    subgraph cluster_predicates {
+        label=<<B>Learned Predicate Gates (5 Base Predicates)</B>>;
+        style=filled;
+        fillcolor="#FFF3E0";
+        color="#E65100";
+
+        node [shape=box, style="rounded,filled", fillcolor="#FFE0B2", color="#E65100"];
+
+        pred_vol [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>RULE 1: Vol Spike</B></TD></TR>
+            <TR><TD>Enter if IVR &gt; 75.00</TD></TR>
+            <TR><TD><FONT COLOR="gray50">Steepness: 50.0</FONT></TD></TR>
+        </TABLE>>];
+
+        pred_liq [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>RULE 2: Liquidity Lock</B></TD></TR>
+            <TR><TD>Block if Spread/Price &gt; 1.12%</TD></TR>
+            <TR><TD><FONT COLOR="gray50">Threshold: 0.0112</FONT></TD></TR>
+        </TABLE>>];
+
+        pred_trend [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>RULE 3: Trend Reversal</B></TD></TR>
+            <TR><TD>Signal if RSI &lt; 25.00</TD></TR>
+            <TR><TD><FONT COLOR="gray50">+ delta_RSI &lt; 0</FONT></TD></TR>
+        </TABLE>>];
+
+        pred_gap [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>RULE 4: Gap Guard</B></TD></TR>
+            <TR><TD>Guard if 1m jump &gt; 1.12%</TD></TR>
+            <TR><TD><FONT COLOR="gray50">Threshold: 0.0112</FONT></TD></TR>
+        </TABLE>>];
+
+        pred_gamma [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>RULE 5: Gamma Hedge</B></TD></TR>
+            <TR><TD>Hedge if |Γ| &gt; 0.0111</TD></TR>
+            <TR><TD><FONT COLOR="gray50">Greeks protection</FONT></TD></TR>
+        </TABLE>>];
+    }
+
+    // ===== SUPER SETS (8 blocks) =====
+    subgraph cluster_supersets {
+        label=<<B>Learned SuperSet Logic (8 SuperSets × 32 Sets)</B>>;
+        style=filled;
+        fillcolor="#E8F5E9";
+        color="#2E7D32";
+
+        node [shape=box, style="rounded,filled", fillcolor="#C8E6C9", color="#2E7D32"];
+
+        // SuperSet 0
+        ss0 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+            <TR><TD COLSPAN="3" BGCOLOR="#81C784"><B>SuperSet 0</B> (32 sets)</TD></TR>
+            <TR><TD><B>&lt;</B> 33%</TD><TD><B>&gt;</B> 34%</TD><TD><B>=</B> 33%</TD></TR>
+            <TR><TD COLSPAN="3" ALIGN="LEFT"><FONT POINT-SIZE="8">
+            • bb_upper_dyn &lt; psar_reversion_mu<BR/>
+            • max_dd_60m = risk_override<BR/>
+            • close &gt; feat_56<BR/>
+            • target_spot &lt; consolidation_score
+            </FONT></TD></TR>
+        </TABLE>>];
+
+        // SuperSet 1
+        ss1 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+            <TR><TD COLSPAN="3" BGCOLOR="#81C784"><B>SuperSet 1</B> (32 sets)</TD></TR>
+            <TR><TD><B>&lt;</B> 33%</TD><TD><B>&gt;</B> 33%</TD><TD><B>=</B> 34%</TD></TR>
+            <TR><TD COLSPAN="3" ALIGN="LEFT"><FONT POINT-SIZE="8">
+            • iv_confidence = feat_56<BR/>
+            • vol_energy = macd_norm<BR/>
+            • bb_percentile &lt; risk_override<BR/>
+            • bb_sigma_dyn &gt; macd_norm
+            </FONT></TD></TR>
+        </TABLE>>];
+
+        // SuperSet 2
+        ss2 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+            <TR><TD COLSPAN="3" BGCOLOR="#81C784"><B>SuperSet 2</B> (32 sets)</TD></TR>
+            <TR><TD><B>&lt;</B> 33%</TD><TD><B>&gt;</B> 34%</TD><TD><B>=</B> 33%</TD></TR>
+            <TR><TD COLSPAN="3" ALIGN="LEFT"><FONT POINT-SIZE="8">
+            • position_size_mult &gt; feat_62<BR/>
+            • breakout_score = pressure_down<BR/>
+            • iv_confidence &gt; feat_54<BR/>
+            • bb_lower_dyn &gt; feat_61
+            </FONT></TD></TR>
+        </TABLE>>];
+
+        // SuperSet 3
+        ss3 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+            <TR><TD COLSPAN="3" BGCOLOR="#81C784"><B>SuperSet 3</B> (32 sets)</TD></TR>
+            <TR><TD><B>&lt;</B> 33%</TD><TD><B>&gt;</B> 33%</TD><TD><B>=</B> 34%</TD></TR>
+            <TR><TD COLSPAN="3" ALIGN="LEFT"><FONT POINT-SIZE="8">
+            • cmf = exec_allow<BR/>
+            • iv_confidence &gt; feat_56<BR/>
+            • strike &lt; target_spot<BR/>
+            • vol_energy = risk_override
+            </FONT></TD></TR>
+        </TABLE>>];
+
+        // SuperSet 4
+        ss4 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+            <TR><TD COLSPAN="3" BGCOLOR="#81C784"><B>SuperSet 4</B> (32 sets)</TD></TR>
+            <TR><TD><B>&lt;</B> 33%</TD><TD><B>&gt;</B> 34%</TD><TD><B>=</B> 33%</TD></TR>
+            <TR><TD COLSPAN="3" ALIGN="LEFT"><FONT POINT-SIZE="8">
+            • open &lt; iv_confidence<BR/>
+            • vega &gt; atr_pct<BR/>
+            • adx_adaptive = psar_adaptive<BR/>
+            • stoch_k_dyn &gt; friction_ratio
+            </FONT></TD></TR>
+        </TABLE>>];
+
+        // SuperSet 5
+        ss5 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+            <TR><TD COLSPAN="3" BGCOLOR="#81C784"><B>SuperSet 5</B> (32 sets)</TD></TR>
+            <TR><TD><B>&lt;</B> 33%</TD><TD><B>&gt;</B> 34%</TD><TD><B>=</B> 34%</TD></TR>
+            <TR><TD COLSPAN="3" ALIGN="LEFT"><FONT POINT-SIZE="8">
+            • iv_confidence &gt; beta1_norm_stub<BR/>
+            • vega &lt; vol_ewma<BR/>
+            • delta &gt; target_spot<BR/>
+            • ivr &gt; iv_confidence
+            </FONT></TD></TR>
+        </TABLE>>];
+
+        // SuperSet 6
+        ss6 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+            <TR><TD COLSPAN="3" BGCOLOR="#81C784"><B>SuperSet 6</B> (32 sets)</TD></TR>
+            <TR><TD><B>&lt;</B> 33%</TD><TD><B>&gt;</B> 34%</TD><TD><B>=</B> 33%</TD></TR>
+            <TR><TD COLSPAN="3" ALIGN="LEFT"><FONT POINT-SIZE="8">
+            • spread_ratio &gt; gap_risk_score<BR/>
+            • bb_upper_dyn = chaos_membership<BR/>
+            • macd_norm &gt; macd_histogram<BR/>
+            • bb_lower_dyn &gt; feat_61
+            </FONT></TD></TR>
+        </TABLE>>];
+
+        // SuperSet 7
+        ss7 [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+            <TR><TD COLSPAN="3" BGCOLOR="#81C784"><B>SuperSet 7</B> (32 sets)</TD></TR>
+            <TR><TD><B>&lt;</B> 33%</TD><TD><B>&gt;</B> 33%</TD><TD><B>=</B> 34%</TD></TR>
+            <TR><TD COLSPAN="3" ALIGN="LEFT"><FONT POINT-SIZE="8">
+            • breakout_score &gt; pressure_down<BR/>
+            • pressure_up = feat_55<BR/>
+            • bb_lower_dyn &gt; bb_percentile<BR/>
+            • close &gt; vol_ewma
+            </FONT></TD></TR>
+        </TABLE>>];
+
+        // Layout within cluster
+        {rank=same; ss0; ss1; ss2; ss3;}
+        {rank=same; ss4; ss5; ss6; ss7;}
+    }
+
+    // ===== STATE BLOCKS =====
+    subgraph cluster_state {
+        label=<<B>Internal State Representation (4 Blocks)</B>>;
+        style=filled;
+        fillcolor="#F3E5F5";
+        color="#7B1FA2";
+
+        node [shape=box, style="rounded,filled", fillcolor="#E1BEE7", color="#7B1FA2"];
+
+        state_h [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>Market Physics (h)</B></TD></TR>
+            <TR><TD>d_h = 64 dimensions</TD></TR>
+            <TR><TD><FONT COLOR="gray50">ETD-1 Exponential Integrator</FONT></TD></TR>
+        </TABLE>>];
+
+        state_v [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>Portfolio State (v)</B></TD></TR>
+            <TR><TD>d_v = 16 dimensions</TD></TR>
+            <TR><TD><FONT COLOR="gray50">Position Dynamics</FONT></TD></TR>
+        </TABLE>>];
+
+        state_m [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>Momentum (m)</B></TD></TR>
+            <TR><TD>d_m = 16 dimensions</TD></TR>
+            <TR><TD><FONT COLOR="gray50">Trend Following</FONT></TD></TR>
+        </TABLE>>];
+
+        state_r [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>Regime (r)</B></TD></TR>
+            <TR><TD>d_r = 8 dimensions</TD></TR>
+            <TR><TD><FONT COLOR="gray50">Market Conditions</FONT></TD></TR>
+        </TABLE>>];
+    }
+
+    // ===== OUTPUT HEAD =====
+    subgraph cluster_output {
+        label=<<B>Output Head - Trading Decisions (10 Targets)</B>>;
+        style=filled;
+        fillcolor="#FFEBEE";
+        color="#C62828";
+
+        node [shape=box, style="rounded,filled", fillcolor="#FFCDD2", color="#C62828"];
+
+        // Iron Condor Strikes
+        out_call [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>Call Offset</B></TD></TR>
+            <TR><TD>Primary: Market Physics (0.39)</TD></TR>
+        </TABLE>>];
+
+        out_put [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>Put Offset</B></TD></TR>
+            <TR><TD>Primary: Market Physics (0.31)</TD></TR>
+        </TABLE>>];
+
+        out_wing [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>Wing Width</B></TD></TR>
+            <TR><TD>Primary: Market Physics (0.34)</TD></TR>
+        </TABLE>>];
+
+        out_dte [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>Target DTE</B></TD></TR>
+            <TR><TD>Primary: Market Physics (0.35)</TD></TR>
+        </TABLE>>];
+
+        // Profitability
+        out_pop [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>Was Profitable</B></TD></TR>
+            <TR><TD>Primary: Market Physics (0.37)</TD></TR>
+        </TABLE>>];
+
+        out_roi [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>Realized ROI</B></TD></TR>
+            <TR><TD>Primary: Market Physics (0.35)</TD></TR>
+        </TABLE>>];
+
+        out_loss [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>Max Loss</B></TD></TR>
+            <TR><TD>Primary: Market Physics (0.32)</TD></TR>
+        </TABLE>>];
+
+        // Trading Signals
+        out_conf [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>Confidence</B></TD></TR>
+            <TR><TD>Primary: Market Physics (0.53)</TD></TR>
+        </TABLE>>];
+
+        out_entry [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>Entry Signal</B></TD></TR>
+            <TR><TD>Primary: Market Physics (0.40)</TD></TR>
+        </TABLE>>];
+
+        out_exit [label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="2">
+            <TR><TD><B>Exit Signal</B></TD></TR>
+            <TR><TD>Primary: Market Physics (0.36)</TD></TR>
+        </TABLE>>];
+
+        // Layout
+        {rank=same; out_call; out_put; out_wing; out_dte; out_pop;}
+        {rank=same; out_roi; out_loss; out_conf; out_entry; out_exit;}
+    }
+
+    // ===== SENSITIVITY LEGEND =====
+    subgraph cluster_legend {
+        label=<<B>Neural Sensitivity Analysis</B>>;
+        style=filled;
+        fillcolor="#ECEFF1";
+        color="#455A64";
+
+        node [shape=plaintext];
+
+        legend [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="4" CELLPADDING="4" COLOR="#455A64">
+            <TR>
+                <TD BGCOLOR="#E1BEE7"><B>State Block</B></TD>
+                <TD><B>Contribution</B></TD>
+                <TD><B>Primary Driver</B></TD>
+            </TR>
+            <TR>
+                <TD>Market Physics (h)</TD>
+                <TD>32-53%</TD>
+                <TD>Strike selection, Confidence</TD>
+            </TR>
+            <TR>
+                <TD>Momentum (m)</TD>
+                <TD>23-37%</TD>
+                <TD>Max Loss, Exit timing</TD>
+            </TR>
+            <TR>
+                <TD>Portfolio (v)</TD>
+                <TD>16-30%</TD>
+                <TD>Position sizing</TD>
+            </TR>
+            <TR>
+                <TD>Regime (r)</TD>
+                <TD>14-25%</TD>
+                <TD>Was Profitable prediction</TD>
+            </TR>
+        </TABLE>>];
+    }
+
+    // ===== OPERATOR STATS =====
+    subgraph cluster_operators {
+        label=<<B>Relational Operator Distribution</B>>;
+        style=filled;
+        fillcolor="#FFF8E1";
+        color="#F57F17";
+
+        node [shape=plaintext];
+
+        op_stats [label=<<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="4" CELLPADDING="4" COLOR="#F57F17">
+            <TR>
+                <TD BGCOLOR="#FFECB3"><B>Operator</B></TD>
+                <TD><B>Usage</B></TD>
+                <TD><B>Interpretation</B></TD>
+            </TR>
+            <TR>
+                <TD><B>&lt;</B> Less Than</TD>
+                <TD>~33%</TD>
+                <TD>Feature A &lt; Feature B</TD>
+            </TR>
+            <TR>
+                <TD><B>&gt;</B> Greater Than</TD>
+                <TD>~34%</TD>
+                <TD>Feature A &gt; Feature B</TD>
+            </TR>
+            <TR>
+                <TD><B>=</B> Approximately Equal</TD>
+                <TD>~33%</TD>
+                <TD>|Feature A - Feature B| &lt; ε</TD>
+            </TR>
+            <TR>
+                <TD COLSPAN="3"><FONT POINT-SIZE="9" COLOR="gray50">Steepness: 20.0 (soft sigmoid transitions)</FONT></TD>
+            </TR>
+        </TABLE>>];
+    }
+
+    // ===== EDGES =====
+
+    // Input to Predicates
+    edge [color="#1565C0", penwidth=1.5];
+    input_greeks -> pred_vol [lhead=cluster_predicates];
+    input_price -> pred_liq [lhead=cluster_predicates];
+    input_tech -> pred_trend [lhead=cluster_predicates];
+    input_momentum -> pred_gap [lhead=cluster_predicates];
+    input_risk -> pred_gamma [lhead=cluster_predicates];
+
+    // Input to SuperSets
+    edge [color="#2E7D32", penwidth=1.5, style=dashed];
+    input_regime -> ss0 [lhead=cluster_supersets];
+    input_tech -> ss2 [lhead=cluster_supersets];
+
+    // Predicates to SuperSets
+    edge [color="#E65100", penwidth=2];
+    pred_vol -> ss0;
+    pred_liq -> ss1;
+    pred_trend -> ss2;
+    pred_gap -> ss3;
+    pred_gamma -> ss4;
+
+    // SuperSets to State
+    edge [color="#7B1FA2", penwidth=2];
+    ss0 -> state_h;
+    ss1 -> state_h;
+    ss2 -> state_m;
+    ss3 -> state_m;
+    ss4 -> state_v;
+    ss5 -> state_v;
+    ss6 -> state_r;
+    ss7 -> state_r;
+
+    // State to Output
+    edge [color="#C62828", penwidth=2.5];
+    state_h -> out_conf [label="0.53", fontcolor="#C62828"];
+    state_h -> out_entry [label="0.40"];
+    state_h -> out_call [label="0.39"];
+    state_m -> out_loss [label="0.29"];
+    state_v -> out_roi [label="0.19"];
+    state_r -> out_pop [label="0.21"];
+
+    // Hidden edges for layout
+    edge [style=invis];
+    ss0 -> ss4;
+    ss1 -> ss5;
+    ss2 -> ss6;
+    ss3 -> ss7;
+
+    out_call -> out_roi;
+    out_put -> out_loss;
+    out_wing -> out_conf;
+    out_dte -> out_entry;
+    out_pop -> out_exit;
+}

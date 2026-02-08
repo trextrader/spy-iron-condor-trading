@@ -14,6 +14,7 @@ This document provides a comprehensive index of all architecture diagrams in the
 | Data Pipeline | 3 | `data_pipeline_detailed.png`, `lag_alignment_flow.png` |
 | Decision Logic | 6 | `fuzzy_sizing_pipeline.png`, `membership_curves.png` |
 | Execution | 2 | `institutional_execution_flow.png`, `optimization_pipeline.png` |
+| Audit & Comparison | 2 | `condornet_learned_logic.pdf`, `audit_cde_comparison_flow.png` |
 
 ---
 
@@ -187,6 +188,17 @@ This document provides a comprehensive index of all architecture diagrams in the
 ---
 
 ## Audit & Comparison
+
+### condornet_learned_logic.pdf (NEW)
+**File:** [condornet_learned_logic.pdf](condornet_learned_logic.pdf) | [PNG](condornet_learned_logic.png)
+**Source:** [condornet_learned_logic.dot](condornet_learned_logic.dot)
+**Description:** Complete visualization of CondorNet learned decision logic from Epoch 3 checkpoint. Shows:
+- **Input Features**: 54-dimensional feature space (price, greeks, technical, momentum, regime, risk)
+- **5 Predicate Gates**: Learned thresholds for Vol Spike, Liquidity Lock, Trend Reversal, Gap Guard, Gamma Hedge
+- **8 SuperSets × 32 Sets**: Relational logic with operator weights (<, >, =) and top feature comparisons
+- **4 State Blocks**: Market Physics (h), Portfolio (v), Momentum (m), Regime (r)
+- **10 Output Targets**: Strike offsets, DTE, confidence, entry/exit signals with neural sensitivity scores
+- **Operator Distribution**: ~33% each for <, >, = with steepness=20 soft sigmoid
 
 ### audit_cde_comparison_flow.png
 **File:** [audit_cde_comparison_flow.png](audit_cde_comparison_flow.png)
