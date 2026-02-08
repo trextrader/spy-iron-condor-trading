@@ -1,0 +1,302 @@
+// CondorNet™ Epoch 3 Logic Map - Compact Grid Layout
+// 8 SuperSets × Top 8 Sets per SuperSet (Dominant Comparisons)
+// © 2026 Dr. T. Jerry Mahabub, Ph.D
+
+digraph CondorNetLogicMap {
+    // Portrait-friendly layout
+    rankdir=TB;
+    splines=polyline;
+    nodesep=0.3;
+    ranksep=0.6;
+    fontname="Helvetica";
+    node [fontname="Helvetica", fontsize=9];
+    edge [fontname="Helvetica", fontsize=8];
+
+    // Page size for portrait
+    size="11,17";
+    ratio=fill;
+
+    // Title
+    labelloc="t";
+    label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0">
+        <TR><TD><FONT POINT-SIZE="20" FACE="Helvetica-Bold">CondorNet™ Epoch 3 Logic Map</FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="12" COLOR="gray40">8 SuperSets × 32 Sets — Top Relational Comparisons</FONT></TD></TR>
+    </TABLE>>;
+
+    // ==========================================
+    // FEATURE CLUSTERS (Input Context)
+    // ==========================================
+    subgraph cluster_features {
+        label=<<B>Feature Clusters</B>>;
+        style=filled;
+        fillcolor="#E3F2FD";
+        color="#1565C0";
+
+        node [shape=box, style="rounded,filled", fillcolor="#BBDEFB", color="#1565C0", fontsize=8];
+
+        feat_vol [label="Volatility\nbb_upper/lower_dyn\npsar_reversion_mu"];
+        feat_mom [label="Momentum\nmacd_norm/histogram\nstoch_k_dyn"];
+        feat_risk [label="Risk\nmax_dd_60m\nfriction_ratio"];
+        feat_regime [label="Regime\niv_confidence\nmtf_consensus"];
+
+        {rank=same; feat_vol; feat_mom; feat_risk; feat_regime;}
+    }
+
+    // ==========================================
+    // SUPERSET 0 - Volatility/Reversion
+    // ==========================================
+    subgraph cluster_ss0 {
+        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 0</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Volatility/Reversion — &lt;33% &gt;34% =33%</FONT></TD></TR></TABLE>>;
+        style=filled;
+        fillcolor="#E8F5E9";
+        color="#2E7D32";
+
+        node [shape=box, style="rounded,filled", fillcolor="#C8E6C9", color="#2E7D32", fontsize=7];
+
+        S0_0 [label="bb_upper &lt; psar_rev"];
+        S0_1 [label="iv_conf &lt; feat_59"];
+        S0_2 [label="bb_lower &gt; feat_61"];
+        S0_3 [label="bb_lower = macd"];
+        S0_4 [label="max_dd &gt; stoch_k"];
+        S0_5 [label="adx &gt; psar_adapt"];
+        S0_6 [label="breakout &lt; press_dn"];
+        S0_7 [label="iv_conf &gt; feat_56"];
+
+        {rank=same; S0_0; S0_1; S0_2; S0_3;}
+        {rank=same; S0_4; S0_5; S0_6; S0_7;}
+    }
+
+    // ==========================================
+    // SUPERSET 1 - Liquidity/Momentum
+    // ==========================================
+    subgraph cluster_ss1 {
+        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 1</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Liquidity/Momentum — &lt;33% &gt;33% =34%</FONT></TD></TR></TABLE>>;
+        style=filled;
+        fillcolor="#FFF3E0";
+        color="#E65100";
+
+        node [shape=box, style="rounded,filled", fillcolor="#FFE0B2", color="#E65100", fontsize=7];
+
+        S1_0 [label="iv_conf = feat_56"];
+        S1_1 [label="vega = psar_trend"];
+        S1_2 [label="cmf &lt; risk_over"];
+        S1_3 [label="bb_pct = press_dn"];
+        S1_4 [label="vega &lt; atr_pct"];
+        S1_5 [label="friction &gt; feat_60"];
+        S1_6 [label="macd &lt; feat_54"];
+        S1_7 [label="bb_pct = psar_rev"];
+
+        {rank=same; S1_0; S1_1; S1_2; S1_3;}
+        {rank=same; S1_4; S1_5; S1_6; S1_7;}
+    }
+
+    // ==========================================
+    // SUPERSET 2 - Risk Overrides
+    // ==========================================
+    subgraph cluster_ss2 {
+        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 2</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Risk Overrides — &lt;33% &gt;33% =34%</FONT></TD></TR></TABLE>>;
+        style=filled;
+        fillcolor="#F3E5F5";
+        color="#7B1FA2";
+
+        node [shape=box, style="rounded,filled", fillcolor="#E1BEE7", color="#7B1FA2", fontsize=7];
+
+        S2_0 [label="cmf &lt; exec_allow"];
+        S2_1 [label="bb_pct &lt; exec_allow"];
+        S2_2 [label="feat_55 &gt; feat_59"];
+        S2_3 [label="open &lt; feat_63"];
+        S2_4 [label="cmf &gt; risk_over"];
+        S2_5 [label="bw_exp &gt; feat_57"];
+        S2_6 [label="cmf &gt; mtf_cons"];
+        S2_7 [label="bb_lower &gt; feat_61"];
+
+        {rank=same; S2_0; S2_1; S2_2; S2_3;}
+        {rank=same; S2_4; S2_5; S2_6; S2_7;}
+    }
+
+    // ==========================================
+    // SUPERSET 3 - Price Extremes
+    // ==========================================
+    subgraph cluster_ss3 {
+        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 3</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Price Extremes — &lt;33% &gt;33% =34%</FONT></TD></TR></TABLE>>;
+        style=filled;
+        fillcolor="#FFEBEE";
+        color="#C62828";
+
+        node [shape=box, style="rounded,filled", fillcolor="#FFCDD2", color="#C62828", fontsize=7];
+
+        S3_0 [label="high &gt; atr_pct"];
+        S3_1 [label="ivr &lt; macd_sig"];
+        S3_2 [label="feat_54 = feat_62"];
+        S3_3 [label="close &gt; feat_63"];
+        S3_4 [label="target &gt; feat_59"];
+        S3_5 [label="cmf &gt; risk_over"];
+        S3_6 [label="pos_mult &lt; feat_63"];
+        S3_7 [label="spread = risk_over"];
+
+        {rank=same; S3_0; S3_1; S3_2; S3_3;}
+        {rank=same; S3_4; S3_5; S3_6; S3_7;}
+    }
+
+    // ==========================================
+    // SUPERSET 4 - Volatility Structure
+    // ==========================================
+    subgraph cluster_ss4 {
+        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 4</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Volatility Structure — &lt;34% &gt;33% =33%</FONT></TD></TR></TABLE>>;
+        style=filled;
+        fillcolor="#E0F2F1";
+        color="#00695C";
+
+        node [shape=box, style="rounded,filled", fillcolor="#B2DFDB", color="#00695C", fontsize=7];
+
+        S4_0 [label="feat_60 &gt; feat_61"];
+        S4_1 [label="iv_conf &lt; beta1"];
+        S4_2 [label="atr_pct &gt; kappa"];
+        S4_3 [label="cmf &lt; risk_over"];
+        S4_4 [label="bb_pct = psar_rev"];
+        S4_5 [label="iv_conf &gt; feat_60"];
+        S4_6 [label="iv_conf &gt; beta1"];
+        S4_7 [label="bb_pct &gt; feat_63"];
+
+        {rank=same; S4_0; S4_1; S4_2; S4_3;}
+        {rank=same; S4_4; S4_5; S4_6; S4_7;}
+    }
+
+    // ==========================================
+    // SUPERSET 5 - Execution Allowance
+    // ==========================================
+    subgraph cluster_ss5 {
+        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 5</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Execution Allowance — &lt;33% &gt;34% =33%</FONT></TD></TR></TABLE>>;
+        style=filled;
+        fillcolor="#FFF8E1";
+        color="#F57F17";
+
+        node [shape=box, style="rounded,filled", fillcolor="#FFECB3", color="#F57F17", fontsize=7];
+
+        S5_0 [label="friction &gt; feat_60"];
+        S5_1 [label="breakout &lt; press_dn"];
+        S5_2 [label="macd &lt; feat_54"];
+        S5_3 [label="bb_pct = psar_rev"];
+        S5_4 [label="open &gt; feat_61"];
+        S5_5 [label="feat_60 &gt; feat_61"];
+        S5_6 [label="bb_upper = chaos"];
+        S5_7 [label="cmf &gt; gap_risk"];
+
+        {rank=same; S5_0; S5_1; S5_2; S5_3;}
+        {rank=same; S5_4; S5_5; S5_6; S5_7;}
+    }
+
+    // ==========================================
+    // SUPERSET 6 - Regime-Momentum
+    // ==========================================
+    subgraph cluster_ss6 {
+        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 6</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Regime-Momentum — &lt;33% &gt;34% =33%</FONT></TD></TR></TABLE>>;
+        style=filled;
+        fillcolor="#E8EAF6";
+        color="#3F51B5";
+
+        node [shape=box, style="rounded,filled", fillcolor="#C5CAE9", color="#3F51B5", fontsize=7];
+
+        S6_0 [label="cmf &gt; mtf_cons"];
+        S6_1 [label="bb_lower &gt; feat_61"];
+        S6_2 [label="bb_pct &lt; exec"];
+        S6_3 [label="spread = risk_over"];
+        S6_4 [label="close &lt; feat_62"];
+        S6_5 [label="vega &lt; psar_adapt"];
+        S6_6 [label="breakout = iv_conf"];
+        S6_7 [label="psar_rev = feat_59"];
+
+        {rank=same; S6_0; S6_1; S6_2; S6_3;}
+        {rank=same; S6_4; S6_5; S6_6; S6_7;}
+    }
+
+    // ==========================================
+    // SUPERSET 7 - Stabilizer Logic
+    // ==========================================
+    subgraph cluster_ss7 {
+        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 7</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Stabilizer Logic — &lt;33% &gt;33% =34%</FONT></TD></TR></TABLE>>;
+        style=filled;
+        fillcolor="#ECEFF1";
+        color="#455A64";
+
+        node [shape=box, style="rounded,filled", fillcolor="#CFD8DC", color="#455A64", fontsize=7];
+
+        S7_0 [label="bb_upper &lt; feat_57"];
+        S7_1 [label="bb_upper &gt; feat_57"];
+        S7_2 [label="spread &gt; risk_over"];
+        S7_3 [label="vega &lt; kappa"];
+        S7_4 [label="bb_lower = risk_over"];
+        S7_5 [label="bb_sigma = bw_exp"];
+        S7_6 [label="press_dn &gt; feat_56"];
+        S7_7 [label="vega &lt; vol_energy"];
+
+        {rank=same; S7_0; S7_1; S7_2; S7_3;}
+        {rank=same; S7_4; S7_5; S7_6; S7_7;}
+    }
+
+    // ==========================================
+    // OUTPUT TARGETS
+    // ==========================================
+    subgraph cluster_outputs {
+        label=<<B>Output Targets (10)</B>>;
+        style=filled;
+        fillcolor="#FCE4EC";
+        color="#AD1457";
+
+        node [shape=box, style="rounded,filled", fillcolor="#F8BBD9", color="#AD1457", fontsize=8];
+
+        out_strikes [label="Strike Selection\ncall_offset, put_offset\nwing_width, dte"];
+        out_profit [label="Profitability\nwas_profitable\nrealized_roi, max_loss"];
+        out_signals [label="Trading Signals\nconfidence, entry\nexit"];
+
+        {rank=same; out_strikes; out_profit; out_signals;}
+    }
+
+    // ==========================================
+    // EDGES - Flow connections
+    // ==========================================
+
+    // Features to SuperSets (grouped)
+    edge [color="#1565C0", penwidth=1.5, style=dashed];
+    feat_vol -> S0_0 [lhead=cluster_ss0];
+    feat_mom -> S1_0 [lhead=cluster_ss1];
+    feat_risk -> S2_0 [lhead=cluster_ss2];
+    feat_regime -> S3_0 [lhead=cluster_ss3];
+
+    // SuperSets to Outputs
+    edge [color="#2E7D32", penwidth=2, style=solid];
+    S0_7 -> out_strikes [ltail=cluster_ss0];
+    S1_7 -> out_strikes [ltail=cluster_ss1];
+
+    edge [color="#7B1FA2", penwidth=2];
+    S2_7 -> out_profit [ltail=cluster_ss2];
+    S3_7 -> out_profit [ltail=cluster_ss3];
+
+    edge [color="#E65100", penwidth=2];
+    S4_7 -> out_signals [ltail=cluster_ss4];
+    S5_7 -> out_signals [ltail=cluster_ss5];
+
+    edge [color="#3F51B5", penwidth=2];
+    S6_7 -> out_signals [ltail=cluster_ss6];
+    S7_7 -> out_signals [ltail=cluster_ss7];
+
+    // ==========================================
+    // LEGEND
+    // ==========================================
+    subgraph cluster_legend {
+        label=<<B>Operator Legend</B>>;
+        style=filled;
+        fillcolor="#FAFAFA";
+        color="#9E9E9E";
+
+        node [shape=plaintext];
+
+        legend [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="3">
+            <TR><TD BGCOLOR="#E0E0E0"><B>Symbol</B></TD><TD BGCOLOR="#E0E0E0"><B>Meaning</B></TD></TR>
+            <TR><TD>&lt;</TD><TD>Feature A less than Feature B</TD></TR>
+            <TR><TD>&gt;</TD><TD>Feature A greater than Feature B</TD></TR>
+            <TR><TD>=</TD><TD>Features approximately equal</TD></TR>
+            <TR><TD COLSPAN="2"><FONT POINT-SIZE="7">Steepness: 20.0 (soft sigmoid)</FONT></TD></TR>
+        </TABLE>>];
+    }
+}

@@ -1,0 +1,404 @@
+digraph CondorNetLogicMap {
+
+    graph [
+        rankdir=LR,
+        fontsize=12,
+        labelloc="t",
+        label="CondorNet™ Epoch 3 Logic Map (Hybrid High Level)\n8 SuperSets × 32 Sets × Dominant Comparisons"
+    ];
+
+    node [shape=box, style=filled, fillcolor="#1e1e1e", fontcolor="white", fontsize=10];
+    edge [color="#888888"];
+
+    // ============================
+    // FEATURE CLUSTERS (Context)
+    // ============================
+
+    subgraph cluster_features {
+        label="Feature Clusters (Epoch 3 Dominant Groups)";
+        fontsize=14;
+        style=filled;
+        color="#333333";
+
+        A [label="Cluster A:\nVolatility & Reversion\n(bb_upper_dyn, bb_lower_dyn,\npsar_reversion_mu, bb_sigma_dyn)", shape=box, fillcolor="#2e2e2e"];
+        B [label="Cluster B:\nMomentum & Trend\n(macd_norm, macd_histogram,\nstoch_k_dyn, psar_adaptive)", shape=box, fillcolor="#2e2e2e"];
+        C [label="Cluster C:\nRisk & Microstructure\n(max_dd_60m, spread_ratio,\nfriction_ratio, exec_allow)", shape=box, fillcolor="#2e2e2e"];
+        D [label="Cluster D:\nRegime & Volatility\n(iv_confidence, atr_pct,\nmtf_consensus, chaos_membership)", shape=box, fillcolor="#2e2e2e"];
+    }
+
+    // ============================
+    // SUPERSETS
+    // ============================
+
+    // Helper macro-like style
+    node [shape=box, style=filled, fillcolor="#0f0f0f", fontcolor="white"];
+
+    // SUPERSET 0
+    subgraph cluster_ss0 {
+        label="SuperSet 0 — Volatility/Reversion Logic\nOperator Dist: <33%  >34%  =33%";
+        color="#444444";
+
+        SS0 [label="SuperSet 0", shape=oval, fillcolor="#222222"];
+
+        // 32 Sets (top 1–2 comparisons)
+        S0_0 [label="Set 0:\nbb_upper_dyn < psar_reversion_mu\nmax_dd_60m = risk_override"];
+        S0_1 [label="Set 1:\niv_confidence < feat_59\nstoch_k_dyn = pressure_up"];
+        S0_2 [label="Set 2:\nbb_lower_dyn > feat_61\niv_confidence = feat_56"];
+        S0_3 [label="Set 3:\nbb_lower_dyn = macd_norm\nkappa_proxy > friction_ratio"];
+        S0_4 [label="Set 4:\nmax_dd_60m > stoch_k_dyn\nbb_percentile = exec_allow"];
+        S0_5 [label="Set 5:\nadx_adaptive > psar_adaptive\nvol_ewma < gap_risk_score"];
+        S0_6 [label="Set 6:\nbreakout_score < pressure_down\nlog_return > bw_expansion_rate"];
+        S0_7 [label="Set 7:\niv_confidence > feat_56\nstrike < target_spot"];
+        S0_8 [label="Set 8:\nopen < iv_confidence\nvega > atr_pct"];
+        S0_9 [label="Set 9:\niv_confidence > beta1_norm_stub\nvega < vol_ewma"];
+        S0_10 [label="Set 10:\nivr < plus_di\nbb_lower_dyn < feat_62"];
+        S0_11 [label="Set 11:\nspread_ratio > gap_risk_score\nfeat_60 < feat_61"];
+        S0_12 [label="Set 12:\nbreakout_score = risk_override\nlow > bb_sigma_dyn"];
+        S0_13 [label="Set 13:\nclose < pressure_down\nbb_percentile < gap_risk_score"];
+        S0_14 [label="Set 14:\nhigh = ivr\nopen > bb_percentile"];
+        S0_15 [label="Set 15:\ncmf > gap_risk_score\niv_confidence < feat_58"];
+        S0_16 [label="Set 16:\nstrike = bw_expansion_rate\nbb_lower_dyn > feat_61"];
+        S0_17 [label="Set 17:\nbb_percentile = pressure_up\nret_z < feat_58"];
+        S0_18 [label="Set 18:\nbb_lower_dyn > fuzzy_reversion_11\nmax_dd_60m < bb_sigma_dyn"];
+        S0_19 [label="Set 19:\ncmf < macd_signal_norm\nrsi_dyn < feat_62"];
+        S0_20 [label="Set 20:\nstrike < minus_di\nlog_return < bb_lower_dyn"];
+        S0_21 [label="Set 21:\nopen = pressure_up\nlog_return > friction_ratio"];
+        S0_22 [label="Set 22:\nspread_ratio > gap_risk_score\niv_confidence < beta1_norm_stub"];
+        S0_23 [label="Set 23:\nlow > bb_percentile\nopen = bb_lower_dyn"];
+        S0_24 [label="Set 24:\nposition_size_mult > feat_63\nopen = rsi_dyn"];
+        S0_25 [label="Set 25:\nbreakout_score > mtf_consensus\nivr > macd_histogram"];
+        S0_26 [label="Set 26:\nbreakout_score > pressure_down\nbb_lower_dyn > bb_percentile"];
+        S0_27 [label="Set 27:\nfriction_ratio < feat_61\nlow = cmf"];
+        S0_28 [label="Set 28:\nivr = iv_confidence\nbb_percentile > feat_63"];
+        S0_29 [label="Set 29:\nbreakout_score > bb_percentile\nlow < kappa_proxy"];
+        S0_30 [label="Set 30:\nmacd_histogram = feat_59\ngamma < feat_60"];
+        S0_31 [label="Set 31:\nplus_di = chaos_membership\nret_z = adx_adaptive"];
+
+        SS0 -> {S0_0 S0_1 S0_2 S0_3 S0_4 S0_5 S0_6 S0_7 S0_8 S0_9 S0_10 S0_11 S0_12 S0_13 S0_14 S0_15 S0_16 S0_17 S0_18 S0_19 S0_20 S0_21 S0_22 S0_23 S0_24 S0_25 S0_26 S0_27 S0_28 S0_29 S0_30 S0_31};
+    }
+
+    // ============================
+    // SUPERSET 1
+    // ============================
+
+    subgraph cluster_ss1 {
+        label="SuperSet 1 — Liquidity/Momentum/Microstructure\nOperator Dist: <33%  >33%  =34%";
+        color="#444444";
+
+        SS1 [label="SuperSet 1", shape=oval, fillcolor="#222222"];
+
+        // Only top 1–2 comparisons per Set
+        S1_0 [label="Set 0:\niv_confidence = feat_56\nbb_percentile < risk_override"];
+        S1_1 [label="Set 1:\nvega = psar_trend\nbb_lower_dyn < macd_norm"];
+        S1_2 [label="Set 2:\ncmf < risk_override\nlog_return = exec_allow"];
+        S1_3 [label="Set 3:\nbb_percentile = pressure_down\nmax_dd_60m > bb_lower_dyn"];
+        S1_4 [label="Set 4:\nvega < atr_pct\nvol_energy = bb_upper_dyn"];
+        S1_5 [label="Set 5:\nfriction_ratio > feat_60\nbreakout_score < pressure_down"];
+        S1_6 [label="Set 6:\nmacd_norm < feat_54\nfriction_ratio > mtf_consensus"];
+        S1_7 [label="Set 7:\nbb_percentile = psar_reversion_mu\nclose = ivr"];
+        S1_8 [label="Set 8:\nopen > feat_61\niv_confidence > feat_55"];
+        S1_9 [label="Set 9:\nfeat_60 > feat_61\niv_confidence = beta1_norm_stub"];
+        S1_10 [label="Set 10:\nbb_upper_dyn = chaos_membership\ndelta > plus_di"];
+        S1_11 [label="Set 11:\ncmf > gap_risk_score\nvol_energy = pressure_down"];
+        S1_12 [label="Set 12:\npsar_adaptive = bb_sigma_dyn\nrsi_dyn > macd_signal_norm"];
+        S1_13 [label="Set 13:\nfeat_57 > feat_62\nspread_ratio = risk_override"];
+        S1_14 [label="Set 14:\nlow > delta\nbw_expansion_rate = fuzzy_reversion_11"];
+        S1_15 [label="Set 15:\nopen = rsi_dyn\nbb_lower_dyn > macd_histogram"];
+        S1_16 [label="Set 16:\nfeat_59 > feat_63\nadx_adaptive = feat_59"];
+        S1_17 [label="Set 17:\nbw_expansion_rate < feat_59\nvolume > vol_energy"];
+        S1_18 [label="Set 18:\nspread_ratio > risk_override\ncmf < exec_allow"];
+        S1_19 [label="Set 19:\niv_confidence = feat_55\nadx_adaptive = psar_adaptive"];
+        S1_20 [label="Set 20:\nfeat_60 > feat_61\nvega > psar_trend"];
+        S1_21 [label="Set 21:\nvega < kappa_proxy\nivr < macd_signal_norm"];
+        S1_22 [label="Set 22:\nstrike < psar_reversion_mu\nfeat_59 = feat_60"];
+        S1_23 [label="Set 23:\nret_z = feat_60\nmacd_histogram < chaos_membership"];
+        S1_24 [label="Set 24:\nbreakout_score = mtf_consensus\nopen > gap_risk_score"];
+        S1_25 [label="Set 25:\nfeat_60 = feat_63\nopen > ret_z"];
+        S1_26 [label="Set 26:\nopen = rsi_dyn\nstrike < risk_override"];
+        S1_27 [label="Set 27:\nivr > bb_sigma_dyn\nlog_return > risk_override"];
+        S1_28 [label="Set 28:\nopen = rsi_dyn\nspread_ratio > gap_risk_score"];
+        S1_29 [label="Set 29:\nvega > atr_pct\nbb_lower_dyn > feat_61"];
+        S1_30 [label="Set 30:\nstrike > risk_override\nbb_upper_dyn > feat_61"];
+        S1_31 [label="Set 31:\npressure_up > macd_histogram\nivr = gap_risk_score"];
+
+        SS1 -> {S1_0 S1_1 S1_2 S1_3 S1_4 S1_5 S1_6 S1_7 S1_8 S1_9 S1_10 S1_11 S1_12 S1_13 S1_14 S1_15 S1_16 S1_17 S1_18 S1_19 S1_20 S1_21 S1_22 S1_23 S1_24 S1_25 S1_26 S1_27 S1_28 S1_29 S1_30 S1_31};
+    }
+
+    // ============================
+    // SUPERSET 2
+    // ============================
+
+    subgraph cluster_ss2 {
+        label="SuperSet 2 — Risk Overrides & Regime Filters\nOperator Dist: <33%  >33%  =34%";
+        color="#444444";
+
+        SS2 [label="SuperSet 2", shape=oval, fillcolor="#222222"];
+
+        S2_0  [label="Set 0:\ncmf < exec_allow\nfuzzy_reversion_11 < feat_57"];
+        S2_1  [label="Set 1:\nbb_percentile < exec_allow\nfeat_56 = feat_60"];
+        S2_2  [label="Set 2:\nfeat_55 > feat_59\nbb_upper_dyn = plus_di"];
+        S2_3  [label="Set 3:\nopen < feat_63\nbw_expansion_rate > feat_59"];
+        S2_4  [label="Set 4:\ncmf > risk_override\nstrike > macd_signal_norm"];
+        S2_5  [label="Set 5:\nbw_expansion_rate > feat_57\nbb_upper_dyn < pressure_down"];
+        S2_6  [label="Set 6:\ncmf > mtf_consensus\nbw_expansion_rate = feat_59"];
+        S2_7  [label="Set 7:\nbb_lower_dyn > feat_61\niv_confidence < feat_55"];
+        S2_8  [label="Set 8:\nbb_percentile < exec_allow\nbreakout_score < macd_signal_norm"];
+        S2_9  [label="Set 9:\nspread_ratio = risk_override\nvega < psar_adaptive"];
+        S2_10 [label="Set 10:\nclose < feat_62\nrsi_dyn > position_size_mult"];
+        S2_11 [label="Set 11:\nvega < psar_adaptive\nmax_dd_60m < vol_energy"];
+        S2_12 [label="Set 12:\nbreakout_score = iv_confidence\nbb_percentile > risk_override"];
+        S2_13 [label="Set 13:\npsar_reversion_mu = feat_59\nbb_lower_dyn > feat_63"];
+        S2_14 [label="Set 14:\niv_confidence = feat_55\nstrike > macd_signal_norm"];
+        S2_15 [label="Set 15:\nposition_size_mult = feat_62\nfeat_56 = feat_60"];
+        S2_16 [label="Set 16:\nfeat_60 < feat_61\nmax_dd_60m = exec_allow"];
+        S2_17 [label="Set 17:\nopen = rsi_dyn\nbb_lower_dyn < macd_norm"];
+        S2_18 [label="Set 18:\nspread_ratio > risk_override\nfuzzy_reversion_11 < feat_57"];
+        S2_19 [label="Set 19:\npressure_down < fuzzy_reversion_11\nminus_di > feat_56"];
+        S2_20 [label="Set 20:\nbw_expansion_rate < cmf\nstrike < chaos_membership"];
+        S2_21 [label="Set 21:\nbreakout_score > iv_confidence\nbb_percentile > pressure_down"];
+        S2_22 [label="Set 22:\nfriction_ratio > mtf_consensus\nstoch_k_dyn > bb_percentile"];
+        S2_23 [label="Set 23:\niv_confidence > chaos_membership\ncmf > gap_risk_score"];
+        S2_24 [label="Set 24:\nfeat_60 < feat_61\nopen > bb_percentile"];
+        S2_25 [label="Set 25:\nlow = vol_energy\nvolume = bb_sigma_dyn"];
+        S2_26 [label="Set 26:\nclose < feat_57\nte > plus_di"];
+        S2_27 [label="Set 27:\nposition_size_mult < feat_62\nadx_adaptive > cmf"];
+        S2_28 [label="Set 28:\ncmf < risk_override\niv_confidence > feat_54"];
+        S2_29 [label="Set 29:\nspread_ratio > gap_risk_score\nlow < pressure_up"];
+        S2_30 [label="Set 30:\niv_confidence > feat_56\nstoch_k_dyn = bb_percentile"];
+        S2_31 [label="Set 31:\nplus_di > minus_di\nhigh = delta"];
+
+        SS2 -> {S2_0 S2_1 S2_2 S2_3 S2_4 S2_5 S2_6 S2_7 S2_8 S2_9 S2_10 S2_11 S2_12 S2_13 S2_14 S2_15 S2_16 S2_17 S2_18 S2_19 S2_20 S2_21 S2_22 S2_23 S2_24 S2_25 S2_26 S2_27 S2_28 S2_29 S2_30 S2_31};
+    }
+
+    // ============================
+    // SUPERSET 3
+    // ============================
+
+    subgraph cluster_ss3 {
+        label="SuperSet 3 — Price Extremes & Momentum\nOperator Dist: <33%  >33%  =34%";
+        color="#444444";
+
+        SS3 [label="SuperSet 3", shape=oval, fillcolor="#222222"];
+
+        S3_0  [label="Set 0:\nhigh > atr_pct\nkappa_proxy < bb_sigma_dyn"];
+        S3_1  [label="Set 1:\nivr < macd_signal_norm\nvega < vol_energy"];
+        S3_2  [label="Set 2:\nfeat_54 = feat_62\nclose > strike"];
+        S3_3  [label="Set 3:\nclose > feat_63\nte < macd_signal_norm"];
+        S3_4  [label="Set 4:\ntarget_spot > feat_59\nbb_mu_dyn < mtf_consensus"];
+        S3_5  [label="Set 5:\ncmf > risk_override\nstrike = bw_expansion_rate"];
+        S3_6  [label="Set 6:\nposition_size_mult < feat_63\nbb_upper_dyn > psar_reversion_mu"];
+        S3_7  [label="Set 7:\nspread_ratio = risk_override\nhigh > vol_energy"];
+        S3_8  [label="Set 8:\nbb_upper_dyn < feat_57\nclose > feat_62"];
+        S3_9  [label="Set 9:\nbb_upper_dyn > feat_57\ngamma > atr_pct"];
+        S3_10 [label="Set 10:\nspread_ratio > risk_override\nstrike > macd_signal_norm"];
+        S3_11 [label="Set 11:\nvega < kappa_proxy\niv_confidence > feat_56"];
+        S3_12 [label="Set 12:\nbb_lower_dyn = risk_override\npsar_adaptive > position_size_mult"];
+        S3_13 [label="Set 13:\nbb_sigma_dyn = bw_expansion_rate\nmax_dd_60m < pressure_down"];
+        S3_14 [label="Set 14:\npressure_down > feat_56\ntarget_spot > chaos_membership"];
+        S3_15 [label="Set 15:\nvega < vol_energy\nivr > fuzzy_reversion_11"];
+        S3_16 [label="Set 16:\nopen > close\nspread_ratio > feat_61"];
+        S3_17 [label="Set 17:\nfeat_60 < feat_61\nfeat_59 < feat_63"];
+        S3_18 [label="Set 18:\nopen = rsi_dyn\nvol_ewma < position_size_mult"];
+        S3_19 [label="Set 19:\nvol_ewma > feat_62\npressure_up > beta1_norm_stub"];
+        S3_20 [label="Set 20:\npsar_trend < fuzzy_reversion_11\nlow < feat_55"];
+        S3_21 [label="Set 21:\niv_confidence = feat_55\nbb_lower_dyn = chaos_membership"];
+        S3_22 [label="Set 22:\niv_confidence > beta1_norm_stub\nbreakout_score > iv_confidence"];
+        S3_23 [label="Set 23:\nopen < feat_63\nmax_dd_60m < feat_61"];
+        S3_24 [label="Set 24:\nstrike < minus_di\nkappa_proxy < mtf_consensus"];
+        S3_25 [label="Set 25:\nvol_energy = feat_57\nminus_di = feat_62"];
+        S3_26 [label="Set 26:\nchaos_membership < feat_60\nadx_adaptive > feat_58"];
+        S3_27 [label="Set 27:\niv_confidence = feat_59\ncmf > pressure_down"];
+        S3_28 [label="Set 28:\nbb_upper_dyn = macd_signal_norm\nkappa_proxy = adx_adaptive"];
+        S3_29 [label="Set 29:\nplus_di > feat_62\nbb_mu_dyn = feat_57"];
+        S3_30 [label="Set 30:\nvega > kappa_proxy\nclose < feat_59"];
+        S3_31 [label="Set 31:\nbb_upper_dyn = fuzzy_reversion_11\nopen > feat_58"];
+
+        SS3 -> {S3_0 S3_1 S3_2 S3_3 S3_4 S3_5 S3_6 S3_7 S3_8 S3_9 S3_10 S3_11 S3_12 S3_13 S3_14 S3_15 S3_16 S3_17 S3_18 S3_19 S3_20 S3_21 S3_22 S3_23 S3_24 S3_25 S3_26 S3_27 S3_28 S3_29 S3_30 S3_31};
+    }
+
+    // ============================
+    // SUPERSET 4
+    // ============================
+
+    subgraph cluster_ss4 {
+        label="SuperSet 4 — Volatility Structure & Trend\nOperator Dist: <34%  >33%  =33%";
+        color="#444444";
+
+        SS4 [label="SuperSet 4", shape=oval, fillcolor="#222222"];
+
+        S4_0  [label="Set 0:\nfeat_60 > feat_61\ncmf > pressure_down"];
+        S4_1  [label="Set 1:\niv_confidence < beta1_norm_stub\nstrike > stoch_k_dyn"];
+        S4_2  [label="Set 2:\natr_pct > kappa_proxy\niv_confidence < feat_59"];
+        S4_3  [label="Set 3:\ncmf < risk_override\nfeat_59 > feat_63"];
+        S4_4  [label="Set 4:\nbb_percentile = psar_reversion_mu\nbreakout_score = pressure_down"];
+        S4_5  [label="Set 5:\niv_confidence > feat_60\npressure_down < fuzzy_reversion_11"];
+        S4_6  [label="Set 6:\niv_confidence > beta1_norm_stub\nbreakout_score = macd_norm"];
+        S4_7  [label="Set 7:\nbb_percentile > feat_63\nlow > bb_sigma_dyn"];
+        S4_8  [label="Set 8:\nstoch_k_dyn = iv_confidence\nopen = rsi_dyn"];
+        S4_9  [label="Set 9:\ncmf > macd_signal_norm\nfeat_60 = feat_61"];
+        S4_10 [label="Set 10:\niv_confidence = feat_55\nstrike = breakout_score"];
+        S4_11 [label="Set 11:\nbeta1_norm_stub > feat_63\nvol_ewma > psar_reversion_mu"];
+        S4_12 [label="Set 12:\niv = feat_57\nivr < exec_allow"];
+        S4_13 [label="Set 13:\nspread_ratio > macd_histogram\nbb_percentile = feat_56"];
+        S4_14 [label="Set 14:\nivr = feat_58\nbb_sigma_dyn = bb_lower_dyn"];
+        S4_15 [label="Set 15:\nte = strike\nspread_ratio > te"];
+        S4_16 [label="Set 16:\nbw_expansion_rate < feat_61\niv_confidence < feat_61"];
+        S4_17 [label="Set 17:\nbreakout_score > bb_percentile\nopen > psar_adaptive"];
+        S4_18 [label="Set 18:\nbreakout_score < bb_percentile\nlow = volume"];
+        S4_19 [label="Set 19:\niv_confidence = feat_55\nbb_lower_dyn = chaos_membership"];
+        S4_20 [label="Set 20:\niv_confidence > beta1_norm_stub\nbreakout_score > iv_confidence"];
+        S4_21 [label="Set 21:\nopen < feat_63\nmax_dd_60m < feat_61"];
+        S4_22 [label="Set 22:\nstrike < minus_di\nkappa_proxy < mtf_consensus"];
+        S4_23 [label="Set 23:\nvol_energy = feat_57\nminus_di = feat_62"];
+        S4_24 [label="Set 24:\nchaos_membership < feat_60\nadx_adaptive > feat_58"];
+        S4_25 [label="Set 25:\niv_confidence = feat_59\ncmf > pressure_down"];
+        S4_26 [label="Set 26:\nbb_upper_dyn = macd_signal_norm\nkappa_proxy = adx_adaptive"];
+        S4_27 [label="Set 27:\nplus_di > feat_62\nbb_mu_dyn = feat_57"];
+        S4_28 [label="Set 28:\nvega > kappa_proxy\nclose < feat_59"];
+        S4_29 [label="Set 29:\nbb_upper_dyn = fuzzy_reversion_11\nopen > feat_58"];
+        S4_30 [label="Set 30:\npressure_up > macd_histogram\nivr = gap_risk_score"];
+        S4_31 [label="Set 31:\nlog_return > feat_58\nadx_adaptive > feat_62"];
+
+        SS4 -> {S4_0 S4_1 S4_2 S4_3 S4_4 S4_5 S4_6 S4_7 S4_8 S4_9 S4_10 S4_11 S4_12 S4_13 S4_14 S4_15 S4_16 S4_17 S4_18 S4_19 S4_20 S4_21 S4_22 S4_23 S4_24 S4_25 S4_26 S4_27 S4_28 S4_29 S4_30 S4_31};
+    }
+
+    // ============================
+    // SUPERSET 5
+    // ============================
+
+    subgraph cluster_ss5 {
+        label="SuperSet 5 — Execution Allowance & Microstructure\nOperator Dist: <33%  >34%  =33%";
+        color="#444444";
+
+        SS5 [label="SuperSet 5", shape=oval, fillcolor="#222222"];
+
+        S5_0  [label="Set 0:\nfriction_ratio > feat_60\nvolume > delta"];
+        S5_1  [label="Set 1:\nbreakout_score < pressure_down\nbb_percentile = risk_override"];
+        S5_2  [label="Set 2:\nmacd_norm < feat_54\nfriction_ratio > mtf_consensus"];
+        S5_3  [label="Set 3:\nbb_percentile = psar_reversion_mu\nclose = ivr"];
+        S5_4  [label="Set 4:\nopen > feat_61\niv_confidence > feat_55"];
+        S5_5  [label="Set 5:\nfeat_60 > feat_61\niv_confidence = beta1_norm_stub"];
+        S5_6  [label="Set 6:\nbb_upper_dyn = chaos_membership\ndelta > plus_di"];
+        S5_7  [label="Set 7:\ncmf > gap_risk_score\nvol_energy = pressure_down"];
+        S5_8  [label="Set 8:\npsar_adaptive = bb_sigma_dyn\nrsi_dyn > macd_signal_norm"];
+        S5_9  [label="Set 9:\nfeat_57 > feat_62\nspread_ratio = risk_override"];
+        S5_10 [label="Set 10:\nlow > delta\nbw_expansion_rate = fuzzy_reversion_11"];
+        S5_11 [label="Set 11:\nopen = rsi_dyn\nbb_lower_dyn > macd_histogram"];
+        S5_12 [label="Set 12:\nfeat_59 > feat_63\nadx_adaptive = feat_59"];
+        S5_13 [label="Set 13:\nbw_expansion_rate < feat_59\nvolume > vol_energy"];
+        S5_14 [label="Set 14:\nspread_ratio > risk_override\ncmf < exec_allow"];
+        S5_15 [label="Set 15:\niv_confidence = feat_55\nadx_adaptive = psar_adaptive"];
+        S5_16 [label="Set 16:\nfeat_60 > feat_61\nvega > psar_trend"];
+        S5_17 [label="Set 17:\nvega < kappa_proxy\nivr < macd_signal_norm"];
+        S5_18 [label="Set 18:\nstrike < psar_reversion_mu\nfeat_59 = feat_60"];
+        S5_19 [label="Set 19:\nret_z = feat_60\nmacd_histogram < chaos_membership"];
+        S5_20 [label="Set 20:\nbreakout_score = mtf_consensus\nopen > gap_risk_score"];
+        S5_21 [label="Set 21:\nfeat_60 = feat_63\nopen > ret_z"];
+        S5_22 [label="Set 22:\nopen = rsi_dyn\nstrike < risk_override"];
+        S5_23 [label="Set 23:\nivr > bb_sigma_dyn\nlog_return > risk_override"];
+        S5_24 [label="Set 24:\nopen = rsi_dyn\nspread_ratio > gap_risk_score"];
+        S5_25 [label="Set 25:\nvega > atr_pct\nbb_lower_dyn > feat_61"];
+        S5_26 [label="Set 26:\nstrike > risk_override\nbb_upper_dyn > feat_61"];
+        S5_27 [label="Set 27:\npressure_up > macd_histogram\nivr = gap_risk_score"];
+        S5_28 [label="Set 28:\nlog_return > feat_58\nadx_adaptive > feat_62"];
+        S5_29 [label="Set 29:\nte < gap_risk_score\nspread_ratio > gap_risk_score"];
+        S5_30 [label="Set 30:\nvega < vol_energy\niv_confidence < feat_56"];
+        S5_31 [label="Set 31:\nhigh > adx_adaptive\nbreakout_score = feat_61"];
+
+        SS5 -> {S5_0 S5_1 S5_2 S5_3 S5_4 S5_5 S5_6 S5_7 S5_8 S5_9 S5_10 S5_11 S5_12 S5_13 S5_14 S5_15 S5_16 S5_17 S5_18 S5_19 S5_20 S5_21 S5_22 S5_23 S5_24 S5_25 S5_26 S5_27 S5_28 S5_29 S5_30 S5_31};
+    }
+
+    // ============================
+    // SUPERSET 6
+    // ============================
+
+    subgraph cluster_ss6 {
+        label="SuperSet 6 — Regime–Momentum Interactions\nOperator Dist: <33%  >34%  =33%";
+        color="#444444";
+
+        SS6 [label="SuperSet 6", shape=oval, fillcolor="#222222"];
+
+        S6_0  [label="Set 0:\ncmf > mtf_consensus\ncmf > gap_risk_score"];
+        S6_1  [label="Set 1:\nbb_lower_dyn > feat_61\niv_confidence < feat_55"];
+        S6_2  [label="Set 2:\nbb_percentile < exec_allow\nbreakout_score < macd_signal_norm"];
+        S6_3  [label="Set 3:\nspread_ratio = risk_override\nvega < psar_adaptive"];
+        S6_4  [label="Set 4:\nclose < feat_62\nrsi_dyn > position_size_mult"];
+        S6_5  [label="Set 5:\nvega < psar_adaptive\nmax_dd_60m < vol_energy"];
+        S6_6  [label="Set 6:\nbreakout_score = iv_confidence\nbb_percentile > risk_override"];
+        S6_7  [label="Set 7:\npsar_reversion_mu = feat_59\nbb_lower_dyn > feat_63"];
+        S6_8  [label="Set 8:\niv_confidence = feat_55\nstrike > macd_signal_norm"];
+        S6_9  [label="Set 9:\nposition_size_mult = feat_62\nfeat_56 = feat_60"];
+        S6_10 [label="Set 10:\nfeat_60 < feat_61\nmax_dd_60m = exec_allow"];
+        S6_11 [label="Set 11:\nopen = rsi_dyn\nbb_lower_dyn < macd_norm"];
+        S6_12 [label="Set 12:\nspread_ratio > risk_override\nspread_ratio < gap_risk_score"];
+        S6_13 [label="Set 13:\npressure_down < fuzzy_reversion_11\nminus_di > feat_56"];
+        S6_14 [label="Set 14:\nbw_expansion_rate < cmf\nstrike < chaos_membership"];
+        S6_15 [label="Set 15:\nbreakout_score > iv_confidence\nbb_percentile > pressure_down"];
+        S6_16 [label="Set 16:\nfriction_ratio > mtf_consensus\nstoch_k_dyn > bb_percentile"];
+        S6_17 [label="Set 17:\niv_confidence > chaos_membership\ncmf > gap_risk_score"];
+        S6_18 [label="Set 18:\nfeat_60 < feat_61\nopen > bb_percentile"];
+        S6_19 [label="Set 19:\nlow = vol_energy\nvolume = bb_sigma_dyn"];
+        S6_20 [label="Set 20:\nclose < feat_57\nte > plus_di"];
+        S6_21 [label="Set 21:\nposition_size_mult < feat_62\nadx_adaptive > cmf"];
+        S6_22 [label="Set 22:\ncmf < risk_override\niv_confidence > feat_54"];
+        S6_23 [label="Set 23:\nspread_ratio > gap_risk_score\nlow < pressure_up"];
+        S6_24 [label="Set 24:\niv_confidence > feat_56\nstoch_k_dyn = bb_percentile"];
+        S6_25 [label="Set 25:\nplus_di > minus_di\nhigh = delta"];
+        S6_26 [label="Set 26:\nbb_upper_dyn = macd_signal_norm\nkappa_proxy = adx_adaptive"];
+        S6_27 [label="Set 27:\nvega > kappa_proxy\nclose < feat_59"];
+        S6_28 [label="Set 28:\nbb_upper_dyn = fuzzy_reversion_11\nopen > feat_58"];
+        S6_29 [label="Set 29:\npressure_up > macd_histogram\nivr = gap_risk_score"];
+        S6_30 [label="Set 30:\nlog_return > feat_58\nadx_adaptive > feat_62"];
+        S6_31 [label="Set 31:\nte < gap_risk_score\nspread_ratio > gap_risk_score"];
+
+        SS6 -> {S6_0 S6_1 S6_2 S6_3 S6_4 S6_5 S6_6 S6_7 S6_8 S6_9 S6_10 S6_11 S6_12 S6_13 S6_14 S6_15 S6_16 S6_17 S6_18 S6_19 S6_20 S6_21 S6_22 S6_23 S6_24 S6_25 S6_26 S6_27 S6_28 S6_29 S6_30 S6_31};
+    }
+
+    // ============================
+    // SUPERSET 7
+    // ============================
+
+    subgraph cluster_ss7 {
+        label="SuperSet 7 — Stabilizer Logic (High Entropy)\nOperator Dist: <33%  >33%  =34%";
+        color="#444444";
+
+        SS7 [label="SuperSet 7", shape=oval, fillcolor="#222222"];
+
+        S7_0  [label="Set 0:\nbb_upper_dyn < feat_57\nclose > feat_62"];
+        S7_1  [label="Set 1:\nbb_upper_dyn > feat_57\ngamma > atr_pct"];
+        S7_2  [label="Set 2:\nspread_ratio > risk_override\nstrike > macd_signal_norm"];
+        S7_3  [label="Set 3:\nvega < kappa_proxy\niv_confidence > feat_56"];
+        S7_4  [label="Set 4:\nbb_lower_dyn = risk_override\npsar_adaptive > position_size_mult"];
+        S7_5  [label="Set 5:\nbb_sigma_dyn = bw_expansion_rate\nmax_dd_60m < pressure_down"];
+        S7_6  [label="Set 6:\npressure_down > feat_56\ntarget_spot > chaos_membership"];
+        S7_7  [label="Set 7:\nvega < vol_energy\nivr > fuzzy_reversion_11"];
+        S7_8  [label="Set 8:\nopen > close\nspread_ratio > feat_61"];
+        S7_9  [label="Set 9:\nfeat_60 < feat_61\nfeat_59 < feat_63"];
+        S7_10 [label="Set 10:\nopen = rsi_dyn\nvol_ewma < position_size_mult"];
+        S7_11 [label="Set 11:\nvol_ewma > feat_62\npressure_up > beta1_norm_stub"];
+        S7_12 [label="Set 12:\npsar_trend < fuzzy_reversion_11\nlow < feat_55"];
+        S7_13 [label="Set 13:\niv_confidence = feat_55\nbb_lower_dyn = chaos_membership"];
+        S7_14 [label="Set 14:\niv_confidence > beta1_norm_stub\nbreakout_score > iv_confidence"];
+        S7_15 [label="Set 15:\nopen < feat_63\nmax_dd_60m < feat_61"];
+        S7_16 [label="Set 16:\nstrike < minus_di\nkappa_proxy < mtf_consensus"];
+        S7_17 [label="Set 17:\nvol_energy = feat_57\nminus_di = feat_62"];
+        S7_18 [label="Set 18:\nchaos_membership < feat_60\nadx_adaptive > feat_58"];
+        S7_19 [label="Set 19:\niv_confidence = feat_59\ncmf > pressure_down"];
+        S7_20 [label="Set 20:\nbb_upper_dyn = macd_signal_norm\nkappa_proxy = adx_adaptive"];
+        S7_21 [label="Set 21:\nplus_di > feat_62\nbb_mu_dyn = feat_57"];
+        S7_22 [label="Set 22:\nvega > kappa_proxy\nclose < feat_59"];
+        S7_23 [label="Set 23:\nbb_upper_dyn = fuzzy_reversion_11\nopen > feat_58"];
+        S7_24 [label="Set 24:\npressure_up > macd_histogram\nivr = gap_risk_score"];
+        S7_25 [label="Set 25:\nlog_return > feat_58\nadx_adaptive > feat_62"];
+        S7_26 [label="Set 26:\nte < gap_risk_score\nspread_ratio > gap_risk_score"];
+        S7_27 [label="Set 27:\nvega < vol_energy\niv_confidence < feat_56"];
+        S7_28 [label="Set 28:\nhigh > adx_adaptive\nbreakout_score = feat_61"];
+        S7_29 [label="Set 29:\nopen > feat_60\nbb_percentile > pressure_down"];
+        S7_30 [label="Set 30:\nbb_sigma_dyn = exec_allow\nstoch_k_dyn > feat_58"];
+        S7_31 [label="Set 31:\nmacd_signal_norm = feat_57\nbb_lower_dyn = feat_59"];
+
+        SS7 -> {S7_0 S7_1 S7_2 S7_3 S7_4 S7_5 S7_6 S7_7 S7_8 S7_9 S7_10 S7_11 S7_12 S7_13 S7_14 S7_15 S7_16 S7_17 S7_18 S7_19 S7_20 S7_21 S7_22 S7_23 S7_24 S7_25 S7_26 S7_27 S7_28 S7_29 S7_30 S7_31};
+    }
+
+    // END OF GRAPH
+}
