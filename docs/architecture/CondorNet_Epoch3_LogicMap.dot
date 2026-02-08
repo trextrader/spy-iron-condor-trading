@@ -1,38 +1,45 @@
-// CondorNet™ Epoch 3 Logic Map - Compact Grid Layout
+// CondorNet™ Epoch 3 Logic Map - Neon Dark Theme
 // 8 SuperSets × Top 8 Sets per SuperSet (Dominant Comparisons)
+// High Resolution - Black Background with Neon Colors
 // © 2026 Dr. T. Jerry Mahabub, Ph.D
 
 digraph CondorNetLogicMap {
-    // Portrait-friendly layout
+    // High resolution settings
     rankdir=TB;
     splines=polyline;
-    nodesep=0.3;
-    ranksep=0.6;
-    fontname="Helvetica";
-    node [fontname="Helvetica", fontsize=9];
-    edge [fontname="Helvetica", fontsize=8];
+    nodesep=0.4;
+    ranksep=0.7;
+    fontname="Helvetica-Bold";
+    node [fontname="Helvetica-Bold", fontsize=11];
+    edge [fontname="Helvetica-Bold", fontsize=10];
 
-    // Page size for portrait
-    size="11,17";
+    // Large size for high resolution
+    size="24,36";
+    dpi=150;
     ratio=fill;
+
+    // Dark background
+    bgcolor="#0a0a0a";
 
     // Title
     labelloc="t";
+    fontcolor="#00ffff";
     label=<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0">
-        <TR><TD><FONT POINT-SIZE="20" FACE="Helvetica-Bold">CondorNet™ Epoch 3 Logic Map</FONT></TD></TR>
-        <TR><TD><FONT POINT-SIZE="12" COLOR="gray40">8 SuperSets × 32 Sets — Top Relational Comparisons</FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="28" COLOR="#00ffff" FACE="Helvetica-Bold">CondorNet™ Epoch 3 Logic Map</FONT></TD></TR>
+        <TR><TD><FONT POINT-SIZE="16" COLOR="#888888">8 SuperSets × 32 Sets — Top Relational Comparisons</FONT></TD></TR>
     </TABLE>>;
 
     // ==========================================
     // FEATURE CLUSTERS (Input Context)
     // ==========================================
     subgraph cluster_features {
-        label=<<B>Feature Clusters</B>>;
+        label=<<FONT COLOR="#00ffff"><B>Feature Clusters</B></FONT>>;
         style=filled;
-        fillcolor="#E3F2FD";
-        color="#1565C0";
+        fillcolor="#1a1a2e";
+        color="#00ffff";
+        penwidth=2;
 
-        node [shape=box, style="rounded,filled", fillcolor="#BBDEFB", color="#1565C0", fontsize=8];
+        node [shape=box, style="rounded,filled", fillcolor="#0f0f1a", color="#00ffff", fontcolor="#00ffff", fontsize=10, penwidth=2];
 
         feat_vol [label="Volatility\nbb_upper/lower_dyn\npsar_reversion_mu"];
         feat_mom [label="Momentum\nmacd_norm/histogram\nstoch_k_dyn"];
@@ -43,47 +50,49 @@ digraph CondorNetLogicMap {
     }
 
     // ==========================================
-    // SUPERSET 0 - Volatility/Reversion
+    // SUPERSET 0 - Volatility/Reversion (Neon Green)
     // ==========================================
     subgraph cluster_ss0 {
-        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 0</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Volatility/Reversion — &lt;33% &gt;34% =33%</FONT></TD></TR></TABLE>>;
+        label=<<TABLE BORDER="0"><TR><TD><FONT COLOR="#39ff14"><B>SuperSet 0</B></FONT></TD></TR><TR><TD><FONT POINT-SIZE="9" COLOR="#39ff14">Volatility/Reversion — &lt;33% &gt;34% =33%</FONT></TD></TR></TABLE>>;
         style=filled;
-        fillcolor="#E8F5E9";
-        color="#2E7D32";
+        fillcolor="#0a1a0a";
+        color="#39ff14";
+        penwidth=2;
 
-        node [shape=box, style="rounded,filled", fillcolor="#C8E6C9", color="#2E7D32", fontsize=7];
+        node [shape=box, style="rounded,filled", fillcolor="#0f1f0f", color="#39ff14", fontcolor="#39ff14", fontsize=9, penwidth=2];
 
-        S0_0 [label="bb_upper &lt; psar_rev"];
-        S0_1 [label="iv_conf &lt; feat_59"];
-        S0_2 [label="bb_lower &gt; feat_61"];
+        S0_0 [label="bb_upper < psar_rev"];
+        S0_1 [label="iv_conf < feat_59"];
+        S0_2 [label="bb_lower > feat_61"];
         S0_3 [label="bb_lower = macd"];
-        S0_4 [label="max_dd &gt; stoch_k"];
-        S0_5 [label="adx &gt; psar_adapt"];
-        S0_6 [label="breakout &lt; press_dn"];
-        S0_7 [label="iv_conf &gt; feat_56"];
+        S0_4 [label="max_dd > stoch_k"];
+        S0_5 [label="adx > psar_adapt"];
+        S0_6 [label="breakout < press_dn"];
+        S0_7 [label="iv_conf > feat_56"];
 
         {rank=same; S0_0; S0_1; S0_2; S0_3;}
         {rank=same; S0_4; S0_5; S0_6; S0_7;}
     }
 
     // ==========================================
-    // SUPERSET 1 - Liquidity/Momentum
+    // SUPERSET 1 - Liquidity/Momentum (Neon Orange)
     // ==========================================
     subgraph cluster_ss1 {
-        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 1</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Liquidity/Momentum — &lt;33% &gt;33% =34%</FONT></TD></TR></TABLE>>;
+        label=<<TABLE BORDER="0"><TR><TD><FONT COLOR="#ff6600"><B>SuperSet 1</B></FONT></TD></TR><TR><TD><FONT POINT-SIZE="9" COLOR="#ff6600">Liquidity/Momentum — &lt;33% &gt;33% =34%</FONT></TD></TR></TABLE>>;
         style=filled;
-        fillcolor="#FFF3E0";
-        color="#E65100";
+        fillcolor="#1a0f00";
+        color="#ff6600";
+        penwidth=2;
 
-        node [shape=box, style="rounded,filled", fillcolor="#FFE0B2", color="#E65100", fontsize=7];
+        node [shape=box, style="rounded,filled", fillcolor="#1f1408", color="#ff6600", fontcolor="#ff6600", fontsize=9, penwidth=2];
 
         S1_0 [label="iv_conf = feat_56"];
         S1_1 [label="vega = psar_trend"];
-        S1_2 [label="cmf &lt; risk_over"];
+        S1_2 [label="cmf < risk_over"];
         S1_3 [label="bb_pct = press_dn"];
-        S1_4 [label="vega &lt; atr_pct"];
-        S1_5 [label="friction &gt; feat_60"];
-        S1_6 [label="macd &lt; feat_54"];
+        S1_4 [label="vega < atr_pct"];
+        S1_5 [label="friction > feat_60"];
+        S1_6 [label="macd < feat_54"];
         S1_7 [label="bb_pct = psar_rev"];
 
         {rank=same; S1_0; S1_1; S1_2; S1_3;}
@@ -91,47 +100,49 @@ digraph CondorNetLogicMap {
     }
 
     // ==========================================
-    // SUPERSET 2 - Risk Overrides
+    // SUPERSET 2 - Risk Overrides (Neon Magenta)
     // ==========================================
     subgraph cluster_ss2 {
-        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 2</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Risk Overrides — &lt;33% &gt;33% =34%</FONT></TD></TR></TABLE>>;
+        label=<<TABLE BORDER="0"><TR><TD><FONT COLOR="#ff00ff"><B>SuperSet 2</B></FONT></TD></TR><TR><TD><FONT POINT-SIZE="9" COLOR="#ff00ff">Risk Overrides — &lt;33% &gt;33% =34%</FONT></TD></TR></TABLE>>;
         style=filled;
-        fillcolor="#F3E5F5";
-        color="#7B1FA2";
+        fillcolor="#1a001a";
+        color="#ff00ff";
+        penwidth=2;
 
-        node [shape=box, style="rounded,filled", fillcolor="#E1BEE7", color="#7B1FA2", fontsize=7];
+        node [shape=box, style="rounded,filled", fillcolor="#1f0f1f", color="#ff00ff", fontcolor="#ff00ff", fontsize=9, penwidth=2];
 
-        S2_0 [label="cmf &lt; exec_allow"];
-        S2_1 [label="bb_pct &lt; exec_allow"];
-        S2_2 [label="feat_55 &gt; feat_59"];
-        S2_3 [label="open &lt; feat_63"];
-        S2_4 [label="cmf &gt; risk_over"];
-        S2_5 [label="bw_exp &gt; feat_57"];
-        S2_6 [label="cmf &gt; mtf_cons"];
-        S2_7 [label="bb_lower &gt; feat_61"];
+        S2_0 [label="cmf < exec_allow"];
+        S2_1 [label="bb_pct < exec_allow"];
+        S2_2 [label="feat_55 > feat_59"];
+        S2_3 [label="open < feat_63"];
+        S2_4 [label="cmf > risk_over"];
+        S2_5 [label="bw_exp > feat_57"];
+        S2_6 [label="cmf > mtf_cons"];
+        S2_7 [label="bb_lower > feat_61"];
 
         {rank=same; S2_0; S2_1; S2_2; S2_3;}
         {rank=same; S2_4; S2_5; S2_6; S2_7;}
     }
 
     // ==========================================
-    // SUPERSET 3 - Price Extremes
+    // SUPERSET 3 - Price Extremes (Neon Red)
     // ==========================================
     subgraph cluster_ss3 {
-        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 3</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Price Extremes — &lt;33% &gt;33% =34%</FONT></TD></TR></TABLE>>;
+        label=<<TABLE BORDER="0"><TR><TD><FONT COLOR="#ff073a"><B>SuperSet 3</B></FONT></TD></TR><TR><TD><FONT POINT-SIZE="9" COLOR="#ff073a">Price Extremes — &lt;33% &gt;33% =34%</FONT></TD></TR></TABLE>>;
         style=filled;
-        fillcolor="#FFEBEE";
-        color="#C62828";
+        fillcolor="#1a0508";
+        color="#ff073a";
+        penwidth=2;
 
-        node [shape=box, style="rounded,filled", fillcolor="#FFCDD2", color="#C62828", fontsize=7];
+        node [shape=box, style="rounded,filled", fillcolor="#1f0a0f", color="#ff073a", fontcolor="#ff073a", fontsize=9, penwidth=2];
 
-        S3_0 [label="high &gt; atr_pct"];
-        S3_1 [label="ivr &lt; macd_sig"];
+        S3_0 [label="high > atr_pct"];
+        S3_1 [label="ivr < macd_sig"];
         S3_2 [label="feat_54 = feat_62"];
-        S3_3 [label="close &gt; feat_63"];
-        S3_4 [label="target &gt; feat_59"];
-        S3_5 [label="cmf &gt; risk_over"];
-        S3_6 [label="pos_mult &lt; feat_63"];
+        S3_3 [label="close > feat_63"];
+        S3_4 [label="target > feat_59"];
+        S3_5 [label="cmf > risk_over"];
+        S3_6 [label="pos_mult < feat_63"];
         S3_7 [label="spread = risk_over"];
 
         {rank=same; S3_0; S3_1; S3_2; S3_3;}
@@ -139,70 +150,73 @@ digraph CondorNetLogicMap {
     }
 
     // ==========================================
-    // SUPERSET 4 - Volatility Structure
+    // SUPERSET 4 - Volatility Structure (Neon Teal)
     // ==========================================
     subgraph cluster_ss4 {
-        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 4</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Volatility Structure — &lt;34% &gt;33% =33%</FONT></TD></TR></TABLE>>;
+        label=<<TABLE BORDER="0"><TR><TD><FONT COLOR="#00ffcc"><B>SuperSet 4</B></FONT></TD></TR><TR><TD><FONT POINT-SIZE="9" COLOR="#00ffcc">Volatility Structure — &lt;34% &gt;33% =33%</FONT></TD></TR></TABLE>>;
         style=filled;
-        fillcolor="#E0F2F1";
-        color="#00695C";
+        fillcolor="#001a1a";
+        color="#00ffcc";
+        penwidth=2;
 
-        node [shape=box, style="rounded,filled", fillcolor="#B2DFDB", color="#00695C", fontsize=7];
+        node [shape=box, style="rounded,filled", fillcolor="#0a1f1f", color="#00ffcc", fontcolor="#00ffcc", fontsize=9, penwidth=2];
 
-        S4_0 [label="feat_60 &gt; feat_61"];
-        S4_1 [label="iv_conf &lt; beta1"];
-        S4_2 [label="atr_pct &gt; kappa"];
-        S4_3 [label="cmf &lt; risk_over"];
+        S4_0 [label="feat_60 > feat_61"];
+        S4_1 [label="iv_conf < beta1"];
+        S4_2 [label="atr_pct > kappa"];
+        S4_3 [label="cmf < risk_over"];
         S4_4 [label="bb_pct = psar_rev"];
-        S4_5 [label="iv_conf &gt; feat_60"];
-        S4_6 [label="iv_conf &gt; beta1"];
-        S4_7 [label="bb_pct &gt; feat_63"];
+        S4_5 [label="iv_conf > feat_60"];
+        S4_6 [label="iv_conf > beta1"];
+        S4_7 [label="bb_pct > feat_63"];
 
         {rank=same; S4_0; S4_1; S4_2; S4_3;}
         {rank=same; S4_4; S4_5; S4_6; S4_7;}
     }
 
     // ==========================================
-    // SUPERSET 5 - Execution Allowance
+    // SUPERSET 5 - Execution Allowance (Neon Yellow)
     // ==========================================
     subgraph cluster_ss5 {
-        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 5</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Execution Allowance — &lt;33% &gt;34% =33%</FONT></TD></TR></TABLE>>;
+        label=<<TABLE BORDER="0"><TR><TD><FONT COLOR="#ffff00"><B>SuperSet 5</B></FONT></TD></TR><TR><TD><FONT POINT-SIZE="9" COLOR="#ffff00">Execution Allowance — &lt;33% &gt;34% =33%</FONT></TD></TR></TABLE>>;
         style=filled;
-        fillcolor="#FFF8E1";
-        color="#F57F17";
+        fillcolor="#1a1a00";
+        color="#ffff00";
+        penwidth=2;
 
-        node [shape=box, style="rounded,filled", fillcolor="#FFECB3", color="#F57F17", fontsize=7];
+        node [shape=box, style="rounded,filled", fillcolor="#1f1f0a", color="#ffff00", fontcolor="#ffff00", fontsize=9, penwidth=2];
 
-        S5_0 [label="friction &gt; feat_60"];
-        S5_1 [label="breakout &lt; press_dn"];
-        S5_2 [label="macd &lt; feat_54"];
+        S5_0 [label="friction > feat_60"];
+        S5_1 [label="breakout < press_dn"];
+        S5_2 [label="macd < feat_54"];
         S5_3 [label="bb_pct = psar_rev"];
-        S5_4 [label="open &gt; feat_61"];
-        S5_5 [label="feat_60 &gt; feat_61"];
+        S5_4 [label="open > feat_61"];
+        S5_5 [label="feat_60 > feat_61"];
         S5_6 [label="bb_upper = chaos"];
-        S5_7 [label="cmf &gt; gap_risk"];
+        S5_7 [label="cmf > gap_risk"];
 
         {rank=same; S5_0; S5_1; S5_2; S5_3;}
         {rank=same; S5_4; S5_5; S5_6; S5_7;}
     }
 
     // ==========================================
-    // SUPERSET 6 - Regime-Momentum
+    // SUPERSET 6 - Regime-Momentum (Neon Blue)
     // ==========================================
     subgraph cluster_ss6 {
-        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 6</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Regime-Momentum — &lt;33% &gt;34% =33%</FONT></TD></TR></TABLE>>;
+        label=<<TABLE BORDER="0"><TR><TD><FONT COLOR="#0080ff"><B>SuperSet 6</B></FONT></TD></TR><TR><TD><FONT POINT-SIZE="9" COLOR="#0080ff">Regime-Momentum — &lt;33% &gt;34% =33%</FONT></TD></TR></TABLE>>;
         style=filled;
-        fillcolor="#E8EAF6";
-        color="#3F51B5";
+        fillcolor="#000f1a";
+        color="#0080ff";
+        penwidth=2;
 
-        node [shape=box, style="rounded,filled", fillcolor="#C5CAE9", color="#3F51B5", fontsize=7];
+        node [shape=box, style="rounded,filled", fillcolor="#081420", color="#0080ff", fontcolor="#0080ff", fontsize=9, penwidth=2];
 
-        S6_0 [label="cmf &gt; mtf_cons"];
-        S6_1 [label="bb_lower &gt; feat_61"];
-        S6_2 [label="bb_pct &lt; exec"];
+        S6_0 [label="cmf > mtf_cons"];
+        S6_1 [label="bb_lower > feat_61"];
+        S6_2 [label="bb_pct < exec"];
         S6_3 [label="spread = risk_over"];
-        S6_4 [label="close &lt; feat_62"];
-        S6_5 [label="vega &lt; psar_adapt"];
+        S6_4 [label="close < feat_62"];
+        S6_5 [label="vega < psar_adapt"];
         S6_6 [label="breakout = iv_conf"];
         S6_7 [label="psar_rev = feat_59"];
 
@@ -211,39 +225,41 @@ digraph CondorNetLogicMap {
     }
 
     // ==========================================
-    // SUPERSET 7 - Stabilizer Logic
+    // SUPERSET 7 - Stabilizer Logic (Neon Purple)
     // ==========================================
     subgraph cluster_ss7 {
-        label=<<TABLE BORDER="0"><TR><TD><B>SuperSet 7</B></TD></TR><TR><TD><FONT POINT-SIZE="8">Stabilizer Logic — &lt;33% &gt;33% =34%</FONT></TD></TR></TABLE>>;
+        label=<<TABLE BORDER="0"><TR><TD><FONT COLOR="#bf00ff"><B>SuperSet 7</B></FONT></TD></TR><TR><TD><FONT POINT-SIZE="9" COLOR="#bf00ff">Stabilizer Logic — &lt;33% &gt;33% =34%</FONT></TD></TR></TABLE>>;
         style=filled;
-        fillcolor="#ECEFF1";
-        color="#455A64";
+        fillcolor="#12001a";
+        color="#bf00ff";
+        penwidth=2;
 
-        node [shape=box, style="rounded,filled", fillcolor="#CFD8DC", color="#455A64", fontsize=7];
+        node [shape=box, style="rounded,filled", fillcolor="#180a1f", color="#bf00ff", fontcolor="#bf00ff", fontsize=9, penwidth=2];
 
-        S7_0 [label="bb_upper &lt; feat_57"];
-        S7_1 [label="bb_upper &gt; feat_57"];
-        S7_2 [label="spread &gt; risk_over"];
-        S7_3 [label="vega &lt; kappa"];
+        S7_0 [label="bb_upper < feat_57"];
+        S7_1 [label="bb_upper > feat_57"];
+        S7_2 [label="spread > risk_over"];
+        S7_3 [label="vega < kappa"];
         S7_4 [label="bb_lower = risk_over"];
         S7_5 [label="bb_sigma = bw_exp"];
-        S7_6 [label="press_dn &gt; feat_56"];
-        S7_7 [label="vega &lt; vol_energy"];
+        S7_6 [label="press_dn > feat_56"];
+        S7_7 [label="vega < vol_energy"];
 
         {rank=same; S7_0; S7_1; S7_2; S7_3;}
         {rank=same; S7_4; S7_5; S7_6; S7_7;}
     }
 
     // ==========================================
-    // OUTPUT TARGETS
+    // OUTPUT TARGETS (Neon Pink)
     // ==========================================
     subgraph cluster_outputs {
-        label=<<B>Output Targets (10)</B>>;
+        label=<<FONT COLOR="#ff1493"><B>Output Targets (10)</B></FONT>>;
         style=filled;
-        fillcolor="#FCE4EC";
-        color="#AD1457";
+        fillcolor="#1a0010";
+        color="#ff1493";
+        penwidth=2;
 
-        node [shape=box, style="rounded,filled", fillcolor="#F8BBD9", color="#AD1457", fontsize=8];
+        node [shape=box, style="rounded,filled", fillcolor="#1f0a18", color="#ff1493", fontcolor="#ff1493", fontsize=10, penwidth=2];
 
         out_strikes [label="Strike Selection\ncall_offset, put_offset\nwing_width, dte"];
         out_profit [label="Profitability\nwas_profitable\nrealized_roi, max_loss"];
@@ -253,50 +269,51 @@ digraph CondorNetLogicMap {
     }
 
     // ==========================================
-    // EDGES - Flow connections
+    // EDGES - Flow connections (Neon glow effect)
     // ==========================================
 
-    // Features to SuperSets (grouped)
-    edge [color="#1565C0", penwidth=1.5, style=dashed];
+    // Features to SuperSets
+    edge [color="#00ffff", penwidth=2, style=dashed];
     feat_vol -> S0_0 [lhead=cluster_ss0];
     feat_mom -> S1_0 [lhead=cluster_ss1];
     feat_risk -> S2_0 [lhead=cluster_ss2];
     feat_regime -> S3_0 [lhead=cluster_ss3];
 
     // SuperSets to Outputs
-    edge [color="#2E7D32", penwidth=2, style=solid];
+    edge [color="#39ff14", penwidth=3, style=solid];
     S0_7 -> out_strikes [ltail=cluster_ss0];
     S1_7 -> out_strikes [ltail=cluster_ss1];
 
-    edge [color="#7B1FA2", penwidth=2];
+    edge [color="#ff00ff", penwidth=3];
     S2_7 -> out_profit [ltail=cluster_ss2];
     S3_7 -> out_profit [ltail=cluster_ss3];
 
-    edge [color="#E65100", penwidth=2];
+    edge [color="#ff6600", penwidth=3];
     S4_7 -> out_signals [ltail=cluster_ss4];
     S5_7 -> out_signals [ltail=cluster_ss5];
 
-    edge [color="#3F51B5", penwidth=2];
+    edge [color="#0080ff", penwidth=3];
     S6_7 -> out_signals [ltail=cluster_ss6];
     S7_7 -> out_signals [ltail=cluster_ss7];
 
     // ==========================================
-    // LEGEND
+    // LEGEND (Neon White)
     // ==========================================
     subgraph cluster_legend {
-        label=<<B>Operator Legend</B>>;
+        label=<<FONT COLOR="#ffffff"><B>Operator Legend</B></FONT>>;
         style=filled;
-        fillcolor="#FAFAFA";
-        color="#9E9E9E";
+        fillcolor="#111111";
+        color="#ffffff";
+        penwidth=2;
 
         node [shape=plaintext];
 
-        legend [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="3">
-            <TR><TD BGCOLOR="#E0E0E0"><B>Symbol</B></TD><TD BGCOLOR="#E0E0E0"><B>Meaning</B></TD></TR>
-            <TR><TD>&lt;</TD><TD>Feature A less than Feature B</TD></TR>
-            <TR><TD>&gt;</TD><TD>Feature A greater than Feature B</TD></TR>
-            <TR><TD>=</TD><TD>Features approximately equal</TD></TR>
-            <TR><TD COLSPAN="2"><FONT POINT-SIZE="7">Steepness: 20.0 (soft sigmoid)</FONT></TD></TR>
+        legend [label=<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4" COLOR="#444444" BGCOLOR="#0a0a0a">
+            <TR><TD BGCOLOR="#222222"><FONT COLOR="#ffffff"><B>Symbol</B></FONT></TD><TD BGCOLOR="#222222"><FONT COLOR="#ffffff"><B>Meaning</B></FONT></TD></TR>
+            <TR><TD><FONT COLOR="#39ff14">&lt;</FONT></TD><TD><FONT COLOR="#aaaaaa">Feature A less than Feature B</FONT></TD></TR>
+            <TR><TD><FONT COLOR="#ff6600">&gt;</FONT></TD><TD><FONT COLOR="#aaaaaa">Feature A greater than Feature B</FONT></TD></TR>
+            <TR><TD><FONT COLOR="#00ffff">=</FONT></TD><TD><FONT COLOR="#aaaaaa">Features approximately equal</FONT></TD></TR>
+            <TR><TD COLSPAN="2"><FONT POINT-SIZE="8" COLOR="#666666">Steepness: 20.0 (soft sigmoid)</FONT></TD></TR>
         </TABLE>>];
     }
 }
