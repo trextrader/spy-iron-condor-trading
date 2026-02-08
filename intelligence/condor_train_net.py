@@ -968,6 +968,20 @@ def train_condor_net(args):
                     eta_seconds=eta_seconds,
                 )
 
+                # Emit fuzzy gate activations for heatmap
+                if 'predicates' in diag and diag['predicates'] is not None:
+                    preds = diag['predicates']
+                    # Average across batch, take first 10 gates
+                    if preds.dim() >= 2:
+                        activations = preds.mean(dim=0)[:10].detach().cpu().tolist()
+                    else:
+                        activations = preds[:10].detach().cpu().tolist()
+                    emitter.emit_fuzzy(
+                        step=global_step,
+                        epoch=epoch + 1,
+                        activations=activations,
+                    )
+
         scheduler.step()
         avg_train_loss = epoch_loss / n_train_batches
 
