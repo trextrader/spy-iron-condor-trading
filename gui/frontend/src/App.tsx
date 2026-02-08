@@ -13,6 +13,7 @@ const TapeViewer = lazy(() => import('@/pages/TapeViewer'));
 const ModelIntrospection = lazy(() => import('@/pages/ModelIntrospection'));
 const TradeExplorer = lazy(() => import('@/pages/TradeExplorer'));
 const OptimizationPanel = lazy(() => import('@/pages/OptimizationPanel'));
+const Training = lazy(() => import('@/pages/Training'));
 
 function App() {
   return (
@@ -25,6 +26,7 @@ function App() {
 
             {/* Control Panels */}
             <Route path="/backtest" element={<BacktestPanel />} />
+            <Route path="/training" element={<Training />} />
             <Route path="/intelligence" element={<IntelligencePanel />} />
             <Route path="/execution" element={<ExecutionPanel />} />
 

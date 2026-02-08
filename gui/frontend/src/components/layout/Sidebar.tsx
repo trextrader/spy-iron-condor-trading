@@ -11,6 +11,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { path: '/', label: 'Dashboard', icon: '📊', category: 'Overview' },
   { path: '/backtest', label: 'Backtest', icon: '⏱️', category: 'Control' },
+  { path: '/training', label: 'Training', icon: '🏋️', category: 'Control' },
   { path: '/intelligence', label: 'Intelligence', icon: '🧠', category: 'Control' },
   { path: '/execution', label: 'Execution', icon: '⚡', category: 'Control' },
   { path: '/tape', label: 'Tape Viewer', icon: '📜', category: 'Data' },
