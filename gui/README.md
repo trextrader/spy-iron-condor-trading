@@ -43,6 +43,16 @@ npm run dev
 
 ## Architecture
 
+### Architecture Diagrams
+
+For detailed visual specifications, see:
+- **[GUI Architecture](../docs/architecture/gui_architecture.png)** - Complete GUI system diagram
+- **[Training Telemetry Flow](../docs/architecture/training_telemetry_flow.png)** - Real-time data flow
+- **[Training Components](../docs/architecture/training_components.png)** - React component breakdown
+- **[Complete System v2.3](../docs/architecture/complete_system_v23.png)** - Full system with GUI layer
+
+### Directory Structure
+
 ```
 gui/
 ├── backend/                 # FastAPI Python backend

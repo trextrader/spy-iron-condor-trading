@@ -1,0 +1,205 @@
+digraph TrainingComponents {
+    rankdir=TB;
+    bgcolor="#0a0a0a";
+    fontname="Helvetica";
+    fontcolor="#e0e0e0";
+    node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
+    edge [fontname="Helvetica", fontcolor="#b0b0b0", color="#606060"];
+
+    // Title
+    label=<<b>Training Page Component Architecture</b><br/>React Components for Real-time Training Visualization>;
+    labelloc="t";
+    fontsize=18;
+
+    // Main Page
+    training_page [label=<<b>Training.tsx</b><br/>Main Training Page<br/>Uses useTrainingTelemetry()>, shape=box3d, fillcolor="#e74c3c", fontsize=12];
+
+    // Header Section
+    subgraph cluster_header {
+        label="Header Section";
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        training_header [label=<<b>TrainingHeader</b><br/>Status Display>, shape=component, fillcolor="#5dade2"];
+
+        subgraph cluster_header_elements {
+            label="Elements";
+            style=filled;
+            fillcolor="#3d3d3d";
+
+            epoch_counter [label="Epoch Counter\n3 / 20", shape=box, fillcolor="#3498db"];
+            step_counter [label="Step Counter\n1,234 / 5,000", shape=box, fillcolor="#3498db"];
+            progress_ring [label="Circular Progress\nSVG Ring 45%", shape=circle, fillcolor="#2ecc71"];
+            eta_display [label="ETA Display\n2h 15m remaining", shape=box, fillcolor="#f39c12"];
+            status_badge [label="Status Badge\n'training' | 'idle'", shape=ellipse, fillcolor="#9b59b6"];
+        }
+    }
+
+    // Metrics Section
+    subgraph cluster_metrics {
+        label="Metrics Section";
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        metric_grid [label=<<b>MetricGrid</b><br/>12 Loss Components>, shape=component, fillcolor="#5dade2"];
+
+        subgraph cluster_cards {
+            label="LiveMetricCards (12)";
+            style=filled;
+            fillcolor="#3d3d3d";
+
+            card_loss [label="loss\n0.4235", shape=box, fillcolor="#e74c3c"];
+            card_mse [label="mse\n0.0812", shape=box, fillcolor="#e67e22"];
+            card_npdd [label="npdd\n0.1523", shape=box, fillcolor="#f39c12"];
+            card_sharpe [label="sharpe\n1.2341", shape=box, fillcolor="#2ecc71"];
+            card_dd [label="dd\n0.0312", shape=box, fillcolor="#3498db"];
+            card_turnover [label="turnover\n0.0156", shape=box, fillcolor="#9b59b6"];
+            card_fuzzy [label="fuzzy\n0.8912", shape=box, fillcolor="#e74c3c"];
+            card_pattern [label="pattern_ent\n0.0234", shape=box, fillcolor="#e67e22"];
+            card_group [label="group_inv\n0.0145", shape=box, fillcolor="#f39c12"];
+            card_rho [label="rho\n0.0089", shape=box, fillcolor="#2ecc71"];
+            card_energy [label="energy\n0.0067", shape=box, fillcolor="#3498db"];
+            card_growth [label="growth\n0.0045", shape=box, fillcolor="#9b59b6"];
+        }
+
+        live_metric_card [label=<<b>LiveMetricCard</b><br/>Single Metric Display>, shape=component, fillcolor="#8e44ad"];
+
+        subgraph cluster_card_elements {
+            label="Card Elements";
+            style=filled;
+            fillcolor="#4a235a";
+
+            label_text [label="Label\nComponent name", shape=box, fillcolor="#a569bd"];
+            value_text [label="Value\nFormatted number", shape=box, fillcolor="#a569bd"];
+            sparkline [label="MiniSparkline\nSVG polyline", shape=box, fillcolor="#a569bd"];
+            color_dot [label="Color Indicator\nComponent color", shape=circle, fillcolor="#a569bd"];
+        }
+    }
+
+    // Charts Section
+    subgraph cluster_charts {
+        label="Charts Section";
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        loss_chart [label=<<b>StreamingLossChart</b><br/>Real-time Loss Trajectory>, shape=component, fillcolor="#5dade2"];
+
+        subgraph cluster_chart_elements {
+            label="Recharts Components";
+            style=filled;
+            fillcolor="#3d3d3d";
+
+            line_chart [label="LineChart\n800x300", shape=box, fillcolor="#3498db"];
+            x_axis [label="XAxis\nStep number", shape=box, fillcolor="#3498db"];
+            y_axis [label="YAxis\nLoss value", shape=box, fillcolor="#3498db"];
+            tooltip [label="Tooltip\nHover details", shape=box, fillcolor="#3498db"];
+            legend [label="Legend\nClickable toggles", shape=box, fillcolor="#3498db"];
+            lines [label="Line × 12\nOne per component", shape=box, fillcolor="#2ecc71"];
+        }
+
+        toggle_buttons [label="Component Toggles\n[loss] [mse] [npdd] ...", shape=box, fillcolor="#f39c12"];
+    }
+
+    // Heatmap Section
+    subgraph cluster_heatmap {
+        label="Heatmap Section";
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        heatmap [label=<<b>StreamingHeatmap</b><br/>Fuzzy Gate Activations>, shape=component, fillcolor="#5dade2"];
+
+        subgraph cluster_heatmap_elements {
+            label="Canvas Elements";
+            style=filled;
+            fillcolor="#3d3d3d";
+
+            canvas [label="Canvas\n10 rows × 100 cols", shape=box, fillcolor="#e74c3c"];
+            colormap [label="Magma Colormap\n0.0 → 1.0", shape=box, fillcolor="#9b59b6"];
+            labels [label="Gate Labels\nF0...F9", shape=box, fillcolor="#3498db"];
+            hover_tooltip [label="Hover Tooltip\nStep, Gate, Value", shape=box, fillcolor="#f39c12"];
+        }
+    }
+
+    // Diagnostics Section
+    subgraph cluster_diagnostics {
+        label="Diagnostics Section";
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        diag_panel [label=<<b>DiagnosticsPanel</b><br/>Training Diagnostics>, shape=component, fillcolor="#5dade2"];
+
+        subgraph cluster_diag_charts {
+            label="Mini Charts";
+            style=filled;
+            fillcolor="#3d3d3d";
+
+            lr_chart [label="LR Chart\nAreaChart\nexponential", shape=box, fillcolor="#2ecc71"];
+            grad_chart [label="Grad Norm Chart\nAreaChart", shape=box, fillcolor="#e67e22"];
+            scaler_chart [label="Scaler Chart\nAreaChart", shape=box, fillcolor="#9b59b6"];
+        }
+    }
+
+    // Controls Section
+    subgraph cluster_controls {
+        label="Controls Section";
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        controls [label=<<b>TrainingControls</b><br/>Simulation Controls>, shape=component, fillcolor="#5dade2"];
+
+        start_btn [label="Start Simulation\nPOST /simulate/start", shape=box, fillcolor="#2ecc71"];
+        stop_btn [label="Stop Simulation\nPOST /simulate/stop", shape=box, fillcolor="#e74c3c"];
+        clear_btn [label="Clear History\nclearHistory()", shape=box, fillcolor="#95a5a6"];
+    }
+
+    // Connections
+    training_page -> training_header;
+    training_page -> metric_grid;
+    training_page -> loss_chart;
+    training_page -> heatmap;
+    training_page -> diag_panel;
+    training_page -> controls;
+
+    training_header -> epoch_counter;
+    training_header -> step_counter;
+    training_header -> progress_ring;
+    training_header -> eta_display;
+    training_header -> status_badge;
+
+    metric_grid -> live_metric_card [label="×12"];
+    live_metric_card -> label_text;
+    live_metric_card -> value_text;
+    live_metric_card -> sparkline;
+    live_metric_card -> color_dot;
+
+    metric_grid -> card_loss [style=invis];
+    metric_grid -> card_mse [style=invis];
+    metric_grid -> card_npdd [style=invis];
+    metric_grid -> card_sharpe [style=invis];
+    metric_grid -> card_dd [style=invis];
+    metric_grid -> card_turnover [style=invis];
+
+    loss_chart -> line_chart;
+    line_chart -> x_axis;
+    line_chart -> y_axis;
+    line_chart -> tooltip;
+    line_chart -> legend;
+    line_chart -> lines;
+    loss_chart -> toggle_buttons;
+
+    heatmap -> canvas;
+    canvas -> colormap;
+    canvas -> labels;
+    canvas -> hover_tooltip;
+
+    diag_panel -> lr_chart;
+    diag_panel -> grad_chart;
+    diag_panel -> scaler_chart;
+
+    controls -> start_btn;
+    controls -> stop_btn;
+    controls -> clear_btn;
+
+    // Copyright
+    copyright [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D - All rights reserved.", shape=plaintext, fontsize=10, fontcolor="#777777"];
+}

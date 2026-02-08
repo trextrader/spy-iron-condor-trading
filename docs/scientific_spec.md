@@ -1484,12 +1484,12 @@ If this document conflicts with the master spec, the master spec governs impleme
 
 For any quantitative claims in this spec, the *actual deployed model profile* must be recorded and traceable from checkpoint metadata. Do not assume fixed layer counts or input dimensions without verifying `model_config` and `feature_cols` stored in the checkpoint.
 
-## 13. Interpretability & Audit System (v3.0)
+## 19. Interpretability & Audit System (v3.0)
 
 To ensure safety, transparency, and regulatory auditability of the Neural CDE decision process, we implement a rigorous model interpretability and stability audit framework.
 This framework transforms the Neural CDE from a black-box predictor into a verifiable parametric policy system.
 
-### 13.1 Neural CDE Dynamics & Stability
+### 19.1 Neural CDE Dynamics & Stability
 
 The model evolves a latent state $Z_t$ driven by a continuous control path $X_t$ under a learned vector field $f$.
 
@@ -1505,11 +1505,11 @@ $$
 
 This bound enforces a global Lipschitz constraint on the dynamics, ensuring controlled state evolution even under large market shocks.
 
-### 13.2 Perturbation & Gradient Attribution
+### 19.2 Perturbation & Gradient Attribution
 
 To explain why the model makes a given trade decision, we apply two complementary attribution methods: global perturbation analysis and local sensitivity analysis.
 
-#### 13.2.1 Permutation Importance
+#### 19.2.1 Permutation Importance
 
 Permutation importance measures the global causal influence of each feature by breaking its association with the target and observing the resulting degradation in predictive performance.
 
@@ -1526,7 +1526,7 @@ Where:
 
 High $I_j$ indicates strong dependence of the model’s predictions on feature $j$.
 
-#### 13.2.2 Gradient Saliency
+#### 19.2.2 Gradient Saliency
 
 Gradient saliency measures local sensitivity by analyzing how infinitesimal changes in input features affect the model output.
 
@@ -1542,11 +1542,11 @@ Where:
 
 This captures the instantaneous attention of the Neural CDE to each feature at decision time.
 
-### 13.3 Information Geometry: Fisher & Hessian Analysis
+### 19.3 Information Geometry: Fisher & Hessian Analysis
 
 To audit training quality and parameter sensitivity, we analyze the curvature of the loss landscape using information-geometric tools.
 
-#### 13.3.1 Fisher Information Matrix
+#### 19.3.1 Fisher Information Matrix
 
 The Fisher Information Matrix quantifies how much information the parameters $\theta$ carry about the predictive distribution.
 
@@ -1559,7 +1559,7 @@ Properties:
 *   Strong off-diagonal terms indicate parameter coupling
 *   Low-rank structure suggests redundancy or over-parameterization
 
-#### 13.3.2 Hessian Eigenspectrum
+#### 19.3.2 Hessian Eigenspectrum
 
 The Hessian matrix of the loss function is defined as:
 
@@ -1580,11 +1580,11 @@ $$
 
 Lower trace correlates with flatter minima and improved out-of-sample robustness.
 
-### 13.4 Physics-Inspired Stability Metrics
+### 19.4 Physics-Inspired Stability Metrics
 
 To quantify model drift between two checkpoints $P$ and $Q$ (e.g., Epoch 3 vs Epoch 4), we apply metrics inspired by statistical physics and optimal transport.
 
-#### 13.4.1 Wasserstein Distance (Earth Mover’s Distance)
+#### 19.4.1 Wasserstein Distance (Earth Mover's Distance)
 
 The first-order Wasserstein distance measures the minimal transport cost required to transform one prediction distribution into another.
 
@@ -1597,7 +1597,7 @@ Where:
 
 Small $W_1$ indicates distributional stability across training epochs.
 
-#### 13.4.2 Mean Squared Deviation (Energy Metric)
+#### 19.4.2 Mean Squared Deviation (Energy Metric)
 
 The mean squared deviation measures the energy difference between two model outputs.
 
@@ -1607,7 +1607,7 @@ $$
 
 This metric captures pointwise drift in predictions and is sensitive to regime-specific divergence.
 
-### 13.5 Audit Interpretation & Deployment Gate
+### 19.5 Audit Interpretation & Deployment Gate
 
 A model checkpoint is considered deployment-safe if it satisfies:
 *   Stable permutation rankings across epochs

@@ -1044,6 +1044,13 @@ def train_condor_net(args):
                     'd_h': args.d_h, 'd_v': args.d_v,
                     'd_m': args.d_m, 'd_r': args.d_r,
                 },
+                'hyperparameters': {
+                    'n_predicates': args.n_predicates,
+                    'n_sets': args.n_sets,
+                    'n_super_sets': args.n_super_sets,
+                    'n_layers': args.n_layers,
+                    'd_control': args.d_control,
+                },
                 'feature_cols': FEATURE_COLS,
                 'normalization': {'median': med.tolist(), 'scale': scale.tolist()},
             }, checkpoint_path)
@@ -1061,6 +1068,13 @@ def train_condor_net(args):
                 'state_dims': {
                     'd_h': args.d_h, 'd_v': args.d_v,
                     'd_m': args.d_m, 'd_r': args.d_r,
+                },
+                'hyperparameters': {
+                    'n_predicates': args.n_predicates,
+                    'n_sets': args.n_sets,
+                    'n_super_sets': args.n_super_sets,
+                    'n_layers': args.n_layers,
+                    'd_control': args.d_control,
                 },
                 'feature_cols': FEATURE_COLS,
                 'normalization': {'median': med.tolist(), 'scale': scale.tolist()},

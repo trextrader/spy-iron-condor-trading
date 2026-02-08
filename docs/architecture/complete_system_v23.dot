@@ -1,0 +1,180 @@
+digraph CompleteSystemV23 {
+    rankdir=TB;
+    bgcolor="#0a0a0a";
+    fontname="Helvetica";
+    fontcolor="#e0e0e0";
+    node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
+    edge [fontname="Helvetica", fontcolor="#b0b0b0", color="#606060"];
+    compound=true;
+
+    // Title
+    label=<<b>CondorBrain Complete System Architecture v2.3</b><br/>Quantor-MTFuzz Trading System with Real-time GUI>;
+    labelloc="t";
+    fontsize=20;
+
+    // GUI Layer (NEW in v2.3)
+    subgraph cluster_gui {
+        label=<<b>GUI Layer (Phase 6)</b>>;
+        style=filled;
+        fillcolor="#1a1a2e";
+        color="#e74c3c";
+        penwidth=2;
+
+        subgraph cluster_frontend {
+            label="Frontend (React 18)";
+            style=filled;
+            fillcolor="#0f3460";
+
+            dashboard_page [label="Dashboard\nSystem Overview", shape=box, fillcolor="#4a90e2"];
+            training_page [label="Training Page\nReal-time Viz", shape=box, fillcolor="#e74c3c"];
+            introspect_page [label="Introspection\nPost-training", shape=box, fillcolor="#9b59b6"];
+            backtest_page [label="Backtest\nResults", shape=box, fillcolor="#1abc9c"];
+        }
+
+        websocket [label="WebSocket\nReal-time Updates", shape=parallelogram, fillcolor="#2ecc71"];
+
+        subgraph cluster_backend {
+            label="Backend (FastAPI)";
+            style=filled;
+            fillcolor="#16213e";
+
+            api_training [label="/api/training/*\nTelemetry", shape=box, fillcolor="#e74c3c"];
+            api_config [label="/api/config/*\nSettings", shape=box, fillcolor="#3498db"];
+            api_backtest [label="/api/backtest/*\nRuns", shape=box, fillcolor="#1abc9c"];
+            ws_manager [label="WS Manager\nBroadcast", shape=component, fillcolor="#2ecc71"];
+        }
+    }
+
+    // Data Layer
+    subgraph cluster_data {
+        label=<<b>Data Layer</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        spot_data [label="Spot Bars\n1m/5m/15m CSV", shape=folder, fillcolor="#4a90e2"];
+        options_data [label="Options Chain\nMarks + Greeks", shape=folder, fillcolor="#4a90e2"];
+        aux_data [label="Aux Feeds\nVIX, ES, Gaps", shape=folder, fillcolor="#4a90e2"];
+
+        data_engine [label="DataEngine\nLag-Aware Alignment\nFail-fast Mode", shape=component, fillcolor="#e74c3c"];
+        market_snapshot [label="MarketSnapshot\n+ Alignment Metadata", shape=note, fillcolor="#f39c12"];
+    }
+
+    // Intelligence Layer
+    subgraph cluster_intelligence {
+        label=<<b>Intelligence Layer (CondorNet v4.0)</b>>;
+        style=filled;
+        fillcolor="#4a235a";
+
+        condor_net [label=<<b>CondorNet</b><br/>ETD-1 Integrator<br/>+ TFT Control<br/>+ Neural CDE>, shape=box3d, fillcolor="#9b59b6"];
+
+        subgraph cluster_components {
+            label="Core Components";
+            style=filled;
+            fillcolor="#6c3483";
+
+            fuzzy_engine [label="Fuzzy Engine\n10-Factor", shape=box, fillcolor="#8e44ad"];
+            regime_filter [label="Regime Filter\nVIX/IV Gate", shape=box, fillcolor="#8e44ad"];
+            predicate_gates [label="Predicate Gates\n2048 Slots", shape=box, fillcolor="#8e44ad"];
+        }
+
+        output_heads [label="Output Heads\nTopKMoE (3 experts)\nDiffusion Decoder", shape=component, fillcolor="#a569bd"];
+    }
+
+    // Training Layer
+    subgraph cluster_training {
+        label=<<b>Training Layer</b>>;
+        style=filled;
+        fillcolor="#1a472a";
+
+        train_script [label="condor_train_net.py\n--gui-telemetry\n--checkpoint-every", shape=box, fillcolor="#27ae60"];
+
+        subgraph cluster_training_features {
+            label="Training Features";
+            style=filled;
+            fillcolor="#145a32";
+
+            composite_loss [label="Composite Loss\n12 Components", shape=ellipse, fillcolor="#58d68d"];
+            telemetry_emitter [label="TrainingEmitter\nHTTP Telemetry", shape=ellipse, fillcolor="#58d68d"];
+            checkpointer [label="Epoch Checkpointer\nFull State Save", shape=ellipse, fillcolor="#58d68d"];
+            diagnostics_saver [label="Diagnostics\nJSON Export", shape=ellipse, fillcolor="#58d68d"];
+        }
+
+        checkpoints [label="models/checkpoints/\ncondornet_epoch_*.pt", shape=folder, fillcolor="#2ecc71"];
+    }
+
+    // Execution Layer
+    subgraph cluster_execution {
+        label=<<b>Execution Layer</b>>;
+        style=filled;
+        fillcolor="#2c3e50";
+
+        strategy [label="Strategy\nalignment_policy()\nlag_weighted_edge()", shape=hexagon, fillcolor="#e67e22"];
+        sizer [label="Sizer\nKelly Criterion\nConfidence Scaling", shape=hexagon, fillcolor="#e67e22"];
+        risk_mgr [label="Risk Manager\nGreeks Tracking\nDrawdown Caps", shape=hexagon, fillcolor="#c0392b"];
+        router [label="Router\n4-Leg Condor\nOrder Execution", shape=hexagon, fillcolor="#16a085"];
+    }
+
+    // Outputs
+    subgraph cluster_outputs {
+        label=<<b>Outputs</b>>;
+        style=filled;
+        fillcolor="#1a1a1a";
+
+        trade_log [label="Trade Log\nPositions, P&L", shape=folder, fillcolor="#95a5a6"];
+        metrics [label="Performance\nSharpe, MaxDD", shape=folder, fillcolor="#95a5a6"];
+        reports [label="Reports\nBacktest Results", shape=folder, fillcolor="#95a5a6"];
+    }
+
+    // Connections - Data Flow
+    spot_data -> data_engine;
+    options_data -> data_engine;
+    aux_data -> data_engine;
+    data_engine -> market_snapshot;
+
+    // Intelligence Flow
+    market_snapshot -> fuzzy_engine;
+    market_snapshot -> regime_filter;
+    market_snapshot -> condor_net;
+    fuzzy_engine -> predicate_gates;
+    regime_filter -> predicate_gates;
+    predicate_gates -> condor_net;
+    condor_net -> output_heads;
+
+    // Execution Flow
+    output_heads -> strategy;
+    strategy -> sizer;
+    sizer -> risk_mgr;
+    risk_mgr -> router;
+    router -> trade_log;
+    router -> metrics;
+
+    // Training Flow
+    market_snapshot -> train_script [style=dashed, label="training data"];
+    train_script -> composite_loss;
+    train_script -> telemetry_emitter;
+    train_script -> checkpointer;
+    train_script -> diagnostics_saver;
+    checkpointer -> checkpoints;
+    checkpoints -> condor_net [style=dashed, label="load weights"];
+
+    // GUI Connections
+    telemetry_emitter -> api_training [label="HTTP POST", color="#2ecc71", fontcolor="#2ecc71"];
+    api_training -> ws_manager;
+    ws_manager -> websocket;
+    websocket -> training_page [dir=both];
+
+    api_config -> strategy [style=dashed, label="config"];
+    api_backtest -> data_engine [style=dashed, label="run"];
+    metrics -> backtest_page [style=dashed];
+    diagnostics_saver -> introspect_page [style=dashed, label="JSON"];
+
+    // Version Badge
+    subgraph cluster_version {
+        style=invis;
+        rank=sink;
+        version [label="v2.3.0 | Phase 6 Complete\nGUI + Training Telemetry + Epoch Checkpointing", shape=note, fillcolor="#2ecc71", fontsize=11];
+    }
+
+    // Copyright
+    copyright [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D - All rights reserved.", shape=plaintext, fontsize=10, fontcolor="#777777"];
+}

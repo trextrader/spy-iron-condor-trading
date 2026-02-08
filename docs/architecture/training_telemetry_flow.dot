@@ -1,0 +1,155 @@
+digraph TrainingTelemetryFlow {
+    rankdir=LR;
+    bgcolor="#0a0a0a";
+    fontname="Helvetica";
+    fontcolor="#e0e0e0";
+    node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
+    edge [fontname="Helvetica", fontcolor="#b0b0b0", color="#606060"];
+
+    // Title
+    label=<<b>Training Telemetry Data Flow</b><br/>Real-time Metrics Streaming Architecture>;
+    labelloc="t";
+    fontsize=18;
+
+    // Training Script Layer
+    subgraph cluster_training {
+        label=<<b>Training Script</b>>;
+        style=filled;
+        fillcolor="#1a472a";
+
+        train_loop [label="Training Loop\ncondor_train_net.py", shape=box, fillcolor="#27ae60"];
+
+        subgraph cluster_metrics {
+            label="Metrics Collected";
+            style=filled;
+            fillcolor="#145a32";
+
+            loss_metrics [label="12 Loss Components\nloss, mse, npdd\nsharpe, dd, turnover\nfuzzy, pattern_ent\ngroup_inv, rho\nenergy, growth", shape=note, fillcolor="#58d68d"];
+            diag_metrics [label="Diagnostics\nlearning_rate\ngradient_norm\nscaler_scale", shape=note, fillcolor="#58d68d"];
+            fuzzy_metrics [label="Fuzzy Activations\n10 gates × batch\nF0...F9 values", shape=note, fillcolor="#58d68d"];
+            progress_info [label="Progress Info\nepoch, step\ntotal_steps\nETA", shape=note, fillcolor="#58d68d"];
+        }
+
+        emitter [label="TrainingEmitter\nget_backend_url()", shape=component, fillcolor="#2ecc71"];
+    }
+
+    // HTTP Layer
+    subgraph cluster_http {
+        label=<<b>HTTP Transport</b>>;
+        style=filled;
+        fillcolor="#2c3e50";
+
+        http_step [label="POST /telemetry/step\nEvery 10 steps", shape=parallelogram, fillcolor="#3498db"];
+        http_status [label="POST /telemetry/status\nOn progress change", shape=parallelogram, fillcolor="#3498db"];
+        http_epoch [label="POST /telemetry/epoch\nEnd of epoch", shape=parallelogram, fillcolor="#3498db"];
+        http_fuzzy [label="POST /telemetry/fuzzy\nEvery 10 steps", shape=parallelogram, fillcolor="#3498db"];
+        http_complete [label="POST /telemetry/complete\nTraining done", shape=parallelogram, fillcolor="#3498db"];
+    }
+
+    // Backend Layer
+    subgraph cluster_backend {
+        label=<<b>FastAPI Backend</b>>;
+        style=filled;
+        fillcolor="#4a235a";
+
+        training_router [label="training.py Router\n@router.post(\"/telemetry/*\")", shape=box, fillcolor="#9b59b6"];
+        ws_manager [label="WebSocket Manager\nbroadcast(channel, data)", shape=component, fillcolor="#8e44ad"];
+
+        subgraph cluster_channels {
+            label="WebSocket Channels";
+            style=filled;
+            fillcolor="#6c3483";
+
+            ch_step [label="training.step", shape=ellipse, fillcolor="#a569bd"];
+            ch_status [label="training.status", shape=ellipse, fillcolor="#a569bd"];
+            ch_epoch [label="training.epoch", shape=ellipse, fillcolor="#a569bd"];
+            ch_fuzzy [label="training.fuzzy", shape=ellipse, fillcolor="#a569bd"];
+            ch_complete [label="training.complete", shape=ellipse, fillcolor="#a569bd"];
+        }
+    }
+
+    // WebSocket Connection
+    websocket [label=<<b>WebSocket</b><br/>ws://host:8000/ws<br/>Auto-reconnect>, shape=diamond, fillcolor="#2ecc71", fontsize=11];
+
+    // Frontend Layer
+    subgraph cluster_frontend {
+        label=<<b>React Frontend</b>>;
+        style=filled;
+        fillcolor="#1a1a2e";
+
+        ws_hook [label="useWebSocket\n• subscribe(channel)\n• onMessage handler", shape=ellipse, fillcolor="#5dade2"];
+
+        telemetry_hook [label="useTrainingTelemetry\n• stepHistory[]\n• fuzzyHistory[]\n• currentStatus", shape=ellipse, fillcolor="#5dade2"];
+
+        subgraph cluster_components {
+            label="Training Page Components";
+            style=filled;
+            fillcolor="#0f3460";
+
+            header [label="TrainingHeader\nepoch, step, ETA\nprogress %", shape=component, fillcolor="#e74c3c"];
+            grid [label="MetricGrid\n12 LiveMetricCards\nwith sparklines", shape=component, fillcolor="#e74c3c"];
+            chart [label="StreamingLossChart\nRecharts LineChart\nmulti-line toggle", shape=component, fillcolor="#e74c3c"];
+            heatmap [label="StreamingHeatmap\nCanvas heatmap\nmagma colormap", shape=component, fillcolor="#e74c3c"];
+            diag_panel [label="DiagnosticsPanel\nLR, grad, scaler\nmini AreaCharts", shape=component, fillcolor="#e74c3c"];
+        }
+    }
+
+    // Data Flow Connections
+    train_loop -> loss_metrics [style=dashed];
+    train_loop -> diag_metrics [style=dashed];
+    train_loop -> fuzzy_metrics [style=dashed];
+    train_loop -> progress_info [style=dashed];
+
+    loss_metrics -> emitter;
+    diag_metrics -> emitter;
+    fuzzy_metrics -> emitter;
+    progress_info -> emitter;
+
+    emitter -> http_step [label="emit_step()"];
+    emitter -> http_status [label="emit_status()"];
+    emitter -> http_epoch [label="emit_epoch()"];
+    emitter -> http_fuzzy [label="emit_fuzzy()"];
+    emitter -> http_complete [label="emit_complete()"];
+
+    http_step -> training_router;
+    http_status -> training_router;
+    http_epoch -> training_router;
+    http_fuzzy -> training_router;
+    http_complete -> training_router;
+
+    training_router -> ws_manager;
+
+    ws_manager -> ch_step;
+    ws_manager -> ch_status;
+    ws_manager -> ch_epoch;
+    ws_manager -> ch_fuzzy;
+    ws_manager -> ch_complete;
+
+    ch_step -> websocket;
+    ch_status -> websocket;
+    ch_epoch -> websocket;
+    ch_fuzzy -> websocket;
+    ch_complete -> websocket;
+
+    websocket -> ws_hook;
+    ws_hook -> telemetry_hook;
+
+    telemetry_hook -> header [label="status"];
+    telemetry_hook -> grid [label="stepHistory"];
+    telemetry_hook -> chart [label="stepHistory"];
+    telemetry_hook -> heatmap [label="fuzzyHistory"];
+    telemetry_hook -> diag_panel [label="stepHistory"];
+
+    // Environment Detection Note
+    subgraph cluster_env {
+        label="Environment URL Detection";
+        style=filled;
+        fillcolor="#1a1a1a";
+        rank=sink;
+
+        env_note [label="get_backend_url() detects:\n• local → http://localhost:8000\n• lightai → https://8000-{CLOUDSPACE}.litng.ai\n• kaggle → $KAGGLE_BACKEND_URL\n• colab → $COLAB_BACKEND_URL", shape=note, fillcolor="#34495e", fontsize=10];
+    }
+
+    // Copyright
+    copyright [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D - All rights reserved.", shape=plaintext, fontsize=10, fontcolor="#777777"];
+}

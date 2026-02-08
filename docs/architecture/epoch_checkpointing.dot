@@ -1,0 +1,135 @@
+digraph EpochCheckpointing {
+    rankdir=TB;
+    bgcolor="#0a0a0a";
+    fontname="Helvetica";
+    fontcolor="#e0e0e0";
+    node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
+    edge [fontname="Helvetica", fontcolor="#b0b0b0", color="#606060"];
+
+    // Title
+    label=<<b>Epoch Checkpointing System</b><br/>Model State Preservation for Training Resumption>;
+    labelloc="t";
+    fontsize=18;
+
+    // Training Loop
+    subgraph cluster_training {
+        label=<<b>Training Loop</b>>;
+        style=filled;
+        fillcolor="#1a472a";
+
+        start [label="Training Start", shape=ellipse, fillcolor="#27ae60"];
+        epoch_loop [label="for epoch in epochs:", shape=box, fillcolor="#2ecc71"];
+        batch_loop [label="for batch in dataloader:", shape=box, fillcolor="#58d68d"];
+        forward [label="Forward Pass\nloss = model(batch)", shape=box, fillcolor="#82e0aa"];
+        backward [label="Backward Pass\nloss.backward()", shape=box, fillcolor="#82e0aa"];
+        optimizer_step [label="Optimizer Step\noptimizer.step()", shape=box, fillcolor="#82e0aa"];
+        scheduler_step [label="Scheduler Step\nscheduler.step()", shape=box, fillcolor="#82e0aa"];
+        epoch_end [label="Epoch End", shape=diamond, fillcolor="#f39c12"];
+    }
+
+    // Checkpoint Decision
+    subgraph cluster_checkpoint {
+        label=<<b>Checkpoint Logic</b>>;
+        style=filled;
+        fillcolor="#4a235a";
+
+        check_interval [label="epoch % checkpoint_every == 0?", shape=diamond, fillcolor="#9b59b6"];
+        save_checkpoint [label="Save Checkpoint", shape=box, fillcolor="#8e44ad"];
+
+        subgraph cluster_state {
+            label="State Saved";
+            style=filled;
+            fillcolor="#6c3483";
+
+            model_state [label="model.state_dict()\nAll weights & biases", shape=note, fillcolor="#a569bd"];
+            optim_state [label="optimizer.state_dict()\nMomentum, Adam states", shape=note, fillcolor="#a569bd"];
+            sched_state [label="scheduler.state_dict()\nLR schedule position", shape=note, fillcolor="#a569bd"];
+            epoch_num [label="epoch: int\nCurrent epoch number", shape=note, fillcolor="#a569bd"];
+            config_meta [label="config: dict\nModel configuration", shape=note, fillcolor="#a569bd"];
+        }
+    }
+
+    // Output Files
+    subgraph cluster_output {
+        label=<<b>Output Directory</b>>;
+        style=filled;
+        fillcolor="#1a1a2e";
+
+        checkpoint_dir [label="models/checkpoints/", shape=folder, fillcolor="#3498db"];
+
+        file1 [label="condornet_epoch_001.pt", shape=note, fillcolor="#5dade2"];
+        file2 [label="condornet_epoch_002.pt", shape=note, fillcolor="#5dade2"];
+        file3 [label="condornet_epoch_003.pt", shape=note, fillcolor="#5dade2"];
+        fileN [label="condornet_epoch_N.pt", shape=note, fillcolor="#5dade2"];
+    }
+
+    // Resume Flow
+    subgraph cluster_resume {
+        label=<<b>Training Resumption</b>>;
+        style=filled;
+        fillcolor="#2c3e50";
+
+        load_checkpoint [label="torch.load(checkpoint_path)", shape=box, fillcolor="#3498db"];
+        restore_model [label="model.load_state_dict()", shape=box, fillcolor="#5dade2"];
+        restore_optim [label="optimizer.load_state_dict()", shape=box, fillcolor="#5dade2"];
+        restore_sched [label="scheduler.load_state_dict()", shape=box, fillcolor="#5dade2"];
+        resume_epoch [label="start_epoch = saved_epoch + 1", shape=box, fillcolor="#5dade2"];
+        continue_training [label="Continue Training", shape=ellipse, fillcolor="#2ecc71"];
+    }
+
+    // Connections - Training Flow
+    start -> epoch_loop;
+    epoch_loop -> batch_loop;
+    batch_loop -> forward;
+    forward -> backward;
+    backward -> optimizer_step;
+    optimizer_step -> scheduler_step;
+    scheduler_step -> batch_loop [label="next batch", style=dashed];
+    batch_loop -> epoch_end [label="all batches done"];
+    epoch_end -> check_interval;
+
+    // Checkpoint Flow
+    check_interval -> save_checkpoint [label="Yes"];
+    check_interval -> epoch_loop [label="No\nnext epoch"];
+
+    save_checkpoint -> model_state;
+    save_checkpoint -> optim_state;
+    save_checkpoint -> sched_state;
+    save_checkpoint -> epoch_num;
+    save_checkpoint -> config_meta;
+
+    model_state -> checkpoint_dir;
+    optim_state -> checkpoint_dir;
+    sched_state -> checkpoint_dir;
+    epoch_num -> checkpoint_dir;
+    config_meta -> checkpoint_dir;
+
+    checkpoint_dir -> file1;
+    checkpoint_dir -> file2;
+    checkpoint_dir -> file3;
+    checkpoint_dir -> fileN;
+
+    save_checkpoint -> epoch_loop [label="continue"];
+
+    // Resume Flow
+    fileN -> load_checkpoint [style=dashed, label="--resume"];
+    load_checkpoint -> restore_model;
+    restore_model -> restore_optim;
+    restore_optim -> restore_sched;
+    restore_sched -> resume_epoch;
+    resume_epoch -> continue_training;
+    continue_training -> epoch_loop [style=dashed];
+
+    // CLI Reference
+    subgraph cluster_cli {
+        label="CLI Arguments";
+        style=filled;
+        fillcolor="#1a1a1a";
+        rank=sink;
+
+        cli_note [label="--checkpoint-every N    Save every N epochs\n--checkpoint-dir PATH   Output directory\n--resume PATH           Resume from checkpoint", shape=note, fillcolor="#34495e", fontsize=10];
+    }
+
+    // Copyright
+    copyright [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D - All rights reserved.", shape=plaintext, fontsize=10, fontcolor="#777777"];
+}

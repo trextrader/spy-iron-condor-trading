@@ -33,6 +33,13 @@ This directory contains the visual specifications for the CondorBrain system. Be
 - **[institutional_execution_flow.png](institutional_execution_flow.png)**: The operational workflow for executing trades with a broker, including order lifecycle management and risk checks.
 - **[optimization_pipeline.png](optimization_pipeline.png)**: The feedback loop for model retraining and hyperparameter tuning, connecting training performance back to production parameters.
 
+## 🖥️ GUI & Training (Phase 6 - NEW)
+- **[complete_system_v23.png](complete_system_v23.png)**: Complete system architecture v2.3 showing all layers including the new GUI layer with real-time training dashboard.
+- **[gui_architecture.png](gui_architecture.png)**: CondorBrain GUI architecture showing React frontend components, FastAPI backend routers, WebSocket connections, and state management.
+- **[training_telemetry_flow.png](training_telemetry_flow.png)**: Real-time training telemetry data flow from training script through HTTP POST to backend WebSocket broadcast to frontend components.
+- **[training_components.png](training_components.png)**: Detailed breakdown of the Training page React components including TrainingHeader, MetricGrid, StreamingLossChart, StreamingHeatmap, and DiagnosticsPanel.
+- **[epoch_checkpointing.png](epoch_checkpointing.png)**: Epoch checkpointing system showing model state preservation for training resumption with optimizer and scheduler state.
+
 ---
 **© 2026 by Dr. T. Jerry Mahabub, Ph.D — All rights reserved.**
 

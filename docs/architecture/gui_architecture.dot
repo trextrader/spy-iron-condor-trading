@@ -1,0 +1,136 @@
+digraph GUIArchitecture {
+    rankdir=TB;
+    bgcolor="#0a0a0a";
+    fontname="Helvetica";
+    fontcolor="#e0e0e0";
+    node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
+    edge [fontname="Helvetica", fontcolor="#b0b0b0", color="#606060"];
+
+    // Title
+    label=<<b>CondorBrain GUI Architecture</b><br/>Phase 6 - Real-time Training Dashboard>;
+    labelloc="t";
+    fontsize=20;
+
+    // Frontend Layer
+    subgraph cluster_frontend {
+        label=<<b>Frontend (React 18 + TypeScript)</b>>;
+        style=filled;
+        fillcolor="#1a1a2e";
+
+        subgraph cluster_pages {
+            label="Pages";
+            style=filled;
+            fillcolor="#16213e";
+
+            dashboard [label="Dashboard\n• System overview\n• Equity curves\n• Activity feed", shape=box, fillcolor="#4a90e2"];
+            training [label="Training\n• Real-time metrics\n• Loss charts\n• Fuzzy heatmaps", shape=box, fillcolor="#e74c3c"];
+            introspection [label="Model Introspection\n• Loss trajectories\n• Gate distributions\n• Epoch summaries", shape=box, fillcolor="#9b59b6"];
+            backtest [label="Backtest\n• Run controls\n• Results viewer", shape=box, fillcolor="#1abc9c"];
+            trade_explorer [label="Trade Explorer\n• Trade history\n• Analytics", shape=box, fillcolor="#f39c12"];
+            optimization [label="Optimization\n• Parameter tuning\n• Results", shape=box, fillcolor="#e67e22"];
+        }
+
+        subgraph cluster_training_components {
+            label="Training Components";
+            style=filled;
+            fillcolor="#0f3460";
+
+            training_header [label="TrainingHeader\n• Epoch/Step\n• Progress ring\n• ETA", shape=component, fillcolor="#5dade2"];
+            metric_grid [label="MetricGrid\n• 12 loss cards\n• Live sparklines", shape=component, fillcolor="#5dade2"];
+            loss_chart [label="StreamingLossChart\n• Recharts LineChart\n• Component toggles", shape=component, fillcolor="#5dade2"];
+            heatmap [label="StreamingHeatmap\n• Canvas API\n• Magma colormap", shape=component, fillcolor="#5dade2"];
+            diagnostics [label="DiagnosticsPanel\n• LR chart\n• Grad norm\n• Scaler", shape=component, fillcolor="#5dade2"];
+            controls [label="TrainingControls\n• Start/Stop\n• Clear history", shape=component, fillcolor="#5dade2"];
+        }
+
+        subgraph cluster_hooks {
+            label="State Management";
+            style=filled;
+            fillcolor="#1a1a2e";
+
+            ws_hook [label="useWebSocket\n• Auto-reconnect\n• Channel subscriptions", shape=ellipse, fillcolor="#8e44ad"];
+            telemetry_hook [label="useTrainingTelemetry\n• Step history (1000)\n• Fuzzy activations", shape=ellipse, fillcolor="#8e44ad"];
+            zustand [label="Zustand Stores\n• Config state\n• UI state", shape=ellipse, fillcolor="#8e44ad"];
+        }
+    }
+
+    // WebSocket Layer
+    websocket [label=<<b>WebSocket Connection</b><br/>ws://localhost:8000/ws<br/>wss://8000-{cloudspace}.litng.ai/ws>, shape=parallelogram, fillcolor="#2ecc71", fontsize=11];
+
+    // Backend Layer
+    subgraph cluster_backend {
+        label=<<b>Backend (FastAPI + Pydantic v2)</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+
+        subgraph cluster_routers {
+            label="API Routers";
+            style=filled;
+            fillcolor="#3d3d3d";
+
+            training_router [label="/api/training/*\n• /telemetry/step\n• /telemetry/status\n• /telemetry/epoch\n• /telemetry/fuzzy\n• /simulate/*\n• /diagnostics/*", shape=box, fillcolor="#e74c3c"];
+            config_router [label="/api/config/*\n• /current\n• /update\n• /toggle", shape=box, fillcolor="#3498db"];
+            backtest_router [label="/api/backtest/*\n• /run\n• /status\n• /results", shape=box, fillcolor="#1abc9c"];
+        }
+
+        ws_manager [label="WebSocket Manager\n• Broadcast channels\n• Client registry", shape=component, fillcolor="#2ecc71"];
+
+        subgraph cluster_services {
+            label="Services";
+            style=filled;
+            fillcolor="#3d3d3d";
+
+            emitter [label="TrainingEmitter\n• HTTP POST client\n• URL auto-detect", shape=ellipse, fillcolor="#f39c12"];
+        }
+    }
+
+    // Training Script
+    subgraph cluster_training_script {
+        label=<<b>Training Script (Python)</b>>;
+        style=filled;
+        fillcolor="#1a472a";
+
+        condor_train [label="condor_train_net.py\n• --gui-telemetry\n• --save-diagnostics\n• --checkpoint-every", shape=box, fillcolor="#27ae60"];
+
+        telemetry_calls [label="Telemetry Calls\n• Every 10 steps\n• Per epoch\n• On complete", shape=note, fillcolor="#2ecc71"];
+    }
+
+    // Connections
+    training -> training_header;
+    training -> metric_grid;
+    training -> loss_chart;
+    training -> heatmap;
+    training -> diagnostics;
+    training -> controls;
+
+    telemetry_hook -> training;
+    ws_hook -> telemetry_hook;
+    websocket -> ws_hook [dir=both, label="subscribe/receive"];
+
+    ws_manager -> websocket [label="broadcast"];
+    training_router -> ws_manager [label="emit"];
+
+    condor_train -> telemetry_calls;
+    telemetry_calls -> emitter [label="emit_step()\nemit_epoch()\nemit_fuzzy()"];
+    emitter -> training_router [label="HTTP POST", color="#2ecc71", fontcolor="#2ecc71"];
+
+    // Legend
+    subgraph cluster_legend {
+        label="Legend";
+        style=filled;
+        fillcolor="#1a1a1a";
+        rank=sink;
+
+        legend_page [label="Page", shape=box, fillcolor="#4a90e2"];
+        legend_component [label="Component", shape=component, fillcolor="#5dade2"];
+        legend_hook [label="Hook/Store", shape=ellipse, fillcolor="#8e44ad"];
+        legend_router [label="API Router", shape=box, fillcolor="#e74c3c"];
+    }
+
+    // Copyright
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        copyright [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D - All rights reserved.", shape=plaintext, fontsize=10, fontcolor="#777777"];
+    }
+}

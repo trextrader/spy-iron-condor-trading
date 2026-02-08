@@ -128,7 +128,17 @@ CSV → MarketSnapshot → Trading Decision with sample data.
 
 Successfully implemented a full-stack **real-time training dashboard** for CondorNet visualization and control.
 
-### GUI Architecture
+### Architecture Diagrams
+
+| Diagram | Description |
+|---------|-------------|
+| ![GUI Architecture](architecture/gui_architecture.png) | Complete GUI system architecture |
+| ![Training Telemetry Flow](architecture/training_telemetry_flow.png) | Real-time data flow from training script to frontend |
+| ![Training Components](architecture/training_components.png) | React component breakdown |
+| ![Complete System v2.3](architecture/complete_system_v23.png) | Full system with GUI layer |
+| ![Epoch Checkpointing](architecture/epoch_checkpointing.png) | Model state preservation system |
+
+### GUI Directory Structure
 
 ```
 gui/
