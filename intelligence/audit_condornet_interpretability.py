@@ -38,15 +38,18 @@ EPS = 1e-6
 
 def infer_architecture_from_state_dict(state_dict: dict) -> dict:
     """
-    Infer CondorNet architecture parameters from state_dict keys.
+    Infer CondorNet architecture parameters from state_dict keys and tensor shapes.
 
     This is used when checkpoints don't include hyperparameters metadata.
     Parses keys like 'super_sets.7.sets.31.relational_logic.steepness' to
     determine n_super_sets=8 and n_sets=32.
+
+    Also infers n_features from relational_logic.projection.weight shapes.
     """
     n_super_sets = 0
     n_sets = 0
     n_predicates = 32  # Default
+    n_features = None
 
     super_set_pattern = re.compile(r'^super_sets\.(\d+)\.')
     sets_pattern = re.compile(r'\.sets\.(\d+)\.')
@@ -64,18 +67,33 @@ def infer_architecture_from_state_dict(state_dict: dict) -> dict:
             set_idx = int(sets_match.group(1))
             n_sets = max(n_sets, set_idx + 1)
 
-    # Infer n_predicates from pred_gates.extra_heads if present
+    # Infer n_features from relational_logic.projection.weight shape
+    # Shape is [1, n_pairs * 3] where n_pairs = n_features * (n_features - 1) / 2
+    for key, tensor in state_dict.items():
+        if 'relational_logic.projection.weight' in key and tensor.dim() == 2:
+            total_size = tensor.shape[1]
+            n_pairs = total_size // 3
+            # Solve: n_features * (n_features - 1) / 2 = n_pairs
+            # n_features^2 - n_features - 2*n_pairs = 0
+            # Using quadratic formula: n = (1 + sqrt(1 + 8*n_pairs)) / 2
+            import math
+            n_features = int((1 + math.sqrt(1 + 8 * n_pairs)) / 2)
+            break
+
+    # Infer n_predicates from pred_gates.extra_heads shape
+    # extra_heads[0].weight shape is (n_extra_preds, d_h/4)
+    # n_extra_preds = n_predicates - 5 (base predicates)
     for key, tensor in state_dict.items():
         if 'pred_gates.extra_heads.0.weight' in key:
-            # Shape is (n_predicates + base_predicates, d_h/4)
-            # Base predicates = 5 (iv_rank, spread, rsi, gap, gamma)
-            n_predicates = tensor.shape[0] - 5 + 32  # Approximation
+            n_extra = tensor.shape[0]
+            n_predicates = n_extra + 5  # Add back the 5 base predicates
             break
 
     return {
-        'n_super_sets': max(n_super_sets, 8),  # Default 8 if not found
-        'n_sets': max(n_sets, 16),  # Default 16 if not found
-        'n_predicates': n_predicates
+        'n_super_sets': max(n_super_sets, 8),
+        'n_sets': max(n_sets, 16),
+        'n_predicates': n_predicates,
+        'n_features': n_features
     }
 
 
@@ -123,23 +141,39 @@ def load_condor_model(ckpt_path):
     # Try to read hyperparameters from checkpoint metadata
     hp = ckpt.get('hyperparameters', ckpt.get('model_config', {}))
 
-    # If not found or incomplete, infer from state_dict keys
-    if not hp or 'n_sets' not in hp:
-        print("  Inferring architecture from state_dict keys...")
-        inferred = infer_architecture_from_state_dict(state_dict)
+    # Always infer from state_dict to get correct dimensions
+    print("  Inferring architecture from state_dict...")
+    inferred = infer_architecture_from_state_dict(state_dict)
+
+    # Use checkpoint hyperparameters if available, otherwise use inferred
+    if hp and 'n_sets' in hp:
         n_predicates = hp.get('n_predicates', inferred['n_predicates'])
+        n_sets = hp.get('n_sets', inferred['n_sets'])
+        n_super_sets = hp.get('n_super_sets', inferred['n_super_sets'])
+    else:
+        n_predicates = inferred['n_predicates']
         n_sets = inferred['n_sets']
         n_super_sets = inferred['n_super_sets']
-    else:
-        n_predicates = hp.get('n_predicates', 32)
-        n_sets = hp.get('n_sets', 16)
-        n_super_sets = hp.get('n_super_sets', 8)
 
-    print(f"  Architecture: d_h={sd['d_h']}, d_v={sd['d_v']}, d_m={sd['d_m']}, d_r={sd['d_r']}")
+    # CRITICAL: Use inferred n_features if available, not len(feature_cols)
+    # This ensures model dimensions match the checkpoint
+    if inferred.get('n_features'):
+        d_input = inferred['n_features']
+        print(f"  Using inferred d_input={d_input} (checkpoint was trained with {d_input} features)")
+        # Adjust feature_cols to match
+        if len(feature_cols) > d_input:
+            feature_cols = feature_cols[:d_input]
+        elif len(feature_cols) < d_input:
+            # Pad with generic names
+            feature_cols = list(feature_cols) + [f'feat_{i}' for i in range(len(feature_cols), d_input)]
+    else:
+        d_input = len(feature_cols)
+
+    print(f"  Architecture: d_input={d_input}, d_h={sd['d_h']}, d_v={sd['d_v']}, d_m={sd['d_m']}, d_r={sd['d_r']}")
     print(f"  Logic: n_predicates={n_predicates}, n_sets={n_sets}, n_super_sets={n_super_sets}")
 
     model = CondorNet(
-        d_input=len(feature_cols),
+        d_input=d_input,
         d_h=sd['d_h'], d_v=sd['d_v'], d_m=sd['d_m'], d_r=sd['d_r'],
         n_predicates=n_predicates,
         n_sets=n_sets,
