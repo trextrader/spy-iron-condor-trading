@@ -543,6 +543,10 @@ def parse_args():
                         help="Send training metrics to GUI via WebSocket")
     parser.add_argument("--save-diagnostics", action="store_true",
                         help="Save diagnostics to models/diagnostics/ for GUI Model Introspection")
+    parser.add_argument("--checkpoint-every", type=int, default=0,
+                        help="Save checkpoint every N epochs (0=disabled, 1=every epoch)")
+    parser.add_argument("--checkpoint-dir", type=str, default="models/checkpoints",
+                        help="Directory for epoch checkpoints")
 
     args = parser.parse_args()
 
@@ -973,6 +977,28 @@ def train_condor_net(args):
                 metrics={k: v / n_train_batches for k, v in epoch_components.items()},
                 is_best=(avg_val_loss < best_val_loss),
             )
+
+        # Save epoch checkpoint (every N epochs)
+        if args.checkpoint_every > 0 and (epoch + 1) % args.checkpoint_every == 0:
+            checkpoint_dir = Path(args.checkpoint_dir)
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            checkpoint_path = checkpoint_dir / f"condornet_epoch_{epoch+1:03d}.pt"
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'epoch': epoch + 1,
+                'train_loss': avg_train_loss,
+                'val_loss': avg_val_loss,
+                'best_val_loss': best_val_loss,
+                'state_dims': {
+                    'd_h': args.d_h, 'd_v': args.d_v,
+                    'd_m': args.d_m, 'd_r': args.d_r,
+                },
+                'feature_cols': FEATURE_COLS,
+                'normalization': {'median': med.tolist(), 'scale': scale.tolist()},
+            }, checkpoint_path)
+            print(f"  -> Checkpoint saved: {checkpoint_path}")
 
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
