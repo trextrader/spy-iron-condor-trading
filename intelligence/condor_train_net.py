@@ -54,8 +54,55 @@ try:
     GUI_TELEMETRY_AVAILABLE = True
 except ImportError:
     GUI_TELEMETRY_AVAILABLE = False
-    def get_emitter():
+    def get_emitter(backend_url=None):
         return None
+
+
+def get_backend_url(env: str) -> str:
+    """Get the backend URL based on the environment.
+
+    Args:
+        env: One of 'local', 'lightai', 'kaggle', 'colab'
+
+    Returns:
+        Backend URL for the training emitter
+    """
+    if env == 'local':
+        return "http://localhost:8000"
+
+    elif env == 'lightai':
+        # Lightning AI cloudspaces use subdomain-based routing
+        # e.g., https://8000-{cloudspace_id}.cloudspaces.litng.ai
+        cloudspace_host = os.environ.get('LIGHTNING_CLOUDSPACE_HOST', '')
+        if cloudspace_host:
+            return f"https://8000-{cloudspace_host}"
+        # Fallback: try to construct from teamspace
+        teamspace = os.environ.get('LIGHTNING_TEAMSPACE', '')
+        if teamspace:
+            return f"https://8000-{teamspace}.cloudspaces.litng.ai"
+        print("[Warning] LIGHTNING_CLOUDSPACE_HOST not found, using localhost")
+        return "http://localhost:8000"
+
+    elif env == 'kaggle':
+        # Kaggle notebooks - typically need ngrok or similar tunneling
+        # Check for KAGGLE_BACKEND_URL environment variable
+        kaggle_url = os.environ.get('KAGGLE_BACKEND_URL', '')
+        if kaggle_url:
+            return kaggle_url
+        print("[Warning] KAGGLE_BACKEND_URL not set, using localhost")
+        return "http://localhost:8000"
+
+    elif env == 'colab':
+        # Google Colab - typically need ngrok or similar tunneling
+        # Check for COLAB_BACKEND_URL environment variable
+        colab_url = os.environ.get('COLAB_BACKEND_URL', '')
+        if colab_url:
+            return colab_url
+        print("[Warning] COLAB_BACKEND_URL not set, using localhost")
+        return "http://localhost:8000"
+
+    else:
+        return "http://localhost:8000"
 
 # Training Diagnostics (for Model Introspection page)
 try:
@@ -539,8 +586,9 @@ def parse_args():
                         help="Early stopping patience")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Verbose per-batch logging")
-    parser.add_argument("--gui-telemetry", action="store_true",
-                        help="Send training metrics to GUI via WebSocket")
+    parser.add_argument("--gui-telemetry", type=str, nargs='?', const='local', default=None,
+                        choices=['local', 'lightai', 'kaggle', 'colab'],
+                        help="Send training metrics to GUI (local|lightai|kaggle|colab)")
     parser.add_argument("--save-diagnostics", action="store_true",
                         help="Save diagnostics to models/diagnostics/ for GUI Model Introspection")
     parser.add_argument("--checkpoint-every", type=int, default=0,
@@ -566,10 +614,11 @@ def train_condor_net(args):
 
     # GUI Telemetry setup
     emitter = None
-    if getattr(args, 'gui_telemetry', False) and GUI_TELEMETRY_AVAILABLE:
-        emitter = get_emitter()
-        print("[CondorNet] GUI telemetry enabled")
-    elif getattr(args, 'gui_telemetry', False):
+    if args.gui_telemetry and GUI_TELEMETRY_AVAILABLE:
+        backend_url = get_backend_url(args.gui_telemetry)
+        emitter = get_emitter(backend_url=backend_url)
+        print(f"[CondorNet] GUI telemetry enabled ({args.gui_telemetry} -> {backend_url})")
+    elif args.gui_telemetry:
         print("[CondorNet] GUI telemetry requested but not available (GUI backend not running)")
 
     # Training Diagnostics setup (for Model Introspection)

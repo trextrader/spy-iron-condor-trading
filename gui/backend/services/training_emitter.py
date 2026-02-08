@@ -167,9 +167,12 @@ _emitter: Optional[TrainingEmitter] = None
 
 
 def get_emitter(backend_url: str = "http://localhost:8000") -> TrainingEmitter:
-    """Get the global training emitter instance."""
+    """Get or create the global training emitter instance.
+
+    If backend_url differs from existing emitter, creates a new one.
+    """
     global _emitter
-    if _emitter is None:
+    if _emitter is None or _emitter.backend_url != backend_url:
         _emitter = TrainingEmitter(backend_url=backend_url)
     return _emitter
 
