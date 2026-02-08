@@ -124,10 +124,94 @@ CSV → MarketSnapshot → Trading Decision with sample data.
 - **Policy flexibility**: Strategy-level overrides for different use cases
 - **Graceful degradation**: IV confidence decays smoothly, not binary cutoff
 
-## Next Steps (Phase 3+)
+## Phase 6: CondorBrain GUI (2026-02-07)
 
-4. **CondorNet™ Migration**: Replaced legacy Mamba-2 SSM and Neural CDE with unified CondorNet™ architecture (ETD-1 exponential integrator + TFT control synthesis + Neural CDE path response).
-5. **Documentation Audit**: Completed a thorough audit to update all architecture documentation for CondorNet™ v4.0.
+Successfully implemented a full-stack **real-time training dashboard** for CondorNet visualization and control.
+
+### GUI Architecture
+
+```
+gui/
+├── backend/                 # FastAPI + WebSocket
+│   ├── routers/
+│   │   ├── training.py      # Telemetry endpoints
+│   │   └── websocket.py     # Real-time broadcasts
+│   └── services/
+│       └── training_emitter.py  # HTTP-based telemetry
+├── frontend/                # React 18 + TypeScript
+│   ├── components/
+│   │   ├── training/        # Real-time training viz
+│   │   ├── introspection/   # Post-training analysis
+│   │   └── dashboard/       # System overview
+│   └── hooks/
+│       ├── useWebSocket.ts
+│       └── useTrainingTelemetry.ts
+```
+
+### Training Page Components
+
+| Component | Description |
+|-----------|-------------|
+| `TrainingHeader` | Epoch/step counters, circular progress, ETA |
+| `MetricGrid` | All 12 loss components with live sparklines |
+| `StreamingLossChart` | Real-time multi-line loss trajectory |
+| `StreamingHeatmap` | Fuzzy gate activation heatmap (Canvas) |
+| `DiagnosticsPanel` | LR, gradient norm, scaler mini-charts |
+| `TrainingControls` | Start/Stop simulation buttons |
+
+### Training CLI Enhancements
+
+```bash
+# Environment-based telemetry
+python intelligence/condor_train_net.py \
+  --gui-telemetry lightai \     # local|lightai|kaggle|colab
+  --save-diagnostics \          # Save JSON for Model Introspection
+  --checkpoint-every 1 \        # Save every epoch
+  --checkpoint-dir models/checkpoints
+```
+
+### WebSocket Data Flow
+
+```
+Training Script (Python)
+    │ HTTP POST every 10 steps
+    ▼
+Backend /api/training/telemetry/step
+    │ WebSocket broadcast
+    ▼
+Frontend useTrainingTelemetry hook
+    │ Updates React state
+    ▼
+Training Page components render
+```
+
+### Lightning AI Support
+
+The WebSocket auto-detects Lightning AI cloudspace URLs:
+- Frontend: `https://5173-{LIGHTNING_CLOUDSPACE_HOST}/`
+- Backend: `https://8000-{LIGHTNING_CLOUDSPACE_HOST}/`
+
+### Key Features
+
+1. **Real-time Metrics**: All 12 loss components streaming with sparklines
+2. **Loss Trajectory Chart**: Multi-line Recharts with component toggles
+3. **Fuzzy Gate Heatmap**: Canvas-based magma colormap visualization
+4. **Epoch Checkpointing**: Save model + optimizer + scheduler state
+5. **Model Introspection**: Post-training diagnostics from saved JSON
+6. **Environment Telemetry**: Auto-URL construction for local/cloud
+
+---
+
+## Completed Phases Summary
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 2.0 | Multi-Timeframe Data Pipeline | ✅ Complete |
+| 2.5 | Lag-Aware Alignment System | ✅ Complete |
+| 3.0 | Neural CDE Architecture | ✅ Complete |
+| 4.0 | CondorNet™ Unified Architecture | ✅ Complete |
+| 5.0 | Training Stability & Audit | ✅ Complete |
+| 6.0 | CondorBrain GUI | ✅ Complete |
 
 ## Commits
 - `feat: Multi-timeframe support (1/5/15m) with auto file selection`
