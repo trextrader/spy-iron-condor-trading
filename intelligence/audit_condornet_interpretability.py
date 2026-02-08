@@ -322,8 +322,15 @@ def extract_learned_logic(model, feature_names):
     return logic
 
 
-def generate_trading_rules(logic):
-    """Transcribes extracted logic into human-readable rules."""
+def generate_trading_rules(logic, max_super_sets=None, max_sets=None, max_comparisons=None):
+    """Transcribes extracted logic into human-readable rules.
+
+    Args:
+        logic: Extracted logic dictionary
+        max_super_sets: Max super_sets to show (None = all)
+        max_sets: Max sets per super_set to show (None = all)
+        max_comparisons: Max comparisons per set to show (None = all)
+    """
     rules = []
 
     p = logic.get("predicates", {})
@@ -341,9 +348,11 @@ def generate_trading_rules(logic):
         rules.append("=" * 60)
         rules.append("LEARNED RELATIONAL LOGIC (Feature Comparisons)")
         rules.append("=" * 60)
-        for ss_info in ss["super_sets"][:3]:
+        super_sets_list = ss["super_sets"][:max_super_sets] if max_super_sets else ss["super_sets"]
+        for ss_info in super_sets_list:
             rules.append(f"\nSUPER_SET {ss_info['index']}: {ss_info['n_sets']} predicate logic sets")
-            for set_info in ss_info.get("sets", [])[:3]:
+            sets_list = ss_info.get("sets", [])[:max_sets] if max_sets else ss_info.get("sets", [])
+            for set_info in sets_list:
                 steepness = set_info.get('steepness', 10)
 
                 if "operator_weights" in set_info:
@@ -351,7 +360,8 @@ def generate_trading_rules(logic):
                     rules.append(f"  SET {set_info['index']}: (<:{ops['<']:.0f}% | >:{ops['>']:.0f}% | =:{ops['=']:.0f}%)")
 
                     if "top_comparisons" in set_info:
-                        for comp in set_info["top_comparisons"][:3]:
+                        comps_list = set_info["top_comparisons"][:max_comparisons] if max_comparisons else set_info["top_comparisons"]
+                        for comp in comps_list:
                             comparison_str = comp.get("comparison", f"Pair_{comp['pair_idx']}")
                             rules.append(f"    → {comparison_str}")
                 else:
