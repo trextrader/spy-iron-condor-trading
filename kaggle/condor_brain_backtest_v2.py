@@ -1421,6 +1421,15 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
                      if net_credit < 0.10:  # Min credit filter (after slippage)
                          run_backtest._debug_counters['low_credit'] += 1
+                         # DEBUG: Track actual credit values
+                         if not hasattr(run_backtest, '_credit_samples'):
+                             run_backtest._credit_samples = []
+                         if len(run_backtest._credit_samples) < 10:  # First 10 samples
+                             run_backtest._credit_samples.append({
+                                 'gross': fill_details.get('gross_credit', 0),
+                                 'net': net_credit,
+                                 'slippage': fill_details.get('slippage', 0),
+                             })
                          continue
 
                      max_loss = (legs['width'] - net_credit) * IC_MULTIPLIER * filled_qty
@@ -1466,6 +1475,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         print(f"   Atomicity Violations: {dc.get('not_atomic', 0)}")
         print(f"   Low Credit (<$0.10): {dc.get('low_credit', 0)}")
         print(f"   SUCCESS (trades opened): {dc.get('success', 0)}")
+    
+    # DEBUG: Print credit samples
+    if hasattr(run_backtest, '_credit_samples') and run_backtest._credit_samples:
+        print(f"\n[DEBUG] CREDIT SAMPLES (first 10 low-credit trades):")
+        for i, cs in enumerate(run_backtest._credit_samples):
+            print(f"   [{i+1}] Gross: ${cs['gross']:.4f}, Net: ${cs['net']:.4f}, Slippage: ${cs['slippage']:.4f}")
     
     # Helper to return list of values for legacy main compatibility?
     # Old main expects (equity_list, trades_list)
