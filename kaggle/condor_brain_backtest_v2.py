@@ -45,6 +45,18 @@ from intelligence.canonical_feature_registry import (
     apply_semantic_nan_fill,
     get_neutral_fill_value_v22,
 )
+# Phase 5.5: Execution Reality Engine
+try:
+    from intelligence.execution_reality import (
+        ExecutionRealityEngine,
+        MarketState,
+        FillStatus,
+        FillResult,
+        create_default_engine,
+    )
+    HAS_EXECUTION_REALITY = True
+except ImportError:
+    HAS_EXECUTION_REALITY = False
 from intelligence.features.dynamic_features import (
     compute_all_dynamic_features,
     compute_all_primitive_features_v22
@@ -117,6 +129,18 @@ EXEC_TARGET_SHORT_DELTA = 0.16   # Target delta for short strikes
 EXEC_PARTIAL_FILL_THRESHOLD = 50 # Volume threshold for guaranteed full fill
 EXEC_USE_BID_ASK = True          # Use synthesized bid/ask instead of close
 EXEC_ATOMICITY_STRICT = True     # Require all 4 legs to have valid quotes
+
+# =============================================================================
+# PHASE 5.5: EXECUTION REALITY ENGINE CONFIG
+# =============================================================================
+# Enables full execution reality modeling with 8 components:
+# - Latency, Queue Position, Spread Dynamics, Volatility Shock
+# - Broken Spread Detection, Microstructure, Quote Staleness, TOD Liquidity
+EXEC_REALITY_ENABLED = True       # Use ExecutionRealityEngine for fills
+EXEC_REALITY_SEED = 42            # Seed for deterministic execution
+EXEC_REALITY_LATENCY_MS = 100.0   # Mean latency in ms
+EXEC_REALITY_AGGRESSION = 0.5     # Queue aggression (0=passive, 1=aggressive)
+EXEC_REALITY_LOG_DIAGNOSTICS = True  # Log detailed execution diagnostics
 
 # Trace + outcome labeling config
 TRACE_PER_BAR = True
@@ -630,6 +654,199 @@ def calculate_exit_fill(legs, marks_bid, marks_ask, marks_mid):
     return net_debit, True, fill_details
 
 
+# =============================================================================
+# PHASE 5.5: EXECUTION REALITY WRAPPERS FOR IRON CONDORS
+# =============================================================================
+
+def create_market_state_from_bar(spot, vix, time_of_day, volume=100, quote_age_ms=50):
+    """
+    Create MarketState from bar data for ExecutionRealityEngine.
+
+    Phase 5.5: Converts backtester context to execution reality format.
+    """
+    if not HAS_EXECUTION_REALITY:
+        return None
+
+    return MarketState(
+        vix=vix if vix else 15.0,
+        spot_price=spot,
+        recent_volume=volume,
+        time_of_day_hour=time_of_day,
+        recent_price_change_pct=0.0,  # Could be computed from spot history
+        quote_age_ms=quote_age_ms,
+        market_speed=1.0 + max(0, (vix - 15) / 30) if vix else 1.0  # Faster in high VIX
+    )
+
+
+def calculate_entry_fill_reality(legs, chain_df, target_qty, engine, market_state):
+    """
+    Calculate realistic entry fill using ExecutionRealityEngine.
+
+    Phase 5.5: Routes each leg through the execution reality engine and
+    validates atomic fill across all 4 legs.
+
+    Returns:
+        (filled_qty, net_credit, is_atomic, fill_details)
+    """
+    if legs is None or engine is None or market_state is None:
+        # Fallback to simple model
+        return calculate_entry_fill(legs, chain_df, target_qty)
+
+    # Build symbol lookup for prices
+    prices = {}
+    for _, row in chain_df.iterrows():
+        sym = row.get('option_symbol', row.get('symbol', ''))
+        if sym:
+            prices[sym] = synthesize_bid_ask(row)
+
+    leg_configs = [
+        ('short_call', legs['short_call_symbol'], True),   # is_short=True (we sell)
+        ('long_call', legs['long_call_symbol'], False),    # is_short=False (we buy)
+        ('short_put', legs['short_put_symbol'], True),
+        ('long_put', legs['long_put_symbol'], False),
+    ]
+
+    fill_results = {}
+    total_credit = 0.0
+    total_slippage = 0.0
+    all_filled = True
+    diagnostics = {'leg_results': {}}
+
+    for leg_name, symbol, is_short in leg_configs:
+        if symbol not in prices:
+            return 0, 0.0, False, {"reason": f"missing_{leg_name}", "symbol": symbol}
+
+        p = prices[symbol]
+        bid, ask = p['bid'], p['ask']
+
+        # Entry: shorts sell (is_entry=True), longs buy (is_entry=True but different side)
+        # For Iron Condor entry:
+        # - Short legs: we SELL, so we get the bid side (is_entry=True in engine)
+        # - Long legs: we BUY, so we pay the ask side (is_entry=True for buying)
+        result = engine.simulate_realistic_fill(
+            bid=bid,
+            ask=ask,
+            size=target_qty,
+            market_state=market_state,
+            is_entry=is_short  # True for shorts (sell), False for longs (buy to open)
+        )
+
+        fill_results[leg_name] = result
+        diagnostics['leg_results'][leg_name] = {
+            'status': result.status.value,
+            'fill_price': result.fill_price,
+            'slippage': result.slippage,
+            'latency_ms': result.diagnostics.get('latency_ms', 0),
+        }
+
+        if result.status != FillStatus.FILLED:
+            all_filled = False
+            diagnostics['rejection'] = {
+                'leg': leg_name,
+                'reason': result.diagnostics.get('rejection_reason', result.status.value)
+            }
+            break
+
+        # Accumulate credit/debit
+        if is_short:
+            total_credit += result.fill_price  # We receive this
+        else:
+            total_credit -= result.fill_price  # We pay this
+
+        total_slippage += result.slippage
+
+    if not all_filled:
+        return 0, 0.0, False, diagnostics
+
+    diagnostics['gross_credit'] = total_credit
+    diagnostics['total_slippage'] = total_slippage
+    diagnostics['net_credit'] = total_credit  # Slippage already embedded in fill prices
+
+    return target_qty, total_credit, True, diagnostics
+
+
+def calculate_exit_fill_reality(legs, marks_bid, marks_ask, marks_mid, engine, market_state):
+    """
+    Calculate realistic exit fill using ExecutionRealityEngine.
+
+    Phase 5.5: Routes each leg through the execution reality engine.
+
+    Returns:
+        (exit_debit, is_valid, fill_details)
+    """
+    if legs is None or engine is None or market_state is None:
+        # Fallback to simple model
+        return calculate_exit_fill(legs, marks_bid, marks_ask, marks_mid)
+
+    leg_configs = [
+        ('short_call', legs['short_call_symbol'], True),   # is_short=True (we buy back)
+        ('long_call', legs['long_call_symbol'], False),    # is_short=False (we sell)
+        ('short_put', legs['short_put_symbol'], True),
+        ('long_put', legs['long_put_symbol'], False),
+    ]
+
+    fill_results = {}
+    total_debit = 0.0
+    total_slippage = 0.0
+    all_filled = True
+    diagnostics = {'leg_results': {}}
+
+    for leg_name, symbol, is_short in leg_configs:
+        if symbol not in marks_bid or symbol not in marks_ask:
+            return None, False, {"reason": f"missing_{leg_name}", "symbol": symbol}
+
+        bid = marks_bid[symbol]
+        ask = marks_ask[symbol]
+
+        # Exit: shorts buy back, longs sell
+        # - Short legs: we BUY BACK at ask (is_entry=False in engine)
+        # - Long legs: we SELL at bid (is_entry=False, but favorable side)
+        result = engine.simulate_realistic_fill(
+            bid=bid,
+            ask=ask,
+            size=1,  # Size doesn't matter for pricing
+            market_state=market_state,
+            is_entry=not is_short  # False for shorts (buy to close), True for longs (sell to close)
+        )
+
+        fill_results[leg_name] = result
+        diagnostics['leg_results'][leg_name] = {
+            'status': result.status.value,
+            'fill_price': result.fill_price,
+            'slippage': result.slippage,
+        }
+
+        if result.status == FillStatus.REJECTED:
+            # On exit, we may need to force close even with bad quotes
+            # Use mid price as fallback
+            mid = marks_mid.get(symbol, (bid + ask) / 2)
+            if is_short:
+                total_debit += mid * 1.02  # Add 2% buffer for bad exit
+            else:
+                total_debit -= mid * 0.98
+            diagnostics['leg_results'][leg_name]['forced_mid'] = True
+            continue
+
+        if result.status == FillStatus.QUEUED:
+            # Retry with aggressive fill on exit
+            total_debit += ask if is_short else -bid
+            continue
+
+        # Normal filled case
+        if is_short:
+            total_debit += result.fill_price  # We pay this
+        else:
+            total_debit -= result.fill_price  # We receive this
+
+        total_slippage += result.slippage
+
+    diagnostics['gross_debit'] = total_debit
+    diagnostics['total_slippage'] = total_slippage
+    diagnostics['net_debit'] = total_debit
+
+    return total_debit, True, diagnostics
+
+
 # --- P&L ESTIMATION ---
 def estimate_condor_pnl(spot, short_call, long_call, short_put, long_put, credit_received, max_loss, days_held, total_dte):
     """
@@ -889,9 +1106,24 @@ def build_ts_ranges(df, time_col='dt'):
     return ts_ranges
 
 
-def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None, 
+def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None,
                  use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None):
-    
+
+    # ==========================================================================
+    # PHASE 5.5: Initialize Execution Reality Engine
+    # ==========================================================================
+    exec_engine = None
+    if EXEC_REALITY_ENABLED and HAS_EXECUTION_REALITY:
+        print(f"[Phase 5.5] Initializing ExecutionRealityEngine (seed={EXEC_REALITY_SEED})...")
+        exec_engine = ExecutionRealityEngine(
+            seed=EXEC_REALITY_SEED,
+            latency_mean_ms=EXEC_REALITY_LATENCY_MS,
+            aggression=EXEC_REALITY_AGGRESSION,
+        )
+        print(f"   Latency: {EXEC_REALITY_LATENCY_MS}ms, Aggression: {EXEC_REALITY_AGGRESSION}")
+    elif EXEC_REALITY_ENABLED and not HAS_EXECUTION_REALITY:
+        print("[Phase 5.5] WARNING: ExecutionRealityEngine requested but not available. Using simple model.")
+
     # 1. PREPARE DATA (M1-Centric)
     print("Sorting and Indexing Data...")
     time_col = 'dt' if 'dt' in df.columns else 'timestamp'
@@ -980,6 +1212,22 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     print(f"[DEBUG] Entry Prob Stats: Min={entry_probs.min():.4f}, Max={entry_probs.max():.4f}, Mean={entry_probs.mean():.4f}")
     print(f"[DEBUG] > 0.40 count: {(entry_probs > 0.40).sum()}")
     print(f"[DEBUG] > 0.50 count: {(entry_probs > 0.50).sum()}")
+    
+    # DEBUG: Additional diagnostics for other gate conditions
+    pop_raw = policy_matrix[:, 4]
+    pop_probs = 1.0 / (1.0 + np.exp(-pop_raw))
+    conf_raw = policy_matrix[:, 7]
+    conf_probs = 1.0 / (1.0 + np.exp(-conf_raw))
+    
+    print(f"[DEBUG] POP (pol[4]) Stats: Min={pop_probs.min():.4f}, Max={pop_probs.max():.4f}, Mean={pop_probs.mean():.4f}")
+    print(f"[DEBUG] POP > 0.40 count: {(pop_probs > 0.40).sum()}")
+    print(f"[DEBUG] Conf (pol[7]) Stats: Min={conf_probs.min():.4f}, Max={conf_probs.max():.4f}, Mean={conf_probs.mean():.4f}")
+    print(f"[DEBUG] Conf > 0.35 count: {(conf_probs > 0.35).sum()}")
+    
+    # Combined gate check
+    combined_pass = (entry_logits > 0.0) & (pop_probs > 0.40) & (conf_probs > 0.35)
+    print(f"[DEBUG] ALL GATES PASS count: {combined_pass.sum()}")
+
         
     # Map back to bar index: policy_matrix[k] corresponds to spot_bars.iloc[SEQ_LEN + k]
     
@@ -1025,17 +1273,33 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
          marks_bid = dict(zip(chain_with_prices['option_symbol'], chain_with_prices['bid']))
          marks_ask = dict(zip(chain_with_prices['option_symbol'], chain_with_prices['ask']))
 
+         # PHASE 5.5: Create MarketState for execution reality engine
+         bar_data = spot_bars.iloc[i]
+         vix_val = bar_data.get('vix', bar_data.get('VIX', 15.0)) if hasattr(bar_data, 'get') else 15.0
+         vol_val = bar_data.get('volume', 100) if hasattr(bar_data, 'get') else 100
+         # Extract hour from timestamp for TOD liquidity
+         try:
+             ts_hour = pd.Timestamp(ts).hour + pd.Timestamp(ts).minute / 60.0
+         except:
+             ts_hour = 12.0
+         market_state = create_market_state_from_bar(spot, vix_val, ts_hour, vol_val) if exec_engine else None
+
          # 4. Update Open Trades - PHASE 5.2 FIX: Pass bid/ask/mid
          active_trades = []
          for tr in open_trades:
              tr.update_mark(ts, marks_mid, marks_bid, marks_ask)
              
-             # Check Risk Stop (5%) - PHASE 5.2 FIX: Use realistic exit cost
+             # Check Risk Stop (5%) - PHASE 5.2/5.5 FIX: Use realistic exit cost
              if tr.should_risk_close(equity):
-                 # Calculate realistic exit using bid/ask
-                 exit_debit, exit_valid, exit_details = calculate_exit_fill(
-                     tr.legs, marks_bid, marks_ask, marks_mid
-                 )
+                 # PHASE 5.5: Use ExecutionRealityEngine if available
+                 if exec_engine and market_state:
+                     exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
+                         tr.legs, marks_bid, marks_ask, marks_mid, exec_engine, market_state
+                     )
+                 else:
+                     exit_debit, exit_valid, exit_details = calculate_exit_fill(
+                         tr.legs, marks_bid, marks_ask, marks_mid
+                     )
 
                  if exit_valid:
                      # PnL = Entry Credit - Exit Debit (per share), then scale
@@ -1074,10 +1338,15 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              # Better: check days passed.
              days_held = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
              if days_held > tr.dte_entry:
-                 # PHASE 5.2 FIX: Expired - Use realistic exit cost with bid/ask
-                 exit_debit, exit_valid, exit_details = calculate_exit_fill(
-                     tr.legs, marks_bid, marks_ask, marks_mid
-                 )
+                 # PHASE 5.2/5.5 FIX: Expired - Use realistic exit cost
+                 if exec_engine and market_state:
+                     exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
+                         tr.legs, marks_bid, marks_ask, marks_mid, exec_engine, market_state
+                     )
+                 else:
+                     exit_debit, exit_valid, exit_details = calculate_exit_fill(
+                         tr.legs, marks_bid, marks_ask, marks_mid
+                     )
 
                  if exit_valid:
                      # PnL = Entry Credit - Exit Debit (per share), then scale
@@ -1128,10 +1397,17 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  legs = find_best_legs(chain_with_prices, spot, call_off, put_off, width, validate_greeks=True)
 
                  if legs:
-                    # PHASE 5.2 FIX: Use calculate_entry_fill for realistic execution
-                    filled_qty, net_credit, is_atomic, fill_details = calculate_entry_fill(
-                        legs, chain_with_prices, IC_CONTRACTS
-                    )
+                    # PHASE 5.2/5.5 FIX: Use realistic execution
+                    if exec_engine and market_state:
+                        # PHASE 5.5: Full execution reality modeling
+                        filled_qty, net_credit, is_atomic, fill_details = calculate_entry_fill_reality(
+                            legs, chain_with_prices, IC_CONTRACTS, exec_engine, market_state
+                        )
+                    else:
+                        # PHASE 5.2: Simple bid/ask + slippage
+                        filled_qty, net_credit, is_atomic, fill_details = calculate_entry_fill(
+                            legs, chain_with_prices, IC_CONTRACTS
+                        )
 
                     if not is_atomic:
                         # Atomicity violation - skip this entry
@@ -1150,9 +1426,10 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                             'entry': entry_logit,
                             'prob': prob,
                             'gross_credit': fill_details.get('gross_credit', 0),
-                            'slippage': fill_details.get('slippage', 0),
+                            'slippage': fill_details.get('total_slippage', fill_details.get('slippage', 0)),
                             'short_call_delta': legs.get('short_call_delta'),
                             'short_put_delta': legs.get('short_put_delta'),
+                            'exec_reality': True if exec_engine else False,
                         }
                     )
                     open_trades.append(new_trade)
@@ -1199,7 +1476,13 @@ def main():
     parser.add_argument("--use-trade-rules", action="store_true", default=False, help="Enable rule-based entry/exit logic")
     parser.add_argument("--use-diffusion", action="store_true", default=False, help="Enable diffusion-based parameter refinement")
     parser.add_argument("--limit", type=int, default=None, help="Limit the number of bars to simulate")
-    
+
+    # Phase 5.5: Execution Reality Toggles
+    parser.add_argument("--no-exec-reality", action="store_true", default=False, help="Disable Phase 5.5 execution reality modeling")
+    parser.add_argument("--exec-latency", type=float, default=100.0, help="Mean order latency in ms (default: 100)")
+    parser.add_argument("--exec-aggression", type=float, default=0.5, help="Queue aggression 0-1 (default: 0.5)")
+    parser.add_argument("--exec-seed", type=int, default=42, help="Seed for execution reality RNG (default: 42)")
+
     args = parser.parse_args()
 
     # --- GPU CHECK ---
@@ -1214,6 +1497,18 @@ def main():
     else:
         print("⚠️ GPU NOT DETECTED! Running on CPU (Will be slow).")
     print("="*60)
+
+    # Phase 5.5: Update Execution Reality Config from CLI args
+    global EXEC_REALITY_ENABLED, EXEC_REALITY_SEED, EXEC_REALITY_LATENCY_MS, EXEC_REALITY_AGGRESSION
+    if args.no_exec_reality:
+        EXEC_REALITY_ENABLED = False
+        print("[Phase 5.5] Execution reality DISABLED (--no-exec-reality)")
+    else:
+        EXEC_REALITY_ENABLED = True
+        EXEC_REALITY_SEED = args.exec_seed
+        EXEC_REALITY_LATENCY_MS = args.exec_latency
+        EXEC_REALITY_AGGRESSION = args.exec_aggression
+        print(f"[Phase 5.5] Execution reality ENABLED (seed={EXEC_REALITY_SEED}, latency={EXEC_REALITY_LATENCY_MS}ms, aggression={EXEC_REALITY_AGGRESSION})")
 
     # 0. Data Path Detection
     input_override = args.data or args.input
