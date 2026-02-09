@@ -22,7 +22,7 @@ import torch
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from intelligence.condor_brain_net import CondorNetV4, AugmentedStateSpec
+from intelligence.condor_brain_net import CondorNet, AugmentedStateSpec
 
 
 def load_model_and_extract_A(checkpoint_path: Path, device: str = "cpu") -> tuple:
@@ -75,7 +75,7 @@ def load_model_and_extract_A(checkpoint_path: Path, device: str = "cpu") -> tupl
             break
 
     # Create minimal model to load weights
-    model = CondorNetV4(
+    model = CondorNet(
         spec=spec,
         d_input=64,  # Will be overridden by state_dict
         n_predicates=n_predicates,
