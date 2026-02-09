@@ -22,12 +22,14 @@ import torch
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from intelligence.condor_brain_net import CondorNet, AugmentedStateSpec
+from intelligence.condor_brain_net import BlockMatrixA, AugmentedStateSpec
 
 
 def load_model_and_extract_A(checkpoint_path: Path, device: str = "cpu") -> tuple:
     """
     Load a CondorNet checkpoint and extract the full A matrix.
+
+    Uses BlockMatrixA directly to avoid full model instantiation issues.
 
     Returns:
         (A_matrix, spec, metadata)
@@ -47,8 +49,7 @@ def load_model_and_extract_A(checkpoint_path: Path, device: str = "cpu") -> tupl
         state_dict = checkpoint
         epoch = "unknown"
 
-    # Infer spec from state_dict keys
-    # Look for A_theta.A_hh.weight to get d_h
+    # Infer dimensions from state_dict keys
     d_h = d_v = d_m = d_r = 16  # defaults
 
     for key in state_dict.keys():
@@ -66,36 +67,29 @@ def load_model_and_extract_A(checkpoint_path: Path, device: str = "cpu") -> tupl
     # Create spec
     spec = AugmentedStateSpec(d_h=d_h, d_v=d_v, d_m=d_m, d_r=d_r)
 
-    # Infer other model params from state_dict
-    # Count predicates from predicate layer
-    n_predicates = 5  # default
-    for key in state_dict.keys():
-        if "predicate_layer" in key and "weight" in key:
-            n_predicates = state_dict[key].shape[0]
-            break
+    # Create BlockMatrixA directly (much simpler than full CondorNet)
+    A_theta = BlockMatrixA(spec, enforce_sparsity=False)
 
-    # Create minimal model to load weights
-    model = CondorNet(
-        spec=spec,
-        d_input=64,  # Will be overridden by state_dict
-        n_predicates=n_predicates,
-        n_sets=32,
-        n_super_sets=8,
-        d_control=64,
-        enforce_sparsity=False,
-    )
+    # Extract only the A_theta weights from state_dict
+    A_theta_state = {}
+    for key, value in state_dict.items():
+        if key.startswith("A_theta."):
+            # Remove "A_theta." prefix for loading into BlockMatrixA
+            new_key = key[8:]  # len("A_theta.") = 8
+            A_theta_state[new_key] = value
 
-    # Load state dict (strict=False to handle any mismatches)
+    # Load weights
     try:
-        model.load_state_dict(state_dict, strict=False)
+        A_theta.load_state_dict(A_theta_state, strict=False)
+        print(f"  Loaded {len(A_theta_state)} A_theta weight tensors")
     except Exception as e:
         print(f"  Warning: Partial load - {e}")
 
-    model.eval()
+    A_theta.eval()
 
     # Extract full A matrix
     with torch.no_grad():
-        A_full = model.A_theta.full_matrix().cpu().numpy()
+        A_full = A_theta.full_matrix().cpu().numpy()
 
     print(f"  A matrix shape: {A_full.shape}")
 
