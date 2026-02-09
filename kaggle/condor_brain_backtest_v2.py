@@ -1429,6 +1429,18 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                  'gross': fill_details.get('gross_credit', 0),
                                  'net': net_credit,
                                  'slippage': fill_details.get('slippage', 0),
+                                 'call_off': call_off,
+                                 'put_off': put_off,
+                                 'width': width,
+                                 'spot': spot,
+                                 's_call': legs['short_call'],
+                                 'l_call': legs['long_call'],
+                                 's_put': legs['short_put'],
+                                 'l_put': legs['long_put'],
+                                 's_call_bid': legs['short_call_bid'],
+                                 'l_call_ask': legs['long_call_ask'],
+                                 's_put_bid': legs['short_put_bid'],
+                                 'l_put_ask': legs['long_put_ask'],
                              })
                          continue
 
@@ -1481,6 +1493,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         print(f"\n[DEBUG] CREDIT SAMPLES (first 10 low-credit trades):")
         for i, cs in enumerate(run_backtest._credit_samples):
             print(f"   [{i+1}] Gross: ${cs['gross']:.4f}, Net: ${cs['net']:.4f}, Slippage: ${cs['slippage']:.4f}")
+            print(f"        Model: call_off={cs.get('call_off', '?'):.2f}, put_off={cs.get('put_off', '?'):.2f}, width={cs.get('width', '?'):.2f}")
+            print(f"        Spot: ${cs.get('spot', 0):.2f} | Calls: S{cs.get('s_call', 0):.0f}(bid ${cs.get('s_call_bid', 0):.2f}) -> L{cs.get('l_call', 0):.0f}(ask ${cs.get('l_call_ask', 0):.2f})")
+            print(f"        Puts:  S{cs.get('s_put', 0):.0f}(bid ${cs.get('s_put_bid', 0):.2f}) -> L{cs.get('l_put', 0):.0f}(ask ${cs.get('l_put_ask', 0):.2f})")
     
     # Helper to return list of values for legacy main compatibility?
     # Old main expects (equity_list, trades_list)
