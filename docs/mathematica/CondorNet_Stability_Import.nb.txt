@@ -1,0 +1,98 @@
+(* ============================================================ *)
+(* CondorNet A Matrix Import & Stability Analysis               *)
+(* For use with export_A_matrix_for_mathematica.py output       *)
+(* ============================================================ *)
+
+(* --- OPTION 1: Import from local CSV file --- *)
+(* Run: python scripts/export_A_matrix_for_mathematica.py --checkpoint models/condor_net_epoch3.pth *)
+
+localPath = "C:/SPYOptionTrader_test/exports/A_matrices/condor_net_epoch3_A.csv";
+(* Or for Wolfram Cloud, upload the CSV first, then: *)
+(* cloudPath = CloudObject["A_matrices/condor_net_epoch3_A.csv"]; *)
+
+A = Import[localPath, "CSV"];
+Print["A matrix dimensions: ", Dimensions[A]];
+Print["A matrix rank: ", MatrixRank[A]];
+
+(* Basic eigenvalue check *)
+eigs = Eigenvalues[A];
+Print["Max Re(λ): ", Max[Re[eigs]]];
+Print["Spectral radius ρ(A): ", Max[Abs[eigs]]];
+
+(* Now run your stability harness *)
+dt = 1.0;
+stabilityReport[A, dt]
+
+
+(* --- OPTION 2: Import from JSON (includes metadata) --- *)
+
+jsonPath = "C:/SPYOptionTrader_test/exports/A_matrices/condor_net_epoch3_A.json";
+data = Import[jsonPath, "JSON"];
+
+A = data["A_matrix"];
+metadata = data["metadata"];
+
+Print["Checkpoint: ", metadata["checkpoint"]];
+Print["Epoch: ", metadata["epoch"]];
+Print["State dimension d_x: ", metadata["d_x"]];
+Print["Pre-computed max Re(λ): ", metadata["max_real_eigenvalue"]];
+Print["Pre-computed Gershgorin α: ", metadata["gershgorin_alpha"]];
+Print["Hurwitz stable: ", metadata["is_hurwitz"]];
+
+dt = 1.0;
+stabilityReport[A, dt]
+
+
+(* --- OPTION 3: Batch import multiple epochs --- *)
+
+exportDir = "C:/SPYOptionTrader_test/exports/A_matrices/";
+files = FileNames["*_A.csv", exportDir];
+Print["Found ", Length[files], " A matrix files"];
+
+As = Import[#, "CSV"] & /@ files;
+
+(* Run batch stability report *)
+dt = 1.0;
+batchStabilityReport[As, dt]
+
+
+(* --- OPTION 4: Import from NumPy .npy (requires external converter) --- *)
+(* NumPy files need conversion. Use JSON or CSV instead. *)
+
+
+(* ============================================================ *)
+(* ALTERNATE: Reconstruct A from {eta, gate, R} if saved separately *)
+(* ============================================================ *)
+
+(* If your export saves the components instead of full A: *)
+
+etaPath = "C:/SPYOptionTrader_test/exports/A_matrices/epoch3_eta.csv";
+gatePath = "C:/SPYOptionTrader_test/exports/A_matrices/epoch3_gate.csv";
+RPath = "C:/SPYOptionTrader_test/exports/A_matrices/epoch3_R.csv";
+
+(* Import vectors/matrices *)
+eta = Flatten[Import[etaPath, "CSV"]];   (* n-vector *)
+gate = Flatten[Import[gatePath, "CSV"]]; (* n-vector *)
+R = Import[RPath, "CSV"];                 (* n×n matrix *)
+
+(* Reconstruct A using your makeAFromEtaGateR function *)
+A = makeAFromEtaGateR[eta, gate, R];
+
+dt = 1.0;
+stabilityReport[A, dt]
+
+
+(* ============================================================ *)
+(* CLOUD UPLOAD HELPER (one-time setup)                         *)
+(* ============================================================ *)
+
+(* To upload a local CSV to Wolfram Cloud: *)
+(*
+localFile = "C:/SPYOptionTrader_test/exports/A_matrices/condor_net_epoch3_A.csv";
+cloudDest = CloudObject["CondorNet/A_epoch3.csv"];
+CopyFile[localFile, cloudDest];
+Print["Uploaded to: ", cloudDest];
+
+(* Then import from cloud: *)
+A = Import[CloudObject["CondorNet/A_epoch3.csv"], "CSV"];
+*)
