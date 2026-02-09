@@ -1393,10 +1393,15 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  width = pol[2] * 10.0
                  dte = pol[3] * 45.0 # Denormalized
                  
+                 # DEBUG: Track downstream blocking
+                 if not hasattr(run_backtest, '_debug_counters'):
+                     run_backtest._debug_counters = {'gate_pass': 0, 'no_legs': 0, 'not_atomic': 0, 'low_credit': 0, 'success': 0}
+                 run_backtest._debug_counters['gate_pass'] += 1
+                 
                  # Leg Selection - PHASE 5.2 FIX: Includes bid/ask and Greeks validation
                  legs = find_best_legs(chain_with_prices, spot, call_off, put_off, width, validate_greeks=True)
 
-                 if legs:
+                    if legs:
                     # PHASE 5.2/5.5 FIX: Use realistic execution
                     if exec_engine and market_state:
                         # PHASE 5.5: Full execution reality modeling
@@ -1411,9 +1416,11 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
                     if not is_atomic:
                         # Atomicity violation - skip this entry
+                        run_backtest._debug_counters['not_atomic'] += 1
                         continue
 
                     if net_credit < 0.10:  # Min credit filter (after slippage)
+                        run_backtest._debug_counters['low_credit'] += 1
                         continue
 
                     max_loss = (legs['width'] - net_credit) * IC_MULTIPLIER * filled_qty
@@ -1433,6 +1440,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                         }
                     )
                     open_trades.append(new_trade)
+                    run_backtest._debug_counters['success'] += 1
+                 else:
+                    run_backtest._debug_counters['no_legs'] += 1
          
          # 6. Record Equity Curve
          unrealized = sum(t.unrealized_pnl for t in open_trades)
@@ -1446,6 +1456,16 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
          
     # End Simulation
     print(f"Simulation Complete. Final Equity: ${equity:,.2f}")
+    
+    # DEBUG: Print downstream blocking stats
+    if hasattr(run_backtest, '_debug_counters'):
+        dc = run_backtest._debug_counters
+        print(f"\n[DEBUG] DOWNSTREAM BLOCKING STATS:")
+        print(f"   Gate Pass Attempts: {dc.get('gate_pass', 0)}")
+        print(f"   No Legs (find_best_legs=None): {dc.get('no_legs', 0)}")
+        print(f"   Atomicity Violations: {dc.get('not_atomic', 0)}")
+        print(f"   Low Credit (<$0.10): {dc.get('low_credit', 0)}")
+        print(f"   SUCCESS (trades opened): {dc.get('success', 0)}")
     
     # Helper to return list of values for legacy main compatibility?
     # Old main expects (equity_list, trades_list)
