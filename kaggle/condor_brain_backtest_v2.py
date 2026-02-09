@@ -1401,48 +1401,48 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  # Leg Selection - PHASE 5.2 FIX: Includes bid/ask and Greeks validation
                  legs = find_best_legs(chain_with_prices, spot, call_off, put_off, width, validate_greeks=True)
 
-                    if legs:
-                    # PHASE 5.2/5.5 FIX: Use realistic execution
-                    if exec_engine and market_state:
-                        # PHASE 5.5: Full execution reality modeling
-                        filled_qty, net_credit, is_atomic, fill_details = calculate_entry_fill_reality(
-                            legs, chain_with_prices, IC_CONTRACTS, exec_engine, market_state
-                        )
-                    else:
-                        # PHASE 5.2: Simple bid/ask + slippage
-                        filled_qty, net_credit, is_atomic, fill_details = calculate_entry_fill(
-                            legs, chain_with_prices, IC_CONTRACTS
-                        )
+                 if legs:
+                     # PHASE 5.2/5.5 FIX: Use realistic execution
+                     if exec_engine and market_state:
+                         # PHASE 5.5: Full execution reality modeling
+                         filled_qty, net_credit, is_atomic, fill_details = calculate_entry_fill_reality(
+                             legs, chain_with_prices, IC_CONTRACTS, exec_engine, market_state
+                         )
+                     else:
+                         # PHASE 5.2: Simple bid/ask + slippage
+                         filled_qty, net_credit, is_atomic, fill_details = calculate_entry_fill(
+                             legs, chain_with_prices, IC_CONTRACTS
+                         )
 
-                    if not is_atomic:
-                        # Atomicity violation - skip this entry
-                        run_backtest._debug_counters['not_atomic'] += 1
-                        continue
+                     if not is_atomic:
+                         # Atomicity violation - skip this entry
+                         run_backtest._debug_counters['not_atomic'] += 1
+                         continue
 
-                    if net_credit < 0.10:  # Min credit filter (after slippage)
-                        run_backtest._debug_counters['low_credit'] += 1
-                        continue
+                     if net_credit < 0.10:  # Min credit filter (after slippage)
+                         run_backtest._debug_counters['low_credit'] += 1
+                         continue
 
-                    max_loss = (legs['width'] - net_credit) * IC_MULTIPLIER * filled_qty
-                    trade_id = f"TR_{i}"
+                     max_loss = (legs['width'] - net_credit) * IC_MULTIPLIER * filled_qty
+                     trade_id = f"TR_{i}"
 
-                    new_trade = Trade(
-                        trade_id, ts, legs, net_credit, max_loss,
-                        dte=dte,
-                        scores={
-                            'entry': entry_logit,
-                            'prob': prob,
-                            'gross_credit': fill_details.get('gross_credit', 0),
-                            'slippage': fill_details.get('total_slippage', fill_details.get('slippage', 0)),
-                            'short_call_delta': legs.get('short_call_delta'),
-                            'short_put_delta': legs.get('short_put_delta'),
-                            'exec_reality': True if exec_engine else False,
-                        }
-                    )
-                    open_trades.append(new_trade)
-                    run_backtest._debug_counters['success'] += 1
+                     new_trade = Trade(
+                         trade_id, ts, legs, net_credit, max_loss,
+                         dte=dte,
+                         scores={
+                             'entry': entry_logit,
+                             'prob': prob,
+                             'gross_credit': fill_details.get('gross_credit', 0),
+                             'slippage': fill_details.get('total_slippage', fill_details.get('slippage', 0)),
+                             'short_call_delta': legs.get('short_call_delta'),
+                             'short_put_delta': legs.get('short_put_delta'),
+                             'exec_reality': True if exec_engine else False,
+                         }
+                     )
+                     open_trades.append(new_trade)
+                     run_backtest._debug_counters['success'] += 1
                  else:
-                    run_backtest._debug_counters['no_legs'] += 1
+                     run_backtest._debug_counters['no_legs'] += 1
          
          # 6. Record Equity Curve
          unrealized = sum(t.unrealized_pnl for t in open_trades)
