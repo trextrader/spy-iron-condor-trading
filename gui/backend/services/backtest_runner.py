@@ -1,17 +1,23 @@
 """
 Backtest Runner Service
-Phase 6.1 - Core Infrastructure
+Phase 6.5 - Core Infrastructure
 
 Manages backtest execution with progress tracking and result storage.
+Uses BacktestBridge to run the actual kaggle backtester.
 """
 
 import asyncio
 from typing import Optional, Dict, Any, List
 from datetime import datetime
-from enum import Enum
 
-from gui.backend.schemas.backtest import BacktestStatus, BacktestResult, BacktestMetrics
+from gui.backend.schemas.backtest import (
+    BacktestStatus,
+    BacktestResult,
+    BacktestMetrics,
+    BacktestProgress,
+)
 from gui.backend.schemas.config import FullConfig
+from gui.backend.services.backtest_bridge import BacktestBridge
 
 
 class BacktestRunner:
@@ -20,6 +26,30 @@ class BacktestRunner:
     def __init__(self):
         self._runs: Dict[str, Dict[str, Any]] = {}
         self._results: Dict[str, BacktestResult] = {}
+        self._bridges: Dict[str, BacktestBridge] = {}
+        self._progress_callbacks: Dict[str, Any] = {}
+
+    def set_progress_callback(self, run_id: str, callback):
+        """Set progress callback for a run (for WebSocket streaming)."""
+        self._progress_callbacks[run_id] = callback
+
+    async def _progress_handler(self, run_id: str, progress: BacktestProgress):
+        """Handle progress updates from the bridge."""
+        # Update internal state
+        if run_id in self._runs:
+            self._runs[run_id]["progress"] = progress.progress_pct
+            self._runs[run_id]["bars_processed"] = progress.bars_processed
+            self._runs[run_id]["current_pnl"] = progress.current_pnl
+            self._runs[run_id]["current_equity"] = progress.current_equity
+            self._runs[run_id]["trades_so_far"] = progress.trades_so_far
+
+        # Call external callback if registered
+        if run_id in self._progress_callbacks:
+            callback = self._progress_callbacks[run_id]
+            if asyncio.iscoroutinefunction(callback):
+                await callback(progress)
+            else:
+                callback(progress)
 
     async def run_backtest(
         self,
@@ -27,68 +57,69 @@ class BacktestRunner:
         config: FullConfig,
         limit: Optional[int] = None,
     ):
-        """Run a backtest asynchronously."""
+        """Run a backtest asynchronously using the real backtester."""
         # Initialize run state
         self._runs[run_id] = {
             "status": BacktestStatus.RUNNING,
             "progress": 0.0,
             "bars_processed": 0,
-            "total_bars": limit or 1000,  # TODO: Get from tape
+            "total_bars": limit or 10000,
             "current_pnl": 0.0,
+            "current_equity": 100000.0,
+            "trades_so_far": 0,
             "started_at": datetime.utcnow().isoformat(),
-            "config": config.model_dump(),
+            "config": config.model_dump() if hasattr(config, 'model_dump') else {},
         }
 
+        # Create bridge with progress callback
+        bridge = BacktestBridge(
+            progress_callback=lambda p: self._progress_handler(run_id, p)
+        )
+        self._bridges[run_id] = bridge
+
         try:
-            # TODO: Integrate with actual backtest engine
-            # For now, simulate progress
-            total_bars = limit or 1000
-            for i in range(total_bars):
-                if self._runs[run_id]["status"] == BacktestStatus.CANCELLED:
-                    break
+            # Run the real backtest
+            result = await bridge.run_backtest(
+                run_id=run_id,
+                tape_id=config.tape_id,
+                model_id=config.model_id,
+                seed=config.seed,
+                device=config.device,
+                limit=limit,
+                use_execution_reality=config.execution_reality.enabled if config.execution_reality else True,
+                use_fuzzy_sizing=False,
+                use_trade_rules=True,
+            )
 
-                # Simulate processing
-                await asyncio.sleep(0.01)  # Placeholder
+            # Store result
+            self._results[run_id] = result
+            self._runs[run_id]["status"] = result.status
 
-                # Update progress
-                self._runs[run_id]["bars_processed"] = i + 1
-                self._runs[run_id]["progress"] = (i + 1) / total_bars * 100
-
-                # Simulate PnL changes
-                import random
-                self._runs[run_id]["current_pnl"] += random.uniform(-10, 15)
-
-            # Mark as completed
-            if self._runs[run_id]["status"] != BacktestStatus.CANCELLED:
-                self._runs[run_id]["status"] = BacktestStatus.COMPLETED
+            if result.status == BacktestStatus.COMPLETED:
                 self._runs[run_id]["completed_at"] = datetime.utcnow().isoformat()
-
-                # Create result
-                self._results[run_id] = BacktestResult(
-                    run_id=run_id,
-                    config_hash="placeholder",  # TODO: Get from config manager
-                    status=BacktestStatus.COMPLETED,
-                    started_at=self._runs[run_id]["started_at"],
-                    completed_at=self._runs[run_id]["completed_at"],
-                    duration_seconds=10.0,  # TODO: Calculate actual duration
-                    metrics=BacktestMetrics(
-                        net_pnl=self._runs[run_id]["current_pnl"],
-                        total_trades=50,  # Placeholder
-                        win_rate=0.55,
-                        sharpe_ratio=1.5,
-                        max_drawdown=0.08,
-                        npdd_ratio=2.1,
-                        avg_trade_pnl=20.0,
-                        avg_trade_duration=45.0,
-                        profit_factor=1.8,
-                    ),
-                    equity_curve=[],
-                    trades=[],
-                )
 
         except Exception as e:
             self._runs[run_id]["status"] = BacktestStatus.FAILED
             self._runs[run_id]["error"] = str(e)
+
+            # Create error result
+            self._results[run_id] = BacktestResult(
+                run_id=run_id,
+                status=BacktestStatus.FAILED,
+                config_hash="",
+                started_at=datetime.fromisoformat(self._runs[run_id]["started_at"]),
+                tape_id=config.tape_id,
+                model_id=config.model_id,
+                seed=config.seed,
+                device=config.device,
+                total_bars=0,
+                error_message=str(e),
+            )
+
+        finally:
+            # Cleanup
+            if run_id in self._bridges:
+                del self._bridges[run_id]
 
     def get_status(self, run_id: str) -> Optional[BacktestStatus]:
         """Get the status of a backtest run."""
@@ -102,10 +133,12 @@ class BacktestRunner:
             return None
         run = self._runs[run_id]
         return {
-            "progress_pct": run["progress"],
-            "bars_processed": run["bars_processed"],
-            "total_bars": run["total_bars"],
-            "current_pnl": run["current_pnl"],
+            "progress_pct": run.get("progress", 0),
+            "bars_processed": run.get("bars_processed", 0),
+            "total_bars": run.get("total_bars", 0),
+            "current_pnl": run.get("current_pnl", 0),
+            "current_equity": run.get("current_equity", 100000),
+            "trades_so_far": run.get("trades_so_far", 0),
         }
 
     def get_result(self, run_id: str) -> Optional[BacktestResult]:
@@ -118,9 +151,16 @@ class BacktestRunner:
         status_filter: Optional[BacktestStatus] = None,
     ) -> List[Dict[str, Any]]:
         """List recent backtest runs."""
-        runs = list(self._runs.values())
-        if status_filter:
-            runs = [r for r in runs if r["status"] == status_filter]
+        runs = []
+        for run_id, run_data in self._runs.items():
+            if status_filter and run_data["status"] != status_filter:
+                continue
+            runs.append({
+                "run_id": run_id,
+                **run_data,
+            })
+        # Sort by start time descending
+        runs.sort(key=lambda x: x.get("started_at", ""), reverse=True)
         return runs[:limit]
 
     def cancel(self, run_id: str) -> bool:
@@ -129,6 +169,11 @@ class BacktestRunner:
             return False
         if self._runs[run_id]["status"] != BacktestStatus.RUNNING:
             return False
+
+        # Signal cancellation to bridge
+        if run_id in self._bridges:
+            self._bridges[run_id].cancel()
+
         self._runs[run_id]["status"] = BacktestStatus.CANCELLED
         return True
 
@@ -139,9 +184,37 @@ class BacktestRunner:
         config: FullConfig,
     ) -> Dict[str, Any]:
         """Replay a backtest to verify determinism."""
-        # TODO: Implement actual replay with comparison
+        # Get original result
+        original = self._results.get(original_run_id)
+        if not original:
+            return {
+                "verified": False,
+                "diff_fingerprint": "original_not_found",
+                "differences": ["Original run not found"],
+            }
+
+        # Run replay
+        await self.run_backtest(replay_run_id, config, limit=original.total_bars)
+        replay = self._results.get(replay_run_id)
+
+        if not replay or replay.status != BacktestStatus.COMPLETED:
+            return {
+                "verified": False,
+                "diff_fingerprint": "replay_failed",
+                "differences": ["Replay failed to complete"],
+            }
+
+        # Compare results
+        differences = []
+
+        if original.metrics and replay.metrics:
+            if abs(original.metrics.total_pnl - replay.metrics.total_pnl) > 0.01:
+                differences.append(f"PnL differs: {original.metrics.total_pnl:.2f} vs {replay.metrics.total_pnl:.2f}")
+            if original.metrics.total_trades != replay.metrics.total_trades:
+                differences.append(f"Trade count differs: {original.metrics.total_trades} vs {replay.metrics.total_trades}")
+
         return {
-            "verified": True,
-            "diff_fingerprint": "match",
-            "differences": None,
+            "verified": len(differences) == 0,
+            "diff_fingerprint": "match" if not differences else "mismatch",
+            "differences": differences if differences else None,
         }

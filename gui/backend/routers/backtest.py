@@ -1,12 +1,19 @@
 """
 Backtest Router
-Phase 6.1 - Core Infrastructure
+Phase 6.5 - Core Infrastructure
+
+Provides endpoints for:
+- Running backtests with the kaggle backtester
+- Listing available tapes and models
+- Real-time progress via WebSocket
 """
 
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
-from typing import Optional
+from typing import Optional, List
 import uuid
 from datetime import datetime
+from pathlib import Path
+import os
 
 from gui.backend.schemas.backtest import (
     BacktestRequest,
@@ -19,8 +26,14 @@ from gui.backend.schemas.backtest import (
 )
 from gui.backend.services.backtest_runner import BacktestRunner
 from gui.backend.services.config_engine import ConfigManager
+from gui.backend.routers.websocket import broadcast_progress
 
 router = APIRouter()
+
+# Project paths
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+DATA_DIR = PROJECT_ROOT / "data" / "processed"
+MODELS_DIR = PROJECT_ROOT / "models"
 
 # Global instances
 _backtest_runner: Optional[BacktestRunner] = None
@@ -73,6 +86,22 @@ async def run_backtest(
 
     config.execution_reality.enabled = request.use_execution_reality
     config_hash = config_manager.get_config_hash(config)
+
+    # Set up progress callback to broadcast via WebSocket
+    async def progress_callback(progress):
+        await broadcast_progress(f"backtest:{run_id}", {
+            "run_id": run_id,
+            "status": progress.status.value,
+            "progress_pct": progress.progress_pct,
+            "bars_processed": progress.bars_processed,
+            "total_bars": progress.total_bars,
+            "current_equity": progress.current_equity,
+            "current_pnl": progress.current_pnl,
+            "trades_so_far": progress.trades_so_far,
+            "eta_seconds": progress.eta_seconds,
+        })
+
+    runner.set_progress_callback(run_id, progress_callback)
 
     # Start backtest in background
     background_tasks.add_task(
@@ -207,3 +236,79 @@ async def cancel_backtest(
             detail=f"Could not cancel backtest: {run_id}"
         )
     return {"message": f"Backtest {run_id} cancelled"}
+
+
+# =============================================================================
+# DISCOVERY ENDPOINTS
+# =============================================================================
+
+@router.get("/tapes")
+async def list_available_tapes():
+    """List available data tapes for backtesting."""
+    tapes = []
+
+    # Check data/processed directory
+    if DATA_DIR.exists():
+        for f in DATA_DIR.glob("*.csv"):
+            stat = f.stat()
+            tapes.append({
+                "id": f.stem,
+                "name": f.name,
+                "path": str(f),
+                "size_mb": stat.st_size / 1024 / 1024,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+
+    # Also check root data directory
+    root_data = PROJECT_ROOT / "data"
+    if root_data.exists():
+        for f in root_data.glob("*.csv"):
+            if f.stem not in [t["id"] for t in tapes]:
+                stat = f.stat()
+                tapes.append({
+                    "id": f.stem,
+                    "name": f.name,
+                    "path": str(f),
+                    "size_mb": stat.st_size / 1024 / 1024,
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                })
+
+    # Sort by modified date descending
+    tapes.sort(key=lambda x: x["modified"], reverse=True)
+
+    return {"tapes": tapes, "total": len(tapes)}
+
+
+@router.get("/models")
+async def list_available_models():
+    """List available model checkpoints."""
+    models = []
+
+    if MODELS_DIR.exists():
+        for f in MODELS_DIR.glob("*.pth"):
+            stat = f.stat()
+            models.append({
+                "id": f.stem,
+                "name": f.name,
+                "path": str(f),
+                "size_mb": stat.st_size / 1024 / 1024,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+
+    # Also check for .pt files
+    if MODELS_DIR.exists():
+        for f in MODELS_DIR.glob("*.pt"):
+            if f.stem not in [m["id"] for m in models]:
+                stat = f.stat()
+                models.append({
+                    "id": f.stem,
+                    "name": f.name,
+                    "path": str(f),
+                    "size_mb": stat.st_size / 1024 / 1024,
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                })
+
+    # Sort by modified date descending
+    models.sort(key=lambda x: x["modified"], reverse=True)
+
+    return {"models": models, "total": len(models)}

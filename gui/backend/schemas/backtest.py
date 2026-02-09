@@ -79,20 +79,27 @@ class TradeSummary(BaseModel):
 
 class BacktestMetrics(BaseModel):
     """Metrics from a backtest run."""
-    total_trades: int
-    win_count: int
-    loss_count: int
-    win_rate: float
-    total_pnl: float
-    avg_pnl: float
-    max_pnl: float
-    min_pnl: float
-    sharpe_ratio: float
-    max_drawdown: float
-    max_drawdown_pct: float
-    npdd: float
-    turnover: float
-    avg_hold_time: float
+    total_trades: int = 0
+    win_count: int = 0
+    loss_count: int = 0
+    win_rate: float = 0.0
+    total_pnl: float = 0.0
+    avg_pnl: float = 0.0
+    max_pnl: float = 0.0
+    min_pnl: float = 0.0
+    sharpe_ratio: float = 0.0
+    max_drawdown: float = 0.0
+    max_drawdown_pct: float = 0.0
+    npdd: float = 0.0
+    turnover: float = 0.0
+    avg_hold_time: float = 0.0
+
+    # Legacy aliases for compatibility
+    net_pnl: Optional[float] = None
+    npdd_ratio: Optional[float] = None
+    profit_factor: Optional[float] = None
+    avg_trade_pnl: Optional[float] = None
+    avg_trade_duration: Optional[float] = None
 
 
 class BacktestProgress(BaseModel):
@@ -112,19 +119,19 @@ class BacktestResult(BaseModel):
     """Complete backtest result."""
     run_id: str
     status: BacktestStatus
-    config_hash: str
+    config_hash: str = ""
 
     # Timing
-    started_at: datetime
+    started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     duration_seconds: Optional[float] = None
 
     # Input summary
-    tape_id: str
-    model_id: str
-    seed: int
-    device: str
-    total_bars: int
+    tape_id: str = ""
+    model_id: str = ""
+    seed: int = 42
+    device: str = "cpu"
+    total_bars: int = 0
 
     # Results
     metrics: Optional[BacktestMetrics] = None
