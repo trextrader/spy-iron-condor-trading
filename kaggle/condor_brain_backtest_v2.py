@@ -1364,9 +1364,29 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
          market_state = create_market_state_from_bar(spot, vix_val, ts_hour, vol_val) if exec_engine else None
 
          # 4. Update Open Trades - PHASE 5.2 FIX: Pass bid/ask/mid
-         active_trades = []
+          active_trades = []
          for tr in open_trades:
              tr.update_mark(ts, marks_mid, marks_bid, marks_ask)
+             
+             # DEBUG: Track mark update success (first 5 occurrences)
+             if not hasattr(run_backtest, '_mark_debug_count'):
+                 run_backtest._mark_debug_count = 0
+             if run_backtest._mark_debug_count < 5:
+                 sc_found = tr.legs['short_call_symbol'] in marks_mid
+                 lc_found = tr.legs['long_call_symbol'] in marks_mid
+                 sp_found = tr.legs['short_put_symbol'] in marks_mid
+                 lp_found = tr.legs['long_put_symbol'] in marks_mid
+                 found_count = sum([sc_found, lc_found, sp_found, lp_found])
+                 if run_backtest._mark_debug_count == 0:
+                     print(f"\n[DEBUG] TRADE LIFECYCLE - First mark update:")
+                     print(f"   Trade {tr.trade_id} entered at {tr.entry_dt}")
+                     print(f"   Symbols: SC={tr.legs['short_call_symbol']}, LC={tr.legs['long_call_symbol']}")
+                     print(f"   Symbols: SP={tr.legs['short_put_symbol']}, LP={tr.legs['long_put_symbol']}")
+                     print(f"   Marks available: {len(marks_mid)} symbols")
+                     print(f"   Legs found in marks: {found_count}/4 (SC={sc_found}, LC={lc_found}, SP={sp_found}, LP={lp_found})")
+                     print(f"   Unrealized PnL: ${tr.unrealized_pnl:.4f}")
+                     print(f"   DTE at entry: {tr.dte_entry}")
+                 run_backtest._mark_debug_count += 1
              
              # Check Risk Stop (5%) - PHASE 5.2/5.5 FIX: Use realistic exit cost
              if tr.should_risk_close(equity):
@@ -1413,9 +1433,17 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              # if exit_logit > 1.0: ...
              
              # Check Expiration (DTE < 0.1)
-             # Approximation: if we hold > DTE (in bars) ??
-             # Better: check days passed.
-             days_held = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
+             try:
+                 days_held = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
+             except Exception as e:
+                 # DEBUG: Log timestamp parsing issues
+                 if not hasattr(run_backtest, '_dte_error_logged'):
+                     print(f"\n[DEBUG] DTE CALC ERROR: {e}")
+                     print(f"   ts type={type(ts)}, value={ts}")
+                     print(f"   entry_dt type={type(tr.entry_dt)}, value={tr.entry_dt}")
+                     run_backtest._dte_error_logged = True
+                 days_held = 0  # Fallback
+             
              if days_held > tr.dte_entry:
                  # PHASE 5.2/5.5 FIX: Expired - Use realistic exit cost
                  if exec_engine and market_state:
