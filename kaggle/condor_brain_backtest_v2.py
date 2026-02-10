@@ -1119,6 +1119,7 @@ class Trade:
         Phase 5.2 Fix:
         - Uses MID prices for fair value MTM
         - Optionally uses bid/ask for realistic exit cost estimation
+        - Handles missing legs by using last known price (carry forward)
         """
         # Price 4 legs using MID for fair value
         sc = marks_mid.get(self.legs['short_call_symbol'])
@@ -1126,9 +1127,26 @@ class Trade:
         sp = marks_mid.get(self.legs['short_put_symbol'])
         lp = marks_mid.get(self.legs['long_put_symbol'])
 
-        # If any leg missing, carry forward logic (simplified: skip update)
-        if None in [sc, lc, sp, lp]:
-            return
+        # If any leg missing, use last known prices (carry forward)
+        # Initialize carry-forward cache if not present
+        if not hasattr(self, '_last_marks'):
+            self._last_marks = {}
+        
+        syms = ['short_call_symbol', 'long_call_symbol', 'short_put_symbol', 'long_put_symbol']
+        vals = [sc, lc, sp, lp]
+        resolved = []
+        for sym_key, val in zip(syms, vals):
+            if val is not None:
+                self._last_marks[sym_key] = val
+                resolved.append(val)
+            elif sym_key in self._last_marks:
+                resolved.append(self._last_marks[sym_key])
+            else:
+                # No current or historical price - use entry price as fallback
+                entry_key = sym_key.replace('_symbol', '_mid')
+                resolved.append(self.legs.get(entry_key, 0.01))
+        
+        sc, lc, sp, lp = resolved
 
         # MTM using MID prices (fair value)
         debit_mid = (sc + sp) - (lc + lp)
@@ -1427,10 +1445,34 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  })
                  continue  # Trade is gone
             
-             # Check Model Exit Signal (optional)
-             # pol = policy_matrix[pol_idx]
-             # exit_logit = pol[9]
-             # if exit_logit > 1.0: ...
+             # Check Profit Target (50% of max profit)
+             if tr.net_credit > 0 and tr.unrealized_pnl > 0:
+                 profit_target = tr.net_credit * 0.50 * tr.qty * IC_MULTIPLIER
+                 if tr.unrealized_pnl >= profit_target:
+                     if exec_engine and market_state:
+                         exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
+                             tr.legs, marks_bid, marks_ask, marks_mid, exec_engine, market_state
+                         )
+                     else:
+                         exit_debit, exit_valid, exit_details = calculate_exit_fill(
+                             tr.legs, marks_bid, marks_ask, marks_mid
+                         )
+                     if exit_valid:
+                         realized_pnl = (tr.net_credit - exit_debit) * tr.qty * IC_MULTIPLIER
+                     else:
+                         realized_pnl = tr.unrealized_pnl
+                     tr.exit_dt = ts
+                     tr.exit_reason = "PROFIT_TARGET"
+                     tr.realized_pnl = realized_pnl
+                     tr.is_closed = True
+                     equity += tr.realized_pnl
+                     closed_trades.append({
+                         'trade_id': tr.trade_id, 'entry_dt': tr.entry_dt, 'exit_dt': ts,
+                         'pnl': tr.realized_pnl, 'pnl_pct': tr.pnl_pct * 100,
+                         'reason': "PROFIT_50PCT", 'max_dd': tr.max_dd_pct * 100,
+                         'exit_details': exit_details if exit_valid else None
+                     })
+                     continue
              
              # Check Expiration (DTE < 0.1)
              try:
@@ -1498,7 +1540,10 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  call_off = pol[0] * 5.0
                  put_off = pol[1] * 5.0
                  width = pol[2] * 10.0
-                 dte = pol[3] * 45.0 # Denormalized
+                 dte_raw = pol[3] * 45.0 # Denormalized
+                 # Cap DTE to reasonable range: use option's actual te if available, max 45 days
+                 chain_te = chain_with_prices['te'].iloc[0] if 'te' in chain_with_prices.columns else 30.0
+                 dte = min(max(dte_raw, 1.0), min(chain_te, 45.0))  # Clamp [1, min(chain_te, 45)]
                  
                  # DEBUG: Track downstream blocking
                  if not hasattr(run_backtest, '_debug_counters'):
