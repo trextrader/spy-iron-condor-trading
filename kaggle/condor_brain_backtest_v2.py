@@ -1364,7 +1364,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
          market_state = create_market_state_from_bar(spot, vix_val, ts_hour, vol_val) if exec_engine else None
 
          # 4. Update Open Trades - PHASE 5.2 FIX: Pass bid/ask/mid
-          active_trades = []
+         active_trades = []
          for tr in open_trades:
              tr.update_mark(ts, marks_mid, marks_bid, marks_ask)
              
