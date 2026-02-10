@@ -421,31 +421,73 @@ def run_rule_engine(df, ruleset_path):
 # PHASE 5.2: EXECUTION REALITY HELPERS (Truth Alignment)
 # =============================================================================
 
+def _bsm_option_price(S, K, T_years, iv, r, cp):
+    """
+    Black-Scholes-Merton option price.
+    
+    Args:
+        S: Underlying spot price
+        K: Strike price
+        T_years: Time to expiry in years
+        iv: Implied volatility (annualized, e.g. 0.20 for 20%)
+        r: Risk-free rate (annualized)
+        cp: 'C' for call, 'P' for put
+    
+    Returns:
+        Theoretical option price
+    """
+    from scipy.stats import norm
+    
+    if T_years <= 0 or iv <= 0 or S <= 0 or K <= 0:
+        # At or past expiry, return intrinsic value
+        if cp == 'C':
+            return max(0.0, S - K)
+        else:
+            return max(0.0, K - S)
+    
+    d1 = (np.log(S / K) + (r + 0.5 * iv**2) * T_years) / (iv * np.sqrt(T_years))
+    d2 = d1 - iv * np.sqrt(T_years)
+    
+    if cp == 'C':
+        price = S * norm.cdf(d1) - K * np.exp(-r * T_years) * norm.cdf(d2)
+    else:
+        price = K * np.exp(-r * T_years) * norm.cdf(-d2) - S * norm.cdf(-d1)
+    
+    return max(0.01, price)  # Floor at $0.01
+
+
 def synthesize_bid_ask(row):
     """
-    Synthesize bid/ask from close and spread_ratio.
+    Synthesize bid/ask from BSM theoretical price and spread_ratio.
 
-    Formula:
-        spread = spread_ratio * close
-        bid = close - spread/2
-        ask = close + spread/2
-        mid = close (assumed)
-
-    Phase 5.2 Fix: Use proper bid/ask instead of just close.
+    CRITICAL FIX: The 'close' column is the underlying SPY bar price, NOT 
+    the option price. We must compute the option price from BSM using the 
+    available greeks data (iv, strike, underlying_price, te, call_put).
     """
-    close = row.get('close', 0.0)
-    spread_ratio = row.get('spread_ratio', EXEC_MIN_SPREAD_RATIO)
+    # Get option parameters
+    S = row.get('underlying_price', row.get('close', 0.0))
+    K = row.get('strike', 0.0)
+    iv = row.get('iv', 0.20)
+    te_days = row.get('te', 30.0)  # time to expiry in days
+    cp = row.get('call_put', 'C')
+    r = 0.05  # risk-free rate assumption
 
-    # Clamp spread_ratio to reasonable bounds
+    T_years = max(0.0, te_days / 365.0)
+    
+    # Compute theoretical option price using BSM
+    option_price = _bsm_option_price(S, K, T_years, iv, r, cp)
+    
+    # Apply spread_ratio to option price (not underlying price)
+    spread_ratio = row.get('spread_ratio', EXEC_MIN_SPREAD_RATIO)
     spread_ratio = max(EXEC_MIN_SPREAD_RATIO, min(spread_ratio, EXEC_MAX_SPREAD_RATIO))
 
-    half_spread = (spread_ratio * close) / 2.0
-    bid = close - half_spread
-    ask = close + half_spread
-    mid = close
+    half_spread = (spread_ratio * option_price) / 2.0
+    bid = option_price - half_spread
+    ask = option_price + half_spread
+    mid = option_price
 
     return {
-        'bid': max(0.01, bid),  # Floor at $0.01
+        'bid': max(0.01, bid),
         'ask': max(0.02, ask),
         'mid': max(0.01, mid),
         'spread': ask - bid,
@@ -455,9 +497,10 @@ def synthesize_bid_ask(row):
 
 def synthesize_chain_prices(chain_df):
     """
-    Add bid/ask/mid columns to chain DataFrame.
+    Add bid/ask/mid columns to chain DataFrame using BSM pricing.
 
-    Phase 5.2 Fix: Synthesize realistic bid/ask from close + spread_ratio.
+    CRITICAL FIX: Computes option prices from BSM instead of using 'close'
+    which is the underlying SPY bar price.
     """
     if chain_df.empty:
         return chain_df
@@ -468,11 +511,46 @@ def synthesize_chain_prices(chain_df):
     if 'spread_ratio' not in df.columns:
         df['spread_ratio'] = EXEC_MIN_SPREAD_RATIO
 
-    # Synthesize bid/ask
-    half_spread = (df['spread_ratio'].clip(EXEC_MIN_SPREAD_RATIO, EXEC_MAX_SPREAD_RATIO) * df['close']) / 2.0
-    df['bid'] = (df['close'] - half_spread).clip(lower=0.01)
-    df['ask'] = (df['close'] + half_spread).clip(lower=0.02)
-    df['mid'] = df['close'].clip(lower=0.01)
+    # Compute BSM option prices for each row
+    S = df['underlying_price'] if 'underlying_price' in df.columns else df['close']
+    K = df['strike']
+    iv = df['iv'] if 'iv' in df.columns else 0.20
+    te_days = df['te'] if 'te' in df.columns else 30.0
+    r = 0.05
+    T_years = (te_days / 365.0).clip(lower=0.0)
+    
+    # Vectorized BSM (using scipy for CDF)
+    from scipy.stats import norm
+    
+    # Handle edge cases
+    valid = (T_years > 0) & (iv > 0) & (S > 0) & (K > 0)
+    
+    d1 = np.where(valid,
+        (np.log(S / K) + (r + 0.5 * iv**2) * T_years) / (iv * np.sqrt(T_years.clip(lower=1e-10))),
+        0.0)
+    d2 = d1 - iv * np.sqrt(T_years.clip(lower=1e-10))
+    
+    is_call = df['call_put'] == 'C'
+    
+    call_price = S * norm.cdf(d1) - K * np.exp(-r * T_years) * norm.cdf(d2)
+    put_price = K * np.exp(-r * T_years) * norm.cdf(-d2) - S * norm.cdf(-d1)
+    
+    option_price = np.where(is_call, call_price, put_price)
+    
+    # For expired/invalid, use intrinsic value
+    intrinsic_call = (S - K).clip(lower=0)
+    intrinsic_put = (K - S).clip(lower=0)
+    intrinsic = np.where(is_call, intrinsic_call, intrinsic_put)
+    option_price = np.where(valid, option_price, intrinsic)
+    option_price = np.maximum(option_price, 0.01)  # Floor at $0.01
+    
+    df['option_price'] = option_price
+
+    # Synthesize bid/ask from option price
+    half_spread = (df['spread_ratio'].clip(EXEC_MIN_SPREAD_RATIO, EXEC_MAX_SPREAD_RATIO) * option_price) / 2.0
+    df['bid'] = (option_price - half_spread).clip(lower=0.01)
+    df['ask'] = (option_price + half_spread).clip(lower=0.02)
+    df['mid'] = option_price.clip(lower=0.01)
 
     return df
 
