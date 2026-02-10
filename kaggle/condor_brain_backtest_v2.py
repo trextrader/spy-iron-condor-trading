@@ -538,8 +538,8 @@ def synthesize_chain_prices(chain_df):
     option_price = np.where(is_call, call_price, put_price)
     
     # For expired/invalid, use intrinsic value
-    intrinsic_call = (S - K).clip(lower=0)
-    intrinsic_put = (K - S).clip(lower=0)
+    intrinsic_call = np.maximum(S - K, 0)
+    intrinsic_put = np.maximum(K - S, 0)
     intrinsic = np.where(is_call, intrinsic_call, intrinsic_put)
     option_price = np.where(valid, option_price, intrinsic)
     option_price = np.maximum(option_price, 0.01)  # Floor at $0.01
@@ -547,10 +547,11 @@ def synthesize_chain_prices(chain_df):
     df['option_price'] = option_price
 
     # Synthesize bid/ask from option price
-    half_spread = (df['spread_ratio'].clip(EXEC_MIN_SPREAD_RATIO, EXEC_MAX_SPREAD_RATIO) * option_price) / 2.0
-    df['bid'] = (option_price - half_spread).clip(lower=0.01)
-    df['ask'] = (option_price + half_spread).clip(lower=0.02)
-    df['mid'] = option_price.clip(lower=0.01)
+    sr = df['spread_ratio'].clip(EXEC_MIN_SPREAD_RATIO, EXEC_MAX_SPREAD_RATIO).values
+    half_spread = (sr * option_price) / 2.0
+    df['bid'] = np.maximum(option_price - half_spread, 0.01)
+    df['ask'] = np.maximum(option_price + half_spread, 0.02)
+    df['mid'] = np.maximum(option_price, 0.01)
 
     return df
 
