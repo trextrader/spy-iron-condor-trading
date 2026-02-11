@@ -1,11 +1,11 @@
-digraph CondorNet_v3_Feature_Stack {
+digraph CondorNet_v4_Feature_Stack {
     rankdir=TB;
     splines=curved;
     bgcolor="#000000";
     fontname="Arial,Sans-Serif";
     fontsize=30;
     labelloc="t";
-    label="CondorNet™ v3.0 Feature Stack\n(87-Column Multi-Layer Architecture)";
+    label="CondorNet™ HAL-S3N v4.0 Feature Stack\n(87-Column Multi-Layer Architecture)";
     fontcolor="#ffffff";
     nodesep=0.5;
     ranksep=0.55;
@@ -198,6 +198,6 @@ digraph CondorNet_v3_Feature_Stack {
         style=invis;
         rank=sink;
         node [shape=plaintext, fontsize=13, fontcolor="#888888"];
-        copyright_note [label="© 2026 CondorBrain™ Differential Intelligence"];
+        copyright_note [label="© 2026 QuantorMT-Fuzz™ HAL-S3N DataSet Pipeline"];
     }
 }
