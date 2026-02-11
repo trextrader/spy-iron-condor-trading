@@ -1,0 +1,201 @@
+digraph CondorNet_v3_Feature_Stack {
+    rankdir=TB;
+    splines=curved;
+    bgcolor="#000000";
+    fontname="Arial,Sans-Serif";
+    fontsize=30;
+    labelloc="t";
+    label="CondorNet™ v3.0 Feature Stack\n(87-Column Multi-Layer Architecture)";
+    fontcolor="#ffffff";
+    nodesep=0.4;
+    ranksep=0.7;
+    compound=true;
+
+    // GLOBAL NODE STYLE
+    node [
+        fontname="Arial,Sans-Serif",
+        fontsize=16,
+        shape=box,
+        style="filled,rounded",
+        fillcolor="#1a1a1a",
+        color="#555555",
+        fontcolor="#ffffff",
+        penwidth=2.5,
+        margin="0.35,0.18"
+    ];
+
+    // GLOBAL EDGE STYLE
+    edge [
+        color="#666666",
+        penwidth=2.0,
+        arrowsize=1.1,
+        fontname="Arial,Sans-Serif",
+        fontsize=13,
+        fontcolor="#bbbbbb"
+    ];
+
+    // =========================================================================
+    // DATA SOURCES
+    // =========================================================================
+    subgraph cluster_sources {
+        label="DATA SOURCES  (synchronized @ 1-min resolution)";
+        fontsize=20;
+        fontcolor="#00d4ff";
+        style="rounded,dashed";
+        color="#00d4ff";
+        penwidth=2;
+
+        src_options [label="SPY Options Chain\n(Greeks, IV, Volume, OI, TE, IVR)", fillcolor="#0d1f2d", color="#00d4ff"];
+        src_ohlcv   [label="SPY OHLCV\n(Barchart M1 Bars)", fillcolor="#0d1f2d", color="#00d4ff"];
+        src_alpaca  [label="Alpaca Tick-Level Quotes\n(Bid/Ask, Microstructure)", fillcolor="#0d1f2d", color="#00d4ff"];
+        src_derived [label="Derived Studies\n(Trend, Volatility, Breadth, Flow)", fillcolor="#0d1f2d", color="#00d4ff"];
+    }
+
+    // MERGE NODE
+    merge [label="Unified Timestamp-Keyed Merge\n(Left Join Across Full Chain)", fillcolor="#1a2a3a", color="#00d4ff", fontsize=18, penwidth=3, width=5.5];
+
+    src_options -> merge [color="#00d4ff"];
+    src_ohlcv   -> merge [color="#00d4ff"];
+    src_alpaca  -> merge [color="#00d4ff"];
+    src_derived -> merge [color="#00d4ff"];
+
+    // =========================================================================
+    // FEATURE LAYERS
+    // =========================================================================
+
+    // --- PRICE LAYER ---
+    subgraph cluster_price {
+        label="PRICE LAYER";
+        fontsize=18;
+        fontcolor="#4a6cff";
+        style="rounded";
+        color="#4a6cff";
+        penwidth=2;
+
+        price_features [label="open  |  high  |  low  |  close\nlog_return  |  SMA  |  MACD  |  RSI  |  ADX  |  PSAR", fillcolor="#0d1a3a", color="#4a6cff", fontsize=14];
+    }
+
+    // --- VOLATILITY LAYER ---
+    subgraph cluster_vol {
+        label="VOLATILITY LAYER";
+        fontsize=18;
+        fontcolor="#ed8936";
+        style="rounded";
+        color="#ed8936";
+        penwidth=2;
+
+        vol_features [label="vol_ewma  |  atr_pct  |  kappa_proxy  |  vol_energy\nIV_High  |  IV_Mid  |  IV_Low  |  IVR", fillcolor="#2a1a0a", color="#ed8936", fontsize=14];
+    }
+
+    // --- TREND & STRUCTURE LAYER ---
+    subgraph cluster_trend {
+        label="TREND & STRUCTURE LAYER";
+        fontsize=18;
+        fontcolor="#48bb78";
+        style="rounded";
+        color="#48bb78";
+        penwidth=2;
+
+        trend_features [label="FRAMA (Fractal Trend)\nAnchored VWAP (Volume-Anchored Equilibrium)\nBollinger Bands (μ, σ, Percentiles, Bandwidth)", fillcolor="#0d2a1a", color="#48bb78", fontsize=14];
+    }
+
+    // --- FLOW & BREADTH LAYER ---
+    subgraph cluster_flow {
+        label="FLOW & BREADTH LAYER";
+        fontsize=18;
+        fontcolor="#e53e3e";
+        style="rounded";
+        color="#e53e3e";
+        penwidth=2;
+
+        flow_features [label="CMF  |  AccDistWill  |  AccDistWillMovAvg\nWeightedAlpha  |  WilderAccSwingIndex\nMcClellanOsc  |  OSC_Volume", fillcolor="#2a0d0d", color="#e53e3e", fontsize=14];
+    }
+
+    // --- OPTIONS SURFACE LAYER ---
+    subgraph cluster_greeks {
+        label="OPTIONS SURFACE LAYER";
+        fontsize=18;
+        fontcolor="#d69e2e";
+        style="rounded";
+        color="#d69e2e";
+        penwidth=2;
+
+        greeks_features [label="delta  |  gamma  |  vega  |  theta  |  rho  |  iv\nOptions_Total_Volume  |  Options_Put_Volume  |  Options_Call_Volume", fillcolor="#2a2a0d", color="#d69e2e", fontsize=14];
+    }
+
+    // --- MICROSTRUCTURE LAYER ---
+    subgraph cluster_micro {
+        label="MICROSTRUCTURE LAYER";
+        fontsize=18;
+        fontcolor="#00d4ff";
+        style="rounded";
+        color="#00d4ff";
+        penwidth=2;
+
+        micro_features [label="aggregate_bid_count  |  aggregate_ask_count\nmean_bid  |  mean_ask  |  quote_spread  |  friction_ratio", fillcolor="#0d1f2d", color="#00d4ff", fontsize=14];
+    }
+
+    // --- FUZZY / CONTROL LAYER ---
+    subgraph cluster_fuzzy {
+        label="FUZZY / CONTROL LAYER";
+        fontsize=18;
+        fontcolor="#9f7aea";
+        style="rounded";
+        color="#9f7aea";
+        penwidth=2;
+
+        fuzzy_features [label="chaos_membership  |  fuzzy_reversion_11\nexec_allow  |  gap_risk_score  |  risk_override", fillcolor="#1a0d2a", color="#9f7aea", fontsize=14];
+    }
+
+    // MERGE TO LAYERS
+    merge -> price_features  [color="#4a6cff"];
+    merge -> vol_features    [color="#ed8936"];
+    merge -> trend_features  [color="#48bb78"];
+    merge -> flow_features   [color="#e53e3e"];
+    merge -> greeks_features [color="#d69e2e"];
+    merge -> micro_features  [color="#00d4ff"];
+    merge -> fuzzy_features  [color="#9f7aea"];
+
+    // =========================================================================
+    // NEURAL GATING
+    // =========================================================================
+    gating [label="Neural Gating  |  Regime Classification\nReversal Detection  |  Execution-Aware Decision Modules", fillcolor="#1a1a2a", color="#ffffff", fontsize=18, penwidth=3, width=6.5, fontcolor="#ffffff"];
+
+    price_features  -> gating [color="#4a6cff"];
+    vol_features    -> gating [color="#ed8936"];
+    trend_features  -> gating [color="#48bb78"];
+    flow_features   -> gating [color="#e53e3e"];
+    greeks_features -> gating [color="#d69e2e"];
+    micro_features  -> gating [color="#00d4ff"];
+    fuzzy_features  -> gating [color="#9f7aea"];
+
+    // =========================================================================
+    // OUTPUT SIGNALS
+    // =========================================================================
+    subgraph cluster_outputs {
+        label="OUTPUTS";
+        fontsize=20;
+        fontcolor="#ffffff";
+        style="rounded,bold";
+        color="#ffffff";
+        penwidth=2;
+
+        out_reversal [label="Reversal Scores\n(Trend + IV + Breadth + Flow Composites)", fillcolor="#1a3a1a", color="#48bb78", fontsize=14];
+        out_regime   [label="Regime Classification\n(Volatility, Liquidity, Breadth)", fillcolor="#2a1a3a", color="#9f7aea", fontsize=14];
+        out_exec     [label="Execution-Aware Signals\n(Microstructure Adjusted)", fillcolor="#1a2a3a", color="#00d4ff", fontsize=14];
+        out_risk     [label="Risk Metrics\n(Drawdown, Entropy, Fuzzy Loss)", fillcolor="#2a1a1a", color="#e53e3e", fontsize=14];
+    }
+
+    gating -> out_reversal [color="#48bb78"];
+    gating -> out_regime   [color="#9f7aea"];
+    gating -> out_exec     [color="#00d4ff"];
+    gating -> out_risk     [color="#e53e3e"];
+
+    // Copyright
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=14, fontcolor="#888888"];
+        copyright_note [label="© 2026 CondorBrain™ Differential Intelligence"];
+    }
+}
