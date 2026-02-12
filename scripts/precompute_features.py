@@ -132,6 +132,16 @@ def main() -> int:
 
     df = pd.concat(chunks, ignore_index=True)
     del chunks # free memory
+    import gc
+    gc.collect()
+
+    # Optimize dtypes immediately
+    print("[Precompute] Optimizing dtypes...")
+    for col in df.columns:
+        if df[col].dtype == 'float64':
+            df[col] = df[col].astype('float32')
+        if df[col].dtype == 'int64':
+            df[col] = pd.to_numeric(df[col], downcast='integer')
 
     if args.dt_col not in df.columns:
         # Fallback check
@@ -154,8 +164,25 @@ def main() -> int:
     if not args.no_sort:
         sort_cols = [c for c in ["symbol", args.dt_col] if c in df.columns]
         if sort_cols:
-            print(f"[Precompute] Sorting by {sort_cols} ...")
-            df = df.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
+            # CHECK IF ALREADY SORTED to save RAM
+            print(f"[Precompute] Checking if already sorted by {sort_cols}...")
+            # We check a subset for speed/safety if it's huge
+            is_sorted = True
+            try:
+                # Fast check for sortedness
+                for sc in sort_cols:
+                    if not df[sc].is_monotonic_increasing:
+                        is_sorted = False
+                        break
+            except:
+                is_sorted = False
+
+            if is_sorted:
+                print("   [O] Data is already sorted. Skipping explicit sort to save RAM.")
+            else:
+                print(f"[Precompute] Data is NOT sorted. Attempting memory-safe sort by {sort_cols} ...")
+                df = df.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
+                gc.collect()
 
     before_cols = list(df.columns)
     before_n = len(before_cols)

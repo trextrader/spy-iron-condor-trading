@@ -279,6 +279,59 @@ async def list_available_tapes():
     return {"tapes": tapes, "total": len(tapes)}
 
 
+@router.get("/results/latest")
+async def get_latest_cli_results():
+    """Load results from CLI backtest (reports/ folder)."""
+    import pandas as pd
+
+    reports_dir = PROJECT_ROOT / "reports"
+
+    result = {
+        "source": "cli_backtest",
+        "equity_curve": None,
+        "trades": None,
+        "metrics": None,
+    }
+
+    # Load equity curve
+    equity_file = reports_dir / "equity_curve.csv"
+    if equity_file.exists():
+        df = pd.read_csv(equity_file)
+        result["equity_curve"] = df.to_dict(orient="records")
+
+        # Calculate metrics from equity curve
+        if len(df) > 0:
+            equity = df["equity"].values
+            starting = equity[0]
+            final = equity[-1]
+            returns = (equity[1:] - equity[:-1]) / equity[:-1]
+
+            import numpy as np
+            running_max = np.maximum.accumulate(equity)
+            drawdown = (equity - running_max) / running_max
+            max_dd = abs(np.min(drawdown))
+
+            result["metrics"] = {
+                "total_pnl": final - starting,
+                "return_pct": (final - starting) / starting * 100,
+                "max_drawdown_pct": max_dd * 100,
+                "sharpe_ratio": np.sqrt(252 * 390) * np.mean(returns) / np.std(returns) if np.std(returns) > 0 else 0,
+                "final_equity": final,
+            }
+
+    # Load trades
+    trades_file = reports_dir / "trades.csv"
+    if trades_file.exists():
+        df = pd.read_csv(trades_file)
+        result["trades"] = df.to_dict(orient="records")
+        result["total_trades"] = len(df)
+        if "pnl" in df.columns:
+            wins = (df["pnl"] > 0).sum()
+            result["win_rate"] = wins / len(df) * 100 if len(df) > 0 else 0
+
+    return result
+
+
 @router.get("/models")
 async def list_available_models():
     """List available model checkpoints."""

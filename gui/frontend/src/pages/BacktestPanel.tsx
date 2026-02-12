@@ -363,6 +363,47 @@ export default function BacktestPanel() {
                 </button>
               )}
             </div>
+
+            {/* Load CLI Results Button */}
+            <button
+              className="btn-secondary w-full mt-2"
+              onClick={async () => {
+                try {
+                  const res = await fetch(`${API_BASE}/api/backtest/results/latest`);
+                  if (res.ok) {
+                    const data = await res.json();
+                    if (data.equity_curve) {
+                      setResult({
+                        run_id: 'cli_backtest',
+                        status: 'completed',
+                        metrics: {
+                          total_trades: data.total_trades || 0,
+                          win_count: 0,
+                          loss_count: 0,
+                          win_rate: data.win_rate || 0,
+                          total_pnl: data.metrics?.total_pnl || 0,
+                          avg_pnl: 0,
+                          max_pnl: 0,
+                          min_pnl: 0,
+                          sharpe_ratio: data.metrics?.sharpe_ratio || 0,
+                          max_drawdown: 0,
+                          max_drawdown_pct: data.metrics?.max_drawdown_pct || 0,
+                          npdd: 0,
+                        },
+                        equity_curve: data.equity_curve?.map((p: { equity: number }) => ({ equity: p.equity })),
+                        trades: data.trades,
+                      });
+                    } else {
+                      setError('No CLI results found in reports/ folder');
+                    }
+                  }
+                } catch (err) {
+                  setError('Failed to load CLI results');
+                }
+              }}
+            >
+              Load CLI Results (from reports/)
+            </button>
           </div>
         </div>
 

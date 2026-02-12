@@ -1,0 +1,15 @@
+[
+  {
+    "checkpoint": "models/condor_net_e5_dh64_lr1e04.pth",
+    "epoch": 5,
+    "d_h": 64,
+    "d_v": 16,
+    "d_m": 32,
+    "d_r": 16,
+    "d_x": 128,
+    "max_real_eigenvalue": 0.001890319399535656,
+    "spectral_radius": 0.0019303541630506516,
+    "gershgorin_alpha": -0.022766169160604477,
+    "is_hurwitz": false
+  }
+]

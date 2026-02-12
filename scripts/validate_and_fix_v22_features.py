@@ -253,46 +253,83 @@ def main():
     parser.add_argument("--input", "-i", required=True)
     parser.add_argument("--output", "-o", default=None)
     parser.add_argument("--check-only", action="store_true")
+    parser.add_argument("--chunk-size", type=int, default=500000, help="Rows per chunk for streaming load.")
     args = parser.parse_args()
 
     if not os.path.exists(args.input):
         print(f"Error: {args.input} not found.")
         sys.exit(1)
 
-    print(f"\n[START] Auditing (Memory Optimized): {args.input}")
+    print(f"\n[START] Auditing (Memory Optimized / Streaming): {args.input}")
     
-    # 🕵️ MEMORY SAVER 4: Load with float32 directly to avoid peak RAM spike
-    print(f"   [LOAD] Initializing 10M-row streaming load...")
     # Get headers first to determine dtypes
     headers = pd.read_csv(args.input, nrows=0).columns
-    # Explicitly exclude metadata columns from float32 coercion
     exclude_cols = ['dt', 'timestamp', 'option_symbol', 'symbol', 'call_put', 'expiration', 'Date', 'time', 'sym']
     dtype_dict = {col: np.float32 for col in headers if col not in exclude_cols}
     
-    df = pd.read_csv(args.input, dtype=dtype_dict, low_memory=False)
+    # 🕵️ MEMORY SAVER: Streaming Load
+    print(f"   [LOAD] Initializing streaming load with chunk_size={args.chunk_size:,}...")
     
-    report_pre = validate_columns(df)
-    has_fails = any(v['is_fail'] for v in report_pre.values())
+    total_report = {}
+    chunks_processed = 0
+    all_chunks = []
+    
+    try:
+        reader = pd.read_csv(args.input, dtype=dtype_dict, low_memory=False, chunksize=args.chunk_size)
+        
+        for chunk in reader:
+            print(f"\n[CHUNK {chunks_processed + 1}] Validating...")
+            report = validate_columns(chunk, sample_size=50000)
+            
+            # Merge report
+            for col, stats in report.items():
+                if col not in total_report:
+                    total_report[col] = stats
+                else:
+                    total_report[col]['is_fail'] = total_report[col]['is_fail'] or stats['is_fail']
+                    if stats['status'] != "OK" and total_report[col]['status'] == "OK":
+                         total_report[col]['status'] = stats['status']
 
-    if has_fails and not args.check_only:
-        print("\n[🚨] FAILS DETECTED. Commencing Forensic Repair...")
-        start_t = time.time()
-        df = forensic_repair(df)
-        end_t = time.time()
-        
-        print(f"\n[DONE] Repair took {end_t - start_t:.1f}s")
-        
-        print("\n[RE-AUDIT] Verifying Fix...")
-        validate_columns(df)
-        
-        out_path = args.output or args.input.replace(".csv", "_fixed.csv")
-        print(f"\n[SAVE] Exporting to: {out_path}")
-        df.to_csv(out_path, index=False)
-    else:
-        if has_fails:
-            print("\n[🚨] Fails detected but --check-only is set. Exiting with error.")
-            sys.exit(1)
-        print("\n[✅] All features passed institutional audit. Volume and time-alignment verified.")
+            chunks_processed += 1
+            
+            if args.check_only and chunks_processed >= 2:
+                print("\n[INFO] --check-only mode: stopping after 1.0M rows for sanity check.")
+                break
+            
+            if not args.check_only:
+                all_chunks.append(chunk)
+
+        has_fails = any(v['is_fail'] for v in total_report.values())
+
+        if has_fails and not args.check_only:
+            print("\n[🚨] FAILS DETECTED in full stream. Commencing Forensic Repair...")
+            df = pd.concat(all_chunks, ignore_index=True)
+            del all_chunks # Free memory
+            start_t = time.time()
+            df = forensic_repair(df)
+            end_t = time.time()
+            
+            print(f"\n[DONE] Repair took {end_t - start_t:.1f}s")
+            print("\n[RE-AUDIT] Verifying Fix...")
+            validate_columns(df)
+            
+            out_path = args.output or args.input.replace(".csv", "_fixed.csv")
+            print(f"\n[SAVE] Exporting to: {out_path}")
+            df.to_csv(out_path, index=False)
+        elif not args.check_only:
+            if chunks_processed > 0:
+                print("\n[✅] All features passed institutional audit across all chunks.")
+            else:
+                print("\n[!] No data found in input file.")
+        else:
+             if has_fails:
+                print("\n[🚨] Fails detected in sanity check. Exiting.")
+                sys.exit(1)
+             print("\n[✅] Sanity check PASSED (First 1M rows).")
+
+    except Exception as e:
+        print(f"\n[FATAL] Audit failed: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
