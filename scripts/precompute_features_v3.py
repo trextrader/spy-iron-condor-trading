@@ -181,6 +181,10 @@ def main() -> int:
     spot_df = df.drop_duplicates(subset=['_date'])[available_spot].copy()
     spot_df = spot_df.sort_values('_date').reset_index(drop=True)
 
+    # Add 'dt' column so compute_all_dynamic_features() can find the time column
+    # (keep '_date' intact for the downstream merge on line 259)
+    spot_df['dt'] = spot_df['_date']
+
     # Use underlying_price as close if close is from Barchart
     if 'volume' not in spot_df.columns:
         spot_df['volume'] = 0.0  # Placeholder for dynamic features that need volume
@@ -229,7 +233,7 @@ def main() -> int:
     )
 
     t2 = time.time()
-    dynamic_cols = [c for c in spot_df.columns if c not in available_spot + ['volume']]
+    dynamic_cols = [c for c in spot_df.columns if c not in available_spot + ['volume', 'dt']]
     print(f"  Computed {len(dynamic_cols)} dynamic/primitive columns in {t2-t1:.1f}s")
 
     # ================================================================

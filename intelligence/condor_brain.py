@@ -51,7 +51,7 @@ from intelligence.vol_gated_attn import VolGatedAttn
 from intelligence.topk_moe import TopKMoE, BatchedTopKMoE
 from intelligence.generative.diffusion import ConditionalDiffusionHead
 from intelligence.predicate_discovery import PredicateSelector, PredicateCombiner
-from intelligence.canonical_feature_registry import FEATURE_COLS_V22
+from intelligence.canonical_feature_registry import FEATURE_COLS_V22, FEATURE_COLS_V30, INPUT_DIM_V30
 
 
 # ============================================================================
@@ -87,26 +87,37 @@ class FeatureGroupDropout(nn.Module):
     """
     Drops entire feature groups during training to encourage redundancy learning.
 
-    Feature groups for V2.2 (52 features):
+    Feature groups for V3.0 (79 features):
     - market_primitives: indices 0-4 (open, high, low, close, volume)
-    - greeks: indices 5-13 (delta, gamma, vega, theta, iv, ivr, spread_ratio, te, strike)
+    - greeks: indices 5-13 (delta..strike) — Phase 5 BCS hardening zone
     - targets_risk: indices 14-15 (target_spot, max_dd_60m)
-    - dynamic_regime: indices 16-31 (log_return, vol_ewma, ..., breakout_score)
-    - v22_primitives: indices 32-51 (bb_percentile, bw_expansion_rate, ...)
+    - dynamic_regime: indices 16-31 (log_return..breakout_score)
+    - v22_primitives: indices 32-53 (bb_percentile..fuzzy_reversion_11)
+    - v30_price_greeks: indices 54-56 (underlying_price, rho, open_interest)
+    - v30_trend_structure: indices 57-62 (sma..McClellanOsc)
+    - v30_iv_bands: indices 63-65 (IV_High, IV_Mid, IV_Low)
+    - v30_chain_flow: indices 66-73 (Options volumes + flow extensions)
+    - v30_microstructure: indices 74-78 (bid/ask counts, means, spread)
 
     During training, randomly masks entire groups with probability p.
     """
 
-    # Define feature group slices for V2.2 schema
+    # Define feature group slices for V3.0 schema (append-only from V2.2)
     FEATURE_GROUPS = {
-        'market_primitives': slice(0, 5),      # OHLCV
-        'greeks': slice(5, 14),                # Delta, gamma, etc.
-        'targets_risk': slice(14, 16),         # Target spot, max DD
-        'dynamic_regime': slice(16, 32),       # Dynamic features
-        'v22_primitives': slice(32, 52),       # V2.2 new features
+        'market_primitives': slice(0, 5),       # OHLCV (unchanged)
+        'greeks': slice(5, 14),                 # delta..strike (unchanged)
+        'targets_risk': slice(14, 16),          # target_spot, max_dd_60m (unchanged)
+        'dynamic_regime': slice(16, 32),        # log_return..breakout_score (unchanged)
+        'v22_primitives': slice(32, 54),        # bb_percentile..fuzzy_reversion_11 (FIX: was 32-52)
+        # NEW V3.0 groups
+        'v30_price_greeks': slice(54, 57),      # underlying_price, rho, open_interest
+        'v30_trend_structure': slice(57, 63),   # sma, psar_mark, bandwidth, FRAMA, Anchored_VWAP, McClellanOsc
+        'v30_iv_bands': slice(63, 66),          # IV_High, IV_Mid, IV_Low
+        'v30_chain_flow': slice(66, 74),        # Options volumes + flow extensions
+        'v30_microstructure': slice(74, 79),    # bid/ask counts, means, spread
     }
 
-    def __init__(self, group_drop_prob: float = 0.15, input_dim: int = 52):
+    def __init__(self, group_drop_prob: float = 0.15, input_dim: int = INPUT_DIM_V30):
         """
         Args:
             group_drop_prob: Probability of dropping each group (default 0.15)

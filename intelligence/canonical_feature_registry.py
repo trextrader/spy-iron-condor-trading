@@ -1,12 +1,14 @@
 """
-Canonical Feature Registry V2.1 for CondorBrain Pipeline.
+Canonical Feature Registry for CondorBrain Pipeline.
 
 This module is the SINGLE SOURCE OF TRUTH for feature schema.
 All training, inference, and backtest scripts MUST import from here.
 
 Version History:
 - v2.0: 24 static features (deprecated)
-- v2.1: 32 dynamic features (current)
+- v2.1: 32 dynamic features
+- v2.2: 54 features (32 V2.1 + 22 primitives)
+- v3.0: 79 features (54 V2.2 + 25 new: Barchart studies + Alpaca microstructure)
 """
 
 from typing import List, Dict, Any
@@ -414,4 +416,180 @@ FEATURE_REGISTRY_V22: Dict[str, Any] = {
 def get_neutral_fill_value_v22(feature_name: str) -> float:
     """Get the semantically neutral fill value for a V2.2 feature."""
     return NEUTRAL_FILL_VALUES_V22.get(feature_name, 0.0)
+
+
+# =============================================================================
+# V3.0 FEATURE COLUMNS (APPEND-ONLY: V2.2 indices 0-53 unchanged)
+# =============================================================================
+# Extends V2.2 (54 features) with 25 new features from Barchart technical
+# studies and Alpaca microstructure data = 79 total.
+#
+# DESIGN PRINCIPLE: All 54 V2.2 features retain their exact indices (0-53).
+# New V3.0 features are appended at indices 54-78. This preserves backwards
+# compatibility with existing checkpoints and Phase 5 BCS hardening
+# (indices 5-13 = Greeks).
+
+FEATURE_COLS_V30: List[str] = [
+    # === V2.2 Base Features (54) — UNCHANGED ===
+    # Market Primitives (5)
+    "open", "high", "low", "close", "volume",
+    # Options / Chain State (9)
+    "delta", "gamma", "vega", "theta", "iv", "ivr", "spread_ratio", "te", "strike",
+    # Strategy / Targets / Risk (2)
+    "target_spot", "max_dd_60m",
+    # Dynamic / Regime-Aware (16)
+    "log_return", "vol_ewma", "ret_z", "atr_pct", "kappa_proxy", "vol_energy",
+    "rsi_dyn", "adx_adaptive", "psar_adaptive",
+    "bb_mu_dyn", "bb_sigma_dyn", "bb_lower_dyn", "bb_upper_dyn",
+    "stoch_k_dyn", "consolidation_score", "breakout_score",
+    # V2.2 Primitive Outputs (22)
+    "bb_percentile", "bw_expansion_rate", "cmf", "pressure_up", "pressure_down",
+    "friction_ratio", "exec_allow", "gap_risk_score", "risk_override",
+    "iv_confidence", "mtf_consensus",
+    "macd_norm", "macd_signal_norm", "macd_histogram",
+    "plus_di", "minus_di", "psar_trend", "psar_reversion_mu",
+    "beta1_norm_stub", "chaos_membership", "position_size_mult",
+    "fuzzy_reversion_11",
+
+    # === V3.0 New Features (25) — indices 54-78 ===
+    # Price Context (1)
+    "underlying_price",           # 54: Spot price from options_2025.csv
+    # Additional Greek (1)
+    "rho",                        # 55: Interest rate sensitivity
+    # Liquidity (1)
+    "open_interest",              # 56: Contract open interest
+    # Trend (2)
+    "sma",                        # 57: Simple Moving Average
+    "psar_mark",                  # 58: Parabolic SAR mark (precomputed)
+    # Bands (1)
+    "bandwidth",                  # 59: Bollinger bandwidth (precomputed)
+    # v3.0 Trend Structure (3)
+    "FRAMA",                      # 60: Fractal Adaptive Moving Average
+    "Anchored_VWAP",              # 61: Anchored Volume-Weighted Avg Price
+    "McClellanOsc",               # 62: McClellan Oscillator (breadth)
+    # v3.0 IV Bands (3)
+    "IV_High",                    # 63: 52-week IV High
+    "IV_Mid",                     # 64: 52-week IV Midpoint
+    "IV_Low",                     # 65: 52-week IV Low
+    # v3.0 Chain Aggregates (4)
+    "Options_Total_Volume",       # 66: Total options volume
+    "Options_Put_Volume",         # 67: Put options volume
+    "Options_Call_Volume",        # 68: Call options volume
+    "OSC_Volume",                 # 69: Oscillator volume
+    # v3.0 Flow Extensions (4)
+    "WeightedAlpha",              # 70: Weighted alpha (excess return)
+    "WilderAccSwingIndex",        # 71: Wilder Accumulative Swing Index
+    "AccDistWill",                # 72: Williams Accumulation/Distribution
+    "AccDistWillMovAvg",          # 73: Williams AccDist Moving Average
+    # v3.0 Microstructure (5)
+    "aggregate_bid_count",        # 74: Aggregate bid count (Alpaca)
+    "aggregate_ask_count",        # 75: Aggregate ask count (Alpaca)
+    "mean_bid",                   # 76: Mean bid price (Alpaca)
+    "mean_ask",                   # 77: Mean ask price (Alpaca)
+    "quote_spread",               # 78: Bid-ask spread (Alpaca)
+]
+
+INPUT_DIM_V30: int = len(FEATURE_COLS_V30)  # 79 (54 V2.2 + 25 V3.0)
+VERSION_V30: str = "condorbrain_v3.0_hal_s3n"
+
+# V3.0 Neutral Fill Values (inherit V2.2 + 25 new features)
+NEUTRAL_FILL_VALUES_V30: Dict[str, float] = {
+    **NEUTRAL_FILL_VALUES_V22,  # Inherit all V2.2 values
+    # Price Context
+    "underlying_price": 0.0,        # Forward-filled in practice
+    # Greek
+    "rho": 0.0,                     # Near-zero for short DTE
+    # Liquidity
+    "open_interest": 0.0,           # No open interest
+    # Trend
+    "sma": 0.0,                     # Forward-filled
+    "psar_mark": 0.0,               # Forward-filled
+    # Bands
+    "bandwidth": 0.0,               # No bandwidth
+    # Trend Structure
+    "FRAMA": 0.0,                   # Forward-filled
+    "Anchored_VWAP": 0.0,           # Forward-filled
+    "McClellanOsc": 0.0,            # Neutral breadth
+    # IV Bands
+    "IV_High": 0.2,                 # 20% neutral IV
+    "IV_Mid": 0.2,                  # 20% neutral IV
+    "IV_Low": 0.2,                  # 20% neutral IV
+    # Chain Aggregates
+    "Options_Total_Volume": 0.0,    # No volume
+    "Options_Put_Volume": 0.0,
+    "Options_Call_Volume": 0.0,
+    "OSC_Volume": 0.0,
+    # Flow Extensions
+    "WeightedAlpha": 0.0,           # No excess return
+    "WilderAccSwingIndex": 0.0,     # Neutral
+    "AccDistWill": 0.0,             # Neutral
+    "AccDistWillMovAvg": 0.0,       # Neutral
+    # Microstructure
+    "aggregate_bid_count": 0.0,
+    "aggregate_ask_count": 0.0,
+    "mean_bid": 0.0,                # Forward-filled
+    "mean_ask": 0.0,                # Forward-filled
+    "quote_spread": 0.01,           # Tight spread default
+}
+
+# V3.0 Checkpoint Keys
+CHECKPOINT_REQUIRED_KEYS_V30: List[str] = [
+    "state_dict",
+    "feature_cols",
+    "median",
+    "mad",
+    "input_dim",
+    "version",
+    "primitive_params",  # Inherited from V2.2
+]
+
+# V3.0 Feature Registry
+FEATURE_REGISTRY_V30: Dict[str, Any] = {
+    "version": VERSION_V30,
+    "n_features": INPUT_DIM_V30,
+    "dtype": "float32",
+    "nan_policy": NAN_POLICY_V21,
+    "scaling": NORMALIZATION_POLICY_V21,
+    "feature_cols": FEATURE_COLS_V30,
+    "primitive_integration": True,
+    "tda_enabled": False,
+    "v30_extensions": True,
+    "features_v30": [
+        {"name": "underlying_price", "i": 54, "kind": "price", "range": "SPY $"},
+        {"name": "rho", "i": 55, "kind": "greek", "range": "small"},
+        {"name": "open_interest", "i": 56, "kind": "liquidity", "range": "count"},
+        {"name": "sma", "i": 57, "kind": "trend", "range": "SPY $"},
+        {"name": "psar_mark", "i": 58, "kind": "trend", "range": "SPY $"},
+        {"name": "bandwidth", "i": 59, "kind": "band", "range": "+"},
+        {"name": "FRAMA", "i": 60, "kind": "trend", "range": "SPY $"},
+        {"name": "Anchored_VWAP", "i": 61, "kind": "trend", "range": "SPY $"},
+        {"name": "McClellanOsc", "i": 62, "kind": "breadth", "range": "centered"},
+        {"name": "IV_High", "i": 63, "kind": "vol", "range": "[0, ~2]"},
+        {"name": "IV_Mid", "i": 64, "kind": "vol", "range": "[0, ~2]"},
+        {"name": "IV_Low", "i": 65, "kind": "vol", "range": "[0, ~2]"},
+        {"name": "Options_Total_Volume", "i": 66, "kind": "volume", "range": "count"},
+        {"name": "Options_Put_Volume", "i": 67, "kind": "volume", "range": "count"},
+        {"name": "Options_Call_Volume", "i": 68, "kind": "volume", "range": "count"},
+        {"name": "OSC_Volume", "i": 69, "kind": "volume", "range": "count"},
+        {"name": "WeightedAlpha", "i": 70, "kind": "flow", "range": "centered"},
+        {"name": "WilderAccSwingIndex", "i": 71, "kind": "flow", "range": "centered"},
+        {"name": "AccDistWill", "i": 72, "kind": "flow", "range": "centered"},
+        {"name": "AccDistWillMovAvg", "i": 73, "kind": "flow", "range": "centered"},
+        {"name": "aggregate_bid_count", "i": 74, "kind": "micro", "range": "count"},
+        {"name": "aggregate_ask_count", "i": 75, "kind": "micro", "range": "count"},
+        {"name": "mean_bid", "i": 76, "kind": "micro", "range": "SPY $"},
+        {"name": "mean_ask", "i": 77, "kind": "micro", "range": "SPY $"},
+        {"name": "quote_spread", "i": 78, "kind": "micro", "range": "+"},
+    ],
+}
+
+
+def validate_feature_cols_v30(cols: List[str]) -> bool:
+    """Check if provided columns match the canonical V3.0 schema."""
+    return cols == FEATURE_COLS_V30
+
+
+def get_neutral_fill_value_v30(feature_name: str) -> float:
+    """Get the semantically neutral fill value for a V3.0 feature."""
+    return NEUTRAL_FILL_VALUES_V30.get(feature_name, 0.0)
 

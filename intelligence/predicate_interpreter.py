@@ -19,35 +19,35 @@ from dataclasses import dataclass
 
 # Import the canonical feature registry
 try:
-    from .canonical_feature_registry import FEATURE_COLS_V22
+    from .canonical_feature_registry import FEATURE_COLS_V22, FEATURE_COLS_V30
 except ImportError:
-    from intelligence.canonical_feature_registry import FEATURE_COLS_V22
+    from intelligence.canonical_feature_registry import FEATURE_COLS_V22, FEATURE_COLS_V30
 
 
 # =============================================================================
-# FIELD NAME MAPPING
+# FIELD NAME MAPPING (V3.0: 79 features, indices 0-78)
 # =============================================================================
 
 # Build comprehensive lookup: index -> human-readable name
-FIELD_NAMES: Dict[int, str] = {i: name for i, name in enumerate(FEATURE_COLS_V22)}
+FIELD_NAMES: Dict[int, str] = {i: name for i, name in enumerate(FEATURE_COLS_V30)}
 
 # Reverse lookup: name -> index
-NAME_TO_IDX: Dict[str, int] = {name: i for i, name in enumerate(FEATURE_COLS_V22)}
+NAME_TO_IDX: Dict[str, int] = {name: i for i, name in enumerate(FEATURE_COLS_V30)}
 
 
 def field_to_name(idx: int, include_category: bool = False) -> str:
     """
     Convert field index to human-readable name.
-    
+
     Args:
-        idx: Field index (0-53 for raw features, 54+ for predicates)
+        idx: Field index (0-78 for raw features, 79+ for predicates)
         include_category: If True, prefix with category (e.g., "[PRICE]")
-        
+
     Returns:
         Human-readable name like "close" or "P_312" for recursive predicates
     """
-    if idx < len(FEATURE_COLS_V22):
-        name = FEATURE_COLS_V22[idx]
+    if idx < len(FEATURE_COLS_V30):
+        name = FEATURE_COLS_V30[idx]
         if include_category:
             cat = _get_category(name)
             return f"[{cat}]{name}"
@@ -64,6 +64,7 @@ def _get_category(field_name: str) -> str:
         "open": "PRICE", "high": "PRICE", "low": "PRICE", "close": "PRICE", "volume": "VOL",
         # Greeks
         "delta": "GREEK", "gamma": "GREEK", "vega": "GREEK", "theta": "GREEK",
+        "rho": "GREEK",
         # Volatility
         "iv": "VOL", "ivr": "VOL", "vol_ewma": "VOL", "atr_pct": "VOL", "bb_sigma_dyn": "VOL",
         # Momentum
@@ -71,14 +72,33 @@ def _get_category(field_name: str) -> str:
         "plus_di": "MOM", "minus_di": "MOM", "adx_adaptive": "MOM", "stoch_k_dyn": "MOM",
         # Bands
         "bb_mu_dyn": "BAND", "bb_lower_dyn": "BAND", "bb_upper_dyn": "BAND", "bb_percentile": "BAND",
+        "bandwidth": "BAND",
         # PSAR
         "psar_adaptive": "PSAR", "psar_trend": "PSAR", "psar_reversion_mu": "PSAR",
+        "psar_mark": "PSAR",
         # Risk
         "max_dd_60m": "RISK", "gap_risk_score": "RISK", "risk_override": "RISK",
         # Regime
         "consolidation_score": "REGIME", "breakout_score": "REGIME", "mtf_consensus": "REGIME",
         # Fuzzy
         "fuzzy_reversion_11": "FUZZY", "chaos_membership": "FUZZY",
+        # V3.0: Price Context
+        "underlying_price": "PRICE",
+        # V3.0: Liquidity
+        "open_interest": "LIQUIDITY",
+        # V3.0: Trend Structure
+        "sma": "TREND", "FRAMA": "TREND", "Anchored_VWAP": "TREND", "McClellanOsc": "BREADTH",
+        # V3.0: IV Bands
+        "IV_High": "VOL", "IV_Mid": "VOL", "IV_Low": "VOL",
+        # V3.0: Chain Aggregates
+        "Options_Total_Volume": "FLOW", "Options_Put_Volume": "FLOW",
+        "Options_Call_Volume": "FLOW", "OSC_Volume": "FLOW",
+        # V3.0: Flow Extensions
+        "WeightedAlpha": "FLOW", "WilderAccSwingIndex": "FLOW",
+        "AccDistWill": "FLOW", "AccDistWillMovAvg": "FLOW",
+        # V3.0: Microstructure
+        "aggregate_bid_count": "MICRO", "aggregate_ask_count": "MICRO",
+        "mean_bid": "MICRO", "mean_ask": "MICRO", "quote_spread": "MICRO",
     }
     return categories.get(field_name, "OTHER")
 
@@ -112,7 +132,7 @@ class PredicateInterpreter:
                                Used to unroll recursive predicates
         """
         self.predicate_registry = predicate_registry or {}
-        self.n_raw_features = len(FEATURE_COLS_V22)
+        self.n_raw_features = len(FEATURE_COLS_V30)
     
     def parse_field(self, match_str: str) -> Tuple[str, int]:
         """

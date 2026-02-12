@@ -15,7 +15,7 @@ Grammar:
              | Expr AND/OR Predicate        # Depth 2-4
 
 Search Space:
-  - 54 fields × 129 lookbacks = ~7,000 simple atoms
+  - 79 fields × 129 lookbacks = ~10,191 simple atoms
   - Compound atoms with +/-: ~7000² × 2 = ~98 million
   - Inequalities: atoms² × 5 comparators = astronomical
   - Chained (up to 4): effectively infinite
@@ -43,7 +43,7 @@ except ImportError:
     HAS_NUMBA = False
     warnings.warn("Numba not available - predicate evaluation will be slower")
 
-from .canonical_feature_registry import FEATURE_COLS_V22
+from .canonical_feature_registry import FEATURE_COLS_V22, FEATURE_COLS_V30
 
 
 # =============================================================================
@@ -51,13 +51,13 @@ from .canonical_feature_registry import FEATURE_COLS_V22
 # =============================================================================
 
 class FieldType(IntEnum):
-    """All available fields from V2.2 schema + OHLCV."""
-    # Enumerated dynamically from FEATURE_COLS_V22
+    """All available fields from V3.0 schema."""
+    # Enumerated dynamically from FEATURE_COLS_V30
     pass
 
 
-# Build field enum dynamically
-ALL_FIELDS: List[str] = FEATURE_COLS_V22.copy()
+# Build field enum dynamically (V3.0: 79 fields)
+ALL_FIELDS: List[str] = FEATURE_COLS_V30.copy()
 FIELD_TO_IDX: Dict[str, int] = {f: i for i, f in enumerate(ALL_FIELDS)}
 IDX_TO_FIELD: Dict[int, str] = {i: f for i, f in enumerate(ALL_FIELDS)}
 N_FIELDS: int = len(ALL_FIELDS)

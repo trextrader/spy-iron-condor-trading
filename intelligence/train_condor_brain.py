@@ -36,7 +36,10 @@ from intelligence.condor_brain import CondorBrain, CondorLoss, HAS_CDE
 from intelligence.condor_loss import CompositeCondorLoss
 from intelligence.canonical_feature_registry import (
     FEATURE_COLS_V22,
+    FEATURE_COLS_V30,
+    NEUTRAL_FILL_VALUES_V30,
     VERSION_V22,
+    VERSION_V30,
     select_feature_frame,
 )
 from intelligence.training_monitor import (
@@ -128,7 +131,7 @@ DEFAULT_CONFIG = {
     'model_path': 'models/condor_brain.pth'
 }
 
-FEATURE_COLS = FEATURE_COLS_V22
+FEATURE_COLS = FEATURE_COLS_V30
 
 # ============================================================================
 # DATA PREPARATION (Fast In-Memory)

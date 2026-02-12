@@ -119,11 +119,13 @@ from intelligence.condor_brain_net import (
 )
 from intelligence.canonical_feature_registry import (
     FEATURE_COLS_V22,
+    FEATURE_COLS_V30,
     NEUTRAL_FILL_VALUES_V22,
+    NEUTRAL_FILL_VALUES_V30,
     select_feature_frame,
 )
 
-FEATURE_COLS = FEATURE_COLS_V22
+FEATURE_COLS = FEATURE_COLS_V30
 
 
 # =============================================================================
@@ -493,7 +495,7 @@ def prepare_features(df: pd.DataFrame, feature_cols: List[str]) -> tuple:
     # Only fill critical columns if they have NaNs
     for c in ['rsi', 'adx', 'ivr']:
         if c in df.columns:
-            df[c] = df[c].ffill().fillna(NEUTRAL_FILL_VALUES_V22.get(c, 0.0))
+            df[c] = df[c].ffill().fillna(NEUTRAL_FILL_VALUES_V30.get(c, 0.0))
 
     # Build arrays
     target_cols = [

@@ -485,7 +485,7 @@ def condornet_master_step(
 
 class CanonicalPredicateGates(nn.Module):
     """
-    The 5 canonical inequality gates from the specification.
+    The 8 canonical inequality gates (5 original + 3 V3.0).
 
     Implements soft (differentiable) versions using steep sigmoids:
         1. Volatility spike: IVR_t > 75
@@ -493,32 +493,43 @@ class CanonicalPredicateGates(nn.Module):
         3. Momentum reversal: RSI < 25 AND ΔRSI < 0
         4. Gap risk: |S_t - S_{t-1}|/S_{t-1} > 1.2%
         5. Greeks pressure: |Γ| > threshold
+        6. IV Regime (V3.0): IV_Mid > IV_High * 0.8 (IV near 52-week high)
+        7. Options Flow Imbalance (V3.0): Put_Volume / Total_Volume > 0.6
+        8. Microstructure Stress (V3.0): quote_spread > 2 * median(quote_spread)
 
     These gates modulate the decay in A_θ via:
         A(u, σ) = -diag(exp(η(u,σ)) · (1 + λ_p γ_t))
     """
-    def __init__(self, n_predicates: int = 5, steepness: float = 50.0, learnable_thresholds: bool = True):
+    def __init__(self, n_predicates: int = 8, steepness: float = 50.0, learnable_thresholds: bool = True):
         super().__init__()
         self.n_predicates = n_predicates
         self.steepness = steepness
 
         if learnable_thresholds:
+            # Original 5 thresholds
             self.iv_rank_thresh = nn.Parameter(torch.tensor(75.0))
             self.spread_frac_thresh = nn.Parameter(torch.tensor(0.004))
             self.rsi_thresh = nn.Parameter(torch.tensor(25.0))
             self.gap_frac_thresh = nn.Parameter(torch.tensor(0.012))
             self.gamma_thresh = nn.Parameter(torch.tensor(0.05))
+            # V3.0 thresholds
+            self.iv_regime_frac_thresh = nn.Parameter(torch.tensor(0.8))
+            self.put_flow_thresh = nn.Parameter(torch.tensor(0.6))
+            self.spread_stress_mult_thresh = nn.Parameter(torch.tensor(2.0))
         else:
             self.register_buffer('iv_rank_thresh', torch.tensor(75.0))
             self.register_buffer('spread_frac_thresh', torch.tensor(0.004))
             self.register_buffer('rsi_thresh', torch.tensor(25.0))
             self.register_buffer('gap_frac_thresh', torch.tensor(0.012))
             self.register_buffer('gamma_thresh', torch.tensor(0.05))
+            self.register_buffer('iv_regime_frac_thresh', torch.tensor(0.8))
+            self.register_buffer('put_flow_thresh', torch.tensor(0.6))
+            self.register_buffer('spread_stress_mult_thresh', torch.tensor(2.0))
 
-        if n_predicates > 5:
-            # Extra learned predicates from physics features (8 inputs)
+        if n_predicates > 8:
+            # Extra learned predicates from physics features (11 inputs for V3.0)
             self.extra_heads = nn.Sequential(
-                nn.Linear(8, n_predicates - 5),
+                nn.Linear(11, n_predicates - 8),
                 nn.Sigmoid()
             )
 
@@ -532,6 +543,12 @@ class CanonicalPredicateGates(nn.Module):
         S_t: torch.Tensor,
         S_t_minus_1: torch.Tensor,
         gamma: torch.Tensor,
+        # V3.0 optional inputs (default to neutral values if not provided)
+        iv_mid: torch.Tensor = None,
+        iv_high: torch.Tensor = None,
+        put_volume: torch.Tensor = None,
+        total_volume: torch.Tensor = None,
+        quote_spread: torch.Tensor = None,
     ) -> torch.Tensor:
         """
         Compute soft predicate gates.
@@ -539,8 +556,11 @@ class CanonicalPredicateGates(nn.Module):
         All inputs: (batch,) scalar tensors
 
         Returns:
-            p_k: (batch, 5) soft predicates in [0, 1]
+            p_k: (batch, n_predicates) soft predicates in [0, 1]
         """
+        device = iv_rank.device
+        dtype = iv_rank.dtype
+
         # 1. Volatility spike: IVR_t > 75
         vol_spike = torch.sigmoid(self.steepness * (iv_rank - self.iv_rank_thresh))
 
@@ -560,14 +580,39 @@ class CanonicalPredicateGates(nn.Module):
         # 5. Greeks pressure: |Γ| > threshold
         gamma_gate = torch.sigmoid(self.steepness * (torch.abs(gamma) - self.gamma_thresh))
 
-        p_canonical = torch.stack([vol_spike, liq_lock, mom_rev, gap_gate, gamma_gate], dim=-1)
+        # 6. IV Regime (V3.0): IV_Mid > IV_High * 0.8 (IV near 52-week high)
+        if iv_mid is not None and iv_high is not None:
+            iv_regime = torch.sigmoid(self.steepness * (iv_mid - iv_high * self.iv_regime_frac_thresh))
+        else:
+            iv_regime = torch.zeros_like(iv_rank)
 
-        if self.n_predicates > 5:
-            # Projection for additional predicates
+        # 7. Options Flow Imbalance (V3.0): Put_Volume / Total_Volume > 0.6
+        if put_volume is not None and total_volume is not None:
+            put_ratio = put_volume / (total_volume + 1e-8)
+            flow_imbalance = torch.sigmoid(self.steepness * (put_ratio - self.put_flow_thresh))
+        else:
+            flow_imbalance = torch.zeros_like(iv_rank)
+
+        # 8. Microstructure Stress (V3.0): quote_spread > 2 * median(quote_spread)
+        if quote_spread is not None:
+            # Use running median approximation: compare against 0.01 * spread_stress_mult
+            # In practice, the median is estimated from training data normalization
+            spread_stress = torch.sigmoid(self.steepness * (quote_spread - 0.01 * self.spread_stress_mult_thresh))
+        else:
+            spread_stress = torch.zeros_like(iv_rank)
+
+        p_canonical = torch.stack([
+            vol_spike, liq_lock, mom_rev, gap_gate, gamma_gate,
+            iv_regime, flow_imbalance, spread_stress,
+        ], dim=-1)
+
+        if self.n_predicates > 8:
+            # Projection for additional predicates (11 physics inputs for V3.0)
             physics_features = torch.stack([
                 iv_rank, bid_ask_spread / (price + 1e-8), rsi, delta_rsi,
                 S_t, S_t_minus_1, torch.abs(S_t - S_t_minus_1) / (S_t_minus_1 + 1e-8),
-                torch.abs(gamma)
+                torch.abs(gamma),
+                iv_regime, flow_imbalance, spread_stress,
             ], dim=-1)
             p_extra = self.extra_heads(physics_features)
             return torch.cat([p_canonical, p_extra], dim=-1)
@@ -986,7 +1031,7 @@ class CondorNet(nn.Module):
     """
     def __init__(
         self,
-        d_input: int = 54,
+        d_input: int = 79,
         d_h: int = 256,
         d_v: int = 32,
         d_m: int = 64,
@@ -994,7 +1039,7 @@ class CondorNet(nn.Module):
         d_control: int = 128,
         n_greeks: int = 5,
         d_q: int = 1,
-        n_predicates: int = 5,
+        n_predicates: int = 8,
         R_moments: int = 4,
         M_bloom: int = 16,
         n_layers: int = 2,
@@ -1470,9 +1515,9 @@ if __name__ == '__main__':
     print("CondorNet™ - Mathematically Faithful Implementation")
     print("=" * 70)
 
-    # Create model
+    # Create model (79 fields = V3.0 schema)
     model = CondorNet(
-        d_input=54,
+        d_input=79,
         d_h=128,
         d_v=16,
         d_m=32,
@@ -1486,10 +1531,10 @@ if __name__ == '__main__':
 
     # Test forward pass
     batch, seq = 4, 64
-    x = torch.randn(batch, seq, 54)
+    x = torch.randn(batch, seq, 79)
 
     print(f"\nTest forward pass:")
-    print(f"  Input: ({batch}, {seq}, 54)")
+    print(f"  Input: ({batch}, {seq}, 79)")
 
     with torch.no_grad():
         outputs, diag = model(x, return_diagnostics=True)
@@ -1511,7 +1556,7 @@ if __name__ == '__main__':
     print(f"  Spectral radius loss: {rho_loss.item():.6f}")
 
     # Test group invariance
-    p = torch.rand(batch, 5)
+    p = torch.rand(batch, 8)
     gi_loss = group_invariant_loss(model.pred_signature, p)
     print(f"\nGroup invariance loss: {gi_loss.item():.6f}")
 
