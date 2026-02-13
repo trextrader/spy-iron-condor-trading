@@ -1,26 +1,39 @@
 """
-CondorNet™ Training Script
+CondorNet™ v5 Training Laboratory
 
-Training pipeline for the mathematically faithful CondorNet architecture.
-Implements the 10-component composite loss from the specification.
+Scientific training pipeline with smart convergence detection, full interpretability
+reports, A_matrix stability tracking, and epoch-vs-epoch comparison analytics.
+
+Implements the 10-component composite loss, intra-epoch convergence monitoring,
+generalization-gated best-model selection, and per-epoch forensic artifacts.
 
 Usage:
-    python intelligence/condor_train_net.py --local-data data/institutional/2024.csv \
-        --d-h 256 --d-v 32 --d-m 64 --d-r 32 --epochs 100 --batch-size 128
+    python intelligence/condor_train_net.py --local-data data/Datasetv3/condornet_v30_precomputed.csv \
+        --d-h 128 --d-v 16 --d-m 32 --d-r 16 --n-predicates 64 --n-sets 32 --n-super-sets 8 \
+        --epochs 5 --batch-size 256 --lr 1e-4 --lookback 240 -v --checkpoint-every 1 --save-diagnostics
 
-Author: Claude Code (Opus 4.5)
-Version: 1.0.0
-Date: 2026-02-03
+Author: Claude Code (Opus 4.6)
+Version: 5.0.0
+Date: 2026-02-12
 """
 
 import sys
 import os
 import math
 import time
+import copy
+import glob
+import json
 import argparse
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Tuple, Optional, List, Sequence
+
+# =============================================================================
+# VERSION CONSTANTS
+# =============================================================================
+CN_VERSION = "CNv5"
+DS_VERSION = "DSv3"
 
 # CUDA optimizations before torch import
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
@@ -598,13 +611,445 @@ def parse_args():
     parser.add_argument("--checkpoint-dir", type=str, default="models/checkpoints",
                         help="Directory for epoch checkpoints")
 
+    # V5: Smart convergence
+    parser.add_argument("--convergence-threshold", type=float, default=0.1,
+                        help="Loss threshold to trigger convergence tracking (default: 0.1)")
+    parser.add_argument("--convergence-patience", type=int, default=10,
+                        help="Batches without improvement before stopping epoch (default: 10)")
+    parser.add_argument("--convergence-active", action="store_true", default=False,
+                        help="Actually cut epochs on convergence (default: observe-only)")
+
     args = parser.parse_args()
 
     if args.output == "auto":
         lr_str = f"{args.lr:.0e}".replace("-", "")
-        args.output = f"models/condor_net_e{args.epochs}_dh{args.d_h}_lr{lr_str}.pth"
+        args.output = f"models/{CN_VERSION}_{DS_VERSION}_Best_{datetime.now().strftime('%m%d%Y_%H%M%S')}.pth"
 
     return args
+
+
+# =============================================================================
+# V5: SMART EPOCH MANAGER
+# =============================================================================
+
+class SmartEpochManager:
+    """
+    Intra-epoch convergence detection.
+
+    When batch loss drops below `threshold`, begins a patience window.
+    If `patience` consecutive batches fail to improve, signals epoch stop.
+    Captures a model state_dict snapshot at the best loss within the window.
+
+    In observe-only mode (active=False), logs when it would stop but does not
+    actually signal a break — allows safe burn-in before enabling.
+    """
+
+    def __init__(self, threshold: float = 0.1, patience: int = 10, active: bool = False):
+        self.threshold = threshold
+        self.patience = patience
+        self.active = active
+        self.reset()
+
+    def reset(self):
+        """Reset for a new epoch."""
+        self.tracking = False
+        self.patience_counter = 0
+        self.best_loss_in_window = float('inf')
+        self.best_snapshot = None
+        self.has_snapshot = False
+
+    def update(self, loss: float, model: nn.Module) -> bool:
+        """
+        Feed a batch loss. Returns True if the epoch should stop.
+
+        Args:
+            loss: Current batch loss
+            model: Current model (for snapshotting state_dict)
+
+        Returns:
+            True if epoch should stop (only if active=True)
+        """
+        if loss < self.threshold:
+            if not self.tracking:
+                self.tracking = True
+                self.best_loss_in_window = loss
+                self.best_snapshot = copy.deepcopy(model.state_dict())
+                self.has_snapshot = True
+                self.patience_counter = 0
+                return False
+
+            # Already tracking
+            if loss < self.best_loss_in_window:
+                # Improvement — reset patience, update snapshot
+                self.best_loss_in_window = loss
+                self.best_snapshot = copy.deepcopy(model.state_dict())
+                self.patience_counter = 0
+            else:
+                self.patience_counter += 1
+
+            if self.patience_counter >= self.patience:
+                if self.active:
+                    return True
+                else:
+                    # Observe-only: log but don't stop
+                    print(f"\n  [CONVERGENCE OBSERVE] Would stop here "
+                          f"(best={self.best_loss_in_window:.6f}, "
+                          f"patience={self.patience_counter}/{self.patience})")
+                    self.patience_counter = 0  # Reset to keep observing
+        else:
+            # Loss above threshold — reset tracking
+            if self.tracking:
+                self.tracking = False
+                self.patience_counter = 0
+
+        return False
+
+
+# =============================================================================
+# V5: INTERPRETABILITY EXTRACTION
+# =============================================================================
+
+# Import audit tool functions
+try:
+    from intelligence.audit_condornet_interpretability import (
+        extract_learned_logic,
+        generate_trading_rules,
+    )
+    AUDIT_AVAILABLE = True
+except ImportError:
+    AUDIT_AVAILABLE = False
+
+
+def extract_epoch_interpretability(
+    model: nn.Module,
+    epoch: int,
+    train_loss: float,
+    val_loss: float,
+    feature_cols: list,
+    args,
+    is_best: bool = False,
+) -> dict:
+    """
+    Extract full interpretability report from the live model.
+
+    Reuses extract_learned_logic() from audit_condornet_interpretability.py
+    and adds epoch-level metadata + A_matrix stability metrics.
+    """
+    timestamp = datetime.now().isoformat()
+    n_params = sum(p.numel() for p in model.parameters())
+
+    report = {
+        "summary": {
+            "epoch": epoch,
+            "version": f"{CN_VERSION}_{DS_VERSION}",
+            "timestamp": timestamp,
+            "train_loss": float(train_loss),
+            "val_loss": float(val_loss),
+            "val_train_gap": float(abs(val_loss - train_loss)),
+            "is_best": is_best,
+            "parameters": n_params,
+            "architecture": {
+                "d_h": args.d_h, "d_v": args.d_v,
+                "d_m": args.d_m, "d_r": args.d_r,
+                "n_predicates": args.n_predicates,
+                "n_sets": args.n_sets,
+                "n_super_sets": args.n_super_sets,
+            },
+        },
+    }
+
+    # Core logic extraction via audit tool
+    if AUDIT_AVAILABLE:
+        model.eval()
+        with torch.no_grad():
+            logic = extract_learned_logic(model, feature_cols)
+        model.train()
+
+        # Extend predicates with V3.0 thresholds
+        if hasattr(model, 'pred_gates'):
+            pg = model.pred_gates
+            logic["predicates"]["iv_regime_frac_threshold"] = float(pg.iv_regime_frac_thresh.data)
+            logic["predicates"]["put_flow_threshold"] = float(pg.put_flow_thresh.data)
+            logic["predicates"]["spread_stress_mult_threshold"] = float(pg.spread_stress_mult_thresh.data)
+
+        report["learned_logic"] = logic
+        report["trading_rules"] = generate_trading_rules(logic)
+    else:
+        # Minimal extraction without audit tool
+        report["learned_logic"] = _extract_minimal_logic(model)
+        report["trading_rules"] = []
+
+    # A_matrix stability metrics
+    try:
+        with torch.no_grad():
+            A = model.get_A_matrix().cpu().float().numpy()
+        eigenvalues = np.linalg.eigvals(A)
+        magnitudes = np.abs(eigenvalues)
+        spectral_radius = float(np.max(magnitudes))
+        top_5 = sorted(magnitudes, reverse=True)[:5]
+
+        # Block norms
+        spec = model.spec
+        block_norms = {}
+        for key, param in model.A_theta.named_parameters():
+            if 'weight' in key:
+                block_name = key.replace('.weight', '')
+                block_norms[block_name] = float(param.data.norm().item())
+
+        report["a_matrix"] = {
+            "spectral_radius": spectral_radius,
+            "shape": list(A.shape),
+            "top_5_eigenvalue_magnitudes": [float(x) for x in top_5],
+            "block_norms": block_norms,
+        }
+    except Exception as e:
+        report["a_matrix"] = {"error": str(e)}
+
+    return report
+
+
+def _extract_minimal_logic(model: nn.Module) -> dict:
+    """Fallback extraction when audit tool is not available."""
+    logic = {"predicates": {}, "super_set": {}, "output_head": {}}
+
+    if hasattr(model, 'pred_gates'):
+        pg = model.pred_gates
+        logic["predicates"] = {
+            "iv_rank_threshold": float(pg.iv_rank_thresh.data),
+            "spread_ratio_threshold": float(pg.spread_frac_thresh.data),
+            "rsi_threshold": float(pg.rsi_thresh.data),
+            "gap_fraction_threshold": float(pg.gap_frac_thresh.data),
+            "gamma_threshold": float(pg.gamma_thresh.data),
+            "iv_regime_frac_threshold": float(pg.iv_regime_frac_thresh.data),
+            "put_flow_threshold": float(pg.put_flow_thresh.data),
+            "spread_stress_mult_threshold": float(pg.spread_stress_mult_thresh.data),
+            "steepness": pg.steepness,
+        }
+
+    if hasattr(model, 'super_sets') and model.super_sets is not None:
+        logic["super_set"]["n_super_sets"] = len(model.super_sets)
+
+    return logic
+
+
+# =============================================================================
+# V5: A_MATRIX CSV EXPORT
+# =============================================================================
+
+def export_a_matrix_csv(model: nn.Module, output_path: Path) -> dict:
+    """
+    Export the full A_matrix to CSV and compute stability metrics.
+
+    Returns dict with spectral_radius, top eigenvalues, etc.
+    """
+    with torch.no_grad():
+        A = model.get_A_matrix().cpu().float().numpy()
+
+    # Save CSV
+    np.savetxt(str(output_path), A, delimiter=',', fmt='%.8f')
+
+    # Stability metrics
+    eigenvalues = np.linalg.eigvals(A)
+    magnitudes = np.abs(eigenvalues)
+    spectral_radius = float(np.max(magnitudes))
+    top_5 = sorted(magnitudes, reverse=True)[:5]
+
+    return {
+        "spectral_radius": spectral_radius,
+        "top_5_eigenvalue_magnitudes": [float(x) for x in top_5],
+        "shape": list(A.shape),
+    }
+
+
+# =============================================================================
+# V5: EPOCH COMPARISON
+# =============================================================================
+
+def _cosine_similarity_scalar(a: np.ndarray, b: np.ndarray) -> float:
+    """Compute cosine similarity between two flat arrays."""
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+    if norm_a < 1e-8 or norm_b < 1e-8:
+        return 0.0
+    return float(np.dot(a.flatten(), b.flatten()) / (norm_a * norm_b))
+
+
+def compute_epoch_comparison(epoch_snapshots: list, best_epoch: int) -> dict:
+    """
+    Compare each epoch's interpretability snapshot against the best model.
+
+    Args:
+        epoch_snapshots: List of dicts with 'epoch', 'train_loss', 'val_loss', 'interpretability'
+        best_epoch: Epoch number of the current best model
+
+    Returns:
+        Comparison dict for JSON export
+    """
+    comparison = {
+        "best_model": {
+            "epoch": best_epoch,
+        },
+        "comparisons": {},
+    }
+
+    # Find best snapshot
+    best_snap = None
+    for snap in epoch_snapshots:
+        if snap['epoch'] == best_epoch:
+            best_snap = snap
+            comparison["best_model"]["val_loss"] = snap['val_loss']
+            comparison["best_model"]["train_loss"] = snap['train_loss']
+            break
+
+    if best_snap is None:
+        # Best epoch not yet in snapshots (e.g., no epoch passed generalization yet)
+        # Compare against first epoch as baseline
+        best_snap = epoch_snapshots[0]
+        comparison["best_model"]["note"] = "No epoch passed generalization gate yet; comparing against Epoch 1"
+
+    best_logic = best_snap['interpretability'].get('learned_logic', {})
+
+    for snap in epoch_snapshots:
+        epoch_key = f"Epoch{snap['epoch']}"
+
+        if snap['epoch'] == best_epoch:
+            comparison["comparisons"][epoch_key] = "BEST MODEL - omitted from comparison"
+            continue
+
+        epoch_logic = snap['interpretability'].get('learned_logic', {})
+
+        # Compare predicates (canonical thresholds)
+        pred_same, pred_diff = _compare_predicates(
+            best_logic.get('predicates', {}),
+            epoch_logic.get('predicates', {}),
+        )
+
+        # Compare sets and super-sets (by weight norms)
+        set_same, set_diff = _compare_structure(
+            best_logic.get('super_set', {}),
+            epoch_logic.get('super_set', {}),
+            level='sets',
+        )
+        ss_same, ss_diff = _compare_structure(
+            best_logic.get('super_set', {}),
+            epoch_logic.get('super_set', {}),
+            level='super_sets',
+        )
+
+        # Compare fuzzy gates (output head norms)
+        fg_same, fg_diff = _compare_fuzzy_gates(
+            best_logic.get('output_head', {}),
+            epoch_logic.get('output_head', {}),
+        )
+
+        # Spectral radius delta
+        best_rho = best_snap['interpretability'].get('a_matrix', {}).get('spectral_radius', 0)
+        epoch_rho = snap['interpretability'].get('a_matrix', {}).get('spectral_radius', 0)
+
+        comparison["comparisons"][epoch_key] = {
+            "same_predicates": pred_same,
+            "different_predicates": pred_diff,
+            "same_sets": set_same,
+            "different_sets": set_diff,
+            "same_super_sets": ss_same,
+            "different_super_sets": ss_diff,
+            "same_fuzzy_gates": fg_same,
+            "different_fuzzy_gates": fg_diff,
+            "spectral_radius_delta": round(epoch_rho - best_rho, 6),
+            "val_loss": snap['val_loss'],
+            "train_loss": snap['train_loss'],
+        }
+
+    return comparison
+
+
+def _compare_predicates(best_preds: dict, epoch_preds: dict, tol: float = 0.01) -> Tuple[int, int]:
+    """Compare canonical threshold values with tolerance."""
+    same = 0
+    diff = 0
+    all_keys = set(list(best_preds.keys()) + list(epoch_preds.keys()))
+    # Only compare numeric threshold keys
+    threshold_keys = [k for k in all_keys if 'threshold' in k.lower() or 'thresh' in k.lower()]
+
+    for key in threshold_keys:
+        best_val = best_preds.get(key)
+        epoch_val = epoch_preds.get(key)
+        if best_val is not None and epoch_val is not None:
+            if isinstance(best_val, (int, float)) and isinstance(epoch_val, (int, float)):
+                if abs(best_val - epoch_val) <= tol:
+                    same += 1
+                else:
+                    diff += 1
+
+    return same, diff
+
+
+def _compare_structure(best_ss: dict, epoch_ss: dict, level: str = 'sets') -> Tuple[int, int]:
+    """Compare set or super-set structure by counting matching/differing elements."""
+    same = 0
+    diff = 0
+
+    best_list = best_ss.get('super_sets', [])
+    epoch_list = epoch_ss.get('super_sets', [])
+
+    if level == 'super_sets':
+        # Compare at super-set level (number and general structure)
+        n_best = len(best_list)
+        n_epoch = len(epoch_list)
+        same = min(n_best, n_epoch)
+        diff = abs(n_best - n_epoch)
+        return same, diff
+
+    # Sets level: compare within each super-set
+    for i, (b_ss, e_ss) in enumerate(zip(best_list, epoch_list)):
+        b_sets = b_ss.get('sets', [])
+        e_sets = e_ss.get('sets', [])
+
+        for j, (b_set, e_set) in enumerate(zip(b_sets, e_sets)):
+            # Compare by operator weights if available
+            b_ops = b_set.get('operator_weights', {})
+            e_ops = e_set.get('operator_weights', {})
+            if b_ops and e_ops:
+                # Check if dominant operator is the same
+                b_dom = max(b_ops, key=b_ops.get) if b_ops else None
+                e_dom = max(e_ops, key=e_ops.get) if e_ops else None
+                if b_dom == e_dom:
+                    same += 1
+                else:
+                    diff += 1
+            else:
+                # Compare by weight norm with 1% tolerance
+                b_norm = b_set.get('projection_weight_norm', 0)
+                e_norm = e_set.get('projection_weight_norm', 0)
+                if b_norm > 0 and abs(b_norm - e_norm) / b_norm < 0.01:
+                    same += 1
+                else:
+                    diff += 1
+
+    return same, diff
+
+
+def _compare_fuzzy_gates(best_oh: dict, epoch_oh: dict) -> Tuple[int, int]:
+    """Compare output head sensitivities."""
+    same = 0
+    diff = 0
+
+    best_sens = best_oh.get('sensitivities', {})
+    epoch_sens = epoch_oh.get('sensitivities', {})
+
+    for target in best_sens:
+        if target not in epoch_sens:
+            diff += 1
+            continue
+        # Compare which block drives this target
+        b_primary = max(best_sens[target], key=best_sens[target].get) if best_sens[target] else None
+        e_primary = max(epoch_sens[target], key=epoch_sens[target].get) if epoch_sens[target] else None
+        if b_primary == e_primary:
+            same += 1
+        else:
+            diff += 1
+
+    return same, diff
 
 
 # =============================================================================
@@ -612,7 +1057,7 @@ def parse_args():
 # =============================================================================
 
 def train_condor_net(args):
-    """Main training function for CondorNet."""
+    """Main training function for CondorNet v5."""
 
     # GUI Telemetry setup
     emitter = None
@@ -781,11 +1226,14 @@ def train_condor_net(args):
 
     # Training
     print(f"\n{'='*60}")
-    print(f"CONDORNET TRAINING")
+    print(f"CONDORNET V5 TRAINING LABORATORY")
+    print(f"Version: {CN_VERSION}_{DS_VERSION}")
     print(f"{'='*60}")
     print(f"State: d_h={args.d_h}, d_v={args.d_v}, d_m={args.d_m}, d_r={args.d_r}")
     print(f"Total state dim: {model.spec.d_x}")
+    print(f"Logic: {args.n_predicates} predicates, {args.n_sets} sets, {args.n_super_sets} super-sets")
     print(f"Epochs: {args.epochs}, Batch: {args.batch_size}, LR: {args.lr}")
+    print(f"Convergence: threshold={args.convergence_threshold}, patience={args.convergence_patience}, active={args.convergence_active}")
     print(f"Output: {args.output}")
     print(f"{'='*60}\n")
 
@@ -796,8 +1244,17 @@ def train_condor_net(args):
     training_start_time = time.time()
 
     best_val_loss = float('inf')
+    best_train_loss = float('inf')
+    best_val_train_gap = float('inf')
+    best_epoch = 0
     patience_counter = 0
     total_steps = args.epochs * n_train_batches
+    epoch_snapshots = []  # V5: For epoch comparison reports
+    convergence_manager = SmartEpochManager(
+        threshold=args.convergence_threshold,
+        patience=args.convergence_patience,
+        active=args.convergence_active,
+    )
 
     # Emit training start
     if emitter:
@@ -814,6 +1271,8 @@ def train_condor_net(args):
         model.train()
         epoch_loss = 0.0
         epoch_components = {k: 0.0 for k in criterion.lambdas.keys()}
+        convergence_manager.reset()  # V5: Reset convergence tracking per epoch
+        epoch_batches_run = 0
 
         pbar = tqdm(range(n_train_batches), desc=f"Epoch {epoch+1}", leave=False)
 
@@ -885,8 +1344,16 @@ def train_condor_net(args):
                     optimizer.zero_grad(set_to_none=True)
 
             epoch_loss += loss.item()
+            epoch_batches_run += 1
             for k, v in components.items():
                 epoch_components[k] += v.item() if torch.is_tensor(v) else v
+
+            # V5: Convergence tracking
+            should_stop = convergence_manager.update(loss.item(), model)
+            if should_stop:
+                print(f"\n  [CONVERGENCE] Epoch {epoch+1} stopped at batch {batch_idx+1}/{n_train_batches} "
+                      f"(best_loss={convergence_manager.best_loss_in_window:.6f})")
+                break
 
             # TensorBoard: log every 100 steps
             if global_step % 100 == 0:
@@ -985,7 +1452,12 @@ def train_condor_net(args):
                     )
 
         scheduler.step()
-        avg_train_loss = epoch_loss / n_train_batches
+        avg_train_loss = epoch_loss / max(1, epoch_batches_run)
+
+        # V5: If convergence manager captured a snapshot, restore it for validation
+        if convergence_manager.has_snapshot:
+            print(f"  [V5] Restoring convergence snapshot for validation (loss={convergence_manager.best_loss_in_window:.6f})")
+            model.load_state_dict(convergence_manager.best_snapshot)
 
         # Validation
         model.eval()
@@ -1043,68 +1515,169 @@ def train_condor_net(args):
                 is_best=(avg_val_loss < best_val_loss),
             )
 
-        # Save epoch checkpoint (every N epochs)
-        if args.checkpoint_every > 0 and (epoch + 1) % args.checkpoint_every == 0:
-            checkpoint_dir = Path(args.checkpoint_dir)
-            checkpoint_dir.mkdir(parents=True, exist_ok=True)
-            checkpoint_path = checkpoint_dir / f"condornet_epoch_{epoch+1:03d}.pt"
-            torch.save({
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'epoch': epoch + 1,
-                'train_loss': avg_train_loss,
-                'val_loss': avg_val_loss,
-                'best_val_loss': best_val_loss,
-                'state_dims': {
-                    'd_h': args.d_h, 'd_v': args.d_v,
-                    'd_m': args.d_m, 'd_r': args.d_r,
-                },
-                'hyperparameters': {
-                    'n_predicates': args.n_predicates,
-                    'n_sets': args.n_sets,
-                    'n_super_sets': args.n_super_sets,
-                    'n_layers': args.n_layers,
-                    'd_control': args.d_control,
-                },
-                'feature_cols': FEATURE_COLS,
-                'normalization': {'median': med.tolist(), 'scale': scale.tolist()},
-            }, checkpoint_path)
-            print(f"  -> Checkpoint saved: {checkpoint_path}")
+        # ============================================================
+        # V5: ALWAYS save epoch checkpoint
+        # ============================================================
+        epoch_ts = datetime.now().strftime("%m%d%Y_%H%M%S")
+        checkpoint_dir = Path(args.checkpoint_dir)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        epoch_ckpt_name = f"Epoch{epoch+1}_{CN_VERSION}_{DS_VERSION}_{epoch_ts}.pth"
+        checkpoint_path = checkpoint_dir / epoch_ckpt_name
 
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            patience_counter = 0
+        epoch_checkpoint_data = {
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+            'epoch': epoch + 1,
+            'train_loss': avg_train_loss,
+            'val_loss': avg_val_loss,
+            'best_val_loss': best_val_loss,
+            'version': f"{CN_VERSION}_{DS_VERSION}",
+            'state_dims': {
+                'd_h': args.d_h, 'd_v': args.d_v,
+                'd_m': args.d_m, 'd_r': args.d_r,
+            },
+            'hyperparameters': {
+                'n_predicates': args.n_predicates,
+                'n_sets': args.n_sets,
+                'n_super_sets': args.n_super_sets,
+                'n_layers': args.n_layers,
+                'd_control': args.d_control,
+            },
+            'feature_cols': FEATURE_COLS,
+            'normalization': {'median': med.tolist(), 'scale': scale.tolist()},
+        }
+        torch.save(epoch_checkpoint_data, checkpoint_path)
+        print(f"  -> Checkpoint saved: {epoch_ckpt_name}")
 
-            os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
-            torch.save({
-                'model_state_dict': model.state_dict(),
-                'epoch': epoch + 1,
-                'val_loss': best_val_loss,
-                'state_dims': {
-                    'd_h': args.d_h, 'd_v': args.d_v,
-                    'd_m': args.d_m, 'd_r': args.d_r,
-                },
-                'hyperparameters': {
-                    'n_predicates': args.n_predicates,
-                    'n_sets': args.n_sets,
-                    'n_super_sets': args.n_super_sets,
-                    'n_layers': args.n_layers,
-                    'd_control': args.d_control,
-                },
-                'feature_cols': FEATURE_COLS,
-                'normalization': {'median': med.tolist(), 'scale': scale.tolist()},
-            }, args.output)
-            print(f"  -> Saved best model (val_loss={best_val_loss:.4f})")
+        # ============================================================
+        # V5: Interpretability report
+        # ============================================================
+        interp_report = extract_epoch_interpretability(
+            model, epoch + 1, avg_train_loss, avg_val_loss,
+            FEATURE_COLS, args, is_best=False,
+        )
+        reports_dir = Path("reports")
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        interp_path = reports_dir / f"Epoch{epoch+1}_{CN_VERSION}_{DS_VERSION}_{epoch_ts}.json"
+        with open(interp_path, 'w') as f:
+            json.dump(interp_report, f, indent=2)
+        print(f"  -> Interpretability: {interp_path.name}")
+
+        # Store snapshot for epoch comparison
+        epoch_snapshots.append({
+            'epoch': epoch + 1,
+            'train_loss': avg_train_loss,
+            'val_loss': avg_val_loss,
+            'interpretability': interp_report,
+            'timestamp': epoch_ts,
+        })
+
+        # ============================================================
+        # V5: A_matrix CSV export
+        # ============================================================
+        a_matrix_dir = Path("models/A_matrices")
+        a_matrix_dir.mkdir(parents=True, exist_ok=True)
+        a_csv_path = a_matrix_dir / f"Epoch{epoch+1}_A_Matrix.csv"
+        a_stability = export_a_matrix_csv(model, a_csv_path)
+        print(f"  -> A_matrix: {a_csv_path.name} (rho={a_stability['spectral_radius']:.4f})")
+
+        # ============================================================
+        # V5: Best-model logic with generalization gate
+        # ============================================================
+        val_train_gap = abs(avg_val_loss - avg_train_loss)
+
+        if avg_val_loss < avg_train_loss:
+            # Passes generalization check
+            is_new_best = False
+            if best_val_loss == float('inf'):
+                is_new_best = True
+                reason = "First epoch passing generalization"
+            elif avg_val_loss < best_val_loss and val_train_gap < best_val_train_gap:
+                is_new_best = True
+                reason = (f"Better val ({avg_val_loss:.4f} < {best_val_loss:.4f}) "
+                          f"AND tighter gap ({val_train_gap:.4f} < {best_val_train_gap:.4f})")
+            elif avg_val_loss < best_val_loss:
+                is_new_best = True
+                reason = (f"Better val ({avg_val_loss:.4f} < {best_val_loss:.4f}), "
+                          f"gap widened ({val_train_gap:.4f} vs {best_val_train_gap:.4f})")
+            else:
+                reason = (f"Val not better ({avg_val_loss:.4f} >= {best_val_loss:.4f}), "
+                          f"best remains Epoch {best_epoch}")
+
+            if is_new_best:
+                best_val_loss = avg_val_loss
+                best_train_loss = avg_train_loss
+                best_val_train_gap = val_train_gap
+                best_epoch = epoch + 1
+                patience_counter = 0
+
+                # Update interpretability report flag
+                interp_report['summary']['is_best'] = True
+                with open(interp_path, 'w') as f:
+                    json.dump(interp_report, f, indent=2)
+
+                # Save/overwrite best model
+                os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
+                best_checkpoint_data = {
+                    'model_state_dict': model.state_dict(),
+                    'epoch': epoch + 1,
+                    'train_loss': avg_train_loss,
+                    'val_loss': best_val_loss,
+                    'val_train_gap': val_train_gap,
+                    'version': f"{CN_VERSION}_{DS_VERSION}",
+                    'state_dims': {
+                        'd_h': args.d_h, 'd_v': args.d_v,
+                        'd_m': args.d_m, 'd_r': args.d_r,
+                    },
+                    'hyperparameters': {
+                        'n_predicates': args.n_predicates,
+                        'n_sets': args.n_sets,
+                        'n_super_sets': args.n_super_sets,
+                        'n_layers': args.n_layers,
+                        'd_control': args.d_control,
+                    },
+                    'feature_cols': FEATURE_COLS,
+                    'normalization': {'median': med.tolist(), 'scale': scale.tolist()},
+                }
+                torch.save(best_checkpoint_data, args.output)
+                print(f"  -> NEW BEST MODEL (Epoch {epoch+1}): {reason}")
+                print(f"     Saved: {args.output}")
+            else:
+                patience_counter += 1
+                print(f"  -> Epoch {epoch+1} generalizes but NOT new best: {reason}")
         else:
             patience_counter += 1
-            if patience_counter >= args.patience:
-                print(f"Early stopping at epoch {epoch+1}")
-                break
+            print(f"  -> Epoch {epoch+1} OVERFITTING: val_loss ({avg_val_loss:.4f}) >= train_loss ({avg_train_loss:.4f})")
+
+        # ============================================================
+        # V5: Epoch comparison (after epoch >= 2)
+        # ============================================================
+        if len(epoch_snapshots) >= 2:
+            comparison = compute_epoch_comparison(epoch_snapshots, best_epoch)
+            # Rotate file: delete old, write new
+            for old_file in glob.glob(str(reports_dir / "EPOCH_Comparison_*.json")):
+                os.remove(old_file)
+            comp_path = reports_dir / f"EPOCH_Comparison_{epoch_ts}.json"
+            with open(comp_path, 'w') as f:
+                json.dump(comparison, f, indent=2)
+            print(f"  -> Comparison: {comp_path.name}")
+
+        # Early stopping
+        if patience_counter >= args.patience:
+            print(f"Early stopping at epoch {epoch+1} (patience={args.patience})")
+            break
 
     print(f"\n{'='*60}")
-    print(f"Training complete. Best val loss: {best_val_loss:.4f}")
+    print(f"CONDORNET V5 TRAINING COMPLETE")
+    print(f"{'='*60}")
+    print(f"Best val loss: {best_val_loss:.4f} (Epoch {best_epoch})")
+    print(f"Best train loss: {best_train_loss:.4f}")
+    print(f"Best val-train gap: {best_val_train_gap:.4f}")
     print(f"Model saved to: {args.output}")
+    print(f"Epoch checkpoints: {args.checkpoint_dir}/")
+    print(f"Interpretability reports: reports/")
+    print(f"A_matrices: models/A_matrices/")
     print(f"{'='*60}")
 
     # GUI Telemetry: training complete

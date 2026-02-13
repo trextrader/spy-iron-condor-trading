@@ -29,7 +29,7 @@ from tqdm import tqdm
 sys.path.insert(0, os.getcwd())
 
 from intelligence.condor_brain_net import CondorNet
-from intelligence.canonical_feature_registry import FEATURE_COLS_V22, select_feature_frame
+from intelligence.canonical_feature_registry import FEATURE_COLS_V22, FEATURE_COLS_V30, select_feature_frame
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 SEQ_LEN = 240  # CondorNet standard
@@ -75,12 +75,13 @@ def infer_architecture_from_state_dict(state_dict: dict) -> dict:
             break
 
     # Infer n_predicates from pred_gates.extra_heads shape
-    # extra_heads[0].weight shape is (n_extra_preds, d_h/4)
-    # n_extra_preds = n_predicates - 5 (base predicates)
+    # extra_heads[0].weight shape is (n_extra_preds, 11)
+    # n_extra_preds = n_predicates - 8 (8 canonical gates in V3.0)
+    n_base_predicates = 8  # V3.0: 5 original + 3 V3.0 canonical gates
     for key, tensor in state_dict.items():
         if 'pred_gates.extra_heads.0.weight' in key:
             n_extra = tensor.shape[0]
-            n_predicates = n_extra + 5  # Add back the 5 base predicates
+            n_predicates = n_extra + n_base_predicates
             break
 
     return {
@@ -195,7 +196,7 @@ def extract_learned_logic(model, feature_names):
         "output_head": {}
     }
 
-    # 1. Extract Predicate Thresholds
+    # 1. Extract Predicate Thresholds (V2.2 + V3.0)
     if hasattr(model, 'pred_gates'):
         pg = model.pred_gates
         logic["predicates"] = {
@@ -204,8 +205,15 @@ def extract_learned_logic(model, feature_names):
             "rsi_threshold": float(pg.rsi_thresh.data),
             "gap_fraction_threshold": float(pg.gap_frac_thresh.data),
             "gamma_threshold": float(pg.gamma_thresh.data),
-            "steepness": pg.steepness
+            "steepness": pg.steepness,
         }
+        # V3.0 thresholds (if available)
+        if hasattr(pg, 'iv_regime_frac_thresh'):
+            logic["predicates"]["iv_regime_frac_threshold"] = float(pg.iv_regime_frac_thresh.data)
+        if hasattr(pg, 'put_flow_thresh'):
+            logic["predicates"]["put_flow_threshold"] = float(pg.put_flow_thresh.data)
+        if hasattr(pg, 'spread_stress_mult_thresh'):
+            logic["predicates"]["spread_stress_mult_threshold"] = float(pg.spread_stress_mult_thresh.data)
 
     # 2. Extract SuperSet Logic (V21+: super_sets is a ModuleList)
     if hasattr(model, 'super_sets') and len(model.super_sets) > 0:
@@ -340,6 +348,13 @@ def generate_trading_rules(logic, max_super_sets=None, max_sets=None, max_compar
         rules.append(f"RULE 3 (Trend): Signal Reversal if RSI < {p.get('rsi_threshold', 25):.2f} and delta_RSI < 0")
         rules.append(f"RULE 4 (Gap): Guard if 1m price jump > {p.get('gap_fraction_threshold', 0.012):.2%}")
         rules.append(f"RULE 5 (Greeks): Hedge if |Gamma| > {p.get('gamma_threshold', 0.01):.4f}")
+        # V3.0 rules
+        if 'iv_regime_frac_threshold' in p:
+            rules.append(f"RULE 6 (IV Regime): Alert if IV_Mid > IV_High * {p['iv_regime_frac_threshold']:.2f}")
+        if 'put_flow_threshold' in p:
+            rules.append(f"RULE 7 (Flow): Heavy Put if Put_Vol/Total_Vol > {p['put_flow_threshold']:.2f}")
+        if 'spread_stress_mult_threshold' in p:
+            rules.append(f"RULE 8 (Microstructure): Stress if quote_spread > {p['spread_stress_mult_threshold']:.1f}x median")
 
     # Analyze SuperSet (V21+ format)
     ss = logic.get("super_set", {})
