@@ -1,0 +1,73 @@
+{
+  "best_model": {
+    "epoch": 0,
+    "note": "No epoch passed generalization gate yet; comparing against Epoch 1"
+  },
+  "comparisons": {
+    "Epoch1": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 512,
+      "different_sets": 0,
+      "same_super_sets": 16,
+      "different_super_sets": 0,
+      "same_fuzzy_gates": 10,
+      "different_fuzzy_gates": 0,
+      "spectral_radius_delta": 0.0,
+      "val_loss": 10.999343387351548,
+      "train_loss": 4.879856983108935
+    },
+    "Epoch2": {
+      "same_predicates": 7,
+      "different_predicates": 1,
+      "same_sets": 476,
+      "different_sets": 36,
+      "same_super_sets": 16,
+      "different_super_sets": 0,
+      "same_fuzzy_gates": 10,
+      "different_fuzzy_gates": 0,
+      "spectral_radius_delta": 0.015624,
+      "val_loss": 11.627511960021721,
+      "train_loss": 4.260996208111118
+    },
+    "Epoch3": {
+      "same_predicates": 7,
+      "different_predicates": 1,
+      "same_sets": 456,
+      "different_sets": 56,
+      "same_super_sets": 16,
+      "different_super_sets": 0,
+      "same_fuzzy_gates": 10,
+      "different_fuzzy_gates": 0,
+      "spectral_radius_delta": 0.030452,
+      "val_loss": 11.935202517391236,
+      "train_loss": 4.2944892071060625
+    },
+    "Epoch4": {
+      "same_predicates": 7,
+      "different_predicates": 1,
+      "same_sets": 449,
+      "different_sets": 63,
+      "same_super_sets": 16,
+      "different_super_sets": 0,
+      "same_fuzzy_gates": 10,
+      "different_fuzzy_gates": 0,
+      "spectral_radius_delta": 0.044256,
+      "val_loss": 12.199428603800204,
+      "train_loss": 4.12688124363589
+    },
+    "Epoch5": {
+      "same_predicates": 7,
+      "different_predicates": 1,
+      "same_sets": 439,
+      "different_sets": 73,
+      "same_super_sets": 16,
+      "different_super_sets": 0,
+      "same_fuzzy_gates": 10,
+      "different_fuzzy_gates": 0,
+      "spectral_radius_delta": 0.058765,
+      "val_loss": 12.30500903641882,
+      "train_loss": 4.070674504933816
+    }
+  }
+}
