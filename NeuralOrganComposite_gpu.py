@@ -13,13 +13,14 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import pyvista as pv
+pv.start_xvfb()   # critical for Colab
 
 # ============================================================
 # Configuration
 # ============================================================
 
-A_MATRIX_DIR = Path(r"C:\SPYOptionTrader_test\models\a_matrix")
-OUTPUT_DIR = Path(r"C:\SPYOptionTrader_test\visualizations")
+A_MATRIX_DIR = Path("/models/a_matrix")
+OUTPUT_DIR = Path("/visualizations")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 LOGIC_SHELL_MODE = 1  # 1=thin, 2=double, 3=volumetric
