@@ -300,7 +300,7 @@ def build_epoch_traces(idx: int):
         for vi in range(len(v)):
             cx = pos[0] + radius * np.sin(v[vi]) * np.cos(u)
             cy = pos[1] + radius * np.sin(v[vi]) * np.sin(u)
-            cz = pos[2] + radius * np.cos(v[vi]) + z_off
+            cz = np.full_like(cx, pos[2] + radius * np.cos(v[vi]) + z_off)
             color = _to_plotly_rgba(radius, min_gersh, max_gersh, alpha=0.08)
             traces.append(go.Scatter3d(
                 x=cx, y=cy, z=cz,
