@@ -314,7 +314,7 @@ def build_scene_for_epoch(idx: int, pulse_scale: float = 1.0, pulse_angle: float
     coords = coords * pulse_scale
 
     plotter = pv.Plotter(off_screen=True, window_size=RESOLUTION)
-    plotter.set_background(0.02, 0.02, 0.05)
+    plotter.set_background((0.02, 0.02, 0.05))
 
     # Logic shell
     if LOGIC_SHELL_MODE in (1, 2, 3):
