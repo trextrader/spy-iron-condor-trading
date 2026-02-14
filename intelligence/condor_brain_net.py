@@ -1,6 +1,6 @@
 """
 CondorNet™ - Mathematically Faithful Implementation
-
+condor_brain_net.py
 This module implements the complete CondorNet architecture as specified in the
 canonical PDF/Word document. Key features:
 
@@ -211,13 +211,13 @@ class BlockMatrixA(nn.Module):
         device = next(self.parameters()).device
         
         # Build by applying to basis vectors in FP32
+        # NOTE: No torch.no_grad() — gradients MUST flow through A_theta
+        # so the linear dynamics block can train via ETD kernels + spectral loss.
         eye = torch.eye(d_x, device=device, dtype=torch.float32)
         cols = []
         for i in range(d_x):
             e_i = eye[:, i]
-            # Manual forward_blocks in FP32 to stay within the float32 manifold
-            with torch.no_grad():
-                col = self.forward_blocks(e_i.to(next(self.parameters()).dtype)).float()
+            col = self.forward_blocks(e_i.to(next(self.parameters()).dtype)).float()
             cols.append(col.unsqueeze(-1))
             
         A_full = torch.cat(cols, dim=-1)  # [d_x, d_x]
