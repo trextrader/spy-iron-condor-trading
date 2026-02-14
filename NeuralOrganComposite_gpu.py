@@ -19,8 +19,9 @@ pv.start_xvfb()   # critical for Colab
 # Configuration
 # ============================================================
 
-A_MATRIX_DIR = Path("/models/a_matrix")
-OUTPUT_DIR = Path("/visualizations")
+SCRIPT_DIR = Path(__file__).resolve().parent
+A_MATRIX_DIR = SCRIPT_DIR / "models" / "a_matrix"
+OUTPUT_DIR = SCRIPT_DIR / "visualizations"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 LOGIC_SHELL_MODE = 1  # 1=thin, 2=double, 3=volumetric
