@@ -219,6 +219,7 @@ if os.path.exists(input_csv):
     # Choose Trace Type (Candlesticks are heavy for interactive events)
     if render_mode == "Interactive (Labeling)":
         if show_candles_interactive:
+            # Note: Candlesticks don't have a 'gl' version, but they use WebGL internal
             fig.add_trace(go.Candlestick(
                 x=filtered_data['timestamp'].tolist(),
                 open=filtered_data['open'].tolist(),
@@ -228,13 +229,14 @@ if os.path.exists(input_csv):
                 name='Candlesticks (Interactive)'
             ))
         else:
-            fig.add_trace(go.Scatter(
+            # USE GPU-ACCELERATED SCATTERGL FOR INTERACTIVE MODE
+            fig.add_trace(go.Scattergl(
                 x=filtered_data['timestamp'].tolist(),
                 y=filtered_data['close'].tolist(),
                 mode='lines+markers',
                 marker=dict(size=4, opacity=0.5),
                 line=dict(color='white', width=1),
-                name='Interactive Price'
+                name='Interactive Price (GPU)'
             ))
     elif chart_style == "Candlestick":
         fig.add_trace(go.Candlestick(
