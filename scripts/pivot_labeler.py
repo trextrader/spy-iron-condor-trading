@@ -41,17 +41,24 @@ if os.path.exists(input_csv):
         is_barchart = "Symbol:" in first_line
         
         if fmt_choice == "Barchart Raw Spot" or (fmt_choice == "Auto-Detect" and is_barchart):
-            df = pd.read_csv(path, skiprows=1) # Skip the "Symbol: SPY" metadata row
-            # Standardize Barchart columns
+            # Skip 1st metadata row, use 2nd as headers
+            df = pd.read_csv(path, skiprows=1) 
+            
+            # Standardize Barchart columns (including some studies)
             rename_map = {
                 'Date Time': 'timestamp',
                 'Open': 'open',
                 'High': 'high',
                 'Low': 'low',
-                'Close': 'close'
+                'Close': 'close',
+                'Implied Volatility': 'iv',
+                'FRAMA': 'frama_study',
+                'Anchored VWAP': 'avwap_study',
+                'McClellanOsc': 'mcclellan_osc'
             }
             df = df.rename(columns=rename_map)
-            # In a spot file, underlying_price is just the close
+            
+            # Ensure underlying_price points to close for labeling
             if 'underlying_price' not in df.columns:
                 df['underlying_price'] = df['close']
         else:
@@ -61,16 +68,16 @@ if os.path.exists(input_csv):
         df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
         df = df.dropna(subset=['timestamp'])
         
-        # 2. Extract spot-level columns (these are identical for all options at the same minute)
+        # 2. Extract spot-level columns
         spot_cols = [
             'open', 'high', 'low', 'close', 'underlying_price', 
-            'rev_m5', 'rev_m15', 'rev_h1', 
-            'm_from_open', 'norm_session_time'
+            'rev_m5', 'rev_m15', 'rev_h1', 'iv',
+            'frama_study', 'avwap_study', 'mcclellan_osc'
         ]
         available_spot_cols = [c for c in spot_cols if c in df.columns]
         
-        # 3. Collapse multiple option rows per timestamp to a single spot bar
-        # For a spot-only file, this basically does nothing but confirms 1 row per min
+        # 3. Collapse multiple rows per timestamp (for Option files)
+        # For spot files, this just confirms 1 row per min.
         spots = df.groupby('timestamp')[available_spot_cols].first().reset_index()
         
         # 4. Resample if requested timeframe is higher than M1
