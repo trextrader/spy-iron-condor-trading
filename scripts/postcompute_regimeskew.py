@@ -252,6 +252,14 @@ def main():
     print(f"✔ Full 116-column schema synchronized ({len(df.columns)} cols)")
 
     # --------------------------------------------------------
+    # STEP 7: v4.2 Anti-Stall Integration
+    # --------------------------------------------------------
+    print("🚀 Integrating v4.2 Anti-Stall features (Phase 1)…")
+    df = compute_session_features(df)
+    df = compute_regime_features(df)
+    print(f"✔ Session and Regime awareness added ({len(df.columns)} cols)")
+
+    # --------------------------------------------------------
     # Save output
     # --------------------------------------------------------
     print(f"💾 Saving output to: {args.output}")
