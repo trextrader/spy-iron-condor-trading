@@ -47,12 +47,16 @@ class CompositeCondorLoss(nn.Module):
         # (pred, sharpe, drawdown, turnover, rule_consistency)
         lambdas: Tuple[float, float, float, float, float] = (1.0, 0.5, 0.1, 0.1, 1.0),
         huber_delta: float = 1.0,
-        dd_tau: float = 0.02
+        dd_tau: float = 0.02,
+        pivot_head_weight: float = 2.0
     ):
         super().__init__()
         self.lambdas = lambdas
         self.dd_tau = dd_tau
+        self.pivot_head_weight = pivot_head_weight
         self.huber = nn.HuberLoss(delta=huber_delta, reduction='mean')
+        self.bce = nn.BCELoss(reduction='mean')
+        self.ce = nn.CrossEntropyLoss(reduction='mean')
         
     def forward(
         self,
@@ -133,13 +137,43 @@ class CompositeCondorLoss(nn.Module):
             
             l_rule = l_block + 0.5 * l_consensus
         
+        # 6. v4.2 Structural Pivot Loss
+        l_pivot = torch.tensor(0.0, device=device)
+        if pivot_targets is not None and self.pivot_head_weight > 0:
+            # pivot_preds: (prob, strength, type_logits, dist)
+            # pivot_targets: (B, 5) [has_pivot, strength, high_flag, low_flag, dist]
+            p_prob, p_str, p_type_logits, p_dist = pivot_preds
+            
+            # A. Existence Probability (BCE)
+            l_pivot_exist = self.bce(p_prob, pivot_targets[:, 0:1])
+            
+            # B. Strength (MSE)
+            l_pivot_str = F.mse_loss(p_str, pivot_targets[:, 1:2])
+            
+            # C. Type Classification (CE if exists)
+            # pivot_targets[:, 2:4] are [high_flag, low_flag]
+            # We only classify points labeled as pivots
+            mask = pivot_targets[:, 0] > 0
+            if mask.any():
+                # target index: 0 if high_flag=1, else 1
+                target_idx = (pivot_targets[mask, 3] == 1).long() # 1 if low, 0 if high
+                l_pivot_type = self.ce(p_type_logits[mask], target_idx)
+            else:
+                l_pivot_type = torch.tensor(0.0, device=device)
+                
+            # D. Distance (MSE)
+            l_pivot_dist = F.mse_loss(p_dist, pivot_targets[:, 4:5])
+            
+            l_pivot = l_pivot_exist + 0.1 * l_pivot_str + l_pivot_type + 0.1 * l_pivot_dist
+
         # Weighted combination
         total = (
             self.lambdas[0] * l_pred +
             self.lambdas[1] * l_sharpe +
             self.lambdas[2] * l_dd +
             self.lambdas[3] * l_turn +
-            (self.lambdas[4] * l_rule if len(self.lambdas) > 4 else 0.0)
+            (self.lambdas[4] * l_rule if len(self.lambdas) > 4 else 0.0) +
+            self.pivot_head_weight * l_pivot
         )
         
         return total
@@ -151,7 +185,9 @@ class CompositeCondorLoss(nn.Module):
         returns: Optional[torch.Tensor] = None,
         weights: Optional[torch.Tensor] = None,
         last_weights: Optional[torch.Tensor] = None,
-        rule_signals: Optional[torch.Tensor] = None
+        rule_signals: Optional[torch.Tensor] = None,
+        pivot_preds: Optional[Tuple[torch.Tensor, ...]] = None,
+        pivot_targets: Optional[torch.Tensor] = None
     ) -> dict:
         """
         Compute composite loss with individual component values for logging.
@@ -197,12 +233,28 @@ class CompositeCondorLoss(nn.Module):
             l_consensus = ((1.0 - rule_strength) * confidence).mean()
             l_rule = l_block + 0.5 * l_consensus
         
+        # v4.2 Structural Pivot Loss
+        l_pivot = torch.tensor(0.0, device=device)
+        if pivot_targets is not None and self.pivot_head_weight > 0 and pivot_preds is not None:
+            p_prob, p_str, p_type_logits, p_dist = pivot_preds
+            l_pivot_exist = self.bce(p_prob, pivot_targets[:, 0:1])
+            l_pivot_str = F.mse_loss(p_str, pivot_targets[:, 1:2])
+            mask = pivot_targets[:, 0] > 0
+            if mask.any():
+                target_idx = (pivot_targets[mask, 3] == 1).long()
+                l_pivot_type = self.ce(p_type_logits[mask], target_idx)
+            else:
+                l_pivot_type = torch.tensor(0.0, device=device)
+            l_pivot_dist = F.mse_loss(p_dist, pivot_targets[:, 4:5])
+            l_pivot = l_pivot_exist + 0.1 * l_pivot_str + l_pivot_type + 0.1 * l_pivot_dist
+
         total = (
             self.lambdas[0] * l_pred +
             self.lambdas[1] * l_sharpe +
             self.lambdas[2] * l_dd +
             self.lambdas[3] * l_turn +
-            (self.lambdas[4] * l_rule if len(self.lambdas) > 4 else 0.0)
+            (self.lambdas[4] * l_rule if len(self.lambdas) > 4 else 0.0) +
+            self.pivot_head_weight * l_pivot
         )
         
         return {
@@ -211,5 +263,6 @@ class CompositeCondorLoss(nn.Module):
             'sharpe': l_sharpe.detach(),
             'drawdown': l_dd.detach(),
             'turnover': l_turn.detach(),
-            'rule': l_rule.detach()
+            'rule': l_rule.detach(),
+            'pivot': l_pivot.detach() if isinstance(l_pivot, torch.Tensor) else l_pivot
         }

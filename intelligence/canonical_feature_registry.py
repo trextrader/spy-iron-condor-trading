@@ -532,6 +532,44 @@ NEUTRAL_FILL_VALUES_V30: Dict[str, float] = {
     "quote_spread": 0.01,           # Tight spread default
 }
 
+# =============================================================================
+# V4.2 FEATURE COLUMNS (Anti-Stall & Structural)
+# =============================================================================
+
+FEATURE_COLS_V42: List[str] = [
+    *FEATURE_COLS_V30,
+    "minutes_from_open",          # 79: Minutes since market open
+    "minutes_to_close",           # 80: Minutes to market close
+    "norm_session_time",          # 81: 0..1 session progress
+    "session_phase",              # 82: {1: Open, 2: Mid, 3: Close, 4: Ext}
+    "vol_regime_label",           # 83: {0: Low, 1: Normal, 2: High}
+    "vol_regime_score",           # 84: 0..1 quantile score
+    "liq_score",                  # 85: Liquidity density score
+    "liq_regime",                 # 86: {0: Low, 1: Normal, 2: High}
+    "p_dist_prev",                # 87: Distance to previous pivot
+    "p_slope_prev",               # 88: Slope to previous pivot
+    "pivot_high_flag",            # 89: 1 if point is high pivot
+    "pivot_low_flag",             # 90: 1 if point is low pivot
+]
+
+INPUT_DIM_V42: int = len(FEATURE_COLS_V42)  # 91 features
+VERSION_V42: str = "condorbrain_v4.2_structural"
+
+# V4.2 Neutral Fill Values
+NEUTRAL_FILL_VALUES_V42: Dict[str, float] = {
+    **NEUTRAL_FILL_VALUES_V30,
+    "norm_session_time": 0.5,
+    "session_phase": 2.0,
+    "vol_regime_label": 1.0,
+    "vol_regime_score": 0.5,
+    "liq_score": 0.5,
+    "liq_regime": 1.0,
+    "p_dist_prev": 60.0,
+    "p_slope_prev": 0.0,
+    "pivot_high_flag": 0.0,
+    "pivot_low_flag": 0.0,
+}
+
 # V3.0 Checkpoint Keys
 CHECKPOINT_REQUIRED_KEYS_V30: List[str] = [
     "state_dict",

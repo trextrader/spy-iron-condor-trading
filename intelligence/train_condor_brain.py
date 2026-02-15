@@ -37,9 +37,12 @@ from intelligence.condor_loss import CompositeCondorLoss
 from intelligence.canonical_feature_registry import (
     FEATURE_COLS_V22,
     FEATURE_COLS_V30,
+    FEATURE_COLS_V42,
     NEUTRAL_FILL_VALUES_V30,
+    NEUTRAL_FILL_VALUES_V42,
     VERSION_V22,
     VERSION_V30,
+    VERSION_V42,
     select_feature_frame,
 )
 from intelligence.training_monitor import (
@@ -137,13 +140,14 @@ FEATURE_COLS = FEATURE_COLS_V30
 # DATA PREPARATION (Fast In-Memory)
 # ============================================================================
 
-def prepare_features(df: pd.DataFrame) -> tuple:
+def prepare_features(df: pd.DataFrame, version: str = "v3.0") -> tuple:
     """Prepare features and targets for CondorBrain training.
     
     Returns:
-        (X, y, regime, median, scale)
+        (X, y, regime, median, scale, y_pivot)
 
-    2026-01-26 UPDATE: Now generates 10 targets (added explicit entry/exit targets)
+    2026-02-15 UPDATE: v4.2 Structural Awareness added.
+    Now supports multi-task pivot targets.
     and uses REALISTIC values instead of constants to prevent model collapse.
 
     Target indices:
@@ -291,16 +295,28 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     # Fill ALL NaNs
     df = df.ffill().bfill().fillna(0)
 
-    # Build arrays (10 targets now)
+    # Build arrays
     target_cols = [
         'target_call_offset', 'target_put_offset', 'target_wing_width', 'target_dte',
         'was_profitable', 'realized_roi', 'realized_max_loss', 'confidence_target',
-        'entry_target', 'exit_target'  # NEW: explicit entry/exit logits
+        'entry_target', 'exit_target'
     ]
+    
+    # Pivot Targets (v4.2)
+    # [has_pivot, strength, high_flag, low_flag, dist]
+    pivot_target_cols = ['pivot_high_flag', 'pivot_low_flag', 'pivot_strength', 'p_dist_prev']
+    for col in pivot_target_cols:
+        if col not in df.columns:
+            df[col] = 0.0
 
-    X = select_feature_frame(df, FEATURE_COLS, strict=True).values.astype(np.float32)
+    df['has_pivot'] = ((df['pivot_high_flag'] > 0) | (df['pivot_low_flag'] > 0)).astype(float)
+    y_pivot_cols = ['has_pivot', 'pivot_strength', 'pivot_high_flag', 'pivot_low_flag', 'p_dist_prev']
+
+    current_feature_cols = FEATURE_COLS_V42 if version == "v4.2" else FEATURE_COLS_V30
+    X = select_feature_frame(df, current_feature_cols, strict=True).values.astype(np.float32)
     y = df[target_cols].values.astype(np.float32)
     regime = df['regime_label'].values.astype(np.int64)
+    y_pivot = df[y_pivot_cols].values.astype(np.float32)
     
     # ROBUST SANITIZATION (never use 1e6 - it explodes in BF16!)
     print("[CondorBrain] Sanitizing data (safe)...")
@@ -339,8 +355,8 @@ def prepare_features(df: pd.DataFrame) -> tuple:
     if np.isnan(y).any() or np.isinf(y).any():
         raise RuntimeError("[CRITICAL ERROR] y still contains NaN/Inf after sanitization!")
 
-    print(f"[CondorBrain] Features: {X.shape}, Targets: {y.shape} (10 heads)")
-    return X, y, regime, med, scale
+    print(f"[CondorBrain] Features: {X.shape}, Targets: {y.shape}, Pivot Targets: {y_pivot.shape}")
+    return X, y, regime, med, scale, y_pivot
 
 
 
@@ -642,6 +658,7 @@ def train_condor_brain(args):
     X_train, X_val = X[:split_row], X[split_row:]
     y_train, y_val = y[:split_row], y[split_row:]
     r_train, r_val = regime[:split_row], regime[split_row:]
+    yp_train, yp_val = y_pivot[:split_row], y_pivot[split_row:]
     
     # Number of sequences (start index positions)
     L = int(args.lookback)
@@ -667,13 +684,15 @@ def train_condor_brain(args):
         X_train_t = torch.from_numpy(X_train).to(device=device, dtype=dtype_gpu)
         y_train_t = torch.from_numpy(y_train).to(device=device, dtype=torch.float32)
         r_train_t = torch.from_numpy(r_train).to(device=device, dtype=torch.long)
+        yp_train_t = torch.from_numpy(yp_train).to(device=device, dtype=torch.float32)
         
         X_val_t = torch.from_numpy(X_val).to(device=device, dtype=dtype_gpu)
         y_val_t = torch.from_numpy(y_val).to(device=device, dtype=torch.float32)
         r_val_t = torch.from_numpy(r_val).to(device=device, dtype=torch.long)
+        yp_val_t = torch.from_numpy(yp_val).to(device=device, dtype=torch.float32)
         
         # Free numpy arrays
-        del X_train, X_val, y_train, y_val, r_train, r_val, X, y, regime
+        del X_train, X_val, y_train, y_val, r_train, r_val, yp_train, yp_val, X, y, regime, y_pivot
         import gc; gc.collect()
         
         # Build sequence views via unfold (ZERO COPY - just stride metadata)
@@ -702,12 +721,12 @@ def train_condor_brain(args):
         def get_train_batch(bi: int):
             s = bi * B
             e = s + B
-            return X_train_seq[s:e], y_train_t[s + L:e + L], r_train_t[s + L:e + L]
+            return X_train_seq[s:e], y_train_t[s + L:e + L], r_train_t[s + L:e + L], yp_train_t[s + L:e + L]
         
         def get_val_batch(bi: int):
             s = bi * B
             e = min(s + B, n_val_seq)
-            return X_val_seq[s:e], y_val_t[s + L:e + L], r_val_t[s + L:e + L]
+            return X_val_seq[s:e], y_val_t[s + L:e + L], r_val_t[s + L:e + L], yp_val_t[s + L:e + L]
         
         print(f"[CondorBrain] GPU tensors ready: {n_train_batches} train batches, {n_val_batches} val batches", flush=True)
     else:
@@ -910,7 +929,7 @@ def train_condor_brain(args):
         for batch_idx in pbar:
             # Get batch (GPU slice if gpu_dataset, else CPU->GPU transfer)
             if use_gpu_dataset:
-                batch_x, batch_y, batch_r = get_train_batch(batch_idx)
+                batch_x, batch_y, batch_r, batch_yp = get_train_batch(batch_idx)
             else:
                 # Fallback path: iterate through DataLoader efficiently
                 # Initialize iterator at start of epoch
@@ -954,7 +973,10 @@ def train_condor_brain(args):
                     diffusion_target=batch_y_diff if use_diffusion_now else None # Pass diffusion targets if enabled
                 )
                 
-                # Robust unpacking
+                # Robust unpacking (v4.2: pivot_preds is at the end)
+                # Position is stable: 0=out, 1=reg, 2=hor, 3=feat(opt), 4=diff(opt), 5=exp(opt), ..., last=pivot
+                pivot_preds = model_out[-1] if isinstance(model_out, tuple) else None
+
                 if isinstance(model_out, tuple):
                     outputs = model_out[0]
                     regime_probs = model_out[1] if len(model_out) > 1 else None
@@ -1016,12 +1038,15 @@ def train_condor_brain(args):
                     raise RuntimeError("Model produced NaN/Inf outputs - check data normalization or internal precision!")
                 
                 # Calculate loss (decomposed if supported)
-                if hasattr(criterion, 'forward_decomposed') and args.composite_loss:
+                # Criterion forward pass
+                if args.composite_loss:
                     loss_dict = criterion.forward_decomposed(
                         outputs.float(), 
                         batch_y.float(), 
                         regime_probs.float() if regime_probs is not None else None, 
                         batch_r,
+                        pivot_preds=[p.float() for p in pivot_preds] if pivot_preds is not None else None,
+                        pivot_targets=batch_yp.float() if batch_yp is not None else None,
                         # Pass rule signals if available (placeholder for now)
                         rule_signals=None 
                     )

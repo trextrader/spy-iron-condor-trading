@@ -380,6 +380,54 @@ class FullForcingD(nn.Module):
 
 
 # =============================================================================
+# PART 7: AUXILIARY HEADS (Pivot, Offset)
+# =============================================================================
+
+class PivotHead(nn.Module):
+    """
+    CondorNet v4.2 Structural Auxiliary Head.
+    Predicts:
+    - pivot_prob: (B, 1) probability of being a pivot
+    - pivot_strength: (B, 1) structural importance
+    - pivot_type: (B, 2) classification (high/low)
+    - pivot_dist: (B, 1) distance to nearest pivot
+    """
+    def __init__(self, d_z: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d_z, 128),
+            nn.SiLU(),
+            nn.Linear(128, 64),
+            nn.SiLU(),
+            nn.Linear(64, 5) # [prob, strength, high_logit, low_logit, dist]
+        )
+
+    def forward(self, z: torch.Tensor):
+        out = self.net(z)
+        prob = torch.sigmoid(out[:, 0:1])
+        strength = F.softplus(out[:, 1:2])
+        type_logits = out[:, 2:4]
+        dist = F.softplus(out[:, 4:5])
+        return prob, strength, type_logits, dist
+
+class OffsetModule(nn.Module):
+    """
+    v4.2 Dynamic Parameter Offset Module.
+    Learns dynamic adjustments to precomputed indicator features.
+    """
+    def __init__(self, d_control: int, n_features: int = 4):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d_control, 32),
+            nn.SiLU(),
+            nn.Linear(32, n_features)
+        )
+
+    def forward(self, u: torch.Tensor):
+        # Learn a delta in range [-0.5, 0.5]
+        return torch.tanh(self.net(u)) * 0.5
+
+# =============================================================================
 # PART 3: TRUE ETD-1 CORE
 # =============================================================================
 
@@ -1094,12 +1142,20 @@ class CondorNet(nn.Module):
             nn.Linear(self.spec.d_x, self.spec.d_x),
         )
 
-        # === PREDICATE SYSTEM ===
-        self.pred_gates = CanonicalPredicateGates(n_predicates=n_predicates)
-        self.pred_signature = PredicateSignature(K=n_predicates, R=R_moments, M=M_bloom)
-        self.regime_dyn = RegimeCombinatoricsDynamics(
-            d_r=d_r,
-            z_dim=n_predicates + R_moments + M_bloom,
+        # === HAL GATING (Predicate Architecture) ===
+        self.pred_gates = PredicateGates(d_input, n_predicates)
+        self.pred_signature = PredicateSignature(n_predicates, R_moments, M_bloom)
+        self.regime_dyn = RegimeDynamics(d_r, self.pred_signature.d_out)
+
+        # v4.2 Structural Brain upgrades
+        self.pivot_head = PivotHead(self.spec.d_x)
+        self.offset_module = OffsetModule(d_control)
+
+        # Output head
+        self.output_head = CondorExpertHead(
+            self.spec.d_x, 
+            n_heads=n_sets, 
+            n_super_heads=n_super_sets
         )
         if n_super_sets > 0:
             self.super_sets = nn.ModuleList([
@@ -1353,15 +1409,19 @@ class CondorNet(nn.Module):
             # Output (Keep in FP32 for "Ultra-Safe Mode")
             outputs = self.output_head(z_gated).float()
 
+            # v4.2 Auxiliary Structural Head
+            pivot_preds = self.pivot_head(z_gated) # (prob, str, logits, dist)
+
         if return_diagnostics:
             diagnostics['final_gate'] = super_gate
             diagnostics['z_final'] = z_final
             diagnostics['predicates'] = p_k
             diagnostics['moments'] = moments
             diagnostics['bloom'] = bloom
+            diagnostics['pivot_preds'] = pivot_preds
             return outputs, diagnostics
 
-        return outputs
+        return outputs, pivot_preds
 
     def get_initial_state(self, x_init: torch.Tensor) -> torch.Tensor:
         """

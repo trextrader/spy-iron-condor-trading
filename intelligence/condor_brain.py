@@ -225,6 +225,43 @@ class CondorSignal:
 
 
 # ============================================================================
+# v4.2 STRUCTURAL HEADS
+# ============================================================================
+
+class PivotHead(nn.Module):
+    """Auxiliary head to predict market structure (Pivots)."""
+    def __init__(self, d_model: int):
+        super().__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(d_model, 256),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, 128),
+            nn.ReLU()
+        )
+        self.prob = nn.Sequential(nn.Linear(128, 1), nn.Sigmoid())
+        self.strength = nn.Linear(128, 1)
+        self.type_logits = nn.Linear(128, 2) # [High, Low]
+        self.dist = nn.Linear(128, 1)
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        feat = self.fc(x)
+        return self.prob(feat), self.strength(feat), self.type_logits(feat), self.dist(feat)
+
+class OffsetModule(nn.Module):
+    """Learns dynamic offsets for IC parameters based on control signals."""
+    def __init__(self, d_control: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d_control, 64),
+            nn.ReLU(),
+            nn.Linear(64, 4) # Adjusts offsets for [Call, Put, Width, DTE]
+        )
+
+    def forward(self, control: torch.Tensor) -> torch.Tensor:
+        return self.net(control)
+
+# ============================================================================
 # REGIME DETECTOR
 # ============================================================================
 
@@ -561,6 +598,10 @@ class CondorBrain(nn.Module):
         
         self.legacy_head = nn.Linear(d_model, 1)
         
+        # v4.2 Structural Brain upgrades
+        self.pivot_head = PivotHead(d_model)
+        self.offset_module = OffsetModule(input_dim)
+        
     def forward(self, x: torch.Tensor, return_regime: bool = True, return_experts: bool = False, 
                 return_features: bool = False, forecast_days: int = 20, 
                 diffusion_target: Optional[torch.Tensor] = None, 
@@ -714,6 +755,10 @@ class CondorBrain(nn.Module):
             
         if return_predicates:
             res.append(pred_logits)
+
+        # v4.2 Structural Head
+        pivot_preds = self.pivot_head(last_hidden)
+        res.append(pivot_preds)
 
         return tuple(res) if len(res) > 1 else outputs
 

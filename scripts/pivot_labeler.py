@@ -21,19 +21,30 @@ st.markdown("""
 st.sidebar.header("Settings")
 input_csv = st.sidebar.text_input("Input CSV Path", "data/Datasetv4/condornet_v41_FINAL.csv")
 output_csv = st.sidebar.text_input("Export filename", "pivots_manual.csv")
+timeframe = st.sidebar.selectbox("View Timeframe", ["M1", "M5", "M15", "H1"], index=0)
 pivot_type = st.sidebar.radio("Pivot Type to Mark", ["High", "Low"])
 pivot_strength = st.sidebar.slider("Pivot Strength", 1, 3, 1)
 
+# TF Mapping
+tf_map = {"M1": "1min", "M5": "5min", "M15": "15min", "H1": "1H"}
+
 if os.path.exists(input_csv):
     @st.cache_data
-    def load_data(path):
+    def load_data(path, tf_str):
         df = pd.read_csv(path)
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         # Unique spots for UI
         spots = df.groupby('timestamp').first().reset_index().sort_values('timestamp')
+        
+        if tf_str != "1min":
+            spots = spots.set_index('timestamp').resample(tf_str).agg({
+                'underlying_price': 'last', # Use last for price line
+                'rev_m5': 'mean',
+                'rev_m15': 'mean'
+            }).dropna().reset_index()
         return spots
 
-    data = load_data(input_csv)
+    data = load_data(input_csv, tf_map[timeframe])
     
     # Session selector (optional filtering)
     date_range = st.sidebar.date_input("Date Range", [data['timestamp'].min(), data['timestamp'].max()])
@@ -65,18 +76,30 @@ if os.path.exists(input_csv):
         ))
 
     # Existing Pivots
-    if not st.session_state.pivots.empty:
-        highs = st.session_state.pivots[st.session_state.pivots['type'] == 'High']
-        lows = st.session_state.pivots[st.session_state.pivots['type'] == 'Low']
-        
-        fig.add_trace(go.Scatter(
-            x=highs['timestamp'], y=highs['price'], mode='markers',
-            marker=dict(symbol='triangle-down', color='red', size=12), name='Labled Highs'
-        ))
-        fig.add_trace(go.Scatter(
-            x=lows['timestamp'], y=lows['price'], mode='markers',
-            marker=dict(symbol='triangle-up', color='green', size=12), name='Labeled Lows'
-        ))
+        # Display all pivots but highlight current timeframe
+        for tf in ["M1", "M5", "M15", "H1"]:
+            tf_data = st.session_state.pivots[st.session_state.pivots['timeframe'] == tf]
+            if tf_data.empty: continue
+            
+            # Highs
+            h = tf_data[tf_data['type'] == 'High']
+            if not h.empty:
+                fig.add_trace(go.Scatter(
+                    x=h['timestamp'], y=h['price'], mode='markers',
+                    marker=dict(symbol='triangle-down', color='red', size=12 if tf == timeframe else 8, 
+                                opacity=1.0 if tf == timeframe else 0.4),
+                    name=f'{tf} Highs'
+                ))
+            
+            # Lows
+            l = tf_data[tf_data['type'] == 'Low']
+            if not l.empty:
+                fig.add_trace(go.Scatter(
+                    x=l['timestamp'], y=l['price'], mode='markers',
+                    marker=dict(symbol='triangle-up', color='green', size=12 if tf == timeframe else 8,
+                                opacity=1.0 if tf == timeframe else 0.4),
+                    name=f'{tf} Lows'
+                ))
 
     fig.update_layout(
         height=700, 
@@ -99,7 +122,8 @@ if os.path.exists(input_csv):
             'timestamp': [ts],
             'type': [pivot_type],
             'strength': [pivot_strength],
-            'price': [price]
+            'price': [price],
+            'timeframe': [timeframe]
         })
         
         # Check if already exists
