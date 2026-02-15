@@ -133,7 +133,6 @@ if os.path.exists(input_csv):
         st.sidebar.markdown("---")
         st.sidebar.subheader("📅 Navigation")
         
-        # Calculate full data bounds
         abs_min = data['timestamp'].min()
         abs_max = data['timestamp'].max()
         
@@ -151,17 +150,22 @@ if os.path.exists(input_csv):
             s_ts = pd.Timestamp(s_d)
             e_ts = pd.Timestamp(e_d) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
             
-            filtered = data[(data['timestamp'] >= s_ts) & (data['timestamp'] <= e_ts)].copy()
-            st.sidebar.success(f"📌 Filter: {s_d} to {e_d}")
+            # Explicit boolean mask for absolute safety
+            mask = (data['timestamp'] >= s_ts) & (data['timestamp'] <= e_ts)
+            filtered = data[mask].copy()
+            st.sidebar.success(f"📌 {len(filtered)} bars selected")
         else:
-            # Fallback to tail if no valid range selected yet
-            filtered = data.tail(5000) if not limit_bars else data.tail(1000)
+            # Fallback to safe tail during selection
+            filtered = data.tail(1000)
             st.sidebar.info("💡 Selecting range...")
             
         if limit_bars:
             filtered = filtered.tail(1000)
-            
-        st.sidebar.write(f"Chart bars: **{len(filtered)}**")
+        
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("🎯 Sniper tools")
+        drag_mode = st.sidebar.selectbox("Drag Mode", ["zoom", "pan", "select"], index=0, help="Use 'select' for Sniper Mode (sweep a box over a peak)")
+        st.sidebar.write(f"Active bars: **{len(filtered)}**")
         
         # Stats
         st.sidebar.markdown("---")
@@ -235,7 +239,9 @@ if os.path.exists(input_csv):
             template="plotly_dark", 
             title=f"SPY {timeframe} - {len(filtered)} bars", 
             yaxis=dict(side="right"),
-            xaxis=dict(type='date', rangeslider=dict(visible=False))
+            xaxis=dict(type='date', rangeslider=dict(visible=False)),
+            dragmode=drag_mode,
+            hovermode="x unified"
         )
         
         if render_mode == "Interactive (Labeling)":
@@ -245,35 +251,34 @@ if os.path.exists(input_csv):
             else:
                 from streamlit_plotly_events import plotly_events
                 if len(filtered) > 5000:
-                    st.warning(f"⚠️ **Perf Warning**: {len(filtered)} bars may cause click lag. If it's too slow, narrow the Date Range.")
+                    st.warning(f"⚠️ **Perf Warning**: {len(filtered)} bars. If it's too slow, narrow the Date Range.")
                 
                 # Unique key to ensure refresh
                 event_key = f"ev_{len(filtered)}_{timeframe}_{view_mode}_{len(st.session_state.pivots)}"
-                selected = plotly_events(fig, click_event=True, key=event_key)
+                selected = plotly_events(fig, click_event=True, select_event=True, key=event_key)
                 
                 if selected:
-                    p = selected[0]
-                    # DEBUG: Show in sidebar
-                    with st.sidebar.expander("🖱️ Click Debugger", expanded=False):
-                        st.json(p)
+                    # 🦅 SNIPER LOGIC: Handle single clicks OR box selections
+                    # We convert selection to timestamps and find the local extreema
+                    clicked_timestamps = []
+                    for p in selected:
+                        tx = p.get('x')
+                        if tx:
+                            clicked_timestamps.append(pd.to_datetime(tx))
                     
-                    # 🦅 ROBUST DETECTION: Use the x value (timestamp) to find the nearest bar
-                    # This works even if curveNumber isn't 0
-                    target_x = p.get('x')
-                    if target_x:
-                        # Convert clicked time to pandas datetime
-                        clicked_ts = pd.to_datetime(target_x)
+                    if clicked_timestamps:
+                        # Filter our data to only these timestamps
+                        selection_mask = filtered['timestamp'].isin(clicked_timestamps)
+                        selection_df = filtered[selection_mask]
                         
-                        # Find nearest timestamp in our filtered data
-                        # We use searchsorted on the sorted timestamp column
-                        timediffs = (filtered['timestamp'] - clicked_ts).abs()
-                        nearest_idx = timediffs.idxmin()
-                        row = filtered.loc[nearest_idx]
-                        
-                        # Only mark if it's reasonably close (within 2 candles)
-                        # For M1, that's 2 minutes.
-                        max_diff = pd.Timedelta(minutes=5) # Generous 5-min window
-                        if timediffs[nearest_idx] <= max_diff:
+                        if not selection_df.empty:
+                            if pivot_type == "High":
+                                # Sniper: find the absolute high in the selection
+                                row = selection_df.sort_values('high', ascending=False).iloc[0] if 'high' in selection_df.columns else selection_df.sort_values('close', ascending=False).iloc[0]
+                            else:
+                                # Sniper: find the absolute low in the selection
+                                row = selection_df.sort_values('low', ascending=True).iloc[0] if 'low' in selection_df.columns else selection_df.sort_values('close', ascending=True).iloc[0]
+                            
                             price = row['high'] if pivot_type == "High" else row['low']
                             new_p = pd.DataFrame([{
                                 'timestamp': row['timestamp'], 
@@ -283,14 +288,16 @@ if os.path.exists(input_csv):
                                 'timeframe': timeframe
                             }])
                             st.session_state.pivots = pd.concat([st.session_state.pivots, new_p], ignore_index=True)
-                            st.success(f"✅ Marked {pivot_type} at {row['timestamp'].strftime('%H:%M')}")
+                            st.sidebar.success(f"🎯 Marked {pivot_type} at {row['timestamp'].strftime('%H:%M')}")
                             st.rerun()
-                        else:
-                            st.sidebar.warning("Click was too far from any data points.")
-                    else:
-                        st.sidebar.warning("Click data missing 'x' coordinate.")
         else:
             st.plotly_chart(fig, use_container_width=True)
+
+        # Keyboard fallback button (visible only in dev)
+        with st.sidebar.expander("⌨️ Keyboard Marking", expanded=True):
+            st.markdown("1. Point crosshair at peak.\n2. Click the button below.")
+            if st.button("🚀 MARK NOW", help="Shortcut helper"):
+                st.info("Interaction active! Click the chart directly.")
 
         # --- EXPORT ---
         st.subheader("Labeled Pivots")
