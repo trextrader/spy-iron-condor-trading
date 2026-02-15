@@ -25,6 +25,8 @@ data_type = st.sidebar.selectbox("Data Format", ["Auto-Detect", "CondorNet V4.2"
 timeframe = st.sidebar.selectbox("View Timeframe", ["M1", "M5", "M15", "H1"], index=0)
 pivot_type = st.sidebar.radio("Pivot Type to Mark", ["High", "Low"])
 pivot_strength = st.sidebar.slider("Pivot Strength", 1, 3, 1)
+render_mode = st.sidebar.radio("Rendering Engine", ["Interactive (Labeling)", "Standard (Fast/Preview)"])
+limit_bars = st.sidebar.checkbox("Focus: Last 500 bars only", value=False)
 
 # TF Mapping
 tf_map = {"M1": "1min", "M5": "5min", "M15": "15min", "H1": "1H"}
@@ -122,7 +124,16 @@ if os.path.exists(input_csv):
         if spots['timestamp'].dt.tz is not None:
             spots['timestamp'] = spots['timestamp'].dt.tz_localize(None)
             
-        print("✅ Data ready.")
+        # 6. Aggressive OHLC check - Candlesticks NEED all 4 values to render
+        ohlc_cols = [c for c in ['open', 'high', 'low', 'close'] if c in spots.columns]
+        if ohlc_cols:
+            before_drop = len(spots)
+            spots = spots.dropna(subset=ohlc_cols)
+            if len(spots) < before_drop:
+                print(f"⚠️ Dropped {before_drop - len(spots)} bars with missing OHLC data.")
+        
+        print(f"✅ Data ready. Shape: {spots.shape}")
+        print("Column Sample (First Row):\n", spots.iloc[0] if not spots.empty else "EMPTY")
         return spots.sort_values('timestamp')
 
     data = pd.DataFrame()
@@ -171,6 +182,9 @@ if os.path.exists(input_csv):
     else:
         filtered_data = data.copy()
     
+    if limit_bars:
+        filtered_data = filtered_data.sort_values('timestamp').tail(500)
+
     st.sidebar.write(f"Chart bars: {len(filtered_data)}")
     
     if filtered_data.empty:
@@ -262,13 +276,16 @@ if os.path.exists(input_csv):
     y_min = filtered_data['low'].dropna().min() if 'low' in filtered_data.columns else filtered_data['underlying_price'].dropna().min()
     y_max = filtered_data['high'].dropna().max() if 'high' in filtered_data.columns else filtered_data['underlying_price'].dropna().max()
 
+    # Convert ranges to ISO strings for Plotly stability
+    x_range = [filtered_data['timestamp'].min().isoformat(), filtered_data['timestamp'].max().isoformat()] if not filtered_data.empty else None
+
     fig.update_layout(
         height=800, 
         template="plotly_dark", 
         xaxis=dict(
             rangeslider=dict(visible=True),
             type='date',
-            range=[filtered_data['timestamp'].min(), filtered_data['timestamp'].max()]
+            range=x_range
         ),
         yaxis=dict(
             fixedrange=False,
@@ -281,8 +298,12 @@ if os.path.exists(input_csv):
     )
 
     # Display chart and capture clicks
-    from streamlit_plotly_events import plotly_events
-    selected_points = plotly_events(fig, click_event=True, hover_event=False, override_height=700)
+    if render_mode == "Interactive (Labeling)":
+        from streamlit_plotly_events import plotly_events
+        selected_points = plotly_events(fig, click_event=True, hover_event=False, override_height=700)
+    else:
+        st.plotly_chart(fig, use_container_width=True, theme="streamlit")
+        selected_points = []
 
     if selected_points:
         point = selected_points[0]
