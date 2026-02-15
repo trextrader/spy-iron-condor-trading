@@ -22,12 +22,10 @@ st.sidebar.header("Settings")
 input_csv = st.sidebar.text_input("Input CSV Path", "data/Datasetv3/SPY_Barchart_Interactive_Chart_Range_1m_02_09_2026.csv")
 output_csv = st.sidebar.text_input("Export filename", "pivots_manual.csv")
 data_type = st.sidebar.selectbox("Data Format", ["Auto-Detect", "CondorNet V4.2", "Barchart Raw Spot"])
-timeframe = st.sidebar.selectbox("View Timeframe", ["M1", "M5", "M15", "H1"], index=0)
-pivot_type = st.sidebar.radio("Pivot Type to Mark", ["High", "Low"])
-pivot_strength = st.sidebar.slider("Pivot Strength", 1, 3, 1)
-render_mode = st.sidebar.radio("Rendering Engine", ["Interactive (Labeling)", "Standard (Fast/Preview)"])
+view_mode = st.sidebar.selectbox("View Mode", ["Lines", "Candlesticks", "OHLC Bars"])
+render_mode = st.sidebar.radio("Interaction Mode", ["Interactive (Labeling)", "Standard (Visual Only)"])
 limit_bars = st.sidebar.checkbox("Focus: Last 500 bars only", value=False)
-show_candles_interactive = st.sidebar.checkbox("Interactive: Show Candlesticks (May be laggy)", value=False)
+gen_static = st.sidebar.button("📸 Generate Static Plot (Fallback)")
 
 if st.sidebar.button("🧹 Clear App Cache"):
     st.cache_data.clear()
@@ -146,8 +144,10 @@ if os.path.exists(input_csv):
     data = pd.DataFrame()
     if load_btn or 'data_loaded' in st.session_state:
         st.session_state.data_loaded = True
-        with st.spinner("📦 Reading and processing CSV... check terminal for progress logs."):
+        with st.spinner("📦 Processing dataset..."):
+            # Passing timeframe to load_data ensures the cache is unique per timeframe
             data = load_data(input_csv, tf_map[timeframe], data_type)
+        st.sidebar.success(f"✅ Data Ready: {len(data)} bars ({timeframe})")
     else:
         st.warning("Click 'Load Data' in the sidebar to begin.")
         st.stop()
@@ -215,53 +215,34 @@ if os.path.exists(input_csv):
     # Chart
     fig = make_subplots(rows=1, cols=1)
     
-    # Candlestick Chart
-    # Choose Trace Type (Candlesticks are heavy for interactive events)
-    if render_mode == "Interactive (Labeling)":
-        if show_candles_interactive:
-            # Note: Candlesticks don't have a 'gl' version, but they use WebGL internal
-            fig.add_trace(go.Candlestick(
-                x=filtered_data['timestamp'].tolist(),
-                open=filtered_data['open'].tolist(),
-                high=filtered_data['high'].tolist(),
-                low=filtered_data['low'].tolist(),
-                close=filtered_data['close'].tolist(),
-                name='Candlesticks (Interactive)'
-            ))
-        else:
-            # USE GPU-ACCELERATED SCATTERGL FOR INTERACTIVE MODE
-            fig.add_trace(go.Scattergl(
-                x=filtered_data['timestamp'].tolist(),
-                y=filtered_data['close'].tolist(),
-                mode='lines+markers',
-                marker=dict(size=4, opacity=0.5),
-                line=dict(color='white', width=1),
-                name='Interactive Price (GPU)'
-            ))
-    elif chart_style == "Candlestick":
+    # Unified Trace Logic
+    if view_mode == "Candlesticks":
         fig.add_trace(go.Candlestick(
             x=filtered_data['timestamp'].tolist(),
-            open=filtered_data['open'],
-            high=filtered_data['high'],
-            low=filtered_data['low'],
-            close=filtered_data['close'],
-            name='Candlesticks',
-            increasing_line_color='green', 
-            decreasing_line_color='red'
+            open=filtered_data['open'].tolist(),
+            high=filtered_data['high'].tolist(),
+            low=filtered_data['low'].tolist(),
+            close=filtered_data['close'].tolist(),
+            name='Candlesticks'
         ))
-        # Add a faint line trace as a backup/baseline
-        fig.add_trace(go.Scatter(
-            x=filtered_data['timestamp'].tolist(), y=filtered_data['close'],
-            mode='lines', line=dict(color='gray', width=0.5),
-            name='Price Baseline (Faint)',
-            opacity=0.3
+    elif view_mode == "OHLC Bars":
+        fig.add_trace(go.Ohlc(
+            x=filtered_data['timestamp'].tolist(),
+            open=filtered_data['open'].tolist(),
+            high=filtered_data['high'].tolist(),
+            low=filtered_data['low'].tolist(),
+            close=filtered_data['close'].tolist(),
+            name='OHLC Bars'
         ))
     else:
-        fig.add_trace(go.Scatter(
+        # GPU accelerated lines for performance
+        fig.add_trace(go.Scattergl(
             x=filtered_data['timestamp'].tolist(),
-            y=filtered_data['close'],
-            name='Price (Line)',
-            line=dict(color='white', width=1.5)
+            y=filtered_data['close'].tolist(),
+            mode='lines+markers',
+            marker=dict(size=4, opacity=0.5),
+            line=dict(color='white', width=1),
+            name='Price Line'
         ))
     
     # Overlays (Rev Signals)
@@ -397,6 +378,28 @@ if os.path.exists(input_csv):
     if st.button("💾 Export to CSV"):
         st.session_state.pivots.to_csv(output_csv, index=False)
         st.success(f"Pivots exported to {output_csv}")
+
+    # --- STATIC FALLBACK BLOCK ---
+    if gen_static:
+        st.subheader("📸 Static Matplotlib Plot (Fallback)")
+        import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+        
+        fig_plt, ax = plt.subplots(figsize=(12, 6))
+        ax.plot(filtered_data['timestamp'], filtered_data['close'], color='blue', label='Price')
+        
+        # Plot existing pivots
+        for tf_p in ["M1", "M5", "M15", "H1"]:
+            pivs = st.session_state.pivots[st.session_state.pivots['timeframe'] == tf_p]
+            if not pivs.empty:
+                ax.scatter(pd.to_datetime(pivs['timestamp']), pivs['price'], 
+                           marker='v' if tf_p == "H1" else '.', label=f'{tf_p} Pivots')
+        
+        ax.set_title(f"Static Plot ({timeframe}) - {len(filtered_data)} bars")
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d %H:%M'))
+        plt.xticks(rotation=45)
+        plt.legend()
+        st.pyplot(fig_plt)
 
 else:
     st.error(f"File not found: {input_csv}. Please check the sidebar path.")
