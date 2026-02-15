@@ -256,11 +256,11 @@ if os.path.exists(input_csv):
             name='OHLC Bars'
         ))
     else:
-        # GPU accelerated lines for performance
-        fig.add_trace(go.Scattergl(
+        # Use standard Scatter for interaction (GL can be flaky with events)
+        fig.add_trace(go.Scatter(
             x=filtered_data['timestamp'].tolist(),
-            y=filtered_data['close'].tolist(),
-            mode='lines+markers',
+            y=filtered_data['secondary_price'].tolist() if 'secondary_price' in filtered_data.columns else filtered_data['close'].tolist(),
+            mode='lines+markers' if len(filtered_data) < 1000 else 'lines',
             marker=dict(size=4, opacity=0.5),
             line=dict(color='white', width=1),
             name='Price Line'
@@ -330,11 +330,18 @@ if os.path.exists(input_csv):
 
     # Display chart and capture clicks
     if render_mode == "Interactive (Labeling)":
-        from streamlit_plotly_events import plotly_events
-        # Force a slightly smaller subset if interactive to prevent hangs
-        if len(filtered_data) > 2000:
-            st.warning(f"⚠️ Displaying {len(filtered_data)} bars. Clicks may be slow.")
-        selected_points = plotly_events(fig, click_event=True, hover_event=False, override_height=700)
+        if len(filtered_data) > 5000:
+            st.error(f"❌ **Dataset too large for Interactive Mode ({len(filtered_data)} bars)**")
+            st.info("Interactive clicking only works reliably with < 5,000 bars. \n\n**Please:** \n1. Use the **'Date Range'** selector to pick a smaller window. \n2. Or check **'Focus: Last 500 bars'**. \n3. Or switch to **'Standard (Visual Only)'** mode.")
+            selected_points = []
+        else:
+            from streamlit_plotly_events import plotly_events
+            if len(filtered_data) > 2000:
+                st.warning(f"⚠️ {len(filtered_data)} bars may cause click lag. Narrowing the Date Range is recommended.")
+            
+            # Use a unique key to force component refresh when data changes
+            event_key = f"plotly_ev_{len(filtered_data)}_{timeframe}_{view_mode}"
+            selected_points = plotly_events(fig, click_event=True, hover_event=False, override_height=700, key=event_key)
     else:
         st.plotly_chart(fig, use_container_width=True, theme="streamlit")
         selected_points = []
