@@ -223,22 +223,31 @@ if os.path.exists(input_csv):
         )
         
         if render_mode == "Interactive (Labeling)":
-            if len(filtered) > 5000:
-                st.error("❌ **Too many bars for Interactive Mode!** Use Date Range to select < 5,000 bars.")
+            if len(filtered) > 15000:
+                st.error("❌ **Too many bars for Interactive Mode!** (> 15,000). Use Date Range to select a smaller window.")
+                st.plotly_chart(fig, use_container_width=True)
             else:
                 from streamlit_plotly_events import plotly_events
+                if len(filtered) > 5000:
+                    st.warning(f"⚠️ **Perf Warning**: {len(filtered)} bars may cause click lag. If it's too slow, narrow the Date Range.")
+                
                 event_key = f"ev_{len(filtered)}_{timeframe}_{view_mode}"
                 selected = plotly_events(fig, click_event=True, key=event_key)
                 
                 if selected:
                     p = selected[0]
                     idx = p.get('pointIndex')
-                    if idx is not None and idx < len(filtered):
+                    curve = p.get('curveNumber')
+                    
+                    # Ensure we clicked the main price trace (curve 0)
+                    if idx is not None and curve == 0 and idx < len(filtered):
                         row = filtered.iloc[idx]
                         price = row['high'] if pivot_type == "High" else row['low']
                         new_p = pd.DataFrame([{'timestamp': row['timestamp'], 'type': pivot_type, 'strength': pivot_strength, 'price': price, 'timeframe': timeframe}])
                         st.session_state.pivots = pd.concat([st.session_state.pivots, new_p], ignore_index=True)
                         st.rerun()
+                    elif curve != 0:
+                        st.sidebar.warning("Target the Price Bars, not the markers!")
         else:
             st.plotly_chart(fig, use_container_width=True)
 
