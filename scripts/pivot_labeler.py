@@ -45,8 +45,8 @@ if os.path.exists(input_csv):
         if fmt_choice == "Barchart Raw Spot" or (fmt_choice == "Auto-Detect" and is_barchart):
             print("Detected Barchart format. Skipping metadata header...")
             df = pd.read_csv(path, skiprows=1, encoding='latin-1') 
-            # Strip whitespace from columns
-            df.columns = df.columns.str.strip()
+            # Aggressive column cleaning: strip quotes and whitespace
+            df.columns = [str(c).replace('"', '').replace("'", "").strip() for c in df.columns]
             
             # Standardize Barchart columns (including some studies)
             rename_map = {
@@ -68,10 +68,13 @@ if os.path.exists(input_csv):
         else:
             print("Assuming standard CondorNet V4.2 / options format...")
             df = pd.read_csv(path, encoding='latin-1')
-            df.columns = df.columns.str.strip()
+            df.columns = [str(c).replace('"', '').replace("'", "").strip() for c in df.columns]
         
         # 1. Parse timestamps robustly
-        print("Parsing timestamps...")
+        print("Cleaning and parsing timestamps...")
+        if df['timestamp'].dtype == object:
+            df['timestamp'] = df['timestamp'].str.replace('"', '').str.replace("'", "").str.strip()
+        
         df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
         df = df.dropna(subset=['timestamp'])
         
@@ -150,19 +153,27 @@ if os.path.exists(input_csv):
     if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
         start_date, end_date = date_range
         filtered_data = data[(data['timestamp'].dt.date >= start_date) & (data['timestamp'].dt.date <= end_date)].copy()
+    elif isinstance(date_range, (pd.Timestamp, pd.DatetimeIndex)):
+        filtered_data = data.copy() # Fallback for single clicks
     else:
-        # If user only clicked start date, show all data for now or just that day
         filtered_data = data.copy()
     
     st.sidebar.write(f"Chart bars: {len(filtered_data)}")
+    
     if filtered_data.empty:
-        st.sidebar.error("⚠️ Filtered data is empty! Adjust date range.")
+        st.sidebar.error("⚠️ Filtered data is empty! Chart will be blank.")
+        st.write("### 🔍 Debug: Filtered Data is Empty")
+        st.write("Source data first 5 timestamps:")
+        st.write(data['timestamp'].head())
+    else:
+        with st.expander("📝 View Chart Data Preview (verify columns)"):
+            st.dataframe(filtered_data.head(10))
 
     # Manual labels state
     if 'pivots' not in st.session_state:
         if os.path.exists(output_csv):
             try:
-                st.session_state.pivots = pd.read_csv(output_csv)
+                st.session_state.pivots = pd.read_csv(output_csv, encoding='latin-1')
                 # Ensure timeframe column exists for legacy compatibility
                 if 'timeframe' not in st.session_state.pivots.columns:
                     st.session_state.pivots['timeframe'] = 'M1'
