@@ -1,180 +1,169 @@
-#!/usr/bin/env python3
-"""
-postcompute_regimeskew.py
-
-Add regime + skew-based reversal features to CondorNet v3.0 dataset
-to produce v4.0:
-
-  - regime_trend_stretch
-  - regime_iv_skew
-  - regime_rv_iv_gap
-  - regime_trend_stretch_flag
-  - regime_iv_skew_flag
-  - regime_reversal_condor_score
-
-Default input:
-  data/Datasetv3/condornet_v30_20260212_precomputed_fixed.csv
-
-Default output:
-  data/Datasetv3/condornet_v40_20260214.csv
-
-Run (Lightning AI / local):
-  python postcompute_regimeskew.py
-  python postcompute_regimeskew.py --input path/to/v30.csv --output path/to/v40.csv \
-      --k3 0.02 --k4 0.03 --k5 0.00
-"""
-
 import argparse
-from pathlib import Path
-
-import numpy as np
 import pandas as pd
+import numpy as np
 
+# ------------------------------------------------------------
+# Reversal score computation
+# ------------------------------------------------------------
 
-def add_regime_skew_features(
-    df: pd.DataFrame,
-    k3: float,
-    k4: float,
-    k5: float,
-) -> pd.DataFrame:
+def compute_reversal(close, sma_len, rv_len, z_len):
     """
-    Add regime + skew-based reversal features to the dataframe.
-
-    Uses existing columns:
-      - underlying_price
-      - sma
-      - vol_ewma
-      - iv (if present) or IV_Mid
-      - IV_High, IV_Low
-
-    New columns:
-      - regime_trend_stretch
-      - regime_iv_skew
-      - regime_rv_iv_gap
-      - regime_trend_stretch_flag
-      - regime_iv_skew_flag
-      - regime_reversal_condor_score
+    Computes the reversal score using:
+    - Stretch (price vs SMA)
+    - Realized volatility gap
+    - Skew proxy
     """
 
-    # --- Safety checks / fallbacks -----------------------------------------
-    required_cols = ["underlying_price", "sma", "vol_ewma"]
-    for col in required_cols:
-        if col not in df.columns:
-            raise ValueError(f"Required column '{col}' not found in dataset")
+    sma = close.rolling(sma_len).mean()
+    stretch = (close - sma) / sma
 
-    # IV ATM proxy: prefer 'iv', else 'IV_Mid', else NaN
-    if "iv" in df.columns:
-        iv_atm = df["iv"].astype(float)
-    elif "IV_Mid" in df.columns:
-        iv_atm = df["IV_Mid"].astype(float)
-    else:
-        iv_atm = pd.Series(np.nan, index=df.index)
+    logret = np.log(close / close.shift(1))
+    rv = logret.rolling(rv_len).std() * np.sqrt(252)
 
-    # IV skew proxy: IV_Low - IV_High (downside puts richer than upside calls)
-    if "IV_Low" in df.columns and "IV_High" in df.columns:
-        iv_low = df["IV_Low"].astype(float)
-        iv_high = df["IV_High"].astype(float)
-        regime_iv_skew = iv_low - iv_high
-    else:
-        # Fallback: no skew info, fill with NaN
-        regime_iv_skew = pd.Series(np.nan, index=df.index)
+    iv = close
+    gap = rv - iv
+    skew = close
 
-    # --- Trend stretch: (P_t - MA_n(t)) / MA_n(t) ---------------------------
-    price = df["underlying_price"].astype(float)
-    sma = df["sma"].astype(float)
+    def zscore(x, window):
+        mu = x.rolling(window).mean()
+        sd = x.rolling(window).std()
+        return (x - mu) / sd.replace(0, np.nan)
 
-    with np.errstate(divide="ignore", invalid="ignore"):
-        regime_trend_stretch = (price - sma) / sma
-    regime_trend_stretch = regime_trend_stretch.replace([np.inf, -np.inf], np.nan)
+    z_stretch = zscore(stretch, z_len)
+    z_skew = zscore(skew, z_len)
+    z_gap = zscore(gap, z_len)
 
-    # --- Realized vs implied vol gap: iv_atm - vol_ewma ---------------------
-    vol_ewma = df["vol_ewma"].astype(float)
-    regime_rv_iv_gap = iv_atm - vol_ewma
+    rev = 0.4 * z_stretch + 0.4 * z_skew + 0.2 * z_gap
+    return rev
 
-    # --- Flags based on thresholds -----------------------------------------
-    # Trend stretched: (P - MA)/MA > k3
-    regime_trend_stretch_flag = (regime_trend_stretch > k3).astype(int)
 
-    # Skew elevated: IV_Low - IV_High > k4
-    regime_iv_skew_flag = (regime_iv_skew > k4).astype(int)
+# ------------------------------------------------------------
+# Alignment logic
+# ------------------------------------------------------------
 
-    # RV < IV: iv_atm - vol_ewma > k5  (room for vol expansion)
-    rv_lt_iv_flag = (regime_rv_iv_gap > k5).astype(int)
+def compute_alignment(df):
+    """
+    Adds:
+    - align_2of3
+    - align_3of3
+    - pairwise alignments
+    """
 
-    # Combined reversal score (0–3)
-    regime_reversal_condor_score = (
-        regime_trend_stretch_flag
-        + regime_iv_skew_flag
-        + rv_lt_iv_flag
-    )
+    df["align_m5_m15"] = (
+        (df["rev_m5_top"] & df["rev_m15_top"]) |
+        (df["rev_m5_bot"] & df["rev_m15_bot"])
+    ).astype(int)
 
-    # --- Attach to dataframe -----------------------------------------------
-    df = df.copy()
-    df["regime_trend_stretch"] = regime_trend_stretch
-    df["regime_iv_skew"] = regime_iv_skew
-    df["regime_rv_iv_gap"] = regime_rv_iv_gap
-    df["regime_trend_stretch_flag"] = regime_trend_stretch_flag
-    df["regime_iv_skew_flag"] = regime_iv_skew_flag
-    df["regime_reversal_condor_score"] = regime_reversal_condor_score
+    df["align_m15_h1"] = (
+        (df["rev_m15_top"] & df["rev_h1_top"]) |
+        (df["rev_m15_bot"] & df["rev_h1_bot"])
+    ).astype(int)
+
+    df["align_m5_h1"] = (
+        (df["rev_m5_top"] & df["rev_h1_top"]) |
+        (df["rev_m5_bot"] & df["rev_h1_bot"])
+    ).astype(int)
+
+    df["align_3of3"] = (
+        (df["rev_m5_top"] & df["rev_m15_top"] & df["rev_h1_top"]) |
+        (df["rev_m5_bot"] & df["rev_m15_bot"] & df["rev_h1_bot"])
+    ).astype(int)
+
+    df["align_2of3"] = (
+        df["align_m5_m15"] |
+        df["align_m15_h1"] |
+        df["align_m5_h1"]
+    ).astype(int)
 
     return df
 
 
+# ------------------------------------------------------------
+# Main script
+# ------------------------------------------------------------
+
 def main():
-    parser = argparse.ArgumentParser(
-        description="Postcompute regime + skew-based reversal features for CondorNet dataset"
-    )
-    parser.add_argument(
-        "--input",
-        type=str,
-        default="data/Datasetv3/condornet_v30_20260212_precomputed_fixed.csv",
-        help="Input CSV (v3.0 precomputed dataset)",
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default="data/Datasetv3/condornet_v40_20260214.csv",
-        help="Output CSV (v4.0 with regime+skew features)",
-    )
-    parser.add_argument(
-        "--k3",
-        type=float,
-        default=0.02,
-        help="Threshold for trend stretch (e.g., 0.02 = 2%% above MA)",
-    )
-    parser.add_argument(
-        "--k4",
-        type=float,
-        default=0.03,
-        help="Threshold for IV skew (IV_Low - IV_High > k4)",
-    )
-    parser.add_argument(
-        "--k5",
-        type=float,
-        default=0.00,
-        help="Threshold for RV<IV gap (iv_atm - vol_ewma > k5)",
-    )
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--input", type=str, default="condornet_v40_fixed.csv")
+    parser.add_argument("--output", type=str, default="condornet_v40_fixed.csv")
+
+    # -----------------------------
+    # Tuned baseline parameters
+    # -----------------------------
+    parser.add_argument("--m5_sma", type=float, default=32)
+    parser.add_argument("--m5_rv", type=float, default=17)
+    parser.add_argument("--m5_z", type=float, default=148)
+    parser.add_argument("--m5_thresh", type=float, default=1)
+
+    parser.add_argument("--m15_sma", type=float, default=99)
+    parser.add_argument("--m15_rv", type=float, default=17)
+    parser.add_argument("--m15_z", type=float, default=250)
+    parser.add_argument("--m15_thresh", type=float, default=1)
+
+    parser.add_argument("--h1_sma", type=float, default=39)
+    parser.add_argument("--h1_rv", type=float, default=17)
+    parser.add_argument("--h1_z", type=float, default=123)
+    parser.add_argument("--h1_thresh", type=float, default=1)
 
     args = parser.parse_args()
 
-    input_path = Path(args.input)
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Load dataset
+    df = pd.read_csv(args.input)
+    close = df["close"]
 
-    print(f"Loading input dataset: {input_path}")
-    df = pd.read_csv(input_path)
+    # -----------------------------
+    # Compute reversal features
+    # -----------------------------
+    df["rev_m5"] = compute_reversal(close, args.m5_sma, args.m5_rv, args.m5_z)
+    df["rev_m15"] = compute_reversal(close, args.m15_sma, args.m15_rv, args.m15_z)
+    df["rev_h1"] = compute_reversal(close, args.h1_sma, args.h1_rv, args.h1_z)
 
-    print("Adding regime + skew-based reversal features...")
-    df_out = add_regime_skew_features(
-        df,
-        k3=args.k3,
-        k4=args.k4,
-        k5=args.k5,
-    )
+    # -----------------------------
+    # Top/bottom signals
+    # -----------------------------
+    df["rev_m5_top"] = (df["rev_m5"] > args.m5_thresh).astype(int)
+    df["rev_m5_bot"] = (df["rev_m5"] < -args.m5_thresh).astype(int)
 
-    print(f"Saving output dataset: {output_path}")
-    df_out.to_csv(output_path, index=False)
-    print("Done.")
+    df["rev_m15_top"] = (df["rev_m15"] > args.m15_thresh).astype(int)
+    df["rev_m15_bot"] = (df["rev_m15"] < -args.m15_thresh).astype(int)
+
+    df["rev_h1_top"] = (df["rev_h1"] > args.h1_thresh).astype(int)
+    df["rev_h1_bot"] = (df["rev_h1"] < -args.h1_thresh).astype(int)
+
+    # -----------------------------
+    # Fuzzy z‑scores
+    # -----------------------------
+    df["rev_m5_z"] = (df["rev_m5"] - df["rev_m5"].rolling(200).mean()) / df["rev_m5"].rolling(200).std()
+    df["rev_m15_z"] = (df["rev_m15"] - df["rev_m15"].rolling(200).mean()) / df["rev_m15"].rolling(200).std()
+    df["rev_h1_z"] = (df["rev_h1"] - df["rev_h1"].rolling(200).mean()) / df["rev_h1"].rolling(200).std()
+
+    # -----------------------------
+    # Alignment features
+    # -----------------------------
+    df = compute_alignment(df)
+
+    # -----------------------------
+    # Baseline parameter export
+    # (for CondorNet multiplicative offsets)
+    # -----------------------------
+    df["m5_sma_base"] = args.m5_sma
+    df["m5_rv_base"] = args.m5_rv
+    df["m5_z_base"] = args.m5_z
+    df["m5_thresh_base"] = args.m5_thresh
+
+    df["m15_sma_base"] = args.m15_sma
+    df["m15_rv_base"] = args.m15_rv
+    df["m15_z_base"] = args.m15_z
+    df["m15_thresh_base"] = args.m15_thresh
+
+    df["h1_sma_base"] = args.h1_sma
+    df["h1_rv_base"] = args.h1_rv
+    df["h1_z_base"] = args.h1_z
+    df["h1_thresh_base"] = args.h1_thresh
+
+    # Save output (overwrite)
+    df.to_csv(args.output, index=False)
 
 
 if __name__ == "__main__":
