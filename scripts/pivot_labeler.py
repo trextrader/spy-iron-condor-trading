@@ -231,23 +231,48 @@ if os.path.exists(input_csv):
                 if len(filtered) > 5000:
                     st.warning(f"⚠️ **Perf Warning**: {len(filtered)} bars may cause click lag. If it's too slow, narrow the Date Range.")
                 
-                event_key = f"ev_{len(filtered)}_{timeframe}_{view_mode}"
+                # Unique key to ensure refresh
+                event_key = f"ev_{len(filtered)}_{timeframe}_{view_mode}_{len(st.session_state.pivots)}"
                 selected = plotly_events(fig, click_event=True, key=event_key)
                 
                 if selected:
                     p = selected[0]
-                    idx = p.get('pointIndex')
-                    curve = p.get('curveNumber')
+                    # DEBUG: Show in sidebar
+                    with st.sidebar.expander("🖱️ Click Debugger", expanded=False):
+                        st.json(p)
                     
-                    # Ensure we clicked the main price trace (curve 0)
-                    if idx is not None and curve == 0 and idx < len(filtered):
-                        row = filtered.iloc[idx]
-                        price = row['high'] if pivot_type == "High" else row['low']
-                        new_p = pd.DataFrame([{'timestamp': row['timestamp'], 'type': pivot_type, 'strength': pivot_strength, 'price': price, 'timeframe': timeframe}])
-                        st.session_state.pivots = pd.concat([st.session_state.pivots, new_p], ignore_index=True)
-                        st.rerun()
-                    elif curve != 0:
-                        st.sidebar.warning("Target the Price Bars, not the markers!")
+                    # 🦅 ROBUST DETECTION: Use the x value (timestamp) to find the nearest bar
+                    # This works even if curveNumber isn't 0
+                    target_x = p.get('x')
+                    if target_x:
+                        # Convert clicked time to pandas datetime
+                        clicked_ts = pd.to_datetime(target_x)
+                        
+                        # Find nearest timestamp in our filtered data
+                        # We use searchsorted on the sorted timestamp column
+                        timediffs = (filtered['timestamp'] - clicked_ts).abs()
+                        nearest_idx = timediffs.idxmin()
+                        row = filtered.loc[nearest_idx]
+                        
+                        # Only mark if it's reasonably close (within 2 candles)
+                        # For M1, that's 2 minutes.
+                        max_diff = pd.Timedelta(minutes=5) # Generous 5-min window
+                        if timediffs[nearest_idx] <= max_diff:
+                            price = row['high'] if pivot_type == "High" else row['low']
+                            new_p = pd.DataFrame([{
+                                'timestamp': row['timestamp'], 
+                                'type': pivot_type, 
+                                'strength': pivot_strength, 
+                                'price': price, 
+                                'timeframe': timeframe
+                            }])
+                            st.session_state.pivots = pd.concat([st.session_state.pivots, new_p], ignore_index=True)
+                            st.success(f"✅ Marked {pivot_type} at {row['timestamp'].strftime('%H:%M')}")
+                            st.rerun()
+                        else:
+                            st.sidebar.warning("Click was too far from any data points.")
+                    else:
+                        st.sidebar.warning("Click data missing 'x' coordinate.")
         else:
             st.plotly_chart(fig, use_container_width=True)
 
