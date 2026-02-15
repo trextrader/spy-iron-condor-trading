@@ -29,20 +29,32 @@ pivot_strength = st.sidebar.slider("Pivot Strength", 1, 3, 1)
 tf_map = {"M1": "1min", "M5": "5min", "M15": "15min", "H1": "1H"}
 
 if os.path.exists(input_csv):
+    st.sidebar.info(f"📁 Dataset: {os.path.basename(input_csv)}")
+    
     @st.cache_data
     def load_data(path, tf_str):
+        # Read a few rows to peek
         df = pd.read_csv(path)
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
         
-        # Select relevant columns for spot price only (excluding grouping key)
-        price_cols = ['open', 'high', 'low', 'close', 'rev_m5', 'rev_m15', 'underlying_price']
-        # Filter to existing columns
-        existing_cols = [c for c in price_cols if c in df.columns]
+        # 1. Parse timestamps robustly
+        df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+        df = df.dropna(subset=['timestamp'])
         
-        spots = df.groupby('timestamp')[existing_cols].first().reset_index().sort_values('timestamp')
+        # 2. Extract spot-level columns (these are identical for all options at the same minute)
+        # We need OHLC and our specific reversal/alignment signals
+        spot_cols = [
+            'open', 'high', 'low', 'close', 'underlying_price', 
+            'rev_m5', 'rev_m15', 'rev_h1', 
+            'm_from_open', 'norm_session_time'
+        ]
+        available_spot_cols = [c for c in spot_cols if c in df.columns]
         
+        # 3. Collapse multiple option rows per timestamp to a single spot bar
+        # This addresses your "repeats m1 bars" point
+        spots = df.groupby('timestamp')[available_spot_cols].first().reset_index()
+        
+        # 4. Resample if requested timeframe is higher than M1
         if tf_str != "1min":
-            # Build agg_dict dynamically to avoid KeyError on missing OHLC
             agg_dict = {}
             if 'open' in spots.columns: agg_dict['open'] = 'first'
             if 'high' in spots.columns: agg_dict['high'] = 'max'
@@ -50,20 +62,38 @@ if os.path.exists(input_csv):
             if 'close' in spots.columns: agg_dict['close'] = 'last'
             if 'underlying_price' in spots.columns: agg_dict['underlying_price'] = 'last'
             
-            if 'rev_m5' in spots.columns: agg_dict['rev_m5'] = 'mean'
-            if 'rev_m15' in spots.columns: agg_dict['rev_m15'] = 'mean'
+            # Weighted/averaged signals
+            for c in ['rev_m5', 'rev_m15', 'rev_h1']:
+                if c in spots.columns: agg_dict[c] = 'mean'
             
             if agg_dict:
-                # Use only underlying_price as the dropna anchor to prevent losing whole rows
+                # We resample the spot series
                 spots = spots.set_index('timestamp').resample(tf_str).agg(agg_dict).dropna(subset=['underlying_price']).reset_index()
         
-        # Ensure timestamp is naive and sorted for reliability
+        # 5. Final cleanup
         if spots['timestamp'].dt.tz is not None:
             spots['timestamp'] = spots['timestamp'].dt.tz_localize(None)
-        
+            
         return spots.sort_values('timestamp')
 
     data = load_data(input_csv, tf_map[timeframe])
+    
+    # --- DIAGNOSTICS SIDEBAR ---
+    st.sidebar.subheader("📊 Data Stats")
+    st.sidebar.write(f"Bars: {len(data)}")
+    if not data.empty:
+        st.sidebar.write("First bar timestamp Sample:")
+        st.sidebar.code(str(data['timestamp'].iloc[0]))
+        st.sidebar.write("Last bar timestamp Sample:")
+        st.sidebar.code(str(data['timestamp'].iloc[-1]))
+        
+        # Check if we have H/M/S data
+        has_time = (data['timestamp'].dt.hour.sum() + data['timestamp'].dt.minute.sum() > 0)
+        if not has_time:
+            st.sidebar.warning("⚠️ No intraday time detected! (Daily?)")
+        else:
+            st.sidebar.success("✅ Intraday data detected.")
+    # ---------------------------
     
     # Session selector (optional filtering)
     date_range = st.sidebar.date_input("Date Range", [data['timestamp'].min(), data['timestamp'].max()])
