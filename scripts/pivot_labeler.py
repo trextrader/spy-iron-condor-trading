@@ -19,8 +19,9 @@ st.markdown("""
 
 # Sidebar settings
 st.sidebar.header("Settings")
-input_csv = st.sidebar.text_input("Input CSV Path", "data/Datasetv4/condornet_v41_FINAL.csv")
+input_csv = st.sidebar.text_input("Input CSV Path", "data/Datasetv3/SPY_Barchart_Interactive_Chart_Range_1m_02_09_2026.csv")
 output_csv = st.sidebar.text_input("Export filename", "pivots_manual.csv")
+data_type = st.sidebar.selectbox("Data Format", ["Auto-Detect", "CondorNet V4.2", "Barchart Raw Spot"])
 timeframe = st.sidebar.selectbox("View Timeframe", ["M1", "M5", "M15", "H1"], index=0)
 pivot_type = st.sidebar.radio("Pivot Type to Mark", ["High", "Low"])
 pivot_strength = st.sidebar.slider("Pivot Strength", 1, 3, 1)
@@ -32,16 +33,35 @@ if os.path.exists(input_csv):
     st.sidebar.info(f"📁 Dataset: {os.path.basename(input_csv)}")
     
     @st.cache_data
-    def load_data(path, tf_str):
-        # Read a few rows to peek
-        df = pd.read_csv(path)
+    def load_data(path, tf_str, fmt_choice):
+        # 0. Detect Format
+        with open(path, 'r') as f:
+            first_line = f.readline()
+        
+        is_barchart = "Symbol:" in first_line
+        
+        if fmt_choice == "Barchart Raw Spot" or (fmt_choice == "Auto-Detect" and is_barchart):
+            df = pd.read_csv(path, skiprows=1) # Skip the "Symbol: SPY" metadata row
+            # Standardize Barchart columns
+            rename_map = {
+                'Date Time': 'timestamp',
+                'Open': 'open',
+                'High': 'high',
+                'Low': 'low',
+                'Close': 'close'
+            }
+            df = df.rename(columns=rename_map)
+            # In a spot file, underlying_price is just the close
+            if 'underlying_price' not in df.columns:
+                df['underlying_price'] = df['close']
+        else:
+            df = pd.read_csv(path)
         
         # 1. Parse timestamps robustly
         df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
         df = df.dropna(subset=['timestamp'])
         
         # 2. Extract spot-level columns (these are identical for all options at the same minute)
-        # We need OHLC and our specific reversal/alignment signals
         spot_cols = [
             'open', 'high', 'low', 'close', 'underlying_price', 
             'rev_m5', 'rev_m15', 'rev_h1', 
@@ -50,7 +70,7 @@ if os.path.exists(input_csv):
         available_spot_cols = [c for c in spot_cols if c in df.columns]
         
         # 3. Collapse multiple option rows per timestamp to a single spot bar
-        # This addresses your "repeats m1 bars" point
+        # For a spot-only file, this basically does nothing but confirms 1 row per min
         spots = df.groupby('timestamp')[available_spot_cols].first().reset_index()
         
         # 4. Resample if requested timeframe is higher than M1
@@ -67,7 +87,6 @@ if os.path.exists(input_csv):
                 if c in spots.columns: agg_dict[c] = 'mean'
             
             if agg_dict:
-                # We resample the spot series
                 spots = spots.set_index('timestamp').resample(tf_str).agg(agg_dict).dropna(subset=['underlying_price']).reset_index()
         
         # 5. Final cleanup
@@ -76,7 +95,7 @@ if os.path.exists(input_csv):
             
         return spots.sort_values('timestamp')
 
-    data = load_data(input_csv, tf_map[timeframe])
+    data = load_data(input_csv, tf_map[timeframe], data_type)
     
     # --- DIAGNOSTICS SIDEBAR ---
     st.sidebar.subheader("📊 Data Stats")
