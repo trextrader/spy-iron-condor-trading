@@ -33,15 +33,26 @@ if os.path.exists(input_csv):
     def load_data(path, tf_str):
         df = pd.read_csv(path)
         df['timestamp'] = pd.to_datetime(df['timestamp'])
-        # Unique spots for UI
-        spots = df.groupby('timestamp').first().reset_index().sort_values('timestamp')
+        
+        # Select relevant columns for spot price only
+        price_cols = ['timestamp', 'open', 'high', 'low', 'close', 'rev_m5', 'rev_m15', 'underlying_price']
+        # Filter to existing columns
+        existing_cols = [c for c in price_cols if c in df.columns]
+        
+        spots = df.groupby('timestamp')[existing_cols].first().reset_index().sort_values('timestamp')
         
         if tf_str != "1min":
-            spots = spots.set_index('timestamp').resample(tf_str).agg({
-                'underlying_price': 'last', # Use last for price line
-                'rev_m5': 'mean',
-                'rev_m15': 'mean'
-            }).dropna().reset_index()
+            agg_dict = {
+                'open': 'first',
+                'high': 'max',
+                'low': 'min',
+                'close': 'last',
+                'underlying_price': 'last'
+            }
+            if 'rev_m5' in spots.columns: agg_dict['rev_m5'] = 'mean'
+            if 'rev_m15' in spots.columns: agg_dict['rev_m15'] = 'mean'
+            
+            spots = spots.set_index('timestamp').resample(tf_str).agg(agg_dict).dropna().reset_index()
         return spots
 
     data = load_data(input_csv, tf_map[timeframe])
@@ -72,12 +83,14 @@ if os.path.exists(input_csv):
     # Chart
     fig = make_subplots(rows=1, cols=1)
     
-    # Underlying Price
-    fig.add_trace(go.Scatter(
-        x=filtered_data['timestamp'], 
-        y=filtered_data['underlying_price'], 
-        name='Price (Spot)',
-        line=dict(color='white', width=1)
+    # Candlestick Chart
+    fig.add_trace(go.Candlestick(
+        x=filtered_data['timestamp'],
+        open=filtered_data['open'] if 'open' in filtered_data.columns else filtered_data['underlying_price'],
+        high=filtered_data['high'] if 'high' in filtered_data.columns else filtered_data['underlying_price'],
+        low=filtered_data['low'] if 'low' in filtered_data.columns else filtered_data['underlying_price'],
+        close=filtered_data['close'] if 'close' in filtered_data.columns else filtered_data['underlying_price'],
+        name='Market Price'
     ))
     
     # Overlays (Rev Signals)
@@ -117,10 +130,19 @@ if os.path.exists(input_csv):
                 ))
 
     fig.update_layout(
-        height=700, 
+        height=800, 
         template="plotly_dark", 
-        xaxis_rangeslider_visible=True,
-        clickmode='event+select'
+        xaxis=dict(
+            rangeslider=dict(visible=True),
+            type='date'
+        ),
+        yaxis=dict(
+            fixedrange=False,
+            title="Price ($)",
+            side="right"
+        ),
+        clickmode='event+select',
+        dragmode='zoom'  # Allows box zoom by default
     )
 
     # Display chart and capture clicks
