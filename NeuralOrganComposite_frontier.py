@@ -794,11 +794,11 @@ out = wn.new('ShaderNodeOutputWorld')
 world.node_tree.links.new(bg.outputs['Background'], out.inputs['Surface'])
 world.node_tree.links.new(vol_scatter.outputs['Volume'], out.inputs['Volume'])
 
-# ---- Geometry data ----
-eigen_pts = {c["points"].tolist()}
-eigen_color = {list(_cmap_rgb(c["rho"], min_rho, max_rho))}
-fibers = {[(s.tolist(), e.tolist()) for s,e in c["fibers"][:500]]}
-spheres = {[(p.tolist(), float(r)) for p,r in c["spheres"][:32]]}
+# ---- Geometry data (pure Python — no numpy dependency) ----
+eigen_pts = {json.dumps([[round(float(x), 8) for x in pt] for pt in c["points"]])}
+eigen_color = {json.dumps([round(float(x), 6) for x in _cmap_rgb(c["rho"], min_rho, max_rho)])}
+fibers = {json.dumps([([round(float(x), 8) for x in s], [round(float(x), 8) for x in e]) for s,e in c["fibers"][:500]])}
+spheres = {json.dumps([([round(float(x), 8) for x in p], round(float(r), 8)) for p,r in c["spheres"][:32]])}
 
 # ---- Helper: create emissive material ----
 def make_emissive_mat(name, rgb, strength=5.0):
