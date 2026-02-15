@@ -120,20 +120,51 @@ def main():
 
     args = parser.parse_args()
 
+    # --------------------------------------------------------
+    # Status: Start
+    # --------------------------------------------------------
+    print("🔧 Starting postcompute_regimeskew.py (v4.0)…")
+    print(f"📥 Loading dataset: {args.input}")
+
     # Load dataset
     df = pd.read_csv(args.input)
+    print(f"✔ Loaded {len(df):,} rows")
+
     close = df["close"]
 
     # --------------------------------------------------------
-    # Compute reversal features
+    # Reversal features
     # --------------------------------------------------------
-    df["rev_m5"] = compute_reversal(close, args.m5_sma, args.m5_rv, args.m5_z)
-    df["rev_m15"] = compute_reversal(close, args.m15_sma, args.m15_rv, args.m15_z)
-    df["rev_h1"] = compute_reversal(close, args.h1_sma, args.h1_rv, args.h1_z)
+    print("🔄 Computing reversal features (M5, M15, H1)…")
+
+    df["rev_m5"] = compute_reversal(
+        close,
+        int(args.m5_sma),
+        int(args.m5_rv),
+        int(args.m5_z)
+    )
+
+    df["rev_m15"] = compute_reversal(
+        close,
+        int(args.m15_sma),
+        int(args.m15_rv),
+        int(args.m15_z)
+    )
+
+    df["rev_h1"] = compute_reversal(
+        close,
+        int(args.h1_sma),
+        int(args.h1_rv),
+        int(args.h1_z)
+    )
+
+    print("✔ Reversal features computed")
 
     # --------------------------------------------------------
     # Top/bottom signals
     # --------------------------------------------------------
+    print("🔍 Generating top/bottom signals…")
+
     df["rev_m5_top"] = (df["rev_m5"] > args.m5_thresh).astype(int)
     df["rev_m5_bot"] = (df["rev_m5"] < -args.m5_thresh).astype(int)
 
@@ -143,22 +174,33 @@ def main():
     df["rev_h1_top"] = (df["rev_h1"] > args.h1_thresh).astype(int)
     df["rev_h1_bot"] = (df["rev_h1"] < -args.h1_thresh).astype(int)
 
+    print("✔ Top/bottom signals complete")
+
     # --------------------------------------------------------
     # Fuzzy z‑scores
     # --------------------------------------------------------
+    print("🌫 Computing fuzzy z‑scores…")
+
     df["rev_m5_z"] = (df["rev_m5"] - df["rev_m5"].rolling(200).mean()) / df["rev_m5"].rolling(200).std()
     df["rev_m15_z"] = (df["rev_m15"] - df["rev_m15"].rolling(200).mean()) / df["rev_m15"].rolling(200).std()
     df["rev_h1_z"] = (df["rev_h1"] - df["rev_h1"].rolling(200).mean()) / df["rev_h1"].rolling(200).std()
 
+    print("✔ Fuzzy z‑scores computed")
+
     # --------------------------------------------------------
     # Alignment features
     # --------------------------------------------------------
+    print("📡 Computing multi‑timeframe alignment features…")
+
     df = compute_alignment(df)
+
+    print("✔ Alignment features complete")
 
     # --------------------------------------------------------
     # Baseline parameter export
-    # (for CondorNet multiplicative offsets)
     # --------------------------------------------------------
+    print("📦 Exporting baseline parameter columns…")
+
     df["m5_sma_base"] = args.m5_sma
     df["m5_rv_base"] = args.m5_rv
     df["m5_z_base"] = args.m5_z
@@ -174,10 +216,15 @@ def main():
     df["h1_z_base"] = args.h1_z
     df["h1_thresh_base"] = args.h1_thresh
 
+    print("✔ Baseline parameters exported")
+
     # --------------------------------------------------------
-    # Save output (overwrite)
+    # Save output
     # --------------------------------------------------------
+    print(f"💾 Saving output to: {args.output}")
     df.to_csv(args.output, index=False)
+
+    print("🎉 postcompute_regimeskew.py completed successfully.")
 
 
 if __name__ == "__main__":
