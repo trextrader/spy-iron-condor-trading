@@ -55,10 +55,10 @@ OUTPUT_DIR = SCRIPT_DIR / "visualizations"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 # ---- Mode toggles ----
-ENABLE_BLOOM_MP4         = True    # A: OpenCV bloom orbit MP4
+ENABLE_BLOOM_MP4         = False   # A: OpenCV bloom orbit MP4
 ENABLE_THREEJS_CATHEDRAL = True    # B: Enhanced Three.js
-ENABLE_BLENDER_EXPORT    = True    # C: Blender Cycles .py
-ENABLE_EPOCH_SCRUBBER    = True    # D: Interactive slider HTML
+ENABLE_BLENDER_EXPORT    = False   # C: Blender Cycles .py
+ENABLE_EPOCH_SCRUBBER    = False   # D: Interactive slider HTML
 ENABLE_MULTI_ORGAN       = False   # E: Multi-organ (needs extra dirs)
 
 # ---- Multi-Organ directories (Mode E) ----
