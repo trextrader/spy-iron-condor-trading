@@ -223,6 +223,28 @@ def main():
     print("✔ Signals and alignment re-derived from clamped scores")
 
     # --------------------------------------------------------
+    # STEP 6: Re-add baseline parameter columns (Final Schema Sync)
+    # --------------------------------------------------------
+    print("📦 Exporting baseline parameter columns…")
+
+    df["m5_sma_base"] = args.m5_sma
+    df["m5_rv_base"] = args.m5_rv
+    df["m5_z_base"] = args.m5_z
+    df["m5_thresh_base"] = args.m5_thresh
+
+    df["m15_sma_base"] = args.m15_sma
+    df["m15_rv_base"] = args.m15_rv
+    df["m15_z_base"] = args.m15_z
+    df["m15_thresh_base"] = args.m15_thresh
+
+    df["h1_sma_base"] = args.h1_sma
+    df["h1_rv_base"] = args.h1_rv
+    df["h1_z_base"] = args.h1_z
+    df["h1_thresh_base"] = args.h1_thresh
+
+    print(f"✔ Full 116-column schema synchronized ({len(df.columns)} cols)")
+
+    # --------------------------------------------------------
     # STEP 6: Re-add baseline parameter columns
     # --------------------------------------------------------
     print("📦 Exporting baseline parameter columns (Restored)…")
