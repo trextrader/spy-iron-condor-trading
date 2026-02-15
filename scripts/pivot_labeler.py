@@ -28,6 +28,10 @@ pivot_strength = st.sidebar.slider("Pivot Strength", 1, 3, 1)
 render_mode = st.sidebar.radio("Rendering Engine", ["Interactive (Labeling)", "Standard (Fast/Preview)"])
 limit_bars = st.sidebar.checkbox("Focus: Last 500 bars only", value=False)
 
+if st.sidebar.button("🧹 Clear App Cache"):
+    st.cache_data.clear()
+    st.rerun()
+
 # TF Mapping
 tf_map = {"M1": "1min", "M5": "5min", "M15": "15min", "H1": "1H"}
 
@@ -129,11 +133,13 @@ if os.path.exists(input_csv):
         if ohlc_cols:
             before_drop = len(spots)
             spots = spots.dropna(subset=ohlc_cols)
+            # FORCE FLOAT64
+            for col in ohlc_cols:
+                spots[col] = spots[col].astype(float)
             if len(spots) < before_drop:
                 print(f"⚠️ Dropped {before_drop - len(spots)} bars with missing OHLC data.")
         
         print(f"✅ Data ready. Shape: {spots.shape}")
-        print("Column Sample (First Row):\n", spots.iloc[0] if not spots.empty else "EMPTY")
         return spots.sort_values('timestamp')
 
     data = pd.DataFrame()
@@ -222,18 +228,27 @@ if os.path.exists(input_csv):
     if chart_style == "Candlestick":
         fig.add_trace(go.Candlestick(
             x=filtered_data['timestamp'],
-            open=filtered_data['open'] if 'open' in filtered_data.columns else filtered_data['underlying_price'],
-            high=filtered_data['high'] if 'high' in filtered_data.columns else filtered_data['underlying_price'],
-            low=filtered_data['low'] if 'low' in filtered_data.columns else filtered_data['underlying_price'],
-            close=filtered_data['close'] if 'close' in filtered_data.columns else filtered_data['underlying_price'],
-            name='Market Price'
+            open=filtered_data['open'],
+            high=filtered_data['high'],
+            low=filtered_data['low'],
+            close=filtered_data['close'],
+            name='Candlesticks',
+            increasing_line_color='green', 
+            decreasing_line_color='red'
+        ))
+        # Add a faint line trace as a backup/baseline
+        fig.add_trace(go.Scatter(
+            x=filtered_data['timestamp'], y=filtered_data['close'],
+            mode='lines', line=dict(color='gray', width=0.5),
+            name='Price Baseline (Faint)',
+            opacity=0.3
         ))
     else:
         fig.add_trace(go.Scatter(
             x=filtered_data['timestamp'],
-            y=filtered_data['close'] if 'close' in filtered_data.columns else filtered_data['underlying_price'],
+            y=filtered_data['close'],
             name='Price (Line)',
-            line=dict(color='white', width=1)
+            line=dict(color='white', width=1.5)
         ))
     
     # Overlays (Rev Signals)
@@ -283,7 +298,7 @@ if os.path.exists(input_csv):
         height=800, 
         template="plotly_dark", 
         xaxis=dict(
-            rangeslider=dict(visible=True),
+            rangeslider=dict(visible=(render_mode != "Interactive (Labeling)")),
             type='date',
             range=x_range
         ),
@@ -291,10 +306,10 @@ if os.path.exists(input_csv):
             fixedrange=False,
             title="Price ($)",
             side="right",
-            range=[y_min * 0.999, y_max * 1.001] if not pd.isna(y_min) else None
+            range=[float(y_min) * 0.999, float(y_max) * 1.001] if not pd.isna(y_min) else None
         ),
         clickmode='event+select',
-        dragmode='zoom'  # Allows box zoom by default
+        dragmode='zoom'
     )
 
     # Display chart and capture clicks
