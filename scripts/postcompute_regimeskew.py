@@ -14,19 +14,19 @@ def compute_reversal(close, sma_len, rv_len, z_len):
     - Skew proxy
     """
 
-    sma = close.rolling(sma_len).mean()
+    sma = close.rolling(sma_len, min_periods=1).mean()
     stretch = (close - sma) / sma
 
     logret = np.log(close / close.shift(1))
-    rv = logret.rolling(rv_len).std() * np.sqrt(252)
+    rv = logret.rolling(rv_len, min_periods=1).std() * np.sqrt(252)
 
     iv = close
     gap = rv - iv
     skew = close
 
     def zscore(x, window):
-        mu = x.rolling(window).mean()
-        sd = x.rolling(window).std()
+        mu = x.rolling(window, min_periods=1).mean()
+        sd = x.rolling(window, min_periods=1).std()
         return (x - mu) / sd.replace(0, np.nan)
 
     z_stretch = zscore(stretch, z_len)
@@ -172,13 +172,20 @@ def main():
     print("🌫 Computing fuzzy z-scores on UNDERLYING signals…")
 
     def calc_z(s, window=200):
-        return (s - s.rolling(window).mean()) / s.rolling(window).std().replace(0, np.nan)
+        return (s - s.rolling(window, min_periods=1).mean()) / s.rolling(window, min_periods=1).std().replace(0, np.nan)
 
     spot_bars["rev_m5_z"] = calc_z(spot_bars["rev_m5"])
     spot_bars["rev_m15_z"] = calc_z(spot_bars["rev_m15"])
     spot_bars["rev_h1_z"] = calc_z(spot_bars["rev_h1"])
 
-    print("✔ Underlying fuzzy z-scores computed (no row-key fragmentation)")
+    # --------------------------------------------------------
+    # STEP 3.5: Backfill Warmup NaNs for 100% Population
+    # --------------------------------------------------------
+    print("🩹 Backfilling warmup NaNs for 100% signal coverage…")
+    cols_to_fill = ["rev_m5", "rev_m15", "rev_h1", "rev_m5_z", "rev_m15_z", "rev_h1_z"]
+    spot_bars[cols_to_fill] = spot_bars[cols_to_fill].fillna(method="bfill").fillna(method="ffill").fillna(0.0)
+
+    print("✔ Underlying fuzzy z-scores computed and backfilled")
 
     # --------------------------------------------------------
     # STEP 4: Merge back to options dataset
