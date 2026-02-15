@@ -34,8 +34,8 @@ if os.path.exists(input_csv):
         df = pd.read_csv(path)
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         
-        # Select relevant columns for spot price only
-        price_cols = ['timestamp', 'open', 'high', 'low', 'close', 'rev_m5', 'rev_m15', 'underlying_price']
+        # Select relevant columns for spot price only (excluding grouping key)
+        price_cols = ['open', 'high', 'low', 'close', 'rev_m5', 'rev_m15', 'underlying_price']
         # Filter to existing columns
         existing_cols = [c for c in price_cols if c in df.columns]
         
