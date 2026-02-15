@@ -73,10 +73,19 @@ if os.path.exists(input_csv):
         # 1. Parse timestamps robustly
         print("Cleaning and parsing timestamps...")
         if df['timestamp'].dtype == object:
-            df['timestamp'] = df['timestamp'].str.replace('"', '').str.replace("'", "").str.strip()
+            df['timestamp'] = df['timestamp'].astype(str).str.replace('"', '').str.replace("'", "").str.strip()
         
         df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
         df = df.dropna(subset=['timestamp'])
+        
+        # 1.5 Clean Numeric Columns (strip quotes and commas)
+        print("Cleaning numeric columns...")
+        num_cols = ['open', 'high', 'low', 'close', 'underlying_price', 'iv', 'rev_m5', 'rev_m15', 'rev_h1']
+        for col in num_cols:
+            if col in df.columns:
+                if df[col].dtype == object:
+                    df[col] = df[col].astype(str).str.replace('"', '').str.replace("'", "").str.replace(',', '').str.strip()
+                df[col] = pd.to_numeric(df[col], errors='coerce')
         
         # 2. Extract spot-level columns
         spot_cols = [
@@ -87,13 +96,10 @@ if os.path.exists(input_csv):
         available_spot_cols = [c for c in spot_cols if c in df.columns]
         
         # 3. Collapse multiple rows per timestamp (for Option files)
-        # We only do this if there ARE duplicates to save performance
-        print("Checking for duplicate bars (option chain architecture)...")
+        print("Checking for duplicate bars...")
         if df['timestamp'].duplicated().any():
-            print("Found repeated timestamps. Collapsing to spot bars...")
             spots = df.groupby('timestamp')[available_spot_cols].first().reset_index()
         else:
-            print("No duplicates found. Using raw spots.")
             spots = df[['timestamp'] + available_spot_cols].copy()
         
         # 4. Resample if requested timeframe is higher than M1
@@ -106,15 +112,13 @@ if os.path.exists(input_csv):
             if 'close' in spots.columns: agg_dict['close'] = 'last'
             if 'underlying_price' in spots.columns: agg_dict['underlying_price'] = 'last'
             
-            # Weighted/averaged signals
-            for c in ['rev_m5', 'rev_m15', 'rev_h1']:
+            for c in ['rev_m5', 'rev_m15', 'rev_h1', 'iv']:
                 if c in spots.columns: agg_dict[c] = 'mean'
             
             if agg_dict:
                 spots = spots.set_index('timestamp').resample(tf_str).agg(agg_dict).dropna(subset=['underlying_price']).reset_index()
         
         # 5. Final cleanup
-        print("Finalizing dataframe...")
         if spots['timestamp'].dt.tz is not None:
             spots['timestamp'] = spots['timestamp'].dt.tz_localize(None)
             
@@ -242,12 +246,14 @@ if os.path.exists(input_csv):
         template="plotly_dark", 
         xaxis=dict(
             rangeslider=dict(visible=True),
-            type='date'
+            type='date',
+            range=[filtered_data['timestamp'].min(), filtered_data['timestamp'].max()]
         ),
         yaxis=dict(
             fixedrange=False,
             title="Price ($)",
-            side="right"
+            side="right",
+            range=[filtered_data['low'].min() * 0.999, filtered_data['high'].max() * 1.001] if not filtered_data.empty else None
         ),
         clickmode='event+select',
         dragmode='zoom'  # Allows box zoom by default
