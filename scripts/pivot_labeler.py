@@ -42,18 +42,26 @@ if os.path.exists(input_csv):
         spots = df.groupby('timestamp')[existing_cols].first().reset_index().sort_values('timestamp')
         
         if tf_str != "1min":
-            agg_dict = {
-                'open': 'first',
-                'high': 'max',
-                'low': 'min',
-                'close': 'last',
-                'underlying_price': 'last'
-            }
+            # Build agg_dict dynamically to avoid KeyError on missing OHLC
+            agg_dict = {}
+            if 'open' in spots.columns: agg_dict['open'] = 'first'
+            if 'high' in spots.columns: agg_dict['high'] = 'max'
+            if 'low' in spots.columns: agg_dict['low'] = 'min'
+            if 'close' in spots.columns: agg_dict['close'] = 'last'
+            if 'underlying_price' in spots.columns: agg_dict['underlying_price'] = 'last'
+            
             if 'rev_m5' in spots.columns: agg_dict['rev_m5'] = 'mean'
             if 'rev_m15' in spots.columns: agg_dict['rev_m15'] = 'mean'
             
-            spots = spots.set_index('timestamp').resample(tf_str).agg(agg_dict).dropna().reset_index()
-        return spots
+            if agg_dict:
+                # Use only underlying_price as the dropna anchor to prevent losing whole rows
+                spots = spots.set_index('timestamp').resample(tf_str).agg(agg_dict).dropna(subset=['underlying_price']).reset_index()
+        
+        # Ensure timestamp is naive and sorted for reliability
+        if spots['timestamp'].dt.tz is not None:
+            spots['timestamp'] = spots['timestamp'].dt.tz_localize(None)
+        
+        return spots.sort_values('timestamp')
 
     data = load_data(input_csv, tf_map[timeframe])
     
