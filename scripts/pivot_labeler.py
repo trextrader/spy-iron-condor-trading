@@ -157,6 +157,7 @@ if os.path.exists(input_csv):
             mask = (data['timestamp'] >= s_ts) & (data['timestamp'] <= e_ts)
             filtered = data[mask].copy()
             st.sidebar.success(f"📌 {len(filtered)} bars selected")
+            st.sidebar.caption(f"Range: {filtered['timestamp'].min()} to {filtered['timestamp'].max()}")
         else:
             # Fallback to safe tail during selection
             filtered = data.tail(1000)
@@ -210,6 +211,15 @@ if os.path.exists(input_csv):
                 close=filtered['close'].tolist(), 
                 name='Price'
             ))
+            # 🦅 INTERACTION TRACE: Plotly Selection needs Scatter markers to work reliably
+            fig.add_trace(go.Scatter(
+                x=filtered['timestamp'].tolist(),
+                y=filtered['high'].tolist(),
+                mode='markers',
+                marker=dict(opacity=0, size=1),
+                name='Interaction',
+                showlegend=False
+            ))
         elif view_mode == "OHLC Bars":
             fig.add_trace(go.Ohlc(
                 x=filtered['timestamp'].tolist(), 
@@ -219,11 +229,21 @@ if os.path.exists(input_csv):
                 close=filtered['close'].tolist(), 
                 name='Price'
             ))
+            # 🦅 INTERACTION TRACE
+            fig.add_trace(go.Scatter(
+                x=filtered['timestamp'].tolist(),
+                y=filtered['high'].tolist(),
+                mode='markers',
+                marker=dict(opacity=0, size=1),
+                name='Interaction',
+                showlegend=False
+            ))
         else:
             fig.add_trace(go.Scatter(
                 x=filtered['timestamp'].tolist(), 
                 y=filtered['close'].tolist(), 
-                mode='lines', 
+                mode='lines+markers', 
+                marker=dict(size=1, opacity=0), 
                 line=dict(color='white', width=1), 
                 name='Price'
             ))
@@ -256,20 +276,16 @@ if os.path.exists(input_csv):
                 if len(filtered) > 5000:
                     st.warning(f"⚠️ **Perf Warning**: {len(filtered)} bars. If it's too slow, narrow the Date Range.")
                 
-                # Logical separation of events to prevent interference
-                # If we are in 'select' mode, we ONLY listen for selection boxes.
-                # If in zoom/pan, we listen for clicks.
+                # Logical separation of events 
                 do_select = (drag_mode == "select")
                 do_click = (drag_mode != "select")
                 
                 event_key = f"ev_{len(filtered)}_{timeframe}_{view_mode}_{len(st.session_state.pivots)}"
-                selected = plotly_events(fig, click_event=do_click, select_event=do_select, key=event_key)
+                selected = plotly_events(fig, click_event=do_click, select_event=do_select, hover_event=True, key=event_key)
                 
                 if selected:
-                    # FEEDBACK: Show raw data to user for debugging
-                    st.sidebar.markdown("---")
-                    with st.sidebar.expander("🔍 Raw Event Data (Debug)", expanded=True):
-                        st.json(selected)
+                    # Determine if it's a Sniper Selection (multi-point) or just Hover (single)
+                    is_selection = len(selected) > 1
                     
                     clicked_timestamps = []
                     for p in selected:
@@ -282,6 +298,7 @@ if os.path.exists(input_csv):
                         selection_df = filtered[selection_mask]
                         
                         if not selection_df.empty:
+                            # 🦅 SNIPER / HOVER PEAK DETECTION
                             if pivot_type == "High":
                                 row = selection_df.sort_values('high', ascending=False).iloc[0] if 'high' in selection_df.columns else selection_df.sort_values('close', ascending=False).iloc[0]
                             else:
@@ -289,7 +306,6 @@ if os.path.exists(input_csv):
                             
                             price = row['high'] if pivot_type == "High" else row['low']
                             
-                            # Update session state for 'commit' button fallback
                             st.session_state.last_candidate = {
                                 'timestamp': row['timestamp'], 
                                 'type': pivot_type, 
@@ -298,26 +314,30 @@ if os.path.exists(input_csv):
                                 'timeframe': timeframe
                             }
                             
-                            # Auto-commit if it's a sniper selection
-                            new_p = pd.DataFrame([st.session_state.last_candidate])
-                            st.session_state.pivots = pd.concat([st.session_state.pivots, new_p], ignore_index=True)
-                            st.sidebar.success(f"🎯 Marked {pivot_type} at {row['timestamp'].strftime('%H:%M')}")
-                            st.rerun()
+                            # Auto-commit ONLY for box selections (Sniper Mode)
+                            if is_selection:
+                                new_p = pd.DataFrame([st.session_state.last_candidate])
+                                st.session_state.pivots = pd.concat([st.session_state.pivots, new_p], ignore_index=True)
+                                st.sidebar.success(f"🎯 Sniper Hit! {pivot_type} at {row['timestamp'].strftime('%H:%M')}")
+                                st.rerun()
+                            # else: just let the sidebar candidate update (Hover Mode)
         else:
             st.plotly_chart(fig, use_container_width=True)
 
         # Commit tools
-        with st.sidebar.expander("🛠️ Commit Tools", expanded=True):
+        with st.sidebar.expander("🎯 Sniper & Commit Tools", expanded=True):
             if 'last_candidate' in st.session_state:
                 c = st.session_state.last_candidate
-                st.write(f"Last Selected: **{c['timestamp'].strftime('%H:%M')}**")
-                if st.button("✅ Confirm & Append", use_container_width=True):
+                st.write(f"Current Target: **{c['timestamp'].strftime('%Y-%m-%d %H:%M')}**")
+                st.write(f"Type: **{c['type']}** | Price: **{c['price']:.2f}**")
+                if st.button("🚀 MARK TARGET NOW", use_container_width=True, type="primary"):
                     new_p = pd.DataFrame([c])
                     st.session_state.pivots = pd.concat([st.session_state.pivots, new_p], ignore_index=True)
-                    st.sidebar.success("Appended!")
+                    st.sidebar.success(f"✅ Created {c['type']} marker!")
                     st.rerun()
+                st.caption("Tip: In 'select' mode, sweep a box to auto-mark.")
             else:
-                st.info("Point crosshair & select a dot/box to start.")
+                st.info("💡 Move cursor over a peak or sweep a box to target.")
 
         # --- EXPORT ---
         st.subheader("Labeled Pivots")
