@@ -27,6 +27,7 @@ pivot_type = st.sidebar.radio("Pivot Type to Mark", ["High", "Low"])
 pivot_strength = st.sidebar.slider("Pivot Strength", 1, 3, 1)
 render_mode = st.sidebar.radio("Rendering Engine", ["Interactive (Labeling)", "Standard (Fast/Preview)"])
 limit_bars = st.sidebar.checkbox("Focus: Last 500 bars only", value=False)
+show_candles_interactive = st.sidebar.checkbox("Interactive: Show Candlesticks (May be laggy)", value=False)
 
 if st.sidebar.button("🧹 Clear App Cache"):
     st.cache_data.clear()
@@ -153,27 +154,17 @@ if os.path.exists(input_csv):
     
     # --- DIAGNOSTICS SIDEBAR ---
     st.sidebar.subheader("📊 Data Stats")
-    st.sidebar.write(f"Bars: {len(data)}")
+    st.sidebar.write(f"Timeframe: **{timeframe}**")
+    st.sidebar.write(f"Total Bars: **{len(data)}**")
     if not data.empty:
-        st.sidebar.write("First bar timestamp Sample:")
-        st.sidebar.code(str(data['timestamp'].iloc[0]))
-        st.sidebar.write("Last bar timestamp Sample:")
-        st.sidebar.code(str(data['timestamp'].iloc[-1]))
+        st.sidebar.write(f"Start: {data['timestamp'].iloc[0].strftime('%Y-%m-%d')}")
+        st.sidebar.write(f"End: {data['timestamp'].iloc[-1].strftime('%Y-%m-%d')}")
         
-        # Check if we have H/M/S data
-        has_time = (data['timestamp'].dt.hour.sum() + data['timestamp'].dt.minute.sum() > 0)
-        if not has_time:
-            st.sidebar.warning("⚠️ No intraday time detected! (Daily?)")
-        else:
-            st.sidebar.success("✅ Intraday data detected.")
-            
         # Price Diagnostics
         if 'close' in data.columns:
             p_min = data['close'].min()
             p_max = data['close'].max()
-            st.sidebar.write(f"Price Range: **${p_min:.2f} - ${p_max:.2f}**")
-            if pd.isna(p_min):
-                st.sidebar.error("❌ Price data is all NaN!")
+            st.sidebar.write(f"Price: **${p_min:.2f} - ${p_max:.2f}**")
     # ---------------------------
     
     # Session selector (optional filtering)
@@ -227,15 +218,24 @@ if os.path.exists(input_csv):
     # Candlestick Chart
     # Choose Trace Type (Candlesticks are heavy for interactive events)
     if render_mode == "Interactive (Labeling)":
-        # USE ULTRA-LIGHTWEIGHT SCATTER FOR INTERACTIVE MODE
-        # This fixes the 'blank sidebar / no click' issue on large datasets
-        fig.add_trace(go.Scatter(
-            x=filtered_data['timestamp'].tolist(),
-            y=filtered_data['close'].tolist(),
-            mode='lines',
-            line=dict(color='white', width=1),
-            name='Interactive Price'
-        ))
+        if show_candles_interactive:
+            fig.add_trace(go.Candlestick(
+                x=filtered_data['timestamp'].tolist(),
+                open=filtered_data['open'].tolist(),
+                high=filtered_data['high'].tolist(),
+                low=filtered_data['low'].tolist(),
+                close=filtered_data['close'].tolist(),
+                name='Candlesticks (Interactive)'
+            ))
+        else:
+            fig.add_trace(go.Scatter(
+                x=filtered_data['timestamp'].tolist(),
+                y=filtered_data['close'].tolist(),
+                mode='lines+markers',
+                marker=dict(size=4, opacity=0.5),
+                line=dict(color='white', width=1),
+                name='Interactive Price'
+            ))
     elif chart_style == "Candlestick":
         fig.add_trace(go.Candlestick(
             x=filtered_data['timestamp'].tolist(),
@@ -306,6 +306,7 @@ if os.path.exists(input_csv):
     x_range = [filtered_data['timestamp'].min().isoformat(), filtered_data['timestamp'].max().isoformat()] if not filtered_data.empty else None
 
     fig.update_layout(
+        title=f"SPY {timeframe} Chart ({len(filtered_data)} bars)",
         height=800, 
         template="plotly_dark", 
         xaxis=dict(
