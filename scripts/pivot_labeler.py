@@ -337,10 +337,17 @@ if os.path.exists(input_csv):
 
     if selected_points:
         point = selected_points[0]
-        # Only process clicks on the main price trace (curveNumber 0)
-        if point.get('curveNumber', 0) == 0:
-            ts = filtered_data.iloc[point['pointIndex']]['timestamp']
-            price = filtered_data.iloc[point['pointIndex']]['underlying_price']
+        idx = point.get('pointIndex')
+        
+        if idx is not None and idx < len(filtered_data):
+            row = filtered_data.iloc[idx]
+            ts = row['timestamp']
+            
+            # SNAP TO PRICE: Highs snap to candle high, Lows snap to candle low
+            if pivot_type == "High":
+                price = row['high'] if pd.notna(row.get('high')) else row['underlying_price']
+            else:
+                price = row['low'] if pd.notna(row.get('low')) else row['underlying_price']
             
             # Add pivot
             new_pivot = pd.DataFrame({
@@ -351,12 +358,18 @@ if os.path.exists(input_csv):
                 'timeframe': [timeframe]
             })
             
-            # Check if already exists
-            if ts not in st.session_state.pivots['timestamp'].values:
+            # Robust Duplicate Check: Only block if SAME type on SAME timestamp for THIS timeframe
+            match_mask = (st.session_state.pivots['timestamp'].astype(str) == str(ts)) & \
+                         (st.session_state.pivots['type'] == pivot_type) & \
+                         (st.session_state.pivots['timeframe'] == timeframe)
+            
+            if not match_mask.any():
                 st.session_state.pivots = pd.concat([st.session_state.pivots, new_pivot], ignore_index=True)
                 st.rerun()
+            else:
+                st.sidebar.info(f"💡 Pivot already exists at {ts}")
         else:
-            st.sidebar.warning("Click detected on an existing marker. Use the main bars to add new pivots.")
+            st.sidebar.warning(f"Click registered but point index {idx} out of range.")
 
     # Table & Export
     st.subheader("Labeled Pivots")
