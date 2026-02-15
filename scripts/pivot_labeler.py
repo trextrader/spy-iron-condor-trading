@@ -26,15 +26,14 @@ data_type = st.sidebar.selectbox("Data Format", ["Auto-Detect", "CondorNet V4.2"
 timeframe = st.sidebar.selectbox("View Timeframe", ["M1", "M5", "M15", "H1"], index=0)
 pivot_type = st.sidebar.radio("Pivot Type to Mark", ["High", "Low"])
 pivot_strength = st.sidebar.slider("Pivot Strength", 1, 3, 1)
-view_mode = st.sidebar.selectbox("View Mode", ["Lines", "Candlesticks", "OHLC Bars"])
-auto_resample = st.sidebar.checkbox("Auto-Resample (Source must be M1)", value=False)
-render_mode = st.sidebar.radio("Interaction Mode", ["Interactive (Labeling)", "Standard (Visual Only)"])
-limit_bars = st.sidebar.checkbox("Focus: Last 500 bars only", value=False)
-gen_static = st.sidebar.button("📸 Generate Static Plot (Fallback)")
-
 if st.sidebar.button("🧹 Clear App Cache"):
     st.cache_data.clear()
     st.rerun()
+
+st.sidebar.markdown("---")
+view_mode = st.sidebar.selectbox("View Mode", ["Lines", "Candlesticks", "OHLC Bars"], index=0)
+render_mode = st.sidebar.radio("Interaction Mode", ["Interactive (Labeling)", "Standard (Visual Only)"], index=1)
+limit_bars = st.sidebar.checkbox("Focus: Last 1000 bars only", value=False)
 
 # TF Mapping
 tf_map = {"M1": "1min", "M5": "5min", "M15": "15min", "H1": "1H"}
@@ -189,24 +188,26 @@ if os.path.exists(input_csv):
             st.sidebar.write(f"Price: **${p_min:.2f} - ${p_max:.2f}**")
     # ---------------------------
     
-    # Session selector (optional filtering)
-    date_range = st.sidebar.date_input("Date Range", [data['timestamp'].min().date(), data['timestamp'].max().date()])
-    chart_style = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line"])
+    # --- DATE FILTERING ---
+    st.sidebar.subheader("📅 Navigation")
+    try:
+        min_date = data['timestamp'].min().date()
+        max_date = data['timestamp'].max().date()
+        date_range = st.sidebar.date_input("Select Date Range", [min_date, max_date])
+    except:
+        date_range = None
     
     if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
         start_date, end_date = date_range
         filtered_data = data[(data['timestamp'].dt.date >= start_date) & (data['timestamp'].dt.date <= end_date)].copy()
-    elif isinstance(date_range, (pd.Timestamp, pd.DatetimeIndex)):
-        filtered_data = data.copy() # Fallback for single clicks
     else:
         filtered_data = data.copy()
     
     if limit_bars:
-        filtered_data = filtered_data.sort_values('timestamp').tail(500)
+        filtered_data = filtered_data.sort_values('timestamp').tail(1000)
     
-    # --- REMOVED WINDOWING ---
-    # User requested to handle navigation via Date Range/Limit Bars instead.
-    # --------------------------
+    gen_static = st.sidebar.button("📸 Generate Static Plot (Fallback)")
+    auto_resample = st.sidebar.checkbox("Auto-Resample (Source must be M1)", value=False)
 
     st.sidebar.write(f"Chart bars: {len(filtered_data)}")
     
