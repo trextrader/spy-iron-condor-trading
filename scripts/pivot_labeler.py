@@ -132,15 +132,31 @@ if os.path.exists(input_csv):
         # --- SIDEBAR: DYNAMIC NAVIGATION ---
         st.sidebar.markdown("---")
         st.sidebar.subheader("📅 Navigation")
-        min_d, max_d = data['timestamp'].min().date(), data['timestamp'].max().date()
-        date_range = st.sidebar.date_input("Select Date Range", [min_d, max_d])
         
-        # Filtering
+        # Calculate full data bounds
+        abs_min = data['timestamp'].min()
+        abs_max = data['timestamp'].max()
+        
+        date_range = st.sidebar.date_input(
+            "Select Date Range", 
+            [abs_min.date(), abs_max.date()],
+            min_value=abs_min.date(),
+            max_value=abs_max.date()
+        )
+        
+        # Robust Filtering
         if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
             s_d, e_d = date_range
-            filtered = data[(data['timestamp'].dt.date >= s_d) & (data['timestamp'].dt.date <= e_d)].copy()
+            # Use pandas Timestamp for robust comparison
+            s_ts = pd.Timestamp(s_d)
+            e_ts = pd.Timestamp(e_d) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+            
+            filtered = data[(data['timestamp'] >= s_ts) & (data['timestamp'] <= e_ts)].copy()
+            st.sidebar.success(f"📌 Filter: {s_d} to {e_d}")
         else:
-            filtered = data.copy()
+            # Fallback to tail if no valid range selected yet
+            filtered = data.tail(5000) if not limit_bars else data.tail(1000)
+            st.sidebar.info("💡 Selecting range...")
             
         if limit_bars:
             filtered = filtered.tail(1000)
