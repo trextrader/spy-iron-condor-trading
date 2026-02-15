@@ -216,9 +216,10 @@ if os.path.exists(input_csv):
                 x=filtered['timestamp'].tolist(),
                 y=filtered['high'].tolist(),
                 mode='markers',
-                marker=dict(opacity=0, size=1),
+                marker=dict(opacity=0.01, size=15), # Larger markers = easier to catch
                 name='Interaction',
-                showlegend=False
+                showlegend=False,
+                hoverinfo='none'
             ))
         elif view_mode == "OHLC Bars":
             fig.add_trace(go.Ohlc(
@@ -234,18 +235,20 @@ if os.path.exists(input_csv):
                 x=filtered['timestamp'].tolist(),
                 y=filtered['high'].tolist(),
                 mode='markers',
-                marker=dict(opacity=0, size=1),
+                marker=dict(opacity=0.01, size=15),
                 name='Interaction',
-                showlegend=False
+                showlegend=False,
+                hoverinfo='none'
             ))
         else:
             fig.add_trace(go.Scatter(
                 x=filtered['timestamp'].tolist(), 
                 y=filtered['close'].tolist(), 
                 mode='lines+markers', 
-                marker=dict(size=1, opacity=0), 
+                marker=dict(size=12, opacity=0.01), 
                 line=dict(color='white', width=1), 
-                name='Price'
+                name='Price',
+                hoverinfo='none'
             ))
 
         # Add existing pivots
@@ -284,6 +287,10 @@ if os.path.exists(input_csv):
                 selected = plotly_events(fig, click_event=do_click, select_event=do_select, hover_event=True, key=event_key)
                 
                 if selected:
+                    # DEBUG WINDOW: Very important for diagnostics
+                    with st.sidebar.expander("🔍 Event Diagnostic", expanded=False):
+                        st.json(selected)
+                    
                     # Determine if it's a Sniper Selection (multi-point) or just Hover (single)
                     is_selection = len(selected) > 1
                     
@@ -294,11 +301,17 @@ if os.path.exists(input_csv):
                             clicked_timestamps.append(pd.to_datetime(tx))
                     
                     if clicked_timestamps:
-                        selection_mask = filtered['timestamp'].isin(clicked_timestamps)
-                        selection_df = filtered[selection_mask]
+                        # 🦅 ROBUST CAPTURE: If selection, use the range of timestamps
+                        if is_selection:
+                            min_t, max_t = min(clicked_timestamps), max(clicked_timestamps)
+                            selection_df = filtered[filtered['timestamp'].between(min_t, max_t)]
+                        else:
+                            # Single point (Hover)
+                            selection_mask = filtered['timestamp'].isin(clicked_timestamps)
+                            selection_df = filtered[selection_mask]
                         
                         if not selection_df.empty:
-                            # 🦅 SNIPER / HOVER PEAK DETECTION
+                            # 🦅 PEAK DETECTION
                             if pivot_type == "High":
                                 row = selection_df.sort_values('high', ascending=False).iloc[0] if 'high' in selection_df.columns else selection_df.sort_values('close', ascending=False).iloc[0]
                             else:
@@ -320,7 +333,7 @@ if os.path.exists(input_csv):
                                 st.session_state.pivots = pd.concat([st.session_state.pivots, new_p], ignore_index=True)
                                 st.sidebar.success(f"🎯 Sniper Hit! {pivot_type} at {row['timestamp'].strftime('%H:%M')}")
                                 st.rerun()
-                            # else: just let the sidebar candidate update (Hover Mode)
+                            # else: update Hover candidate (Hover Mode)
         else:
             st.plotly_chart(fig, use_container_width=True)
 
