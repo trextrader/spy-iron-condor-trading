@@ -45,6 +45,8 @@ if os.path.exists(input_csv):
         if fmt_choice == "Barchart Raw Spot" or (fmt_choice == "Auto-Detect" and is_barchart):
             print("Detected Barchart format. Skipping metadata header...")
             df = pd.read_csv(path, skiprows=1, encoding='latin-1') 
+            # Strip whitespace from columns
+            df.columns = df.columns.str.strip()
             
             # Standardize Barchart columns (including some studies)
             rename_map = {
@@ -66,6 +68,7 @@ if os.path.exists(input_csv):
         else:
             print("Assuming standard CondorNet V4.2 / options format...")
             df = pd.read_csv(path, encoding='latin-1')
+            df.columns = df.columns.str.strip()
         
         # 1. Parse timestamps robustly
         print("Parsing timestamps...")
@@ -142,8 +145,18 @@ if os.path.exists(input_csv):
     # ---------------------------
     
     # Session selector (optional filtering)
-    date_range = st.sidebar.date_input("Date Range", [data['timestamp'].min(), data['timestamp'].max()])
-    filtered_data = data[(data['timestamp'].dt.date >= date_range[0]) & (data['timestamp'].dt.date <= date_range[1])]
+    date_range = st.sidebar.date_input("Date Range", [data['timestamp'].min().date(), data['timestamp'].max().date()])
+    
+    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+        start_date, end_date = date_range
+        filtered_data = data[(data['timestamp'].dt.date >= start_date) & (data['timestamp'].dt.date <= end_date)].copy()
+    else:
+        # If user only clicked start date, show all data for now or just that day
+        filtered_data = data.copy()
+    
+    st.sidebar.write(f"Chart bars: {len(filtered_data)}")
+    if filtered_data.empty:
+        st.sidebar.error("⚠️ Filtered data is empty! Adjust date range.")
 
     # Manual labels state
     if 'pivots' not in st.session_state:
