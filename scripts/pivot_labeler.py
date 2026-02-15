@@ -62,7 +62,7 @@ if os.path.exists(input_csv):
             if 'underlying_price' not in df.columns:
                 df['underlying_price'] = df['close']
         else:
-            df = pd.read_csv(path)
+            df = pd.read_csv(path, encoding='latin-1')
         
         # 1. Parse timestamps robustly
         df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
