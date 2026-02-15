@@ -225,7 +225,18 @@ if os.path.exists(input_csv):
     fig = make_subplots(rows=1, cols=1)
     
     # Candlestick Chart
-    if chart_style == "Candlestick":
+    # Choose Trace Type (Candlesticks are heavy for interactive events)
+    if render_mode == "Interactive (Labeling)":
+        # Use OHLC trace - much lighter for serialization
+        fig.add_trace(go.Ohlc(
+            x=filtered_data['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S').tolist(),
+            open=filtered_data['open'].tolist(),
+            high=filtered_data['high'].tolist(),
+            low=filtered_data['low'].tolist(),
+            close=filtered_data['close'].tolist(),
+            name='Interactive Bars'
+        ))
+    elif chart_style == "Candlestick":
         fig.add_trace(go.Candlestick(
             x=filtered_data['timestamp'],
             open=filtered_data['open'],
@@ -315,6 +326,9 @@ if os.path.exists(input_csv):
     # Display chart and capture clicks
     if render_mode == "Interactive (Labeling)":
         from streamlit_plotly_events import plotly_events
+        # Force a slightly smaller subset if interactive to prevent hangs
+        if len(filtered_data) > 1000:
+            st.warning(f"⚠️ Displaying {len(filtered_data)} bars in interactive mode may be slow. Consider narrowing the Date Range.")
         selected_points = plotly_events(fig, click_event=True, hover_event=False, override_height=700)
     else:
         st.plotly_chart(fig, use_container_width=True, theme="streamlit")
