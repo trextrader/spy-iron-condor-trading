@@ -163,11 +163,13 @@ if os.path.exists(input_csv):
         with st.expander("📝 Data Preview"):
             st.dataframe(filtered.head(10))
 
-        # --- PIVOT STATE ---
         if 'pivots' not in st.session_state:
             if os.path.exists(output_csv):
                 try:
-                    st.session_state.pivots = pd.read_csv(output_csv)
+                    df_piv = pd.read_csv(output_csv)
+                    if 'timestamp' in df_piv.columns:
+                        df_piv['timestamp'] = pd.to_datetime(df_piv['timestamp'], errors='coerce')
+                    st.session_state.pivots = df_piv.dropna(subset=['timestamp'])
                 except:
                     st.session_state.pivots = pd.DataFrame(columns=['timestamp', 'type', 'strength', 'price', 'timeframe'])
             else:
@@ -177,11 +179,31 @@ if os.path.exists(input_csv):
         fig = make_subplots(rows=1, cols=1)
         
         if view_mode == "Candlesticks":
-            fig.add_trace(go.Candlestick(x=filtered['timestamp'], open=filtered['open'], high=filtered['high'], low=filtered['low'], close=filtered['close'], name='Price'))
+            fig.add_trace(go.Candlestick(
+                x=filtered['timestamp'].tolist(), 
+                open=filtered['open'].tolist(), 
+                high=filtered['high'].tolist(), 
+                low=filtered['low'].tolist(), 
+                close=filtered['close'].tolist(), 
+                name='Price'
+            ))
         elif view_mode == "OHLC Bars":
-            fig.add_trace(go.Ohlc(x=filtered['timestamp'], open=filtered['open'], high=filtered['high'], low=filtered['low'], close=filtered['close'], name='Price'))
+            fig.add_trace(go.Ohlc(
+                x=filtered['timestamp'].tolist(), 
+                open=filtered['open'].tolist(), 
+                high=filtered['high'].tolist(), 
+                low=filtered['low'].tolist(), 
+                close=filtered['close'].tolist(), 
+                name='Price'
+            ))
         else:
-            fig.add_trace(go.Scatter(x=filtered['timestamp'], y=filtered['close'], mode='lines', line=dict(color='white', width=1), name='Price'))
+            fig.add_trace(go.Scatter(
+                x=filtered['timestamp'].tolist(), 
+                y=filtered['close'].tolist(), 
+                mode='lines', 
+                line=dict(color='white', width=1), 
+                name='Price'
+            ))
 
         # Add existing pivots
         for tf_p in ["M1", "M5", "M15", "H1"]:
@@ -189,10 +211,16 @@ if os.path.exists(input_csv):
             if not p.empty:
                 highs = p[p['type'] == 'High']
                 lows = p[p['type'] == 'Low']
-                fig.add_trace(go.Scatter(x=highs['timestamp'], y=highs['price'], mode='markers', marker=dict(symbol='triangle-down', color='red', size=10), name=f'{tf_p} Highs'))
-                fig.add_trace(go.Scatter(x=lows['timestamp'], y=lows['price'], mode='markers', marker=dict(symbol='triangle-up', color='green', size=10), name=f'{tf_p} Lows'))
+                fig.add_trace(go.Scatter(x=highs['timestamp'].tolist(), y=highs['price'].tolist(), mode='markers', marker=dict(symbol='triangle-down', color='red', size=10), name=f'{tf_p} Highs'))
+                fig.add_trace(go.Scatter(x=lows['timestamp'].tolist(), y=lows['price'].tolist(), mode='markers', marker=dict(symbol='triangle-up', color='green', size=10), name=f'{tf_p} Lows'))
 
-        fig.update_layout(height=800, template="plotly_dark", title=f"SPY {timeframe} - {len(filtered)} bars", yaxis=dict(side="right"))
+        fig.update_layout(
+            height=800, 
+            template="plotly_dark", 
+            title=f"SPY {timeframe} - {len(filtered)} bars", 
+            yaxis=dict(side="right"),
+            xaxis=dict(type='date', rangeslider=dict(visible=False))
+        )
         
         if render_mode == "Interactive (Labeling)":
             if len(filtered) > 5000:
