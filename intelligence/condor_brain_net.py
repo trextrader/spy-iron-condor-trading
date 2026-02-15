@@ -224,11 +224,13 @@ class BlockMatrixA(nn.Module):
         return A_full
 
 
-class BlockVectorB(nn.Module):
+class BlockMatrixB(nn.Module):
     """
-    B_θ(u_k) ∈ ℝ^{d_x}, partitioned into [B_h, B_v, B_m, B_r].
+    B_θ(u_k) ∈ ℝ^{d_x × d_control}, partitioned into [B_h, B_v, B_m, B_r].
 
-    This is the control injection vector for the ETD-1 term.
+    This is the control injection operator for the ETD-1 term.
+    Mathematically, it is a matrix B ∈ ℝ^{d_x × d_control} that maps 
+    control embeddings u_k into the augmented state space for forcing.
     """
     def __init__(self, spec: AugmentedStateSpec, d_control: int):
         super().__init__()
@@ -251,6 +253,25 @@ class BlockVectorB(nn.Module):
         Bm = self.B_m(u)
         Br = self.B_r(u)
         return self.spec.cat(Bh, Bv, Bm, Br)
+
+    def full_matrix(self) -> torch.Tensor:
+        """
+        Construct the full [d_x, d_control] matrix B_theta.
+        Concatenates weights W_h, W_v, W_m, W_r.
+        
+        Hardened (V47): Always uses FP32 for extraction.
+        """
+        device = self.B_h.weight.device
+        
+        # Concatenate weight matrices (d_block, d_control) along row dim
+        B_full = torch.cat([
+            self.B_h.weight.data.float(),
+            self.B_v.weight.data.float(),
+            self.B_m.weight.data.float(),
+            self.B_r.weight.data.float()
+        ], dim=0)
+        
+        return B_full
 
 
 class CDEResponseG(nn.Module):
@@ -421,7 +442,7 @@ def etd1_kernel(A: torch.Tensor, dt: float) -> Tuple[torch.Tensor, torch.Tensor]
 
 def condornet_master_step(
     spec: AugmentedStateSpec,
-    B_theta: BlockVectorB,
+    B_theta: BlockMatrixB,
     G_theta: CDEResponseG,
     D_forcing: FullForcingD,
     x_prev: torch.Tensor,
