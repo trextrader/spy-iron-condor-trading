@@ -149,10 +149,19 @@ if os.path.exists(input_csv):
             st.sidebar.warning("⚠️ No intraday time detected! (Daily?)")
         else:
             st.sidebar.success("✅ Intraday data detected.")
+            
+        # Price Diagnostics
+        if 'close' in data.columns:
+            p_min = data['close'].min()
+            p_max = data['close'].max()
+            st.sidebar.write(f"Price Range: **${p_min:.2f} - ${p_max:.2f}**")
+            if pd.isna(p_min):
+                st.sidebar.error("❌ Price data is all NaN!")
     # ---------------------------
     
     # Session selector (optional filtering)
     date_range = st.sidebar.date_input("Date Range", [data['timestamp'].min().date(), data['timestamp'].max().date()])
+    chart_style = st.sidebar.selectbox("Chart Style", ["Candlestick", "Line"])
     
     if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
         start_date, end_date = date_range
@@ -196,14 +205,22 @@ if os.path.exists(input_csv):
     fig = make_subplots(rows=1, cols=1)
     
     # Candlestick Chart
-    fig.add_trace(go.Candlestick(
-        x=filtered_data['timestamp'],
-        open=filtered_data['open'] if 'open' in filtered_data.columns else filtered_data['underlying_price'],
-        high=filtered_data['high'] if 'high' in filtered_data.columns else filtered_data['underlying_price'],
-        low=filtered_data['low'] if 'low' in filtered_data.columns else filtered_data['underlying_price'],
-        close=filtered_data['close'] if 'close' in filtered_data.columns else filtered_data['underlying_price'],
-        name='Market Price'
-    ))
+    if chart_style == "Candlestick":
+        fig.add_trace(go.Candlestick(
+            x=filtered_data['timestamp'],
+            open=filtered_data['open'] if 'open' in filtered_data.columns else filtered_data['underlying_price'],
+            high=filtered_data['high'] if 'high' in filtered_data.columns else filtered_data['underlying_price'],
+            low=filtered_data['low'] if 'low' in filtered_data.columns else filtered_data['underlying_price'],
+            close=filtered_data['close'] if 'close' in filtered_data.columns else filtered_data['underlying_price'],
+            name='Market Price'
+        ))
+    else:
+        fig.add_trace(go.Scatter(
+            x=filtered_data['timestamp'],
+            y=filtered_data['close'] if 'close' in filtered_data.columns else filtered_data['underlying_price'],
+            name='Price (Line)',
+            line=dict(color='white', width=1)
+        ))
     
     # Overlays (Rev Signals)
     if 'rev_m5' in filtered_data.columns:
@@ -241,6 +258,10 @@ if os.path.exists(input_csv):
                     name=f'{tf} Lows'
                 ))
 
+    # Explicitly calculate bounds for the current view
+    y_min = filtered_data['low'].dropna().min() if 'low' in filtered_data.columns else filtered_data['underlying_price'].dropna().min()
+    y_max = filtered_data['high'].dropna().max() if 'high' in filtered_data.columns else filtered_data['underlying_price'].dropna().max()
+
     fig.update_layout(
         height=800, 
         template="plotly_dark", 
@@ -253,7 +274,7 @@ if os.path.exists(input_csv):
             fixedrange=False,
             title="Price ($)",
             side="right",
-            range=[filtered_data['low'].min() * 0.999, filtered_data['high'].max() * 1.001] if not filtered_data.empty else None
+            range=[y_min * 0.999, y_max * 1.001] if not pd.isna(y_min) else None
         ),
         clickmode='event+select',
         dragmode='zoom'  # Allows box zoom by default
