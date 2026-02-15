@@ -287,31 +287,44 @@ if os.path.exists(input_csv):
                 selected = plotly_events(fig, click_event=do_click, select_event=do_select, hover_event=True, key=event_key)
                 
                 if selected:
-                    # DEBUG WINDOW: Very important for diagnostics
+                    # DEBUG WINDOW
                     with st.sidebar.expander("🔍 Event Diagnostic", expanded=False):
                         st.json(selected)
                     
-                    # Determine if it's a Sniper Selection (multi-point) or just Hover (single)
-                    is_selection = len(selected) > 1
-                    
+                    # 🦅 NORMALIZATION: Plotly timestamps often include timezones or strings.
+                    # We normalize everything to naive pandas Timestamps for matching.
                     clicked_timestamps = []
                     for p in selected:
                         tx = p.get('x')
                         if tx:
-                            clicked_timestamps.append(pd.to_datetime(tx))
+                            try:
+                                ts = pd.to_datetime(tx)
+                                if ts.tzinfo is not None:
+                                    ts = ts.tz_localize(None)
+                                clicked_timestamps.append(ts)
+                            except:
+                                continue
                     
                     if clicked_timestamps:
-                        # 🦅 ROBUST CAPTURE: If selection, use the range of timestamps
-                        if is_selection:
+                        # 🦅 ROBUST DETECTION: Single Click Snap vs Box Selection
+                        if len(clicked_timestamps) > 1:
+                            # Box Selection: Use the full range
                             min_t, max_t = min(clicked_timestamps), max(clicked_timestamps)
                             selection_df = filtered[filtered['timestamp'].between(min_t, max_t)]
                         else:
-                            # Single point (Hover)
-                            selection_mask = filtered['timestamp'].isin(clicked_timestamps)
-                            selection_df = filtered[selection_mask]
+                            # Single Click: Search a 'Neighborhood' (Radius Snap)
+                            click_ts = clicked_timestamps[0]
+                            # Find index of nearest timestamp
+                            timediffs = (filtered['timestamp'] - click_ts).abs()
+                            nearest_idx_loc = timediffs.argmin()
+                            
+                            # Search ±5 bars around this index for the "magnetic" snap
+                            start_idx = max(0, nearest_idx_loc - 5)
+                            end_idx = min(len(filtered) - 1, nearest_idx_loc + 5)
+                            selection_df = filtered.iloc[start_idx:end_idx+1]
                         
                         if not selection_df.empty:
-                            # 🦅 PEAK DETECTION
+                            # Capture the peak within the neighborhood
                             if pivot_type == "High":
                                 row = selection_df.sort_values('high', ascending=False).iloc[0] if 'high' in selection_df.columns else selection_df.sort_values('close', ascending=False).iloc[0]
                             else:
@@ -327,13 +340,13 @@ if os.path.exists(input_csv):
                                 'timeframe': timeframe
                             }
                             
-                            # Auto-commit ONLY for box selections (Sniper Mode)
-                            if is_selection:
+                            # Auto-commit for Box selections OR deliberate clicks in 'select' mode
+                            if len(clicked_timestamps) > 1 or drag_mode == "select":
                                 new_p = pd.DataFrame([st.session_state.last_candidate])
                                 st.session_state.pivots = pd.concat([st.session_state.pivots, new_p], ignore_index=True)
-                                st.sidebar.success(f"🎯 Sniper Hit! {pivot_type} at {row['timestamp'].strftime('%H:%M')}")
+                                st.sidebar.success(f"🎯 Marked {pivot_type} at {row['timestamp'].strftime('%H:%M')}")
                                 st.rerun()
-                            # else: update Hover candidate (Hover Mode)
+                            # else: just update Hover target in sidebar
         else:
             st.plotly_chart(fig, use_container_width=True)
 
