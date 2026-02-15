@@ -53,31 +53,44 @@ if os.path.exists(input_csv):
         if fmt_choice == "Barchart Raw Spot" or (fmt_choice == "Auto-Detect" and is_barchart):
             print("Detected Barchart format. Skipping metadata header...")
             df = pd.read_csv(path, skiprows=1, encoding='latin-1') 
-            # Aggressive column cleaning: strip quotes and whitespace
-            df.columns = [str(c).replace('"', '').replace("'", "").strip() for c in df.columns]
-            
-            # Standardize Barchart columns (including some studies)
-            rename_map = {
-                'Date Time': 'timestamp',
-                'Open': 'open',
-                'High': 'high',
-                'Low': 'low',
-                'Close': 'close',
-                'Implied Volatility': 'iv',
-                'FRAMA': 'frama_study',
-                'Anchored VWAP': 'avwap_study',
-                'McClellanOsc': 'mcclellan_osc'
-            }
-            df = df.rename(columns=rename_map)
-            
-            # Ensure underlying_price points to close for labeling
-            if 'underlying_price' not in df.columns:
-                df['underlying_price'] = df['close']
         else:
-            print("Assuming standard CondorNet V4.2 / options format...")
+            print("Assuming standard format...")
             df = pd.read_csv(path, encoding='latin-1')
-            df.columns = [str(c).replace('"', '').replace("'", "").strip() for c in df.columns]
+        # 0.5 Aggressive Column Cleaning: strip quotes and whitespace
+        df.columns = [str(c).replace('"', '').replace("'", "").strip() for c in df.columns]
+        print(f"Loaded columns: {list(df.columns)}")
+
+        # 0.6 Robust Column Mapping (Search for keywords instead of exact matches)
+        col_map = {}
+        for c in df.columns:
+            c_low = c.lower()
+            if 'date' in c_low or 'time' in c_low or 'timestamp' == c_low:
+                col_map[c] = 'timestamp'
+            elif 'open' == c_low: col_map[c] = 'open'
+            elif 'high' == c_low: col_map[c] = 'high'
+            elif 'low' == c_low: col_map[c] = 'low'
+            elif 'close' == c_low: col_map[c] = 'close'
+            elif 'last' == c_low: col_map[c] = 'close'
+            elif 'vol' in c_low and 'iv' in c_low: col_map[c] = 'iv'
+            elif 'underlying' in c_low: col_map[c] = 'underlying_price'
         
+        df = df.rename(columns=col_map)
+        
+        # Ensure underlying_price points to close for labeling if missing
+        if 'underlying_price' not in df.columns and 'close' in df.columns:
+            df['underlying_price'] = df['close']
+        elif 'underlying_price' not in df.columns:
+            # Fallback for daily data / simple spot files
+            price_col = [c for c in ['close', 'last', 'price'] if c in df.columns]
+            if price_col:
+                df['underlying_price'] = df[price_col[0]]
+
+        # CHECK: If timestamp still missing, throw a descriptive error
+        if 'timestamp' not in df.columns:
+            st.error(f"❌ Could not find a 'timestamp' column. Available: {list(df.columns)}")
+            st.info("Check if your CSV has a 'Date' or 'Time' header.")
+            return pd.DataFrame()
+
         # 1. Parse timestamps robustly
         print("Cleaning and parsing timestamps...")
         if df['timestamp'].dtype == object:
