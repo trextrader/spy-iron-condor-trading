@@ -1,0 +1,5 @@
+[server]
+port = 8603
+headless = true
+enableCORS = false
+enableXsrfProtection = false
