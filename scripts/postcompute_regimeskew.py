@@ -85,12 +85,24 @@ def compute_alignment(df):
 def main():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--input", type=str, default="condornet_v40_fixed.csv")
-    parser.add_argument("--output", type=str, default="condornet_v40_fixed.csv")
+    # --------------------------------------------------------
+    # Correct dataset paths for your workflow
+    # --------------------------------------------------------
+    parser.add_argument(
+        "--input",
+        type=str,
+        default="data/Datasetv3/condornet_v30_20260212_precomputed_fixed.csv"
+    )
 
-    # -----------------------------
-    # Tuned baseline parameters
-    # -----------------------------
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="data/Datasetv3/condornet_v40_20260215.csv"
+    )
+
+    # --------------------------------------------------------
+    # Tuned baseline parameters (CLI-exposed)
+    # --------------------------------------------------------
     parser.add_argument("--m5_sma", type=float, default=32)
     parser.add_argument("--m5_rv", type=float, default=17)
     parser.add_argument("--m5_z", type=float, default=148)
@@ -112,16 +124,16 @@ def main():
     df = pd.read_csv(args.input)
     close = df["close"]
 
-    # -----------------------------
+    # --------------------------------------------------------
     # Compute reversal features
-    # -----------------------------
+    # --------------------------------------------------------
     df["rev_m5"] = compute_reversal(close, args.m5_sma, args.m5_rv, args.m5_z)
     df["rev_m15"] = compute_reversal(close, args.m15_sma, args.m15_rv, args.m15_z)
     df["rev_h1"] = compute_reversal(close, args.h1_sma, args.h1_rv, args.h1_z)
 
-    # -----------------------------
+    # --------------------------------------------------------
     # Top/bottom signals
-    # -----------------------------
+    # --------------------------------------------------------
     df["rev_m5_top"] = (df["rev_m5"] > args.m5_thresh).astype(int)
     df["rev_m5_bot"] = (df["rev_m5"] < -args.m5_thresh).astype(int)
 
@@ -131,22 +143,22 @@ def main():
     df["rev_h1_top"] = (df["rev_h1"] > args.h1_thresh).astype(int)
     df["rev_h1_bot"] = (df["rev_h1"] < -args.h1_thresh).astype(int)
 
-    # -----------------------------
+    # --------------------------------------------------------
     # Fuzzy z‑scores
-    # -----------------------------
+    # --------------------------------------------------------
     df["rev_m5_z"] = (df["rev_m5"] - df["rev_m5"].rolling(200).mean()) / df["rev_m5"].rolling(200).std()
     df["rev_m15_z"] = (df["rev_m15"] - df["rev_m15"].rolling(200).mean()) / df["rev_m15"].rolling(200).std()
     df["rev_h1_z"] = (df["rev_h1"] - df["rev_h1"].rolling(200).mean()) / df["rev_h1"].rolling(200).std()
 
-    # -----------------------------
+    # --------------------------------------------------------
     # Alignment features
-    # -----------------------------
+    # --------------------------------------------------------
     df = compute_alignment(df)
 
-    # -----------------------------
+    # --------------------------------------------------------
     # Baseline parameter export
     # (for CondorNet multiplicative offsets)
-    # -----------------------------
+    # --------------------------------------------------------
     df["m5_sma_base"] = args.m5_sma
     df["m5_rv_base"] = args.m5_rv
     df["m5_z_base"] = args.m5_z
@@ -162,7 +174,9 @@ def main():
     df["h1_z_base"] = args.h1_z
     df["h1_thresh_base"] = args.h1_thresh
 
+    # --------------------------------------------------------
     # Save output (overwrite)
+    # --------------------------------------------------------
     df.to_csv(args.output, index=False)
 
 
