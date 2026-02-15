@@ -68,6 +68,71 @@
       "spectral_radius_delta": 0.058765,
       "val_loss": 12.30500903641882,
       "train_loss": 4.070674504933816
+    },
+    "Epoch6": {
+      "same_predicates": 7,
+      "different_predicates": 1,
+      "same_sets": 432,
+      "different_sets": 80,
+      "same_super_sets": 16,
+      "different_super_sets": 0,
+      "same_fuzzy_gates": 10,
+      "different_fuzzy_gates": 0,
+      "spectral_radius_delta": 0.063865,
+      "val_loss": 12.282982365421685,
+      "train_loss": 4.064708033284578
+    },
+    "Epoch7": {
+      "same_predicates": 7,
+      "different_predicates": 1,
+      "same_sets": 431,
+      "different_sets": 81,
+      "same_super_sets": 16,
+      "different_super_sets": 0,
+      "same_fuzzy_gates": 10,
+      "different_fuzzy_gates": 0,
+      "spectral_radius_delta": 0.061974,
+      "val_loss": 12.19461310625733,
+      "train_loss": 4.059122197758746
+    },
+    "Epoch8": {
+      "same_predicates": 7,
+      "different_predicates": 1,
+      "same_sets": 424,
+      "different_sets": 88,
+      "same_super_sets": 16,
+      "different_super_sets": 0,
+      "same_fuzzy_gates": 10,
+      "different_fuzzy_gates": 0,
+      "spectral_radius_delta": 0.063158,
+      "val_loss": 12.11785872619671,
+      "train_loss": 4.052492246025198
+    },
+    "Epoch9": {
+      "same_predicates": 7,
+      "different_predicates": 1,
+      "same_sets": 425,
+      "different_sets": 87,
+      "same_super_sets": 16,
+      "different_super_sets": 0,
+      "same_fuzzy_gates": 10,
+      "different_fuzzy_gates": 0,
+      "spectral_radius_delta": 0.063672,
+      "val_loss": 12.096426951458303,
+      "train_loss": 4.050926320182616
+    },
+    "Epoch10": {
+      "same_predicates": 7,
+      "different_predicates": 1,
+      "same_sets": 422,
+      "different_sets": 90,
+      "same_super_sets": 16,
+      "different_super_sets": 0,
+      "same_fuzzy_gates": 10,
+      "different_fuzzy_gates": 0,
+      "spectral_radius_delta": 0.066381,
+      "val_loss": 12.051684539836957,
+      "train_loss": 4.049044710177659
     }
   }
 }
