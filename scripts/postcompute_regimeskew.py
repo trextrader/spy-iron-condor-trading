@@ -79,6 +79,66 @@ def compute_alignment(df):
 
 
 # ------------------------------------------------------------
+# v4.2 Anti-Stall & Regime Awareness
+# ------------------------------------------------------------
+
+def compute_session_features(df):
+    """
+    Computes deterministic session features for anti-stall:
+    - m_from_open (09:30 start)
+    - m_to_close (16:00 end)
+    - norm_session_time [0, 1]
+    - session_phase (Categorical: 0-4)
+    """
+    dt = pd.to_datetime(df['timestamp'])
+    
+    # Standard Market Hours (Minute of day)
+    m_of_day = dt.dt.hour * 60 + dt.dt.minute
+    
+    # 09:30 = 570 mins, 16:00 = 960 mins, Total = 390
+    df['m_from_open'] = (m_of_day - 570).clip(0, 390)
+    df['m_to_close'] = (960 - m_of_day).clip(0, 390)
+    df['norm_session_time'] = df['m_from_open'] / 390.0
+    
+    def get_phase(m):
+        if m < 60:  return 0 # Open (First hour)
+        if m < 150: return 1 # Mid Morning
+        if m < 240: return 2 # Lunch
+        if m < 330: return 3 # Power Hour Prep
+        return 4             # Power Hour + Stall Zone
+
+    df['session_phase'] = df['m_from_open'].apply(get_phase)
+    return df
+
+def compute_regime_features(df):
+    """
+    Computes Robust Volatility and Liquidity regimes via quantile tertiles.
+    """
+    # 1. Volatility Regime
+    if 'vol_ewma' in df.columns:
+        df['vol_regime_score'] = df['vol_ewma']
+        q1, q2 = df['vol_ewma'].quantile([0.33, 0.66])
+        df['vol_regime_label'] = 1 # Normal
+        df.loc[df['vol_ewma'] <= q1, 'vol_regime_label'] = 0 # Low
+        df.loc[df['vol_ewma'] >= q2, 'vol_regime_label'] = 2 # High
+    
+    # 2. Liquidity Score & Regime
+    if 'aggregate_bid_count' in df.columns and 'quote_spread' in df.columns:
+        # Depth / Spread
+        raw_liq = (df['aggregate_bid_count'] + df['aggregate_ask_count']) / df['quote_spread'].replace(0, 1e-6)
+        df['liq_score'] = raw_liq
+        l1, l2 = raw_liq.quantile([0.33, 0.66])
+        df['liq_regime'] = 2 # Normal
+        df.loc[raw_liq <= l1, 'liq_regime'] = 0 # Dead
+        df.loc[raw_liq <= l2, 'liq_regime'] = 1 # Thin
+    else:
+        df['liq_score'] = 1.0
+        df['liq_regime'] = 2
+
+    return df
+
+
+# ------------------------------------------------------------
 # Main script
 # ------------------------------------------------------------
 
