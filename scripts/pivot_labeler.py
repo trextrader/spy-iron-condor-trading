@@ -268,14 +268,18 @@ if os.path.exists(input_csv):
                 fig.add_trace(go.Scatter(x=highs['timestamp'].tolist(), y=highs['price'].tolist(), mode='markers', marker=dict(symbol='triangle-down', color='red', size=10), name=f'{tf_p} Highs'))
                 fig.add_trace(go.Scatter(x=lows['timestamp'].tolist(), y=lows['price'].tolist(), mode='markers', marker=dict(symbol='triangle-up', color='green', size=10), name=f'{tf_p} Lows'))
 
+        # 🦅 IFRAME HARDENING: Force Lasso behavior as it's more reliable in iframes
+        effective_dragmode = "lasso" if drag_mode in ("select", "lasso") else drag_mode
+
         fig.update_layout(
             height=800, 
             template="plotly_dark", 
             title=f"SPY {timeframe} - {len(filtered)} bars", 
             yaxis=dict(side="right"),
             xaxis=dict(type='date', rangeslider=dict(visible=False)),
-            dragmode=drag_mode,
-            clickmode="event+select", # ✅ REQUIRED for box-select events
+            dragmode=effective_dragmode,
+            clickmode="event+select", # ✅ REQUIRED for selection to emit reliably
+            uirevision="pivot-ui",    # ✅ Keep view stable across reruns
             hovermode="x unified"
         )
         
@@ -288,13 +292,45 @@ if os.path.exists(input_csv):
                 if len(filtered) > 5000:
                     st.warning(f"⚠️ **Perf Warning**: {len(filtered)} bars. If it's too slow, narrow the Date Range.")
                 
-                # 🦅 STABLE INTERACTION: Keep click on always, selection only in 'select' mode
-                do_select = (drag_mode == "select")
-                event_key = "pivot_labeler_events" # Stabilize key to prevent resets
-                selected = plotly_events(fig, click_event=True, select_event=do_select, hover_event=False, key=event_key)
+                # 🦅 PLOTLY CONFIG: Force modebar + selection tools (Hardening)
+                PLOTLY_CONFIG = {
+                    "displayModeBar": True,
+                    "displaylogo": False,
+                    "scrollZoom": True,
+                    "doubleClick": "reset",
+                    "modeBarButtonsToAdd": ["lasso2d", "select2d"],
+                    "modeBarButtonsToRemove": ["autoScale2d", "zoomIn2d", "zoomOut2d"],
+                    "responsive": True,
+                }
+
+                event_key = "pivot_labeler_events"
+                
+                # 🦅 STABLE INTERACTION: Always allow clicks and select events.
+                # Modebar determines the active tool.
+                try:
+                    selected = plotly_events(
+                        fig, 
+                        click_event=True, 
+                        select_event=True, 
+                        hover_event=False, 
+                        key=event_key,
+                        config=PLOTLY_CONFIG
+                    )
+                except TypeError:
+                    # Fallback for older versions that don't take 'config'
+                    selected = plotly_events(
+                        fig, 
+                        click_event=True, 
+                        select_event=True, 
+                        hover_event=False, 
+                        key=event_key
+                    )
                 
                 # DIAGNOSTIC: Show live feedback in sidebar
-                st.sidebar.write(f"selected len = {len(selected) if selected else 0}")
+                st.sidebar.write(f"selected payload length: {len(selected) if selected else 0}")
+                if selected:
+                    with st.sidebar.expander("🔍 Selection Sample", expanded=False):
+                        st.json(selected[:5])
                 
                 if selected:
                     # DEBUG WINDOW
