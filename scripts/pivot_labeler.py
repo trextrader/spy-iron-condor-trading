@@ -227,15 +227,14 @@ if os.path.exists(input_csv):
     # Candlestick Chart
     # Choose Trace Type (Candlesticks are heavy for interactive events)
     if render_mode == "Interactive (Labeling)":
-        # Use OHLC trace - much lighter for serialization
-        # Using .tolist() on timestamps is faster for Plotly than sending the Series
-        fig.add_trace(go.Ohlc(
+        # USE ULTRA-LIGHTWEIGHT SCATTER FOR INTERACTIVE MODE
+        # This fixes the 'blank sidebar / no click' issue on large datasets
+        fig.add_trace(go.Scatter(
             x=filtered_data['timestamp'].tolist(),
-            open=filtered_data['open'].tolist(),
-            high=filtered_data['high'].tolist(),
-            low=filtered_data['low'].tolist(),
-            close=filtered_data['close'].tolist(),
-            name='Price'
+            y=filtered_data['close'].tolist(),
+            mode='lines',
+            line=dict(color='white', width=1),
+            name='Interactive Price'
         ))
     elif chart_style == "Candlestick":
         fig.add_trace(go.Candlestick(
