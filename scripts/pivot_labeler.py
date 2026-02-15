@@ -26,9 +26,9 @@ timeframe = st.sidebar.selectbox("View Timeframe", ["M1", "M5", "M15", "H1"], in
 pivot_type = st.sidebar.radio("Pivot Type to Mark", ["High", "Low"])
 pivot_strength = st.sidebar.slider("Pivot Strength", 1, 3, 1)
 view_mode = st.sidebar.selectbox("View Mode", ["Lines", "Candlesticks", "OHLC Bars"])
+auto_resample = st.sidebar.checkbox("Auto-Resample (Source must be M1)", value=False)
 render_mode = st.sidebar.radio("Interaction Mode", ["Interactive (Labeling)", "Standard (Visual Only)"])
 limit_bars = st.sidebar.checkbox("Focus: Last 500 bars only", value=False)
-gen_static = st.sidebar.button("📸 Generate Static Plot (Fallback)")
 
 if st.sidebar.button("🧹 Clear App Cache"):
     st.cache_data.clear()
@@ -42,8 +42,8 @@ if os.path.exists(input_csv):
     load_btn = st.sidebar.button("🚀 Load / Refresh Data")
     
     @st.cache_data
-    def load_data(path, tf_str, fmt_choice):
-        print(f"🎬 Loading dataset: {path} ({tf_str}, {fmt_choice})...")
+    def load_data(path, tf_str, fmt_choice, do_resample):
+        print(f"🎬 Loading dataset: {path} (TF: {tf_str if do_resample else 'Native'}, Format: {fmt_choice})...")
         # 0. Detect Format (using latin-1 to avoid trademark decode errors)
         with open(path, 'r', encoding='latin-1') as f:
             first_line = f.readline()
@@ -123,8 +123,8 @@ if os.path.exists(input_csv):
         else:
             spots = df[['timestamp'] + available_spot_cols].copy()
         
-        # 4. Resample if requested timeframe is higher than M1
-        if tf_str != "1min":
+        # 4. Resample if requested and requested timeframe is higher than M1
+        if do_resample and tf_str != "1min":
             print(f"Resampling to {tf_str}...")
             agg_dict = {}
             if 'open' in spots.columns: agg_dict['open'] = 'first'
@@ -161,9 +161,9 @@ if os.path.exists(input_csv):
     if load_btn or 'data_loaded' in st.session_state:
         st.session_state.data_loaded = True
         with st.spinner("📦 Processing dataset..."):
-            # Passing timeframe to load_data ensures the cache is unique per timeframe
-            data = load_data(input_csv, tf_map[timeframe], data_type)
-        st.sidebar.success(f"✅ Data Ready: {len(data)} bars ({timeframe})")
+            # Passing params to load_data ensures the cache is unique per set of options
+            data = load_data(input_csv, tf_map[timeframe], data_type, auto_resample)
+        st.sidebar.success(f"✅ Data Ready: {len(data)} bars ({timeframe} {'Resampled' if auto_resample else 'Native'})")
     else:
         st.warning("Click 'Load Data' in the sidebar to begin.")
         st.stop()
@@ -172,9 +172,13 @@ if os.path.exists(input_csv):
     st.sidebar.subheader("📊 Data Stats")
     st.sidebar.write(f"Timeframe: **{timeframe}**")
     st.sidebar.write(f"Total Bars: **{len(data)}**")
-    if not data.empty:
+    if not data.empty and len(data) > 1:
         st.sidebar.write(f"Start: {data['timestamp'].iloc[0].strftime('%Y-%m-%d')}")
         st.sidebar.write(f"End: {data['timestamp'].iloc[-1].strftime('%Y-%m-%d')}")
+        
+        # Detect Interval
+        diff = (data['timestamp'].iloc[1] - data['timestamp'].iloc[0]).total_seconds() / 60
+        st.sidebar.info(f"⏱️ Interval: **~{int(diff)} min**")
         
         # Price Diagnostics
         if 'close' in data.columns:
