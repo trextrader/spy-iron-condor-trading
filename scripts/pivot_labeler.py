@@ -136,9 +136,12 @@ if os.path.exists(input_csv):
         abs_min = data['timestamp'].min()
         abs_max = data['timestamp'].max()
         
+        # Default to the LAST 14 days of data to keep it fast
+        default_start = max(abs_min.date(), (abs_max - pd.Timedelta(days=14)).date())
+        
         date_range = st.sidebar.date_input(
             "Select Date Range", 
-            [abs_min.date(), abs_max.date()],
+            [default_start, abs_max.date()],
             min_value=abs_min.date(),
             max_value=abs_max.date()
         )
@@ -253,13 +256,21 @@ if os.path.exists(input_csv):
                 if len(filtered) > 5000:
                     st.warning(f"⚠️ **Perf Warning**: {len(filtered)} bars. If it's too slow, narrow the Date Range.")
                 
-                # Unique key to ensure refresh
+                # Logical separation of events to prevent interference
+                # If we are in 'select' mode, we ONLY listen for selection boxes.
+                # If in zoom/pan, we listen for clicks.
+                do_select = (drag_mode == "select")
+                do_click = (drag_mode != "select")
+                
                 event_key = f"ev_{len(filtered)}_{timeframe}_{view_mode}_{len(st.session_state.pivots)}"
-                selected = plotly_events(fig, click_event=True, select_event=True, key=event_key)
+                selected = plotly_events(fig, click_event=do_click, select_event=do_select, key=event_key)
                 
                 if selected:
-                    # 🦅 SNIPER LOGIC: Handle single clicks OR box selections
-                    # We convert selection to timestamps and find the local extreema
+                    # FEEDBACK: Show raw data to user for debugging
+                    st.sidebar.markdown("---")
+                    with st.sidebar.expander("🔍 Raw Event Data (Debug)", expanded=True):
+                        st.json(selected)
+                    
                     clicked_timestamps = []
                     for p in selected:
                         tx = p.get('x')
@@ -267,37 +278,46 @@ if os.path.exists(input_csv):
                             clicked_timestamps.append(pd.to_datetime(tx))
                     
                     if clicked_timestamps:
-                        # Filter our data to only these timestamps
                         selection_mask = filtered['timestamp'].isin(clicked_timestamps)
                         selection_df = filtered[selection_mask]
                         
                         if not selection_df.empty:
                             if pivot_type == "High":
-                                # Sniper: find the absolute high in the selection
                                 row = selection_df.sort_values('high', ascending=False).iloc[0] if 'high' in selection_df.columns else selection_df.sort_values('close', ascending=False).iloc[0]
                             else:
-                                # Sniper: find the absolute low in the selection
                                 row = selection_df.sort_values('low', ascending=True).iloc[0] if 'low' in selection_df.columns else selection_df.sort_values('close', ascending=True).iloc[0]
                             
                             price = row['high'] if pivot_type == "High" else row['low']
-                            new_p = pd.DataFrame([{
+                            
+                            # Update session state for 'commit' button fallback
+                            st.session_state.last_candidate = {
                                 'timestamp': row['timestamp'], 
                                 'type': pivot_type, 
                                 'strength': pivot_strength, 
                                 'price': price, 
                                 'timeframe': timeframe
-                            }])
+                            }
+                            
+                            # Auto-commit if it's a sniper selection
+                            new_p = pd.DataFrame([st.session_state.last_candidate])
                             st.session_state.pivots = pd.concat([st.session_state.pivots, new_p], ignore_index=True)
                             st.sidebar.success(f"🎯 Marked {pivot_type} at {row['timestamp'].strftime('%H:%M')}")
                             st.rerun()
         else:
             st.plotly_chart(fig, use_container_width=True)
 
-        # Keyboard fallback button (visible only in dev)
-        with st.sidebar.expander("⌨️ Keyboard Marking", expanded=True):
-            st.markdown("1. Point crosshair at peak.\n2. Click the button below.")
-            if st.button("🚀 MARK NOW", help="Shortcut helper"):
-                st.info("Interaction active! Click the chart directly.")
+        # Commit tools
+        with st.sidebar.expander("🛠️ Commit Tools", expanded=True):
+            if 'last_candidate' in st.session_state:
+                c = st.session_state.last_candidate
+                st.write(f"Last Selected: **{c['timestamp'].strftime('%H:%M')}**")
+                if st.button("✅ Confirm & Append", use_container_width=True):
+                    new_p = pd.DataFrame([c])
+                    st.session_state.pivots = pd.concat([st.session_state.pivots, new_p], ignore_index=True)
+                    st.sidebar.success("Appended!")
+                    st.rerun()
+            else:
+                st.info("Point crosshair & select a dot/box to start.")
 
         # --- EXPORT ---
         st.subheader("Labeled Pivots")
