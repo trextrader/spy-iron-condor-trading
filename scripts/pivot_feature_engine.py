@@ -25,14 +25,27 @@ def main():
     # We broadcast the underlying pivot to all option rows at that timestamp
     pivots['pivot_high_flag'] = (pivots['type'] == 'High').astype(int)
     pivots['pivot_low_flag'] = (pivots['type'] == 'Low').astype(int)
-    
-    pivot_merge = pivots[['timestamp', 'pivot_high_flag', 'pivot_low_flag', 'strength']].copy()
-    pivot_merge.rename(columns={'strength': 'pivot_strength'}, inplace=True)
+    pivots.rename(columns={'strength': 'pivot_strength'}, inplace=True)
+
+    # Timeframe-aware flags
+    for tf in ["M1", "M5", "M15", "H1"]:
+        pivots[f'pivot_{tf}_flag'] = (pivots['timeframe'] == tf).astype(int)
+
+    pivot_merge_cols = ['timestamp', 'pivot_high_flag', 'pivot_low_flag', 'pivot_strength']
+    for tf in ["M1", "M5", "M15", "H1"]:
+        if f'pivot_{tf}_flag' in pivots.columns:
+            pivot_merge_cols.append(f'pivot_{tf}_flag')
+
+    pivot_merge = pivots[pivot_merge_cols].copy()
 
     df = df.merge(pivot_merge, on='timestamp', how='left')
     df['pivot_high_flag'] = df['pivot_high_flag'].fillna(0).astype(int)
     df['pivot_low_flag'] = df['pivot_low_flag'].fillna(0).astype(int)
     df['pivot_strength'] = df['pivot_strength'].fillna(0)
+    for tf in ["M1", "M5", "M15", "H1"]:
+        col = f'pivot_{tf}_flag'
+        if col in df.columns:
+            df[col] = df[col].fillna(0).astype(int)
 
     # --------------------------------------------------------
     # STEP 2: Structural Distances (Per-Option Series)

@@ -65,6 +65,10 @@ if os.path.exists(input_csv):
         else:
             st.session_state.pivots = pd.DataFrame(columns=['timestamp', 'type', 'strength', 'price', 'timeframe'])
 
+    # SCHEMA ENFORCEMENT: Ensure 'timeframe' exists if session persisted from older version
+    if 'timeframe' not in st.session_state.pivots.columns:
+        st.session_state.pivots['timeframe'] = 'M1'
+
     # Chart
     fig = make_subplots(rows=1, cols=1)
     
