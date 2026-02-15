@@ -68,6 +68,7 @@ def load_model_and_extract_B(checkpoint_path: Path, device: str = "cpu") -> tupl
 
     # Infer dimensions from A/B-related keys (fallback to defaults)
     d_h = d_v = d_m = d_r = 16  # defaults
+    d_control = 32              # default control dimension
 
     for key, value in state_dict.items():
         if "A_theta.A_hh.weight" in key:
@@ -78,14 +79,16 @@ def load_model_and_extract_B(checkpoint_path: Path, device: str = "cpu") -> tupl
             d_m = value.shape[0]
         elif "A_theta.A_rr.weight" in key:
             d_r = value.shape[0]
+        elif "B_theta.B_h.weight" in key:
+            d_control = value.shape[1]
 
-    print(f"  Inferred dimensions: d_h={d_h}, d_v={d_v}, d_m={d_m}, d_r={d_r}")
+    print(f"  Inferred dimensions: d_h={d_h}, d_v={d_v}, d_m={d_m}, d_r={d_r}, d_control={d_control}")
 
     # Create spec
     spec = AugmentedStateSpec(d_h=d_h, d_v=d_v, d_m=d_m, d_r=d_r)
 
-    # Create BlockMatrixB directly
-    B_theta = BlockMatrixB(spec)
+    # Create BlockMatrixB directly with inferred control dim
+    B_theta = BlockMatrixB(spec, d_control=d_control)
 
     # Extract only the B_theta weights from state_dict
     B_theta_state = {}
