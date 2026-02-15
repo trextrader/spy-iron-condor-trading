@@ -190,11 +190,16 @@ def main():
         else:
             checkpoints = sorted(ckpt_dir.glob("*.pth"))[-1:]
     else:
-        # Auto-discover: check models/ dir relative to project root
+        # Auto-discover: check models/ dir recursively (supports models/ckpts/)
         models_dir = PROJECT_ROOT / "models"
-        found = (list(models_dir.glob("condor_net_epoch*.pth"))
-                 + list(models_dir.glob("condor_net_best*.pth"))
-                 + list(models_dir.glob("condor_net_*.pth")))
+        
+        # Search patterns: condor_net series and Epoch series (V5)
+        patterns = ["condor_net_epoch*.pth", "condor_net_best*.pth", "condor_net_*.pth", "Epoch*.pth"]
+        
+        found = []
+        for pat in patterns:
+            found.extend(list(models_dir.rglob(pat)))
+            
         # Deduplicate while preserving order
         seen = set()
         for cp in found:
@@ -203,8 +208,10 @@ def main():
                 checkpoints.append(cp)
 
     if not checkpoints:
-        print(f"No checkpoints found in {PROJECT_ROOT / 'models'}")
-        print(f"  Looked for: condor_net_epoch*.pth, condor_net_best*.pth, condor_net_*.pth")
+        models_dir = PROJECT_ROOT / "models"
+        print(f"No checkpoints found in {models_dir}")
+        print(f"  Looked for: condor_net_epoch*.pth, condor_net_best*.pth, condor_net_*.pth, Epoch*.pth")
+        print(f"  Searched recursively in subdirectories (e.g., models/ckpts/)")
         return
 
     # Sort by epoch number
