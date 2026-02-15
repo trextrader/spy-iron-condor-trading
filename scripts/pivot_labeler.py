@@ -52,7 +52,18 @@ if os.path.exists(input_csv):
 
     # Manual labels state
     if 'pivots' not in st.session_state:
-        st.session_state.pivots = pd.DataFrame(columns=['timestamp', 'type', 'strength', 'price'])
+        if os.path.exists(output_csv):
+            try:
+                st.session_state.pivots = pd.read_csv(output_csv)
+                # Ensure timeframe column exists for legacy compatibility
+                if 'timeframe' not in st.session_state.pivots.columns:
+                    st.session_state.pivots['timeframe'] = 'M1'
+                st.sidebar.success(f"Loaded {len(st.session_state.pivots)} existing pivots.")
+            except Exception as e:
+                st.sidebar.error(f"Error loading existing pivots: {e}")
+                st.session_state.pivots = pd.DataFrame(columns=['timestamp', 'type', 'strength', 'price', 'timeframe'])
+        else:
+            st.session_state.pivots = pd.DataFrame(columns=['timestamp', 'type', 'strength', 'price', 'timeframe'])
 
     # Chart
     fig = make_subplots(rows=1, cols=1)
