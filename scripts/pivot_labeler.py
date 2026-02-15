@@ -34,15 +34,15 @@ if os.path.exists(input_csv):
     
     @st.cache_data
     def load_data(path, tf_str, fmt_choice):
-        # 0. Detect Format
-        with open(path, 'r') as f:
+        # 0. Detect Format (using latin-1 to avoid trademark decode errors)
+        with open(path, 'r', encoding='latin-1') as f:
             first_line = f.readline()
         
         is_barchart = "Symbol:" in first_line
         
         if fmt_choice == "Barchart Raw Spot" or (fmt_choice == "Auto-Detect" and is_barchart):
             # Skip 1st metadata row, use 2nd as headers
-            df = pd.read_csv(path, skiprows=1) 
+            df = pd.read_csv(path, skiprows=1, encoding='latin-1') 
             
             # Standardize Barchart columns (including some studies)
             rename_map = {
