@@ -328,8 +328,8 @@ if os.path.exists(input_csv):
     if render_mode == "Interactive (Labeling)":
         from streamlit_plotly_events import plotly_events
         # Force a slightly smaller subset if interactive to prevent hangs
-        if len(filtered_data) > 1000:
-            st.warning(f"⚠️ Displaying {len(filtered_data)} bars in interactive mode may be slow. Consider narrowing the Date Range.")
+        if len(filtered_data) > 2000:
+            st.warning(f"⚠️ Displaying {len(filtered_data)} bars. Clicks may be slow.")
         selected_points = plotly_events(fig, click_event=True, hover_event=False, override_height=700)
     else:
         st.plotly_chart(fig, use_container_width=True, theme="streamlit")
@@ -338,44 +338,55 @@ if os.path.exists(input_csv):
     if selected_points:
         point = selected_points[0]
         idx = point.get('pointIndex')
-        curve = point.get('curveNumber', 0)
+        curve = point.get('curveNumber')
         
-        # ONLY process if clicking Curve 0 (the main price bars)
-        if curve == 0:
-            if idx is not None and idx < len(filtered_data):
-                row = filtered_data.iloc[idx]
-                ts = row['timestamp']
-                
-                # SNAP TO PRICE: Highs snap to candle high, Lows snap to candle low
-                if pivot_type == "High":
-                    price = row['high'] if pd.notna(row.get('high')) else row['underlying_price']
-                else:
-                    price = row['low'] if pd.notna(row.get('low')) else row['underlying_price']
-                
-                # Add pivot
-                new_pivot = pd.DataFrame({
-                    'timestamp': [ts],
-                    'type': [pivot_type],
-                    'strength': [pivot_strength],
-                    'price': [price],
-                    'timeframe': [timeframe]
-                })
-                
-                # Robust Duplicate Check: Only block if SAME type on SAME timestamp for THIS timeframe
-                match_mask = (st.session_state.pivots['timestamp'].astype(str) == str(ts)) & \
-                             (st.session_state.pivots['type'] == pivot_type) & \
-                             (st.session_state.pivots['timeframe'] == timeframe)
-                
-                if not match_mask.any():
-                    st.session_state.pivots = pd.concat([st.session_state.pivots, new_pivot], ignore_index=True)
-                    st.sidebar.success(f"✅ Marked {pivot_type} at {ts}")
-                    st.rerun()
-                else:
-                    st.sidebar.info(f"💡 Pivot already exists at {ts}")
+        # DEBUG: Show click data in sidebar
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("🖱️ DEBUG: Last Click")
+        st.sidebar.json(point)
+        
+        # If we clicked a bar (usually curve 0 or low indices)
+        if idx is not None and idx < len(filtered_data):
+            row = filtered_data.iloc[idx]
+            ts = row['timestamp']
+            
+            # SNAP TO PRICE: Highs snap to candle high, Lows snap to candle low
+            if pivot_type == "High":
+                price = row['high'] if pd.notna(row.get('high')) else row['underlying_price']
             else:
-                st.sidebar.warning(f"Click registered but point index {idx} out of range.")
+                price = row['low'] if pd.notna(row.get('low')) else row['underlying_price']
+            
+            # Add pivot
+            new_p = pd.DataFrame([{
+                'timestamp': ts,
+                'type': pivot_type,
+                'strength': pivot_strength,
+                'price': price,
+                'timeframe': timeframe
+            }])
+            
+            # Lenient check for duplicates (just to get it working)
+            already_exists = False
+            if not st.session_state.pivots.empty:
+                # Compare as strings to be safe with types
+                ts_str = str(ts)
+                existing_ts = st.session_state.pivots['timestamp'].astype(str).tolist()
+                existing_types = st.session_state.pivots['type'].tolist()
+                existing_tfs = st.session_state.pivots['timeframe'].tolist()
+                
+                for i in range(len(existing_ts)):
+                    if existing_ts[i] == ts_str and existing_types[i] == pivot_type and existing_tfs[i] == timeframe:
+                        already_exists = True
+                        break
+            
+            if not already_exists:
+                st.session_state.pivots = pd.concat([st.session_state.pivots, new_p], ignore_index=True)
+                st.sidebar.success(f"✅ Marked {pivot_type} at {ts}")
+                st.rerun()
+            else:
+                st.sidebar.info(f"💡 Marker already exists here.")
         else:
-            st.sidebar.warning("⚠️ Click detected on a marker. Click the main bars to add a new pivot.")
+            st.sidebar.warning(f"Click missed the data bars. Try clicking precisely on the candle.")
 
     # Table & Export
     st.subheader("Labeled Pivots")
