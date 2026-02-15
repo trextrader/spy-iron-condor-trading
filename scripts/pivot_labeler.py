@@ -28,7 +28,7 @@ pivot_strength = st.sidebar.slider("Pivot Strength", 1, 3, 1)
 
 st.sidebar.markdown("---")
 view_mode = st.sidebar.selectbox("View Mode", ["Lines", "Candlesticks", "OHLC Bars"], index=0)
-render_mode = st.sidebar.radio("Interaction Mode", ["Interactive (Labeling)", "Standard (Visual Only)"], index=1)
+render_mode = st.sidebar.radio("Interaction Mode", ["Interactive (Labeling)", "Standard (Visual Only)"], index=0)
 limit_bars = st.sidebar.checkbox("Focus: Last 1000 bars only", value=False)
 auto_resample = st.sidebar.checkbox("Auto-Resample (Source must be M1)", value=False)
 
@@ -279,12 +279,10 @@ if os.path.exists(input_csv):
                 if len(filtered) > 5000:
                     st.warning(f"⚠️ **Perf Warning**: {len(filtered)} bars. If it's too slow, narrow the Date Range.")
                 
-                # Logical separation of events 
+                # 🦅 STABLE INTERACTION: Keep click on always, selection only in 'select' mode
                 do_select = (drag_mode == "select")
-                do_click = (drag_mode != "select")
-                
-                event_key = f"ev_{len(filtered)}_{timeframe}_{view_mode}_{len(st.session_state.pivots)}"
-                selected = plotly_events(fig, click_event=do_click, select_event=do_select, hover_event=True, key=event_key)
+                event_key = "pivot_labeler_events" # Stabilize key to prevent resets
+                selected = plotly_events(fig, click_event=True, select_event=do_select, hover_event=False, key=event_key)
                 
                 if selected:
                     # DEBUG WINDOW
@@ -340,10 +338,17 @@ if os.path.exists(input_csv):
                                 'timeframe': timeframe
                             }
                             
-                            # Auto-commit for Box selections OR deliberate clicks in 'select' mode
+                            # 🦅 DEDUPLICATED COMMIT
                             if len(clicked_timestamps) > 1 or drag_mode == "select":
                                 new_p = pd.DataFrame([st.session_state.last_candidate])
-                                st.session_state.pivots = pd.concat([st.session_state.pivots, new_p], ignore_index=True)
+                                
+                                # Auto-dedupe by (timestamp, type, timeframe)
+                                st.session_state.pivots = (
+                                    pd.concat([st.session_state.pivots, new_p], ignore_index=True)
+                                      .drop_duplicates(subset=["timestamp", "type", "timeframe"], keep="last")
+                                      .sort_values("timestamp")
+                                      .reset_index(drop=True)
+                                )
                                 st.sidebar.success(f"🎯 Marked {pivot_type} at {row['timestamp'].strftime('%H:%M')}")
                                 st.rerun()
                             # else: just update Hover target in sidebar
@@ -358,7 +363,12 @@ if os.path.exists(input_csv):
                 st.write(f"Type: **{c['type']}** | Price: **{c['price']:.2f}**")
                 if st.button("🚀 MARK TARGET NOW", use_container_width=True, type="primary"):
                     new_p = pd.DataFrame([c])
-                    st.session_state.pivots = pd.concat([st.session_state.pivots, new_p], ignore_index=True)
+                    st.session_state.pivots = (
+                        pd.concat([st.session_state.pivots, new_p], ignore_index=True)
+                          .drop_duplicates(subset=["timestamp", "type", "timeframe"], keep="last")
+                          .sort_values("timestamp")
+                          .reset_index(drop=True)
+                    )
                     st.sidebar.success(f"✅ Created {c['type']} marker!")
                     st.rerun()
                 st.caption("Tip: In 'select' mode, sweep a box to auto-mark.")
@@ -369,8 +379,9 @@ if os.path.exists(input_csv):
         st.subheader("Labeled Pivots")
         st.dataframe(st.session_state.pivots)
         if st.button("💾 Export CSV"):
-            st.session_state.pivots.to_csv(output_csv, index=False)
-            st.success(f"Saved to {output_csv}")
+            abs_out = os.path.abspath(output_csv)
+            st.session_state.pivots.to_csv(abs_out, index=False)
+            st.success(f"✅ Saved to {abs_out}")
 
     else:
         st.info("💡 **Ready to Start?** Click **'Load / Refresh Data'** in the sidebar.")
