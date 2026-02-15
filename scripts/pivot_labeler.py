@@ -228,17 +228,18 @@ if os.path.exists(input_csv):
     # Choose Trace Type (Candlesticks are heavy for interactive events)
     if render_mode == "Interactive (Labeling)":
         # Use OHLC trace - much lighter for serialization
+        # Using .tolist() on timestamps is faster for Plotly than sending the Series
         fig.add_trace(go.Ohlc(
-            x=filtered_data['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S').tolist(),
+            x=filtered_data['timestamp'].tolist(),
             open=filtered_data['open'].tolist(),
             high=filtered_data['high'].tolist(),
             low=filtered_data['low'].tolist(),
             close=filtered_data['close'].tolist(),
-            name='Interactive Bars'
+            name='Price'
         ))
     elif chart_style == "Candlestick":
         fig.add_trace(go.Candlestick(
-            x=filtered_data['timestamp'],
+            x=filtered_data['timestamp'].tolist(),
             open=filtered_data['open'],
             high=filtered_data['high'],
             low=filtered_data['low'],
@@ -249,14 +250,14 @@ if os.path.exists(input_csv):
         ))
         # Add a faint line trace as a backup/baseline
         fig.add_trace(go.Scatter(
-            x=filtered_data['timestamp'], y=filtered_data['close'],
+            x=filtered_data['timestamp'].tolist(), y=filtered_data['close'],
             mode='lines', line=dict(color='gray', width=0.5),
             name='Price Baseline (Faint)',
             opacity=0.3
         ))
     else:
         fig.add_trace(go.Scatter(
-            x=filtered_data['timestamp'],
+            x=filtered_data['timestamp'].tolist(),
             y=filtered_data['close'],
             name='Price (Line)',
             line=dict(color='white', width=1.5)
@@ -282,7 +283,7 @@ if os.path.exists(input_csv):
             h = tf_data[tf_data['type'] == 'High']
             if not h.empty:
                 fig.add_trace(go.Scatter(
-                    x=h['timestamp'], y=h['price'], mode='markers',
+                    x=h['timestamp'].tolist(), y=h['price'].tolist(), mode='markers',
                     marker=dict(symbol='triangle-down', color='red', size=12 if tf == timeframe else 8, 
                                 opacity=1.0 if tf == timeframe else 0.4),
                     name=f'{tf} Highs'
@@ -292,7 +293,7 @@ if os.path.exists(input_csv):
             l = tf_data[tf_data['type'] == 'Low']
             if not l.empty:
                 fig.add_trace(go.Scatter(
-                    x=l['timestamp'], y=l['price'], mode='markers',
+                    x=l['timestamp'].tolist(), y=l['price'].tolist(), mode='markers',
                     marker=dict(symbol='triangle-up', color='green', size=12 if tf == timeframe else 8,
                                 opacity=1.0 if tf == timeframe else 0.4),
                     name=f'{tf} Lows'
@@ -336,22 +337,26 @@ if os.path.exists(input_csv):
 
     if selected_points:
         point = selected_points[0]
-        ts = filtered_data.iloc[point['pointIndex']]['timestamp']
-        price = filtered_data.iloc[point['pointIndex']]['underlying_price']
-        
-        # Add pivot
-        new_pivot = pd.DataFrame({
-            'timestamp': [ts],
-            'type': [pivot_type],
-            'strength': [pivot_strength],
-            'price': [price],
-            'timeframe': [timeframe]
-        })
-        
-        # Check if already exists
-        if ts not in st.session_state.pivots['timestamp'].values:
-            st.session_state.pivots = pd.concat([st.session_state.pivots, new_pivot], ignore_index=True)
-            st.rerun()
+        # Only process clicks on the main price trace (curveNumber 0)
+        if point.get('curveNumber', 0) == 0:
+            ts = filtered_data.iloc[point['pointIndex']]['timestamp']
+            price = filtered_data.iloc[point['pointIndex']]['underlying_price']
+            
+            # Add pivot
+            new_pivot = pd.DataFrame({
+                'timestamp': [ts],
+                'type': [pivot_type],
+                'strength': [pivot_strength],
+                'price': [price],
+                'timeframe': [timeframe]
+            })
+            
+            # Check if already exists
+            if ts not in st.session_state.pivots['timestamp'].values:
+                st.session_state.pivots = pd.concat([st.session_state.pivots, new_pivot], ignore_index=True)
+                st.rerun()
+        else:
+            st.sidebar.warning("Click detected on an existing marker. Use the main bars to add new pivots.")
 
     # Table & Export
     st.subheader("Labeled Pivots")
