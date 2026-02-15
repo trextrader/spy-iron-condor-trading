@@ -29,6 +29,7 @@ view_mode = st.sidebar.selectbox("View Mode", ["Lines", "Candlesticks", "OHLC Ba
 auto_resample = st.sidebar.checkbox("Auto-Resample (Source must be M1)", value=False)
 render_mode = st.sidebar.radio("Interaction Mode", ["Interactive (Labeling)", "Standard (Visual Only)"])
 limit_bars = st.sidebar.checkbox("Focus: Last 500 bars only", value=False)
+gen_static = st.sidebar.button("📸 Generate Static Plot (Fallback)")
 
 if st.sidebar.button("🧹 Clear App Cache"):
     st.cache_data.clear()
