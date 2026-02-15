@@ -123,47 +123,86 @@ def main():
     # --------------------------------------------------------
     # Status: Start
     # --------------------------------------------------------
-    print("🔧 Starting postcompute_regimeskew.py (v4.0)…")
+    print("🔧 Starting postcompute_regimeskew.py (v4.0 – Institutional REDO)…")
     print(f"📥 Loading dataset: {args.input}")
 
     # Load dataset
     df = pd.read_csv(args.input)
-    print(f"✔ Loaded {len(df):,} rows")
-
-    close = df["close"]
+    print(f"✔ Loaded {len(df):,} rows x {len(df.columns)} cols")
 
     # --------------------------------------------------------
-    # Reversal features
+    # STEP 1: Extract unique spot bars
     # --------------------------------------------------------
-    print("🔄 Computing reversal features (M5, M15, H1)…")
-
-    df["rev_m5"] = compute_reversal(
-        close,
-        int(args.m5_sma),
-        int(args.m5_rv),
-        int(args.m5_z)
-    )
-
-    df["rev_m15"] = compute_reversal(
-        close,
-        int(args.m15_sma),
-        int(args.m15_rv),
-        int(args.m15_z)
-    )
-
-    df["rev_h1"] = compute_reversal(
-        close,
-        int(args.h1_sma),
-        int(args.h1_rv),
-        int(args.h1_z)
-    )
-
-    print("✔ Reversal features computed")
+    print("📊 Extracting unique spot bars for robust signal computation…")
+    
+    # Ensure timestamp is datetime for sorting
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    
+    # Extract one row per unique timestamp to get the underlying underlying_price series
+    # We use 'underlying_price' as the authoritative source for the reversal signals
+    spot_bars = df.groupby("timestamp")[["underlying_price"]].first().sort_index().reset_index()
+    spot_bars = spot_bars.rename(columns={"underlying_price": "close_underlying"})
+    
+    print(f"✔ Extracted {len(spot_bars):,} unique underlying time-bars")
 
     # --------------------------------------------------------
-    # Top/bottom signals
+    # STEP 2: Compute Reversal Features on Underlying
     # --------------------------------------------------------
-    print("🔍 Generating top/bottom signals…")
+    print("🔄 Computing reversal features on UNDERLYING series (M5, M15, H1)…")
+    
+    close_under = spot_bars["close_underlying"]
+
+    spot_bars["rev_m5"] = compute_reversal(
+        close_under, int(args.m5_sma), int(args.m5_rv), int(args.m5_z)
+    ).clip(-6, 6)
+
+    spot_bars["rev_m15"] = compute_reversal(
+        close_under, int(args.m15_sma), int(args.m15_rv), int(args.m15_z)
+    ).clip(-6, 6)
+
+    spot_bars["rev_h1"] = compute_reversal(
+        close_under, int(args.h1_sma), int(args.h1_rv), int(args.h1_z)
+    ).clip(-6, 6)
+
+    print("✔ Underlying reversal scores computed and clamped to [-6, +6]")
+
+    # --------------------------------------------------------
+    # STEP 3: Compute Fuzzy z-scores on Underlying
+    # --------------------------------------------------------
+    print("🌫 Computing fuzzy z-scores on UNDERLYING signals…")
+
+    def calc_z(s, window=200):
+        return (s - s.rolling(window).mean()) / s.rolling(window).std().replace(0, np.nan)
+
+    spot_bars["rev_m5_z"] = calc_z(spot_bars["rev_m5"])
+    spot_bars["rev_m15_z"] = calc_z(spot_bars["rev_m15"])
+    spot_bars["rev_h1_z"] = calc_z(spot_bars["rev_h1"])
+
+    print("✔ Underlying fuzzy z-scores computed (no row-key fragmentation)")
+
+    # --------------------------------------------------------
+    # STEP 4: Merge back to options dataset
+    # --------------------------------------------------------
+    print("📡 Merging underlying features back to options rows…")
+    
+    # Drop existing v4 columns if they exist to avoid duplicates
+    cols_to_drop = [
+        "rev_m5", "rev_m15", "rev_h1", 
+        "rev_m5_z", "rev_m15_z", "rev_h1_z",
+        "rev_m5_top", "rev_m5_bot", "rev_m15_top", "rev_m15_bot", "rev_h1_top", "rev_h1_bot",
+        "align_m5_m15", "align_m15_h1", "align_m5_h1", "align_3of3", "align_2of3"
+    ]
+    df = df.drop(columns=[c for c in cols_to_drop if c in df.columns])
+
+    df = df.merge(spot_bars, on="timestamp", how="left")
+    df = df.drop(columns=["close_underlying"])
+
+    print("✔ Broadcast merge complete")
+
+    # --------------------------------------------------------
+    # STEP 5: Generate Signals and Alignment
+    # --------------------------------------------------------
+    print("🔍 Generating top/bottom signals and alignments…")
 
     df["rev_m5_top"] = (df["rev_m5"] > args.m5_thresh).astype(int)
     df["rev_m5_bot"] = (df["rev_m5"] < -args.m5_thresh).astype(int)
@@ -174,49 +213,10 @@ def main():
     df["rev_h1_top"] = (df["rev_h1"] > args.h1_thresh).astype(int)
     df["rev_h1_bot"] = (df["rev_h1"] < -args.h1_thresh).astype(int)
 
-    print("✔ Top/bottom signals complete")
-
-    # --------------------------------------------------------
-    # Fuzzy z‑scores
-    # --------------------------------------------------------
-    print("🌫 Computing fuzzy z‑scores…")
-
-    df["rev_m5_z"] = (df["rev_m5"] - df["rev_m5"].rolling(200).mean()) / df["rev_m5"].rolling(200).std()
-    df["rev_m15_z"] = (df["rev_m15"] - df["rev_m15"].rolling(200).mean()) / df["rev_m15"].rolling(200).std()
-    df["rev_h1_z"] = (df["rev_h1"] - df["rev_h1"].rolling(200).mean()) / df["rev_h1"].rolling(200).std()
-
-    print("✔ Fuzzy z‑scores computed")
-
-    # --------------------------------------------------------
-    # Alignment features
-    # --------------------------------------------------------
-    print("📡 Computing multi‑timeframe alignment features…")
-
+    # Add alignment
     df = compute_alignment(df)
 
-    print("✔ Alignment features complete")
-
-    # --------------------------------------------------------
-    # Baseline parameter export
-    # --------------------------------------------------------
-    print("📦 Exporting baseline parameter columns…")
-
-    df["m5_sma_base"] = args.m5_sma
-    df["m5_rv_base"] = args.m5_rv
-    df["m5_z_base"] = args.m5_z
-    df["m5_thresh_base"] = args.m5_thresh
-
-    df["m15_sma_base"] = args.m15_sma
-    df["m15_rv_base"] = args.m15_rv
-    df["m15_z_base"] = args.m15_z
-    df["m15_thresh_base"] = args.m15_thresh
-
-    df["h1_sma_base"] = args.h1_sma
-    df["h1_rv_base"] = args.h1_rv
-    df["h1_z_base"] = args.h1_z
-    df["h1_thresh_base"] = args.h1_thresh
-
-    print("✔ Baseline parameters exported")
+    print("✔ Signals and alignment re-derived from clamped scores")
 
     # --------------------------------------------------------
     # Save output
