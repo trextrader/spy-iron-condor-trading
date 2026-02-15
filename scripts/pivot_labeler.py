@@ -216,7 +216,7 @@ if os.path.exists(input_csv):
                 x=filtered['timestamp'].tolist(),
                 y=filtered['high'].tolist(),
                 mode='markers',
-                marker=dict(opacity=0.01, size=15), # Larger markers = easier to catch
+                marker=dict(color="rgba(0,0,0,0)", size=25), # Big transparent hitbox
                 name='Interaction',
                 showlegend=False,
                 hoverinfo='none'
@@ -235,7 +235,7 @@ if os.path.exists(input_csv):
                 x=filtered['timestamp'].tolist(),
                 y=filtered['high'].tolist(),
                 mode='markers',
-                marker=dict(opacity=0.01, size=15),
+                marker=dict(color="rgba(0,0,0,0)", size=25),
                 name='Interaction',
                 showlegend=False,
                 hoverinfo='none'
@@ -244,10 +244,18 @@ if os.path.exists(input_csv):
             fig.add_trace(go.Scatter(
                 x=filtered['timestamp'].tolist(), 
                 y=filtered['close'].tolist(), 
-                mode='lines+markers', 
-                marker=dict(size=12, opacity=0.01), 
+                mode='lines', 
                 line=dict(color='white', width=1), 
-                name='Price',
+                name='Price'
+            ))
+            # 🦅 INTERACTION TRACE
+            fig.add_trace(go.Scatter(
+                x=filtered['timestamp'].tolist(),
+                y=filtered['close'].tolist(),
+                mode='markers',
+                marker=dict(color="rgba(0,0,0,0)", size=25),
+                name='Interaction',
+                showlegend=False,
                 hoverinfo='none'
             ))
 
@@ -267,6 +275,7 @@ if os.path.exists(input_csv):
             yaxis=dict(side="right"),
             xaxis=dict(type='date', rangeslider=dict(visible=False)),
             dragmode=drag_mode,
+            clickmode="event+select", # ✅ REQUIRED for box-select events
             hovermode="x unified"
         )
         
@@ -283,6 +292,9 @@ if os.path.exists(input_csv):
                 do_select = (drag_mode == "select")
                 event_key = "pivot_labeler_events" # Stabilize key to prevent resets
                 selected = plotly_events(fig, click_event=True, select_event=do_select, hover_event=False, key=event_key)
+                
+                # DIAGNOSTIC: Show live feedback in sidebar
+                st.sidebar.write(f"selected len = {len(selected) if selected else 0}")
                 
                 if selected:
                     # DEBUG WINDOW
