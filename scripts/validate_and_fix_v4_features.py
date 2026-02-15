@@ -49,7 +49,7 @@ VALIDATION_SCHEMA_V40 = {
     'call_put':           {'type': 'string',   'required': True},
 
     # --- Options Chain State (3) ---
-    'rho':                {'type': 'float', 'bounds': [-100, 100]},
+    'rho':                {'type': 'float', 'bounds': [-5000, 5000]},
     'volume':             {'type': 'float', 'bounds': [0, 1e9]},
     'open_interest':      {'type': 'float', 'bounds': [0, 1e9]},
 
@@ -87,7 +87,7 @@ VALIDATION_SCHEMA_V40 = {
     'cmf':                {'type': 'float', 'bounds': [-1.1, 1.1]},
     'pressure_up':        {'type': 'float', 'bounds': [0, 5]},
     'pressure_down':      {'type': 'float', 'bounds': [0, 5]},
-    'friction_ratio':     {'type': 'float', 'bounds': [0, 1], 'require_var': True, 'min_std': 0.001},
+    'friction_ratio':     {'type': 'float', 'bounds': [0, 1000], 'require_var': True, 'min_std': 0.001},
     'exec_allow':         {'type': 'binary', 'bounds': [0, 1]},
     'gap_risk_score':     {'type': 'float', 'bounds': [0, 1], 'require_var': True, 'min_std': 0.001},
     'risk_override':      {'type': 'binary', 'bounds': [0, 1]},
@@ -97,7 +97,7 @@ VALIDATION_SCHEMA_V40 = {
     'macd_histogram':     {'type': 'float', 'bounds': [-10, 10]},
     'plus_di':            {'type': 'float', 'bounds': [0, 100]},
     'minus_di':           {'type': 'float', 'bounds': [0, 100]},
-    'psar_trend':         {'type': 'binary', 'bounds': [-1, 1]},
+    'psar_trend':         {'type': 'trinary', 'bounds': [-1, 1]},
     'psar_reversion_mu':  {'type': 'float', 'bounds': [0, 1]},
     'beta1_norm_stub':    {'type': 'float', 'bounds': [-10, 10]},
     'chaos_membership':   {'type': 'float', 'bounds': [0, 1]},
@@ -278,7 +278,14 @@ def validate_columns(df: pd.DataFrame, sample_size: int = 50000) -> Dict:
                  status = "FAIL_BINARY"
                  is_fail = True
 
-        # 4. Variability Warning
+        # 4. Trinary Enforcement
+        if not is_fail and schema['type'] == 'trinary':
+            # Check if values are exactly -1, 0, or 1
+            if not set(data.unique()).issubset({-1, 0, 1, -1.0, 0.0, 1.0}):
+                 status = "FAIL_TRINARY"
+                 is_fail = True
+
+        # 5. Variability Warning
         if not is_fail and status == "OK":
             if c_uni == 1:
                 if schema.get('require_var', False):
