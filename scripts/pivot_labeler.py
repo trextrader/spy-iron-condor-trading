@@ -202,6 +202,27 @@ if os.path.exists(input_csv):
     
     if limit_bars:
         filtered_data = filtered_data.sort_values('timestamp').tail(500)
+    
+    # --- SLIDING WINDOW NAVIGATION ---
+    window_size = 2500
+    start_idx, end_idx = 0, len(filtered_data)
+    if len(filtered_data) > window_size:
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("🪟 Window Navigator")
+        num_windows = (len(filtered_data) // window_size) + 1
+        window_idx = st.sidebar.slider("Select Window Position", 0, num_windows - 1, 0, 
+                                       help="Slide to move through the dataset in chunks of 2500 bars.")
+        
+        start_idx = window_idx * window_size
+        end_idx = min(start_idx + window_size, len(filtered_data))
+        
+        # Display current window range in sidebar
+        w_start_ts = filtered_data['timestamp'].iloc[start_idx].strftime('%Y-%m-%d %H:%M')
+        w_end_ts = filtered_data['timestamp'].iloc[end_idx-1].strftime('%Y-%m-%d %H:%M')
+        st.sidebar.info(f"📍 Window: {start_idx} - {end_idx}\n📅 {w_start_ts}")
+        
+        filtered_data = filtered_data.iloc[start_idx:end_idx]
+    # ---------------------------------
 
     st.sidebar.write(f"Chart bars: {len(filtered_data)}")
     
@@ -339,8 +360,9 @@ if os.path.exists(input_csv):
             if len(filtered_data) > 2000:
                 st.warning(f"⚠️ {len(filtered_data)} bars may cause click lag. Narrowing the Date Range is recommended.")
             
-            # Use a unique key to force component refresh when data changes
-            event_key = f"plotly_ev_{len(filtered_data)}_{timeframe}_{view_mode}"
+            # Use a unique key that includes the window index to force redraw
+            win_id = start_idx if len(data) > window_size else 0
+            event_key = f"plotly_ev_{len(filtered_data)}_{timeframe}_{view_mode}_{win_id}"
             selected_points = plotly_events(fig, click_event=True, hover_event=False, override_height=700, key=event_key)
     else:
         st.plotly_chart(fig, use_container_width=True, theme="streamlit")
