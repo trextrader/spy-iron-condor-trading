@@ -194,12 +194,12 @@ def main():
     ]
     df = df.drop(columns=[c for c in cols_to_drop if c in df.columns])
 
+    # Explicit merge per recommendation
     df = df.merge(
         spot_bars[["timestamp", "rev_m5", "rev_m15", "rev_h1", "rev_m5_z", "rev_m15_z", "rev_h1_z"]],
         on="timestamp",
         how="left"
     )
-    df = df.drop(columns=["close_underlying"], errors='ignore')
 
     print("✔ Broadcast merge complete")
 
@@ -221,6 +221,28 @@ def main():
     df = compute_alignment(df)
 
     print("✔ Signals and alignment re-derived from clamped scores")
+
+    # --------------------------------------------------------
+    # STEP 6: Re-add baseline parameter columns
+    # --------------------------------------------------------
+    print("📦 Exporting baseline parameter columns (Restored)…")
+
+    df["m5_sma_base"] = args.m5_sma
+    df["m5_rv_base"] = args.m5_rv
+    df["m5_z_base"] = args.m5_z
+    df["m5_thresh_base"] = args.m5_thresh
+
+    df["m15_sma_base"] = args.m15_sma
+    df["m15_rv_base"] = args.m15_rv
+    df["m15_z_base"] = args.m15_z
+    df["m15_thresh_base"] = args.m15_thresh
+
+    df["h1_sma_base"] = args.h1_sma
+    df["h1_rv_base"] = args.h1_rv
+    df["h1_z_base"] = args.h1_z
+    df["h1_thresh_base"] = args.h1_thresh
+
+    print("✔ Baseline parameters exported")
 
     # --------------------------------------------------------
     # Save output
