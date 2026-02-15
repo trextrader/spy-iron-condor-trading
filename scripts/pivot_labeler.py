@@ -31,9 +31,11 @@ tf_map = {"M1": "1min", "M5": "5min", "M15": "15min", "H1": "1H"}
 
 if os.path.exists(input_csv):
     st.sidebar.info(f"📁 Dataset: {os.path.basename(input_csv)}")
+    load_btn = st.sidebar.button("🚀 Load / Refresh Data")
     
     @st.cache_data
     def load_data(path, tf_str, fmt_choice):
+        print(f"🎬 Loading dataset: {path} ({tf_str}, {fmt_choice})...")
         # 0. Detect Format (using latin-1 to avoid trademark decode errors)
         with open(path, 'r', encoding='latin-1') as f:
             first_line = f.readline()
@@ -41,7 +43,7 @@ if os.path.exists(input_csv):
         is_barchart = "Symbol:" in first_line
         
         if fmt_choice == "Barchart Raw Spot" or (fmt_choice == "Auto-Detect" and is_barchart):
-            # Skip 1st metadata row, use 2nd as headers
+            print("Detected Barchart format. Skipping metadata header...")
             df = pd.read_csv(path, skiprows=1, encoding='latin-1') 
             
             # Standardize Barchart columns (including some studies)
@@ -62,9 +64,11 @@ if os.path.exists(input_csv):
             if 'underlying_price' not in df.columns:
                 df['underlying_price'] = df['close']
         else:
+            print("Assuming standard CondorNet V4.2 / options format...")
             df = pd.read_csv(path, encoding='latin-1')
         
         # 1. Parse timestamps robustly
+        print("Parsing timestamps...")
         df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
         df = df.dropna(subset=['timestamp'])
         
@@ -77,11 +81,18 @@ if os.path.exists(input_csv):
         available_spot_cols = [c for c in spot_cols if c in df.columns]
         
         # 3. Collapse multiple rows per timestamp (for Option files)
-        # For spot files, this just confirms 1 row per min.
-        spots = df.groupby('timestamp')[available_spot_cols].first().reset_index()
+        # We only do this if there ARE duplicates to save performance
+        print("Checking for duplicate bars (option chain architecture)...")
+        if df['timestamp'].duplicated().any():
+            print("Found repeated timestamps. Collapsing to spot bars...")
+            spots = df.groupby('timestamp')[available_spot_cols].first().reset_index()
+        else:
+            print("No duplicates found. Using raw spots.")
+            spots = df[['timestamp'] + available_spot_cols].copy()
         
         # 4. Resample if requested timeframe is higher than M1
         if tf_str != "1min":
+            print(f"Resampling to {tf_str}...")
             agg_dict = {}
             if 'open' in spots.columns: agg_dict['open'] = 'first'
             if 'high' in spots.columns: agg_dict['high'] = 'max'
@@ -97,12 +108,21 @@ if os.path.exists(input_csv):
                 spots = spots.set_index('timestamp').resample(tf_str).agg(agg_dict).dropna(subset=['underlying_price']).reset_index()
         
         # 5. Final cleanup
+        print("Finalizing dataframe...")
         if spots['timestamp'].dt.tz is not None:
             spots['timestamp'] = spots['timestamp'].dt.tz_localize(None)
             
+        print("✅ Data ready.")
         return spots.sort_values('timestamp')
 
-    data = load_data(input_csv, tf_map[timeframe], data_type)
+    data = pd.DataFrame()
+    if load_btn or 'data_loaded' in st.session_state:
+        st.session_state.data_loaded = True
+        with st.spinner("📦 Reading and processing CSV... check terminal for progress logs."):
+            data = load_data(input_csv, tf_map[timeframe], data_type)
+    else:
+        st.warning("Click 'Load Data' in the sidebar to begin.")
+        st.stop()
     
     # --- DIAGNOSTICS SIDEBAR ---
     st.sidebar.subheader("📊 Data Stats")
