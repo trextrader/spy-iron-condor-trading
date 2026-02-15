@@ -194,8 +194,12 @@ def main():
     ]
     df = df.drop(columns=[c for c in cols_to_drop if c in df.columns])
 
-    df = df.merge(spot_bars, on="timestamp", how="left")
-    df = df.drop(columns=["close_underlying"])
+    df = df.merge(
+        spot_bars[["timestamp", "rev_m5", "rev_m15", "rev_h1", "rev_m5_z", "rev_m15_z", "rev_h1_z"]],
+        on="timestamp",
+        how="left"
+    )
+    df = df.drop(columns=["close_underlying"], errors='ignore')
 
     print("✔ Broadcast merge complete")
 
