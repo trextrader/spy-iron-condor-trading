@@ -210,7 +210,8 @@ def test_predicate_layer_not_saturated_and_has_entropy():
 
 def test_sets_and_supersets_exist_and_have_diversity():
     # Force 2 supersets to test diversity
-    model = CondorBrainNet(n_sets=4, n_super_sets=2, d_input=len(FEATURE_LIST))
+    # Force 2 supersets to test diversity
+    model = CondorBrainNet(n_sets=4, n_super_sets=2)
 
     # 1. Existence
     assert hasattr(model, "super_sets"), "Model missing super_sets attribute"
