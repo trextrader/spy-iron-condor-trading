@@ -287,6 +287,32 @@ DEFAULT_FEATURE_COLS = FEATURE_COLS_V30
 
 
 # =============================================================================
+# SEQUENCE DATASET (Module-Level for use by both build_dataloaders & train_condor_net)
+# =============================================================================
+
+class SequenceDataset(torch.utils.data.Dataset):
+    """Memory-efficient dataset that slices sequences on-the-fly in __getitem__."""
+    def __init__(self, X, y, regime, seq_len):
+        self.X = X
+        self.y = y
+        self.regime = regime
+        self.seq_len = seq_len
+        self.N = len(X)
+
+    def __len__(self):
+        return max(0, self.N - self.seq_len)
+
+    def __getitem__(self, idx):
+        X_seq = self.X[idx : idx + self.seq_len]
+        y_target = self.y[idx + self.seq_len]
+        r_target = self.regime[idx + self.seq_len]
+        return (
+            torch.tensor(X_seq, dtype=torch.float32),
+            torch.tensor(y_target, dtype=torch.float32),
+            torch.tensor(r_target, dtype=torch.float32),
+        )
+
+# =============================================================================
 # COMPOSITE LOSS (10 COMPONENTS)
 # =============================================================================
 
