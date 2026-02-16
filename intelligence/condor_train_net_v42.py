@@ -216,101 +216,64 @@ def build_dataloaders(batch_size: int, seq_len: int, data_path: str = "data/Data
         else:
             static_extras.append(e)
 
-    # ---- 4. Sequence slicing for X, y, and dynamic extras ----
-    # Eager sequence creation (Memory Heavy but Robust)
-    def make_sequences(arr, seq_len):
-        # Slice and stack
-        # Valid indices: 0 to len-seq_len
-        # arr[i : i+seq_len]
-        num_seq = len(arr) - seq_len
-        if num_seq <= 0:
-            return torch.empty(0)
-        
-        # Use strided tricks or simple loop? Simple list comp is safer for correctness first.
-        # Check memory constraint? CondorNet datasets are typically moderate.
-        return torch.stack([arr[i:i+seq_len] for i in range(num_seq)])
-
-    X_seq = make_sequences(X, seq_len)
-    
-    # Validation of sequence generation
-    if len(X_seq) == 0:
-        raise ValueError("Sequence length larger than dataset size.")
-        
-    # Targets are typically prediction *at* step t+seq_len or next step?
-    # Original SequenceDataset: y[i+lookback-1] which is the *last* step of the sequence window 
-    # OR target for *next* step?
-    # prepare_features usually aligns y with X row-by-row.
-    # Code snippet from user: y_seq = y[seq_len:]
-    # This implies y for sequence X[i:i+L] is y[i+L]. (Next step prediction?)
-    # SequenceDataset V4.2 used: `self.y[i+self.lookback-1]` -> The value corresponding to the LAST step of input.
-    # User snippet: `y_seq = y[seq_len:]` -> The value at index `seq_len` (element after the first window 0..L-1).
-    # IF X is [0,1,2,3,4] and L=3.
-    # Seq 0: [0,1,2]. 
-    # User y: y[3]. (Prediction of step 4?)
-    # SequenceDataset y: y[2]. (Autoencoder/current step?)
-    # CondorNet logic often predicts *future* or *next*.
-    # Let's stick to User Snippet logic: y[seq_len:]. 
-    # Note: len(X_seq) = N - seq_len. 
-    # len(y[seq_len:]) = N - seq_len. Matches.
-    
     y_seq = y[seq_len:]
     
     dynamic_seq = [make_sequences(e, seq_len) for e in dynamic_extras]
 
     # ---- 5. Train/val/test split ----
-    N_seq = len(X_seq)
-    n_train = int(N_seq * 0.8)
-    n_val = int(N_seq * 0.1)
+    # N_seq = len(X_seq)
+    # n_train = int(N_seq * 0.8)
+    # n_val = int(N_seq * 0.1)
 
-    def split(arr):
-        return arr[:n_train], arr[n_train:n_train+n_val], arr[n_train+n_val:]
+    # def split(arr):
+    #     return arr[:n_train], arr[n_train:n_train+n_val], arr[n_train+n_val:]
 
-    X_train, X_val, X_test = split(X_seq)
-    y_train, y_val, y_test = split(y_seq)
+    # X_train, X_val, X_test = split(X_seq)
+    # y_train, y_val, y_test = split(y_seq)
 
-    dynamic_splits = [split(e) for e in dynamic_seq]
+    # dynamic_splits = [split(e) for e in dynamic_seq]
 
     # ---- 6. Build dataset tuples ----
-    def build_dataset(Xp, yp, dyn_splits):
-        # We must broadcast static extras effectively.
-        # Python zip stops at shortest. 
-        # We use itertools.repeat for static items to infinite generator.
+    # def build_dataset(Xp, yp, dyn_splits):
+    #     # We must broadcast static extras effectively.
+    #     # Python zip stops at shortest. 
+    #     # We use itertools.repeat for static items to infinite generator.
         
-        # dynamic: list of tensors (N_subset, ...)
-        # static: list of tensors/scalars (D,)
+    #     # dynamic: list of tensors (N_subset, ...)
+    #     # static: list of tensors/scalars (D,)
         
-        # args for zip: Xp, yp, dyn1, dyn2..., stat1_repeated, stat2_repeated...
+    #     # args for zip: Xp, yp, dyn1, dyn2..., stat1_repeated, stat2_repeated...
         
-        iterables = [Xp, yp] + dyn_splits
-        if static_extras:
-            repeated_statics = [itertools.repeat(s) for s in static_extras]
-            iterables += repeated_statics
+    #     iterables = [Xp, yp] + dyn_splits
+    #     if static_extras:
+    #         repeated_statics = [itertools.repeat(s) for s in static_extras]
+    #         iterables += repeated_statics
             
-        return list(zip(*iterables))
+    #     return list(zip(*iterables))
 
-    # unpack splits correctly
-    train_dataset = build_dataset(X_train, y_train, [e[0] for e in dynamic_splits])
-    val_dataset   = build_dataset(X_val,   y_val,   [e[1] for e in dynamic_splits])
-    test_dataset  = build_dataset(X_test,  y_test,  [e[2] for e in dynamic_splits])
+    # # unpack splits correctly
+    # train_dataset = build_dataset(X_train, y_train, [e[0] for e in dynamic_splits])
+    # val_dataset   = build_dataset(X_val,   y_val,   [e[1] for e in dynamic_splits])
+    # test_dataset  = build_dataset(X_test,  y_test,  [e[2] for e in dynamic_splits])
 
     # ---- 7. Build loaders ----
     # Safe pin_memory logic
     pin_memory = torch.cuda.is_available()
     
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True,
-        pin_memory=pin_memory
-    )
-    val_loader = torch.utils.data.DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False,
-        pin_memory=pin_memory
-    )
-    test_loader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=batch_size, shuffle=False,
-        pin_memory=pin_memory
-    )
+    # train_loader = torch.utils.data.DataLoader(
+    #     train_dataset, batch_size=batch_size, shuffle=True,
+    #     pin_memory=pin_memory
+    # )
+    # val_loader = torch.utils.data.DataLoader(
+    #     val_dataset, batch_size=batch_size, shuffle=False,
+    #     pin_memory=pin_memory
+    # )
+    # test_loader = torch.utils.data.DataLoader(
+    #     test_dataset, batch_size=batch_size, shuffle=False,
+    #     pin_memory=pin_memory
+    # )
 
-    return train_loader, val_loader, test_loader
+    # return train_loader, val_loader, test_loader
 
 # FEATURE_COLS will be selected dynamically based on args.data_version
 DEFAULT_FEATURE_COLS = FEATURE_COLS_V30
