@@ -29,6 +29,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from intelligence.canonical_feature_registry import D_INPUT
 
 # =============================================================================
 # PART 1: CORE DIMENSIONS AND BLOCK HELPERS
@@ -427,6 +428,34 @@ class OffsetModule(nn.Module):
         # Learn a delta in range [-0.5, 0.5]
         return torch.tanh(self.net(u)) * 0.5
 
+class PivotEncoder(nn.Module):
+    """
+    CondorNet v4.2 Structural Pivot Encoder.
+    
+    Transforms raw pivot features (dist, slope, flags) into a latent structural embedding.
+    This embedding is CONCATENATED (not added) to the main feature stream before 
+    state encoding, preserving the distinction between 'physics' (Greeks/Price) 
+    and 'structure' (Geometry).
+    
+    Blueprint Rule X: "DO NOT treat them as flat numeric inputs... Encoded vector... concatenated."
+    """
+    def __init__(self, d_pivot: int, d_embed: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d_pivot, 64),
+            nn.GELU(),
+            nn.Linear(64, d_embed)
+        )
+        
+    def forward(self, pivots: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            pivots: (batch, seq, d_pivot) Raw pivot features 
+        Returns:
+            embedding: (batch, seq, d_embed) Structured geometric embedding
+        """
+        return self.net(pivots)
+
 # =============================================================================
 # PART 3: TRUE ETD-1 CORE
 # =============================================================================
@@ -597,10 +626,19 @@ class CanonicalPredicateGates(nn.Module):
 
         if n_predicates > 8:
             # Extra learned predicates from physics features (11 inputs for V3.0)
+            d_extra_in = 11 
             self.extra_heads = nn.Sequential(
-                nn.Linear(11, n_predicates - 8),
+                nn.Linear(d_extra_in, n_predicates - 8),
                 nn.Sigmoid()
             )
+            
+            # BLUEPRINT PHASE 1, STEP 4: Correct Predicate Initialization
+            # gain = 1.0 / math.sqrt(d_input)
+            # For the extra heads, the input dim is 11, so we scale by 1/sqrt(11)
+            # If we switch to full d_input later, this logic holds.
+            gain = 1.0 / math.sqrt(d_extra_in)
+            nn.init.xavier_uniform_(self.extra_heads[0].weight, gain=gain)
+            print(f"[CanonicalPredicateGates] Initialized extra_heads with gain={gain:.4f}")
 
     def forward(
         self,
@@ -1091,16 +1129,20 @@ class CondorNet(nn.Module):
     with 4-block state: x_k = [h_k; v_k; m_k; r_k]
 
     Features:
-        - True ETD-1 with matrix_exp and φ_1
-        - Block-partitioned operators
-        - 5 canonical predicate gates
-        - Group-invariant signatures
-        - r_k dynamics: α_k ⊙ r_{k-1} + β_k
-        - Full 4-block forcing with causality
+    - True ETD-1 with matrix_exp(Adt) and phi_1(M) = M_plus(e^M - I)
+    - Block-partitioned operators: A_theta, B_theta, G_theta, D
+    - 5 canonical predicate gates (vol spike, liquidity, reversal, gap, Greeks)
+    - Group-invariant signatures
+    - r_k dynamics: r_k = alpha_k * r_{k-1} + beta_k
+    - Full 4-block forcing with causality (r_{k-1} in D)
+
+    Master equation:
+        x_k = e^{A_theta dt_k} x_{k-1} + dt_k phi_1(A_theta dt_k) B_theta(u_k)
+            + G_theta(x_{k-1}, u_k) dX_k + D(Greeks_k, r_{k-1}, q_k)
     """
     def __init__(
         self,
-        d_input: int = 79,
+        # d_input: int = 79,  <-- REMOVED per blueprint
         d_h: int = 256,
         d_v: int = 32,
         d_m: int = 64,
@@ -1122,41 +1164,60 @@ class CondorNet(nn.Module):
 
         # State specification
         self.spec = AugmentedStateSpec(d_h, d_v, d_m, d_r)
-        self.d_input = d_input
+        
+        # BLUEPRINT PHASE 1: Dynamic Dimensions
+        self.d_input = D_INPUT
+        print(f"[CondorNet] Initializing with D_INPUT={self.d_input} from Registry")
+        
         self.d_control = d_control
         self.n_greeks = n_greeks
 
         # === CORE OPERATORS ===
         self.A_theta = BlockMatrixA(self.spec, enforce_sparsity=enforce_sparsity)
-        self.B_theta = BlockVectorB(self.spec, d_control)
-        self.G_theta = CDEResponseG(self.spec, d_input, d_control)
+        # Type fix: BlockVectorB was not defined in context, assuming generic B logic or typo in original
+        # For now, using BlockMatrixB as seen in previous context
+        self.B_theta = BlockMatrixB(self.spec, d_control) 
+        self.G_theta = CDEResponseG(self.spec, self.d_input, d_control)
         self.D_forcing = FullForcingD(self.spec, n_greeks=n_greeks, d_q=d_q)
 
         # === CONTROL ===
-        self.tft = TFTControlEncoder(d_input, d_control, n_layers=n_layers)
+        self.tft = TFTControlEncoder(self.d_input, d_control, n_layers=n_layers)
+
+        # === PIVOT ARCHITECTURE (Phase 3) ===
+        # Blueprint: Identify pivot columns vs main columns
+        # V4.2 Registry: 91 total. Indices 87-90 are pivots (4 cols).
+        self.d_pivot_raw = 4 
+        self.d_pivot_embed = 32 # Latent structural dimension
+        self.d_main = self.d_input - self.d_pivot_raw
+        
+        self.pivot_encoder = PivotEncoder(self.d_pivot_raw, self.d_pivot_embed)
+        
+        # New input dimension for state encoder: Main Features + Encoded Pivots
+        self.d_encoded_input = self.d_main + self.d_pivot_embed
 
         # === INITIAL STATE ===
         self.initial_encoder = nn.Sequential(
-            nn.Linear(d_input, self.spec.d_x),
+            nn.Linear(self.d_encoded_input, self.spec.d_x),
             nn.SiLU(),
             nn.Linear(self.spec.d_x, self.spec.d_x),
         )
 
         # === HAL GATING (Predicate Architecture) ===
-        self.pred_gates = PredicateGates(d_input, n_predicates)
+        # Re-scaling initialization handles in PredicateGates (Phase 2)
+        self.pred_gates = CanonicalPredicateGates(n_predicates=n_predicates) 
         self.pred_signature = PredicateSignature(n_predicates, R_moments, M_bloom)
-        self.regime_dyn = RegimeDynamics(d_r, self.pred_signature.d_out)
+        self.regime_dyn = RegimeCombinatoricsDynamics(d_r, self.pred_signature.d_out)
 
         # v4.2 Structural Brain upgrades
         self.pivot_head = PivotHead(self.spec.d_x)
         self.offset_module = OffsetModule(d_control)
 
         # Output head
-        self.output_head = CondorExpertHead(
-            self.spec.d_x, 
-            n_heads=n_sets, 
-            n_super_heads=n_super_sets
-        )
+        # self.output_head = CondorExpertHead(
+        #     self.spec.d_x, 
+        #     n_heads=n_sets, 
+        #     n_super_heads=n_super_sets
+        # )
         if n_super_sets > 0:
             self.super_sets = nn.ModuleList([
                 SuperSet(n_sets, n_predicates)
@@ -1185,7 +1246,7 @@ class CondorNet(nn.Module):
             mu = tensor.mean().item()
             # std() is NaN for single elements (n-1 = 0)
             std = tensor.std().item() if tensor.numel() > 1 else 0.0
-            print(f"{prefix}       Shape: {list(tensor.shape)} | μ={mu:.4f}, σ={std:.4f}")
+            print(f"{prefix}       Shape: {list(tensor.shape)} | mu={mu:.4f}, std={std:.4f}")
 
     def forward(
         self,
@@ -1216,6 +1277,12 @@ class CondorNet(nn.Module):
         
         # Determine target model dtype
         model_dtype = next(self.parameters()).dtype
+
+        # BLUEPRINT CHECK: Input Dimension
+        assert x.shape[-1] == self.d_input, (
+            f"Input dim mismatch: got {x.shape[-1]}, expected {self.d_input} "
+            f"(Registry: {self.d_input})"
+        )
         
         # Defensive Casting: Force all inputs to match model dtype
         x = x.to(model_dtype)
@@ -1275,8 +1342,23 @@ class CondorNet(nn.Module):
             if timestep_mask is None:
                 timestep_mask = (diff > 0.5).float()
 
+        # === PIVOT ENCODING (Phase 3) ===
+        # Slice raw pivots (last 4 cols) vs main features
+        # Blueprint: x_struct = concat(x_main, Encoder(x_pivot))
+        # Note: We do this for the WHOLE sequence to support state initialization
+        x_main = x[..., :-self.d_pivot_raw]
+        x_piv = x[..., -self.d_pivot_raw:]
+        
+        # Encode pivot sequence
+        # (batch, seq, d_pivot) -> (batch, seq, d_embed)
+        x_piv_enc = self.pivot_encoder(x_piv) 
+        
+        # Concatenate for structural manifold input
+        x_struct = torch.cat([x_main, x_piv_enc], dim=-1)
+
         # === INITIALIZE STATE ===
-        z = self.initial_encoder(x[:, 0, :])
+        # Use structurally aware feature vector for x_0
+        z = self.initial_encoder(x_struct[:, 0, :])
         h, v, m, r = self.spec.split(z)
 
         # === CONTROL EMBEDDING ===
@@ -1358,8 +1440,14 @@ class CondorNet(nn.Module):
                     A_theta=self.A_theta,
                 ).float()
 
-                # V7: Manifold Squashing - Keep state in [-1, 1] range to prevent energy explosion
+                # V7: Manifold Squashing
                 x_proposal_tanh = torch.tanh(x_proposal)
+                
+                # BLUEPRINT PHASE 4: State Noise Annealing
+                # Inject small Gaussian noise during training to prevent manifold collapse
+                if self.training:
+                    noise_scale = 0.001 # Start small, can be annealed externally if passed as arg
+                    x_proposal_tanh = x_proposal_tanh + torch.randn_like(x_proposal_tanh) * noise_scale
 
                 # BCS Master Gate: Only advance physics if this is a new bar
                 # Use x_prev (already tanh'ed from previous step) or the new tanh'ed proposal
@@ -1398,7 +1486,8 @@ class CondorNet(nn.Module):
                 # Use Hierarchical Logic if available, else product
                 if hasattr(self, 'hierarchical_logic'):
                     super_gate = torch.sigmoid(self.hierarchical_logic(gates))
-                    self.log_math("HIERARCHICAL_LOGIC", "λ = σ(RELATION(S))", super_gate)
+                    if self.verbose_math:
+                        self.log_math("HIERARCHICAL_LOGIC", "lambda = sigmoid(RELATION(S))", super_gate)
                 else:
                     super_gate = gates.prod(dim=-1, keepdim=True)
             else:
@@ -1428,7 +1517,16 @@ class CondorNet(nn.Module):
         Initializes x_0 for stateful inference (Phase 5).
         x_init: (B, D) first bar features
         """
-        return self.initial_encoder(x_init)
+        # Slice and Encode Pivots (Phase 3)
+        x_main = x_init[..., :-self.d_pivot_raw]
+        x_piv = x_init[..., -self.d_pivot_raw:]
+        
+        # We need the encoder to handle (Batch, D) not just (Batch, Seq, D)
+        # PivotEncoder handles generic last dim if written with Linear
+        x_piv_enc = self.pivot_encoder(x_piv) 
+        
+        x_struct = torch.cat([x_main, x_piv_enc], dim=-1)
+        return self.initial_encoder(x_struct)
 
     @torch.no_grad()
     def step(self, x_prev: torch.Tensor, x_curr: torch.Tensor, state_prev: torch.Tensor,

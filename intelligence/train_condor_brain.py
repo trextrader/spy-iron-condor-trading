@@ -140,7 +140,7 @@ FEATURE_COLS = FEATURE_COLS_V30
 # DATA PREPARATION (Fast In-Memory)
 # ============================================================================
 
-def prepare_features(df: pd.DataFrame, version: str = "v3.0") -> tuple:
+def prepare_features(df: pd.DataFrame, version: str = "v3.0", seed: int = 42) -> tuple:
     """Prepare features and targets for CondorBrain training.
     
     Returns:
@@ -165,7 +165,7 @@ def prepare_features(df: pd.DataFrame, version: str = "v3.0") -> tuple:
     # GENERATE REALISTIC TARGETS (Critical fix for model collapse)
     # ========================================================================
     n = len(df)
-    rng = np.random.default_rng(42)  # Reproducible
+    rng = np.random.default_rng(seed)  # Reproducible per seed
 
     # --- IVR-based regime detection for conditional targets ---
     # --- IVR-based regime detection for conditional targets ---
@@ -383,9 +383,13 @@ class BatchedSequenceDataset(IterableDataset):
         self.r = torch.from_numpy(r1d).long()               # (N,)  int64
         
         if pin_memory:
-            self.X = self.X.pin_memory()
-            self.y = self.y.pin_memory()
-            self.r = self.r.pin_memory()
+            try:
+                if torch.cuda.is_available():
+                    self.X = self.X.pin_memory()
+                    self.y = self.y.pin_memory()
+                    self.r = self.r.pin_memory()
+            except RuntimeError as e:
+                print(f"[CondorBrain] Warning: pin_memory() failed: {e}. Continuing without pinning.")
         
         self.n_seq = self.X.shape[0] - self.L
         self.n_batches = self.n_seq // self.B if drop_last else math.ceil(self.n_seq / self.B)
@@ -526,8 +530,14 @@ def parse_args():
                         help="Limit validation to N batches to save time (0=unlimited).")
     parser.add_argument("--no-plots", action="store_true",
                         help="Disable ALL plotting (Safe Mode) - Prevents hangs on headless systems.")
-    parser.add_argument("--batch-patience", type=int, default=0,
-                        help="[TESTING] Skip to next epoch if batch loss doesn't improve for N batches (0=disabled).")
+    # parser.add_argument("--batch-patience", type=int, default=0,
+    #                     help="[TESTING] Skip to next epoch if batch loss doesn't improve for N batches (0=disabled).")
+
+    # NEW: Data Version Control
+    parser.add_argument("--data-version", type=str, default="v3.0", choices=["v3.0", "v4.1", "v4.2"],
+                        help="Feature schema version (v3.0, v4.1, or v4.2). Default: v3.0")
+
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility/variance testing.")
 
     args = parser.parse_args()
     
@@ -645,8 +655,23 @@ def train_condor_brain(args):
         df = pd.read_csv(args.local_data)
     print(f"[CondorBrain] Loaded {len(df):,} rows", flush=True)
     
+    # Set global seeds
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+
     # Prepare features
-    X, y, regime, med, scale = prepare_features(df)
+    print(f"[CondorBrain] Preparing features using schema: {args.data_version} (Seed: {args.seed})", flush=True)
+    X, y, regime, med, scale, y_pivot = prepare_features(df, version=args.data_version, seed=args.seed)
+
+    
+    # Select correct feature columns for model init
+    if args.data_version in ["v4.2", "v4.1"]:
+        active_feature_cols = FEATURE_COLS_V42
+    else:
+        active_feature_cols = FEATURE_COLS_V30
+
     
     # Free dataframe memory
     del df
@@ -743,7 +768,7 @@ def train_condor_brain(args):
     model = CondorBrain(
         d_model=args.d_model,
         n_layers=args.layers,
-        input_dim=len(FEATURE_COLS),
+        input_dim=len(active_feature_cols),
         use_vol_gated_attn=args.vol_gated_attn,
         use_topk_moe=args.topk_moe,
         moe_n_experts=args.moe_experts,

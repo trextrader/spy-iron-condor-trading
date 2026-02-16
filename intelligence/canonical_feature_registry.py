@@ -9,6 +9,7 @@ Version History:
 - v2.1: 32 dynamic features
 - v2.2: 54 features (32 V2.1 + 22 primitives)
 - v3.0: 79 features (54 V2.2 + 25 new: Barchart studies + Alpaca microstructure)
+- v4.2: 91 features (79 V3.0 + 12 structural/regime features)
 """
 
 from typing import List, Dict, Any
@@ -552,82 +553,41 @@ FEATURE_COLS_V42: List[str] = [
     "pivot_low_flag",             # 90: 1 if point is low pivot
 ]
 
-INPUT_DIM_V42: int = len(FEATURE_COLS_V42)  # 91 features
+INPUT_DIM_V42: int = len(FEATURE_COLS_V42)  # 91 features (79 + 12)
 VERSION_V42: str = "condorbrain_v4.2_structural"
 
 # V4.2 Neutral Fill Values
 NEUTRAL_FILL_VALUES_V42: Dict[str, float] = {
     **NEUTRAL_FILL_VALUES_V30,
+    "minutes_from_open": 0.0,
+    "minutes_to_close": 0.0,
     "norm_session_time": 0.5,
-    "session_phase": 2.0,
-    "vol_regime_label": 1.0,
+    "session_phase": 2.0,       # Default to Mid-session
+    "vol_regime_label": 1.0,    # Normal
     "vol_regime_score": 0.5,
     "liq_score": 0.5,
     "liq_regime": 1.0,
-    "p_dist_prev": 60.0,
-    "p_slope_prev": 0.0,
+    "p_dist_prev": 240.0,       # Max distance default
+    "p_slope_prev": 0.0,        # Flat slope
     "pivot_high_flag": 0.0,
     "pivot_low_flag": 0.0,
 }
 
-# V3.0 Checkpoint Keys
-CHECKPOINT_REQUIRED_KEYS_V30: List[str] = [
-    "state_dict",
-    "feature_cols",
-    "median",
-    "mad",
-    "input_dim",
-    "version",
-    "primitive_params",  # Inherited from V2.2
-]
 
-# V3.0 Feature Registry
-FEATURE_REGISTRY_V30: Dict[str, Any] = {
-    "version": VERSION_V30,
-    "n_features": INPUT_DIM_V30,
-    "dtype": "float32",
-    "nan_policy": NAN_POLICY_V21,
-    "scaling": NORMALIZATION_POLICY_V21,
-    "feature_cols": FEATURE_COLS_V30,
-    "primitive_integration": True,
-    "tda_enabled": False,
-    "v30_extensions": True,
-    "features_v30": [
-        {"name": "underlying_price", "i": 54, "kind": "price", "range": "SPY $"},
-        {"name": "rho", "i": 55, "kind": "greek", "range": "small"},
-        {"name": "open_interest", "i": 56, "kind": "liquidity", "range": "count"},
-        {"name": "sma", "i": 57, "kind": "trend", "range": "SPY $"},
-        {"name": "psar_mark", "i": 58, "kind": "trend", "range": "SPY $"},
-        {"name": "bandwidth", "i": 59, "kind": "band", "range": "+"},
-        {"name": "FRAMA", "i": 60, "kind": "trend", "range": "SPY $"},
-        {"name": "Anchored_VWAP", "i": 61, "kind": "trend", "range": "SPY $"},
-        {"name": "McClellanOsc", "i": 62, "kind": "breadth", "range": "centered"},
-        {"name": "IV_High", "i": 63, "kind": "vol", "range": "[0, ~2]"},
-        {"name": "IV_Mid", "i": 64, "kind": "vol", "range": "[0, ~2]"},
-        {"name": "IV_Low", "i": 65, "kind": "vol", "range": "[0, ~2]"},
-        {"name": "Options_Total_Volume", "i": 66, "kind": "volume", "range": "count"},
-        {"name": "Options_Put_Volume", "i": 67, "kind": "volume", "range": "count"},
-        {"name": "Options_Call_Volume", "i": 68, "kind": "volume", "range": "count"},
-        {"name": "OSC_Volume", "i": 69, "kind": "volume", "range": "count"},
-        {"name": "WeightedAlpha", "i": 70, "kind": "flow", "range": "centered"},
-        {"name": "WilderAccSwingIndex", "i": 71, "kind": "flow", "range": "centered"},
-        {"name": "AccDistWill", "i": 72, "kind": "flow", "range": "centered"},
-        {"name": "AccDistWillMovAvg", "i": 73, "kind": "flow", "range": "centered"},
-        {"name": "aggregate_bid_count", "i": 74, "kind": "micro", "range": "count"},
-        {"name": "aggregate_ask_count", "i": 75, "kind": "micro", "range": "count"},
-        {"name": "mean_bid", "i": 76, "kind": "micro", "range": "SPY $"},
-        {"name": "mean_ask", "i": 77, "kind": "micro", "range": "SPY $"},
-        {"name": "quote_spread", "i": 78, "kind": "micro", "range": "+"},
-    ],
-}
+def validate_feature_cols_v42(cols: List[str]) -> bool:
+    """Check if provided columns match the canonical V4.2 schema."""
+    return cols == FEATURE_COLS_V42
 
 
-def validate_feature_cols_v30(cols: List[str]) -> bool:
-    """Check if provided columns match the canonical V3.0 schema."""
-    return cols == FEATURE_COLS_V30
+def get_neutral_fill_value_v42(feature_name: str) -> float:
+    """Get the semantically neutral fill value for a V4.2 feature."""
+    return NEUTRAL_FILL_VALUES_V42.get(feature_name, 0.0)
 
+# =============================================================================
+# EXPORTED ATTRIBUTES (The Single Source of Truth)
+# =============================================================================
 
-def get_neutral_fill_value_v30(feature_name: str) -> float:
-    """Get the semantically neutral fill value for a V3.0 feature."""
-    return NEUTRAL_FILL_VALUES_V30.get(feature_name, 0.0)
-
+# Default to the validated V4.2 Schema
+FEATURE_LIST = FEATURE_COLS_V42
+D_INPUT = INPUT_DIM_V42  # 91
+VERSION = VERSION_V42
