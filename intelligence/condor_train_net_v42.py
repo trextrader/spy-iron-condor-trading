@@ -142,11 +142,15 @@ from intelligence.canonical_feature_registry import (
 
 def build_dataloaders(batch_size: int, seq_len: int, data_path: str = "data/Datasetv4/condornet_v41_FINAL.csv"):
     """
-    Standardized v4.2 dataloader constructor.
+    Standardized v4.2 dataloader constructor (Robust Future-Proof).
     Returns: train_loader, val_loader, test_loader
     
-    Adapts user's requested interface to CondorNet's 4-tuple batch requirement:
-    (x_seq, y_target, regime, bar_idx)
+    Adapts automatically to prepare_features return signature:
+    - (X, y)
+    - (X, y, meta...)
+    - {X:..., y:..., ...}
+    
+    Handles static metadata (med, scale) vs time-series extras.
     """
     print(f"[CondorNet] build_dataloaders called with path: {data_path}")
     if not os.path.exists(data_path):
@@ -154,32 +158,80 @@ def build_dataloaders(batch_size: int, seq_len: int, data_path: str = "data/Data
         
     df = pd.read_csv(data_path)
     
-    # Use V4.2 features by default for this standardized builder
+    # Use V4.2 features by default
     active_feature_cols = FEATURE_COLS_V42
     
-    # prepare_features returns 6 values
-    X, y, regime, bar_index, med, scale = prepare_features(df, active_feature_cols)
+    # Dynamic call to prepare_features
+    outputs = prepare_features(df, active_feature_cols)
 
-    # Split indices
+    # Normalize return structure
+    extra_seq_items = []
+    
+    if isinstance(outputs, tuple):
+        X = outputs[0]
+        y = outputs[1]
+        
+        # Heuristic: If len > 2, usually (regime, bar_idx, med, scale)
+        if len(outputs) > 2:
+            # We separate time-series (length N) from static (length != N)
+            N = len(X)
+            for item in outputs[2:]:
+                if isinstance(item, (np.ndarray, list, torch.Tensor)):
+                    # Check length match
+                    if len(item) == N:
+                        extra_seq_items.append(item)
+                    else:
+                        # Likely static metadata (med, scale) -> ignore for dataloader
+                        pass
+                else:
+                    # Scalar or other -> ignore
+                    pass
+                    
+    elif isinstance(outputs, dict):
+        X = outputs["X"]
+        y = outputs["y"]
+        N = len(X)
+        for k, v in outputs.items():
+            if k in ("X", "y"): continue
+            if hasattr(v, "__len__") and len(v) == N:
+                extra_seq_items.append(v)
+            else:
+                pass # Static metadata
+    else:
+        raise ValueError("Unsupported return type from prepare_features")
+
+    # Split logic
     N = len(X)
     n_train = int(N * 0.8)
     n_val = int(N * 0.1)
     # n_test implied
     
-    X_train = X[:n_train]
-    y_train = y[:n_train]
-    r_train = regime[:n_train]
-    
-    X_val = X[n_train:n_train+n_val]
-    y_val = y[n_train:n_train+n_val]
-    r_val = regime[n_train:n_train+n_val]
-    
-    X_test = X[n_train+n_val:]
-    y_test = y[n_train+n_val:]
-    r_test = regime[n_train+n_val:]
+    # Splitter helper
+    def split(arr):
+        return arr[:n_train], arr[n_train:n_train+n_val], arr[n_train+n_val:]
 
-    # Use SequenceDataset for consistent behavior (lazy sequence generation)
-    # Note: SequenceDataset expects numpy arrays as inputs (converts to torch internally)
+    X_train, X_val, X_test = split(X)
+    y_train, y_val, y_test = split(y)
+    
+    # Split extra items (e.g., regime, bar_idx)
+    extras_train = [split(e)[0] for e in extra_seq_items]
+    extras_val = [split(e)[1] for e in extra_seq_items]
+    extras_test = [split(e)[2] for e in extra_seq_items]
+
+    # Map specific extras to SequenceDataset args if they match expected pattern
+    # SequenceDataset signature: (X, y, r, [lookback])
+    # The current v4.2 prepare_features returns: X, y, regime, bar_index, ...
+    # So extra_seq_items[0] is regime.
+    
+    r_train = extras_train[0] if len(extras_train) > 0 else np.zeros(len(X_train))
+    r_val = extras_val[0] if len(extras_val) > 0 else np.zeros(len(X_val))
+    r_test = extras_test[0] if len(extras_test) > 0 else np.zeros(len(X_test))
+
+    # Note: SequenceDataset handles X sequences internally, and takes y/r as full arrays.
+    # It does NOT currently support arbitrary extras beyond r. 
+    # If bar_index is present (extra index 1), it is generated internally by SequenceDataset.
+    # So we can safely use SequenceDataset with just X, y, r.
+    
     train_ds = SequenceDataset(X_train, y_train, r_train, seq_len)
     val_ds = SequenceDataset(X_val, y_val, r_val, seq_len)
     test_ds = SequenceDataset(X_test, y_test, r_test, seq_len)
