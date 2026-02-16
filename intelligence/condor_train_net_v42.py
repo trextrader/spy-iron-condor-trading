@@ -216,64 +216,7 @@ def build_dataloaders(batch_size: int, seq_len: int, data_path: str = "data/Data
         else:
             static_extras.append(e)
 
-    y_seq = y[seq_len:]
-    
-    dynamic_seq = [make_sequences(e, seq_len) for e in dynamic_extras]
-
-    # ---- 5. Train/val/test split ----
-    # N_seq = len(X_seq)
-    # n_train = int(N_seq * 0.8)
-    # n_val = int(N_seq * 0.1)
-
-    # def split(arr):
-    #     return arr[:n_train], arr[n_train:n_train+n_val], arr[n_train+n_val:]
-
-    # X_train, X_val, X_test = split(X_seq)
-    # y_train, y_val, y_test = split(y_seq)
-
-    # dynamic_splits = [split(e) for e in dynamic_seq]
-
-    # ---- 6. Build dataset tuples ----
-    # def build_dataset(Xp, yp, dyn_splits):
-    #     # We must broadcast static extras effectively.
-    #     # Python zip stops at shortest. 
-    #     # We use itertools.repeat for static items to infinite generator.
-        
-    #     # dynamic: list of tensors (N_subset, ...)
-    #     # static: list of tensors/scalars (D,)
-        
-    #     # args for zip: Xp, yp, dyn1, dyn2..., stat1_repeated, stat2_repeated...
-        
-    #     iterables = [Xp, yp] + dyn_splits
-    #     if static_extras:
-    #         repeated_statics = [itertools.repeat(s) for s in static_extras]
-    #         iterables += repeated_statics
-            
-    #     return list(zip(*iterables))
-
-    # # unpack splits correctly
-    # train_dataset = build_dataset(X_train, y_train, [e[0] for e in dynamic_splits])
-    # val_dataset   = build_dataset(X_val,   y_val,   [e[1] for e in dynamic_splits])
-    # test_dataset  = build_dataset(X_test,  y_test,  [e[2] for e in dynamic_splits])
-
-    # ---- 7. Build loaders ----
-    # Safe pin_memory logic
-    pin_memory = torch.cuda.is_available()
-    
-    # train_loader = torch.utils.data.DataLoader(
-    #     train_dataset, batch_size=batch_size, shuffle=True,
-    #     pin_memory=pin_memory
-    # )
-    # val_loader = torch.utils.data.DataLoader(
-    #     val_dataset, batch_size=batch_size, shuffle=False,
-    #     pin_memory=pin_memory
-    # )
-    # test_loader = torch.utils.data.DataLoader(
-    #     test_dataset, batch_size=batch_size, shuffle=False,
-    #     pin_memory=pin_memory
-    # )
-
-    # return train_loader, val_loader, test_loader
+    return train_loader, val_loader, test_loader
 
 # FEATURE_COLS will be selected dynamically based on args.data_version
 DEFAULT_FEATURE_COLS = FEATURE_COLS_V30
