@@ -1387,6 +1387,7 @@ def train_condor_net(args):
     X_train, X_val = X[:split_idx], X[split_idx:]
     y_train, y_val = y[:split_idx], y[split_idx:]
     r_train, r_val = regime[:split_idx], regime[split_idx:]
+    bar_train, bar_val = bar_index[:split_idx], bar_index[split_idx:]
     
     # Datasets
     train_ds = SequenceDataset(X_train, y_train, r_train, args.lookback)
