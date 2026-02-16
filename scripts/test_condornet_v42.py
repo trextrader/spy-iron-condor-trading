@@ -61,7 +61,17 @@ def test_dataset_v41_basic_sanity():
 
     df = pd.read_csv(DATASET_V41)
 
-    assert not df.isna().any().any(), "Dataset v4.1 contains NaNs"
+    # Check for NaNs with detailed reporting
+    nan_counts = df.isna().sum()
+    cols_with_nans = nan_counts[nan_counts > 0]
+    
+    if not cols_with_nans.empty:
+        msg = "Dataset v4.1 contains NaNs in the following columns:\n"
+        for col, count in cols_with_nans.items():
+            msg += f"  - {col}: {count} NaNs\n"
+        pytest.fail(msg)
+
+    assert not df.isna().any().any(), "Dataset v4.1 contains NaNs (check failed)"
 
     constant_cols = [c for c in df.columns if df[c].nunique() == 1]
     allowed_constant = {
