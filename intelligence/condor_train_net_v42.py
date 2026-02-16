@@ -1468,7 +1468,6 @@ def train_condor_net(args):
 
     # Model
     model = CondorNet(
-        d_input=len(active_feature_cols),
         d_h=args.d_h,
         d_v=args.d_v,
         d_m=args.d_m,
