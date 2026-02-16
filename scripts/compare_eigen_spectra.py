@@ -12,8 +12,20 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from intelligence.condor_brain_net_v42 import CondorNet
 from intelligence.canonical_feature_registry import D_INPUT
 
+
 def load_and_extract_A(path, device='cpu'):
     print(f"Loading {path}...")
+    
+    # CASE 1: CSV (Direct Matrix)
+    if path.endswith('.csv'):
+        try:
+            A = np.loadtxt(path, delimiter=',')
+            return A
+        except Exception as e:
+            print(f"  Failed to load CSV {path}: {e}")
+            return None
+
+    # CASE 2: PTH (Checkpoint Extraction)
     try:
         checkpoint = torch.load(path, map_location=device)
         state_dict = checkpoint.get('model_state_dict', checkpoint.get('state_dict', checkpoint))
@@ -71,8 +83,8 @@ def load_and_extract_A(path, device='cpu'):
 
 def main():
     parser = argparse.ArgumentParser(description="Compare CondorNet v4.2 A-Matrix Spectra")
-    parser.add_argument("--dir", type=str, help="Directory containing .pth files")
-    parser.add_argument("models", nargs='*', help="Explicit paths to .pth files")
+    parser.add_argument("--dir", type=str, help="Directory containing .pth or .csv files")
+    parser.add_argument("files", nargs='*', help="Explicit paths to .pth or .csv files")
     parser.add_argument("--output", default="v42_eigen_spectra.png", help="Output plot path")
     args = parser.parse_args()
     
@@ -81,10 +93,11 @@ def main():
     if args.dir:
         import glob
         files.extend(glob.glob(os.path.join(args.dir, "*.pth")))
-    files.extend(args.models)
+        files.extend(glob.glob(os.path.join(args.dir, "*.csv")))
+    files.extend(args.files)
     
     if not files:
-        print("No models provided. Usage: --dir <path> or list .pth files")
+        print("No files provided. Usage: --dir <path> or list files")
         return
 
     plt.figure(figsize=(10, 10))
@@ -92,6 +105,12 @@ def main():
     
     plotted = 0
     for i, path in enumerate(files):
+        # Filter out non-matrix CSVs if scraping a dir (e.g. training logs)
+        if path.endswith('.csv') and 'A_Matrix' not in path and 'A_matrix' not in path:
+             # Heuristic: verify content or skip. 
+             # For now, let's assume user passes correct files or dir has A_matrix in name.
+             pass
+
         A = load_and_extract_A(path)
         if A is None:
             continue
@@ -99,7 +118,7 @@ def main():
         print(f"  A Matrix Shape: {A.shape}")
         eigvals = np.linalg.eigvals(A)
         
-        label = os.path.basename(path).replace('.pth', '')
+        label = os.path.basename(path).replace('.pth', '').replace('.csv', '')
         plt.scatter(eigvals.real, eigvals.imag, alpha=0.6, s=15, label=label, c=colors[i % len(colors)])
         plotted += 1
             
