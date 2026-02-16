@@ -19,6 +19,7 @@ Date: 2026-02-12
 
 import sys
 import os
+import shutil
 import math
 import time
 import copy
@@ -537,6 +538,61 @@ def safe_nan_to_num(X: np.ndarray) -> np.ndarray:
     return np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
 
+# =============================================================================
+# ATOMIC SAVE & CHECKPOINT ROTATION
+# =============================================================================
+
+def atomic_save(data: dict, target_path, validate: bool = True):
+    """Save checkpoint atomically: write to .tmp, validate, then rename.
+    
+    Prevents corrupted saves from partial writes or crashes mid-save.
+    """
+    target_path = Path(target_path)
+    tmp_path = target_path.with_suffix('.tmp')
+    
+    try:
+        # Write to temp file
+        torch.save(data, tmp_path)
+        
+        # Validate: attempt to load the checkpoint
+        if validate:
+            _ = torch.load(tmp_path, map_location='cpu', weights_only=False)
+        
+        # Atomic rename (same filesystem = atomic on POSIX, best-effort on Windows)
+        shutil.move(str(tmp_path), str(target_path))
+        return True
+    except Exception as e:
+        print(f"  [SAVE ERROR] Failed to save {target_path.name}: {e}")
+        # Clean up temp file if it exists
+        if tmp_path.exists():
+            tmp_path.unlink()
+        return False
+
+
+def rotate_checkpoints(checkpoint_dir, keep_n: int = 3):
+    """Keep only the N most recent .pth checkpoints in a directory.
+    
+    Files are sorted by modification time (newest first).
+    Set keep_n=0 to keep all checkpoints.
+    """
+    if keep_n <= 0:
+        return  # Keep all
+    
+    checkpoint_dir = Path(checkpoint_dir)
+    ckpts = sorted(
+        checkpoint_dir.glob("Epoch*.pth"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,  # Newest first
+    )
+    
+    for old_ckpt in ckpts[keep_n:]:
+        try:
+            old_ckpt.unlink()
+            print(f"  [ROTATE] Removed old checkpoint: {old_ckpt.name}")
+        except Exception as e:
+            print(f"  [ROTATE] Failed to remove {old_ckpt.name}: {e}")
+
+
 def robust_zscore_fit(X: np.ndarray):
     """Robust scaler using median + MAD."""
     med = np.median(X, axis=0)
@@ -861,6 +917,10 @@ def parse_args():
                         help="Enable per-batch deep component introspection reports")
     parser.add_argument("--observe-every", type=int, default=100,
                         help="Emit deep observation report every N batches (default: 100)")
+
+    # Checkpoint management
+    parser.add_argument("--keep-ckpts", type=int, default=3,
+                        help="Keep only the N most recent epoch checkpoints (default: 3, 0=keep all)")
 
     # V5: Smart convergence
     parser.add_argument("--convergence-threshold", type=float, default=0.1,
@@ -1830,8 +1890,12 @@ def train_condor_net(args):
             'feature_cols': active_feature_cols,
             'normalization': {'median': med.tolist(), 'scale': scale.tolist()},
         }
-        torch.save(epoch_checkpoint_data, checkpoint_path)
-        print(f"  -> Checkpoint saved: {epoch_ckpt_name}")
+        saved_ok = atomic_save(epoch_checkpoint_data, checkpoint_path)
+        if saved_ok:
+            print(f"  -> Checkpoint saved: {epoch_ckpt_name}")
+            rotate_checkpoints(checkpoint_dir, keep_n=args.keep_ckpts)
+        else:
+            print(f"  -> WARNING: Checkpoint save FAILED for {epoch_ckpt_name}")
 
         # ============================================================
         # V5: Interpretability report
@@ -1923,9 +1987,12 @@ def train_condor_net(args):
                     'feature_cols': active_feature_cols,
                     'normalization': {'median': med.tolist(), 'scale': scale.tolist()},
                 }
-                torch.save(best_checkpoint_data, args.output)
-                print(f"  -> NEW BEST MODEL (Epoch {epoch+1}): {reason}")
-                print(f"     Saved: {args.output}")
+                saved_ok = atomic_save(best_checkpoint_data, args.output)
+                if saved_ok:
+                    print(f"  -> NEW BEST MODEL (Epoch {epoch+1}): {reason}")
+                    print(f"     Saved: {args.output}")
+                else:
+                    print(f"  -> WARNING: Best model save FAILED for Epoch {epoch+1}")
             else:
                 patience_counter += 1
                 print(f"  -> Epoch {epoch+1} generalizes but NOT new best: {reason}")
