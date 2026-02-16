@@ -216,6 +216,70 @@ def build_dataloaders(batch_size: int, seq_len: int, data_path: str = "data/Data
         else:
             static_extras.append(e)
 
+    # ---- 4. Memory-Safe Sequence Dataset ----
+    # Instead of pre-slicing (which explodes RAM), we use a custom Dataset
+    # that slices on-the-fly in __getitem__.
+    
+    class SequenceDataset(torch.utils.data.Dataset):
+        def __init__(self, X, y, extras, seq_len):
+            self.X = X
+            self.y = y
+            self.extras = extras
+            self.seq_len = seq_len
+            self.N = len(X)
+
+        def __len__(self):
+            return max(0, self.N - self.seq_len)
+
+        def __getitem__(self, idx):
+            # Input sequence: [idx, idx+seq_len)
+            X_seq = self.X[idx : idx + self.seq_len]
+            
+            # Target: typically we predict step at t+seq_len
+            # (Matches original behavior where y was aligned with end of sequence)
+            y_target = self.y[idx + self.seq_len]
+
+            # Extras handling
+            extra_seq = []
+            for e in self.extras:
+                # Dynamic extra: slice it like X
+                if hasattr(e, "shape") and e.shape[0] == self.N:
+                    extra_seq.append(e[idx : idx + self.seq_len])
+                # Static extra: pass as is
+                else:
+                    extra_seq.append(e)
+
+            return (X_seq, y_target, *extra_seq)
+
+    # Instantiate dataset with all extras (dynamic + static)
+    dataset = SequenceDataset(X, y, dynamic_extras + static_extras, seq_len)
+    
+    if len(dataset) <= 0:
+        raise ValueError(f"Dataset length ({len(X)}) is smaller than sequence length ({seq_len}).")
+
+    # ---- 5. Split and Create Loaders ----
+    # 80/10/10 split
+    n_total = len(dataset)
+    n_train = int(n_total * 0.8)
+    n_val = int(n_total * 0.1)
+    
+    # Use Subset for memory efficiency (views, not copies)
+    train_dataset = torch.utils.data.Subset(dataset, range(0, n_train))
+    val_dataset   = torch.utils.data.Subset(dataset, range(n_train, n_train + n_val))
+    test_dataset  = torch.utils.data.Subset(dataset, range(n_train + n_val, n_total))
+
+    # Determine num_workers: 0 for safety/debugging, >0 for speed if needed
+    # Pin memory if CUDA available
+    pin_memory = torch.cuda.is_available()
+    
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True,  num_workers=0, pin_memory=pin_memory)
+    val_loader   = torch.utils.data.DataLoader(val_dataset,   batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_memory)
+    test_loader  = torch.utils.data.DataLoader(test_dataset,  batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=pin_memory)
+    
+    # Check if empty (e.g. extreme filtering)
+    if len(train_loader) == 0:
+        print("[CondorNet] Warning: Train loader is empty!")
+    
     return train_loader, val_loader, test_loader
 
 # FEATURE_COLS will be selected dynamically based on args.data_version
