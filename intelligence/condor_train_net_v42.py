@@ -140,6 +140,8 @@ from intelligence.canonical_feature_registry import (
 )
 
 
+import itertools
+
 def build_dataloaders(batch_size: int, seq_len: int, data_path: str = "data/Datasetv4/condornet_v41_FINAL.csv"):
     """
     Standardized v4.2 dataloader constructor (Robust Future-Proof).
@@ -161,95 +163,151 @@ def build_dataloaders(batch_size: int, seq_len: int, data_path: str = "data/Data
     # Use V4.2 features by default
     active_feature_cols = FEATURE_COLS_V42
     
-    # Dynamic call to prepare_features
+    # ---- 1. Call prepare_features and normalize return type ----
     outputs = prepare_features(df, active_feature_cols)
 
-    # Normalize return structure
-    extra_seq_items = []
-    
+    extra_names = []
     if isinstance(outputs, tuple):
         X = outputs[0]
         y = outputs[1]
-        
-        # Heuristic: If len > 2, usually (regime, bar_idx, med, scale)
-        if len(outputs) > 2:
-            # We separate time-series (length N) from static (length != N)
-            N = len(X)
-            for item in outputs[2:]:
-                if isinstance(item, (np.ndarray, list, torch.Tensor)):
-                    # Check length match
-                    if len(item) == N:
-                        extra_seq_items.append(item)
-                    else:
-                        # Likely static metadata (med, scale) -> ignore for dataloader
-                        pass
-                else:
-                    # Scalar or other -> ignore
-                    pass
-                    
+        extras = outputs[2:] if len(outputs) > 2 else []
+        extra_names = [f"extra_{i}" for i in range(len(extras))]
     elif isinstance(outputs, dict):
         X = outputs["X"]
         y = outputs["y"]
-        N = len(X)
-        for k, v in outputs.items():
-            if k in ("X", "y"): continue
-            if hasattr(v, "__len__") and len(v) == N:
-                extra_seq_items.append(v)
-            else:
-                pass # Static metadata
+        extras = [v for k, v in outputs.items() if k not in ("X", "y")]
+        extra_names = [k for k in outputs.keys() if k not in ("X", "y")]
     else:
         raise ValueError("Unsupported return type from prepare_features")
 
-    # Split logic
-    N = len(X)
-    n_train = int(N * 0.8)
-    n_val = int(N * 0.1)
-    # n_test implied
+    # ---- 2. Convert X, y to tensors ----
+    # Ensure float32 for main data
+    X = torch.tensor(X, dtype=torch.float32)
+    y = torch.tensor(y, dtype=torch.float32)
+
+    # Convert extras to tensors (handle various types)
+    extras_tensors = []
+    for e in extras:
+        if isinstance(e, (np.ndarray, list)):
+            try:
+                t = torch.tensor(e)
+                # Cast flow/int types appropriately if needed, or default to float32 if float features
+                if t.dtype == torch.float64: t = t.float()
+                extras_tensors.append(t)
+            except Exception as exc:
+                print(f"Warning: Could not convert extra to tensor: {exc}")
+                extras_tensors.append(e) # Keep as is if fails
+        elif isinstance(e, torch.Tensor):
+            extras_tensors.append(e)
+        else:
+            extras_tensors.append(e) # Scalar or other
+
+    # ---- 3. Identify static vs dynamic extras ----
+    # Static extras: shape (D,) or (D, something) or scalar
+    # Dynamic extras: same length as X (N, ...)
+    static_extras = []
+    dynamic_extras = []
+
+    N_full = X.shape[0]
+
+    for e in extras_tensors:
+        if hasattr(e, "shape") and e.shape[0] == N_full:
+            dynamic_extras.append(e)
+        else:
+            static_extras.append(e)
+
+    # ---- 4. Sequence slicing for X, y, and dynamic extras ----
+    # Eager sequence creation (Memory Heavy but Robust)
+    def make_sequences(arr, seq_len):
+        # Slice and stack
+        # Valid indices: 0 to len-seq_len
+        # arr[i : i+seq_len]
+        num_seq = len(arr) - seq_len
+        if num_seq <= 0:
+            return torch.empty(0)
+        
+        # Use strided tricks or simple loop? Simple list comp is safer for correctness first.
+        # Check memory constraint? CondorNet datasets are typically moderate.
+        return torch.stack([arr[i:i+seq_len] for i in range(num_seq)])
+
+    X_seq = make_sequences(X, seq_len)
     
-    # Splitter helper
+    # Validation of sequence generation
+    if len(X_seq) == 0:
+        raise ValueError("Sequence length larger than dataset size.")
+        
+    # Targets are typically prediction *at* step t+seq_len or next step?
+    # Original SequenceDataset: y[i+lookback-1] which is the *last* step of the sequence window 
+    # OR target for *next* step?
+    # prepare_features usually aligns y with X row-by-row.
+    # Code snippet from user: y_seq = y[seq_len:]
+    # This implies y for sequence X[i:i+L] is y[i+L]. (Next step prediction?)
+    # SequenceDataset V4.2 used: `self.y[i+self.lookback-1]` -> The value corresponding to the LAST step of input.
+    # User snippet: `y_seq = y[seq_len:]` -> The value at index `seq_len` (element after the first window 0..L-1).
+    # IF X is [0,1,2,3,4] and L=3.
+    # Seq 0: [0,1,2]. 
+    # User y: y[3]. (Prediction of step 4?)
+    # SequenceDataset y: y[2]. (Autoencoder/current step?)
+    # CondorNet logic often predicts *future* or *next*.
+    # Let's stick to User Snippet logic: y[seq_len:]. 
+    # Note: len(X_seq) = N - seq_len. 
+    # len(y[seq_len:]) = N - seq_len. Matches.
+    
+    y_seq = y[seq_len:]
+    
+    dynamic_seq = [make_sequences(e, seq_len) for e in dynamic_extras]
+
+    # ---- 5. Train/val/test split ----
+    N_seq = len(X_seq)
+    n_train = int(N_seq * 0.8)
+    n_val = int(N_seq * 0.1)
+
     def split(arr):
         return arr[:n_train], arr[n_train:n_train+n_val], arr[n_train+n_val:]
 
-    X_train, X_val, X_test = split(X)
-    y_train, y_val, y_test = split(y)
-    
-    # Split extra items (e.g., regime, bar_idx)
-    extras_train = [split(e)[0] for e in extra_seq_items]
-    extras_val = [split(e)[1] for e in extra_seq_items]
-    extras_test = [split(e)[2] for e in extra_seq_items]
+    X_train, X_val, X_test = split(X_seq)
+    y_train, y_val, y_test = split(y_seq)
 
-    # Map specific extras to SequenceDataset args if they match expected pattern
-    # SequenceDataset signature: (X, y, r, [lookback])
-    # The current v4.2 prepare_features returns: X, y, regime, bar_index, ...
-    # So extra_seq_items[0] is regime.
-    
-    r_train = extras_train[0] if len(extras_train) > 0 else np.zeros(len(X_train))
-    r_val = extras_val[0] if len(extras_val) > 0 else np.zeros(len(X_val))
-    r_test = extras_test[0] if len(extras_test) > 0 else np.zeros(len(X_test))
+    dynamic_splits = [split(e) for e in dynamic_seq]
 
-    # Note: SequenceDataset handles X sequences internally, and takes y/r as full arrays.
-    # It does NOT currently support arbitrary extras beyond r. 
-    # If bar_index is present (extra index 1), it is generated internally by SequenceDataset.
-    # So we can safely use SequenceDataset with just X, y, r.
-    
-    train_ds = SequenceDataset(X_train, y_train, r_train, seq_len)
-    val_ds = SequenceDataset(X_val, y_val, r_val, seq_len)
-    test_ds = SequenceDataset(X_test, y_test, r_test, seq_len)
+    # ---- 6. Build dataset tuples ----
+    def build_dataset(Xp, yp, dyn_splits):
+        # We must broadcast static extras effectively.
+        # Python zip stops at shortest. 
+        # We use itertools.repeat for static items to infinite generator.
+        
+        # dynamic: list of tensors (N_subset, ...)
+        # static: list of tensors/scalars (D,)
+        
+        # args for zip: Xp, yp, dyn1, dyn2..., stat1_repeated, stat2_repeated...
+        
+        iterables = [Xp, yp] + dyn_splits
+        if static_extras:
+            repeated_statics = [itertools.repeat(s) for s in static_extras]
+            iterables += repeated_statics
+            
+        return list(zip(*iterables))
 
+    # unpack splits correctly
+    train_dataset = build_dataset(X_train, y_train, [e[0] for e in dynamic_splits])
+    val_dataset   = build_dataset(X_val,   y_val,   [e[1] for e in dynamic_splits])
+    test_dataset  = build_dataset(X_test,  y_test,  [e[2] for e in dynamic_splits])
+
+    # ---- 7. Build loaders ----
     # Safe pin_memory logic
     pin_memory = torch.cuda.is_available()
-
+    
     train_loader = torch.utils.data.DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True, 
-        num_workers=0, pin_memory=pin_memory
+        train_dataset, batch_size=batch_size, shuffle=True,
+        pin_memory=pin_memory
     )
     val_loader = torch.utils.data.DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False, 
-        num_workers=0, pin_memory=pin_memory
+        val_dataset, batch_size=batch_size, shuffle=False,
+        pin_memory=pin_memory
     )
     test_loader = torch.utils.data.DataLoader(
-        test_ds, batch_size=batch_size, shuffle=False, 
-        num_workers=0, pin_memory=pin_memory
+        test_dataset, batch_size=batch_size, shuffle=False,
+        pin_memory=pin_memory
     )
 
     return train_loader, val_loader, test_loader

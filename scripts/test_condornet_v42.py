@@ -189,10 +189,11 @@ def test_dataloader_and_single_batch_forward():
     model = CondorBrainNet()
 
     batch = next(iter(train_loader))
-    # Batch is [x, y, r, bar]
+    # Batch is tuple: (x, y, [dynamic_extras...], [static_extras...])
     
     if isinstance(batch, (list, tuple)):
         x = batch[0]
+        # y = batch[1]
     elif isinstance(batch, dict):
         x = batch["features"]
     else:
