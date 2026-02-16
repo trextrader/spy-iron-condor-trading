@@ -789,7 +789,7 @@ def parse_args():
     parser.add_argument("--local-data", type=str, required=True)
     parser.add_argument("--max-rows", type=int, default=0)
     # NEW: Data Version Control for v4.2/v4.1
-    parser.add_argument("--data-version", type=str, default="v3.0", choices=["v3.0", "v4.1", "v4.2"],
+    parser.add_argument("--data-version", type=str, default="v4.2", choices=["v3.0", "v4.1", "v4.2"],
                         help="Feature schema version (v3.0, v4.1, or v4.2). Default: v3.0")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility.")
 
