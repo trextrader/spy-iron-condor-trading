@@ -843,8 +843,24 @@ def parse_args():
                         help="Save diagnostics to models/diagnostics/ for GUI Model Introspection")
     parser.add_argument("--checkpoint-every", type=int, default=0,
                         help="Save checkpoint every N epochs (0=disabled, 1=every epoch)")
-    parser.add_argument("--checkpoint-dir", type=str, default="models/checkpoints",
+    parser.add_argument("--checkpoint-dir", type=str, default="models/ckpts",
                         help="Directory for epoch checkpoints")
+
+    # GPU Performance Optimization
+    parser.add_argument("--num-workers", type=int, default=4,
+                        help="DataLoader workers. T4: 2-4, A100: 4-8, H100: 8-12, L4: 2-4")
+    parser.add_argument("--prefetch-factor", type=int, default=2,
+                        help="Batches pre-loaded per worker. T4: 2, A100: 2-4, H100: 4, L4: 2")
+    parser.add_argument("--persistent-workers", action="store_true", default=True,
+                        help="Keep workers alive between epochs (default: True)")
+    parser.add_argument("--no-persistent-workers", action="store_false", dest="persistent_workers",
+                        help="Disable persistent workers")
+
+    # Deep Observability
+    parser.add_argument("--deep-observe", action="store_true", default=False,
+                        help="Enable per-batch deep component introspection reports")
+    parser.add_argument("--observe-every", type=int, default=100,
+                        help="Emit deep observation report every N batches (default: 100)")
 
     # V5: Smart convergence
     parser.add_argument("--convergence-threshold", type=float, default=0.1,
@@ -1393,45 +1409,23 @@ def train_condor_net(args):
     train_ds = SequenceDataset(X_train, y_train, r_train, args.lookback)
     val_ds = SequenceDataset(X_val, y_val, r_val, args.lookback)
 
-    # Safe pin_memory logic
-    pin_memory = False
-    if torch.cuda.is_available():
-        pin_memory = True
-    else:
-        print("[CondorNet] CUDA not available, disabling pin_memory")
+    # GPU-optimized DataLoader config
+    pin_memory = torch.cuda.is_available()
+    use_persistent = args.persistent_workers and args.num_workers > 0
+    use_prefetch = args.prefetch_factor if args.num_workers > 0 else None
+
+    print(f"[CondorNet] DataLoader: workers={args.num_workers}, pin_memory={pin_memory}, "
+          f"persistent={use_persistent}, prefetch={use_prefetch}")
 
     train_loader = torch.utils.data.DataLoader(
-        train_ds, batch_size=args.batch_size, shuffle=True, 
-        num_workers=0, pin_memory=pin_memory
+        train_ds, batch_size=args.batch_size, shuffle=True,
+        num_workers=args.num_workers, pin_memory=pin_memory,
+        persistent_workers=use_persistent, prefetch_factor=use_prefetch,
     )
     val_loader = torch.utils.data.DataLoader(
-        val_ds, batch_size=args.batch_size, shuffle=False, 
-        num_workers=0, pin_memory=pin_memory
-    )
-    
-    # Actually, previous view showed:
-    # 1141: X, y, regime, bar_index, med, scale = prepare_features(df, FEATURE_COLS)
-    # 1146: X_train, X_val = X[:split_row], X[split_row:]
-    
-    # Let's write robustly.
-    
-    train_ds = SequenceDataset(X_train, y_train, r_train, args.lookback)
-    val_ds = SequenceDataset(X_val, y_val, r_val, args.lookback)
-
-    # Safe pin_memory logic
-    pin_memory = False
-    if torch.cuda.is_available():
-        pin_memory = True
-    else:
-        print("[CondorNet] CUDA not available, disabling pin_memory")
-
-    train_loader = torch.utils.data.DataLoader(
-        train_ds, batch_size=args.batch_size, shuffle=True, 
-        num_workers=0, pin_memory=pin_memory
-    )
-    val_loader = torch.utils.data.DataLoader(
-        val_ds, batch_size=args.batch_size, shuffle=False, 
-        num_workers=0, pin_memory=pin_memory
+        val_ds, batch_size=args.batch_size, shuffle=False,
+        num_workers=args.num_workers, pin_memory=pin_memory,
+        persistent_workers=use_persistent, prefetch_factor=use_prefetch,
     )
     L = args.lookback
     B = args.batch_size

@@ -1353,6 +1353,14 @@ class CondorNet(nn.Module):
         # (batch, seq, d_pivot) -> (batch, seq, d_embed)
         x_piv_enc = self.pivot_encoder(x_piv) 
         
+        # Capture pivot diagnostics
+        if return_diagnostics:
+            _pivot_diag = {
+                'pivot_raw': x_piv[:, -1].detach(),
+                'pivot_embedding': x_piv_enc[:, -1].detach(),
+                'pivot_embed_norm': x_piv_enc[:, -1].detach().norm(dim=-1).mean().item(),
+            }
+
         # Concatenate for structural manifold input
         x_struct = torch.cat([x_main, x_piv_enc], dim=-1)
 
@@ -1364,6 +1372,13 @@ class CondorNet(nn.Module):
         # === CONTROL EMBEDDING ===
         # Produces sequence (batch, seq, d_control) for time-local modulation
         u = self.tft(x, return_sequence=True, timestep_mask=timestep_mask)  
+
+        # Capture TFT diagnostics
+        if return_diagnostics:
+            _tft_diag = {
+                'control_vector_norm': u[:, -1].detach().norm(dim=-1).mean().item(),
+                'control_vector': u[:, -1].detach(),
+            }
 
         # Force core manifold to FP32 for "Ultra-Safe Mode"
         # Only the TFT encoder above uses Mixed Precision (autocast).
@@ -1385,6 +1400,20 @@ class CondorNet(nn.Module):
             F_k, phi1 = etd1_kernel(A_full, dt)
             self.log_math("TRANSITION", "F_k = exp(A_full * deltat)", F_k)
             self.log_math("PHI_1", "phi1 = M_pinv @ (expM - I)", phi1)
+
+            # Capture CDE spectral diagnostics
+            if return_diagnostics:
+                try:
+                    eigvals = torch.linalg.eigvals(A_full).detach()
+                    spectral_radius = eigvals.abs().max().item()
+                    top_eigenvalues = eigvals.abs().topk(min(5, len(eigvals))).values.tolist()
+                except Exception:
+                    spectral_radius = 0.0
+                    top_eigenvalues = []
+                _cde_diag = {
+                    'spectral_radius': spectral_radius,
+                    'top_eigenvalues': top_eigenvalues,
+                }
 
             # === TIME LOOP ===
             for t in range(seq_len - 1):
@@ -1508,6 +1537,29 @@ class CondorNet(nn.Module):
             diagnostics['moments'] = moments
             diagnostics['bloom'] = bloom
             diagnostics['pivot_preds'] = pivot_preds
+            # Deep observability extensions
+            diagnostics['pivot'] = _pivot_diag
+            diagnostics['tft'] = _tft_diag
+            diagnostics['cde'] = _cde_diag
+            diagnostics['gate_stats'] = {
+                'active_count': (p_k.detach() > 0.5).float().sum(dim=-1).mean().item(),
+                'total_predicates': p_k.shape[-1],
+                'entropy': -(p_k.detach() * (p_k.detach() + 1e-8).log()).sum(dim=-1).mean().item(),
+                'top5': p_k.detach().mean(dim=0).topk(min(5, p_k.shape[-1])).values.tolist(),
+                'top5_indices': p_k.detach().mean(dim=0).topk(min(5, p_k.shape[-1])).indices.tolist(),
+            }
+            # Set/SuperSet routing
+            if self.super_sets is not None:
+                ss_weights = [ss(p_k).detach().mean().item() for ss in self.super_sets]
+                diagnostics['superset_routing'] = {
+                    'weights': ss_weights,
+                    'dominant_superset': int(torch.tensor(ss_weights).argmax().item()),
+                    'consensus': max(ss_weights) / (sum(ss_weights) + 1e-8),
+                }
+            diagnostics['output_stats'] = {
+                'mean': outputs.detach().mean(dim=0).tolist(),
+                'std': outputs.detach().std(dim=0).tolist(),
+            }
             return outputs, diagnostics
 
         return outputs, pivot_preds
