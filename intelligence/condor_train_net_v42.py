@@ -706,6 +706,52 @@ def prepare_features(df: pd.DataFrame, feature_cols: List[str]) -> tuple:
         'entry_target', 'exit_target'
     ]
 
+    # === V4.2 Feature Backfill / Generation ===
+    # If the dataset is V4.1, we need to generate these structural features on the fly.
+    
+    # 1. Session Timing (minutes_from_open, minutes_to_close, norm_session_time)
+    if 'minutes_from_open' not in df.columns and ('timestamp' in df.columns or 'date' in df.columns):
+        # Infer from timestamp if available
+        try:
+            ts_col = 'timestamp' if 'timestamp' in df.columns else 'date'
+            if not pd.api.types.is_datetime64_any_dtype(df[ts_col]):
+                df[ts_col] = pd.to_datetime(df[ts_col])
+            
+            # Simple assumption: Market Open 9:30 AM ET, Close 4:00 PM ET
+            # We don't have timezone info easily, so standardizing on minute of day
+            minutes_of_day = df[ts_col].dt.hour * 60 + df[ts_col].dt.minute
+            market_open_min = 9 * 60 + 30
+            market_close_min = 16 * 60
+            
+            df['minutes_from_open'] = minutes_of_day - market_open_min
+            df['minutes_to_close'] = market_close_min - minutes_of_day
+            total_session_min = market_close_min - market_open_min
+            df['norm_session_time'] = (df['minutes_from_open'] / total_session_min).clip(0, 1)
+            
+            # Session Phase
+            # 1: Open (first 30m), 2: Mid, 3: Close (last 30m), 4: Ext (outside)
+            conditions = [
+                (df['minutes_from_open'] < 30) & (df['minutes_from_open'] >= 0),
+                (df['minutes_to_close'] < 30) & (df['minutes_to_close'] >= 0),
+                (df['minutes_from_open'] >= 30) & (df['minutes_to_close'] >= 30)
+            ]
+            choices = [1.0, 3.0, 2.0] # Open, Close, Mid
+            df['session_phase'] = np.select(conditions, choices, default=4.0).astype(np.float32)
+            
+        except Exception as e:
+            print(f"[CondorNet] Warning: Failed to generate timing features: {e}")
+
+    # 2. Structural Features Defaulting (if logical generation is too complex for here)
+    # We use the registry's neutral values for anything still missing.
+    from intelligence.canonical_feature_registry import NEUTRAL_FILL_VALUES_V42
+    
+    miss_cols = [c for c in feature_cols if c not in df.columns]
+    if miss_cols:
+        print(f"[CondorNet] Backfilling {len(miss_cols)} missing V4.2 features with neutral values.")
+        for col in miss_cols:
+            fill_val = NEUTRAL_FILL_VALUES_V42.get(col, 0.0)
+            df[col] = np.full(n, fill_val, dtype=np.float32)
+
     X = select_feature_frame(df, feature_cols, strict=True).values.astype(np.float32)
     y = df[target_cols].values.astype(np.float32)
     regime = df['regime_label'].values.astype(np.int64)
