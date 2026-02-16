@@ -1468,7 +1468,7 @@ def train_condor_net(args):
 
     # Model
     model = CondorNet(
-        d_input=len(FEATURE_COLS),
+        d_input=len(active_feature_cols),
         d_h=args.d_h,
         d_v=args.d_v,
         d_m=args.d_m,
@@ -1834,7 +1834,7 @@ def train_condor_net(args):
                 'n_layers': args.n_layers,
                 'd_control': args.d_control,
             },
-            'feature_cols': FEATURE_COLS,
+            'feature_cols': active_feature_cols,
             'normalization': {'median': med.tolist(), 'scale': scale.tolist()},
         }
         torch.save(epoch_checkpoint_data, checkpoint_path)
@@ -1927,7 +1927,7 @@ def train_condor_net(args):
                         'n_layers': args.n_layers,
                         'd_control': args.d_control,
                     },
-                    'feature_cols': FEATURE_COLS,
+                    'feature_cols': active_feature_cols,
                     'normalization': {'median': med.tolist(), 'scale': scale.tolist()},
                 }
                 torch.save(best_checkpoint_data, args.output)
