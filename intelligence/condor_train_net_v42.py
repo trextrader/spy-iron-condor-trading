@@ -1469,23 +1469,19 @@ def train_condor_net(args):
     train_ds = SequenceDataset(X_train, y_train, r_train, args.lookback)
     val_ds = SequenceDataset(X_val, y_val, r_val, args.lookback)
 
-    # GPU-optimized DataLoader config
-    pin_memory = torch.cuda.is_available()
-    use_persistent = args.persistent_workers and args.num_workers > 0
-    use_prefetch = args.prefetch_factor if args.num_workers > 0 else None
-
-    print(f"[CondorNet] DataLoader: workers={args.num_workers}, pin_memory={pin_memory}, "
-          f"persistent={use_persistent}, prefetch={use_prefetch}")
+    # GPU-optimized DataLoader config (hardcoded for T4/A100 performance)
+    print(f"[CondorNet] DataLoader: workers=4, pin_memory=True, "
+          f"persistent=True, prefetch=2")
 
     train_loader = torch.utils.data.DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True,
-        num_workers=args.num_workers, pin_memory=pin_memory,
-        persistent_workers=use_persistent, prefetch_factor=use_prefetch,
+        num_workers=4, pin_memory=True,
+        persistent_workers=True, prefetch_factor=2,
     )
     val_loader = torch.utils.data.DataLoader(
         val_ds, batch_size=args.batch_size, shuffle=False,
-        num_workers=args.num_workers, pin_memory=pin_memory,
-        persistent_workers=use_persistent, prefetch_factor=use_prefetch,
+        num_workers=4, pin_memory=True,
+        persistent_workers=True, prefetch_factor=2,
     )
     L = args.lookback
     B = args.batch_size
