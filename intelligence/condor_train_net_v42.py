@@ -139,6 +139,69 @@ from intelligence.canonical_feature_registry import (
     select_feature_frame,
 )
 
+
+def build_dataloaders(batch_size: int, seq_len: int, data_path: str = "data/Datasetv4/condornet_v41_FINAL.csv"):
+    """
+    Standardized v4.2 dataloader constructor.
+    Returns: train_loader, val_loader, test_loader
+    
+    Adapts user's requested interface to CondorNet's 4-tuple batch requirement:
+    (x_seq, y_target, regime, bar_idx)
+    """
+    print(f"[CondorNet] build_dataloaders called with path: {data_path}")
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(f"Data file not found: {data_path}")
+        
+    df = pd.read_csv(data_path)
+    
+    # Use V4.2 features by default for this standardized builder
+    active_feature_cols = FEATURE_COLS_V42
+    
+    # prepare_features returns 6 values
+    X, y, regime, bar_index, med, scale = prepare_features(df, active_feature_cols)
+
+    # Split indices
+    N = len(X)
+    n_train = int(N * 0.8)
+    n_val = int(N * 0.1)
+    # n_test implied
+    
+    X_train = X[:n_train]
+    y_train = y[:n_train]
+    r_train = regime[:n_train]
+    
+    X_val = X[n_train:n_train+n_val]
+    y_val = y[n_train:n_train+n_val]
+    r_val = regime[n_train:n_train+n_val]
+    
+    X_test = X[n_train+n_val:]
+    y_test = y[n_train+n_val:]
+    r_test = regime[n_train+n_val:]
+
+    # Use SequenceDataset for consistent behavior (lazy sequence generation)
+    # Note: SequenceDataset expects numpy arrays as inputs (converts to torch internally)
+    train_ds = SequenceDataset(X_train, y_train, r_train, seq_len)
+    val_ds = SequenceDataset(X_val, y_val, r_val, seq_len)
+    test_ds = SequenceDataset(X_test, y_test, r_test, seq_len)
+
+    # Safe pin_memory logic
+    pin_memory = torch.cuda.is_available()
+
+    train_loader = torch.utils.data.DataLoader(
+        train_ds, batch_size=batch_size, shuffle=True, 
+        num_workers=0, pin_memory=pin_memory
+    )
+    val_loader = torch.utils.data.DataLoader(
+        val_ds, batch_size=batch_size, shuffle=False, 
+        num_workers=0, pin_memory=pin_memory
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_ds, batch_size=batch_size, shuffle=False, 
+        num_workers=0, pin_memory=pin_memory
+    )
+
+    return train_loader, val_loader, test_loader
+
 # FEATURE_COLS will be selected dynamically based on args.data_version
 DEFAULT_FEATURE_COLS = FEATURE_COLS_V30
 
