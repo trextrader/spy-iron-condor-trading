@@ -208,6 +208,32 @@ def test_predicate_layer_not_saturated_and_has_entropy():
     assert not torch.isnan(out).any()
 
 
+def test_sets_and_supersets_exist_and_have_diversity():
+    # Force 2 supersets to test diversity
+    model = CondorBrainNet(n_sets=4, n_super_sets=2, d_input=len(FEATURE_LIST))
+
+    # 1. Existence
+    assert hasattr(model, "super_sets"), "Model missing super_sets attribute"
+    assert len(model.super_sets) == 2, f"Expected 2 SuperSets, got {len(model.super_sets)}"
+    
+    # 2. Structure
+    for i, ss in enumerate(model.super_sets):
+        assert hasattr(ss, "sets"), f"SuperSet {i} missing sets"
+        assert len(ss.sets) == 4, f"SuperSet {i} has {len(ss.sets)} sets, expected 4"
+        assert hasattr(ss, "relational_logic"), f"SuperSet {i} logic missing separate relational module"
+    
+    # 3. Method Diversity (Check weights are not identical)
+    # Check diversity between local sets in the first superset
+    s0_w = model.super_sets[0].sets[0].relational_logic.projection.weight
+    s1_w = model.super_sets[0].sets[1].relational_logic.projection.weight
+    assert not torch.allclose(s0_w, s1_w), "Sets 0 and 1 have identical weights (no diversity)"
+
+    # Check diversity between supersets
+    ss0_w = model.super_sets[0].relational_logic.projection.weight
+    ss1_w = model.super_sets[1].relational_logic.projection.weight
+    assert not torch.allclose(ss0_w, ss1_w), "SuperSets 0 and 1 have identical weights (no diversity)"
+
+
 # ---------- IV. TRAINING PIPELINE SANITY ----------
 
 def test_dataloader_and_single_batch_forward():

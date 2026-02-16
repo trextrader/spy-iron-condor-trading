@@ -64,7 +64,7 @@ echo "------------------------------------------------------------"
 echo "  [3/8] PREDICATE / SET / SUPERSET TESTS"
 echo "------------------------------------------------------------"
 pytest -vv -s -x "${TEST_FILE}::test_predicate_layer_not_saturated_and_has_entropy"
-# pytest -vv -s -x "${TEST_FILE}::test_sets_and_supersets_exist_and_have_diversity"
+pytest -vv -s -x "${TEST_FILE}::test_sets_and_supersets_exist_and_have_diversity"
 
 # ------------------------------------------------------------
 # 4. Training Pipeline Tests
