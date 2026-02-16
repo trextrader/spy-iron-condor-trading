@@ -589,6 +589,21 @@ def prepare_features(df: pd.DataFrame, feature_cols: List[str]) -> tuple:
         df['cp_num'] = df['call_put'].map({'C': 1.0, 'P': -1.0}).fillna(0)
 
     n = len(df)
+    
+    # Initialize IV Rank source
+    if 'iv_rank' in df.columns:
+        ivr_0_100 = df['iv_rank'].values
+    elif 'ivr' in df.columns:
+         # Check if IVR is 0-1 or 0-100. Heuristic: if max <= 1.0, scale up.
+        vals = df['ivr'].values
+        if vals.max() <= 1.0:
+            ivr_0_100 = vals * 100.0
+        else:
+            ivr_0_100 = vals
+    else:
+        print("[CondorNet] Warning: No iv_rank or ivr column found. Defaulting to 50.0")
+        ivr_0_100 = np.full(n, 50.0, dtype=np.float32)
+
     ivr_0_100 = np.clip(ivr_0_100, 0.0, 100.0).astype(np.float32)
     df['ivr'] = ivr_0_100
 
