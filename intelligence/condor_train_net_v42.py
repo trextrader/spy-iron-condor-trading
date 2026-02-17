@@ -1455,6 +1455,54 @@ def train_condor_net(args):
     if args.max_rows > 0:
         df = df.iloc[:args.max_rows]
 
+    # ================================================================
+    # VERBOSE DATA LOADING DIAGNOSTICS
+    # ================================================================
+    print(f"\n{'='*60}")
+    print(f"DATA LOADING DIAGNOSTICS")
+    print(f"{'='*60}")
+    print(f"  Dataset shape: {df.shape[0]:,} rows × {df.shape[1]} columns")
+    print(f"  Dataset columns ({df.shape[1]} total): {list(df.columns)}")
+    print(f"\n  --- Column Presence Check ---")
+    
+    # Which registered features are IN the dataset?
+    found_features = [c for c in active_feature_cols if c in df.columns]
+    missing_features = [c for c in active_feature_cols if c not in df.columns]
+    print(f"  Registry features found in CSV:   {len(found_features)}/{len(active_feature_cols)}")
+    if missing_features:
+        print(f"  MISSING from CSV (will be backfilled): {missing_features}")
+    
+    # Which dataset columns are NOT in the registry?
+    all_non_feature_cols = set(target_cols + aux_cols)
+    unregistered = [c for c in df.columns if c not in active_feature_cols and c not in all_non_feature_cols]
+    if unregistered:
+        print(f"\n  *** UNREGISTERED COLUMNS ({len(unregistered)}) — these exist in CSV but NOT in feature registry:")
+        for i, col in enumerate(unregistered):
+            sample_vals = df[col].head(5).tolist()
+            null_pct = df[col].isna().mean() * 100
+            print(f"      {i+1:3d}. {col:30s} | NaN%: {null_pct:5.1f}% | Sample: {sample_vals}")
+    
+    # First 3 rows transposed (all columns visible)
+    print(f"\n  --- First 3 rows (transposed) ---")
+    for idx in range(min(3, len(df))):
+        print(f"  Row {idx}:")
+        for col in df.columns[:20]:  # First 20 cols to keep output manageable
+            print(f"    {col:30s} = {df[col].iloc[idx]}")
+        if df.shape[1] > 20:
+            print(f"    ... ({df.shape[1] - 20} more columns)")
+    
+    # NaN/zero summary per feature column
+    print(f"\n  --- Feature Quality Summary (registered features only) ---")
+    for col in active_feature_cols:
+        if col in df.columns:
+            nan_pct = df[col].isna().mean() * 100
+            zero_pct = (df[col] == 0).mean() * 100
+            if nan_pct > 1.0 or zero_pct > 50.0:
+                print(f"    ⚠  {col:30s} | NaN: {nan_pct:5.1f}% | Zero: {zero_pct:5.1f}%")
+    
+    print(f"{'='*60}\n")
+    # ================================================================
+
     # Use active_feature_cols instead of global FEATURE_COLS
     X, y, regime, bar_index, med, scale = prepare_features(df, active_feature_cols)
 
