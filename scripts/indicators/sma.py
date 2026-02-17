@@ -21,7 +21,7 @@ def compute_sma(close: pd.Series, base_window: int = 20, vol_span: int = 64) -> 
     vol_ratio = (vol / (vol_median + 1e-12)).clip(0.5, 3.0)
     
     # Adaptive window: shrink when vol is high, expand when low
-    adaptive_window = (base_window / vol_ratio).clip(5, base_window * 3).astype(int)
+    adaptive_window = (base_window / vol_ratio).clip(5, base_window * 3).fillna(base_window).astype(int)
     
     # Compute using the median adaptive window for vectorized efficiency
     # Then apply EMA with adaptive alpha as proxy
