@@ -1710,6 +1710,27 @@ def train_condor_net(args):
             if should_stop:
                 print(f"\n  [CONVERGENCE] Epoch {epoch+1} stopped at batch {batch_idx+1}/{n_train_batches} "
                       f"(best_loss={convergence_manager.best_loss_in_window:.6f})")
+                
+                # A1.4: Save convergence snapshot
+                conv_ts = datetime.now().strftime("%m%d%Y_%H%M%S")
+                conv_dir = Path(args.checkpoint_dir)
+                conv_dir.mkdir(parents=True, exist_ok=True)
+                conv_name = f"CONVERGED_E{epoch+1}_B{batch_idx+1}_{CN_VERSION}_{DS_VERSION}_{conv_ts}.pth"
+                conv_data = {
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict(),
+                    'epoch': epoch + 1,
+                    'batch': batch_idx + 1,
+                    'convergence_loss': convergence_manager.best_loss_in_window,
+                    'train_loss': loss.item(),
+                    'version': f"{CN_VERSION}_{DS_VERSION}",
+                    'convergence_snapshot': True,
+                    'schema_version': 'v4.3.0',
+                }
+                if atomic_save(conv_data, conv_dir / conv_name):
+                    print(f"  -> Convergence snapshot saved: {conv_name}")
+                
                 break
 
             # TensorBoard: log every 100 steps
