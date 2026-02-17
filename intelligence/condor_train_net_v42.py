@@ -1617,6 +1617,24 @@ def train_condor_net(args):
 
         optimizer.zero_grad(set_to_none=True)
 
+        # ==========================================================
+        # A0: TRAINING LOOP HOOK ORDER (v4.3 Contract)
+        # ==========================================================
+        # Each batch executes in this EXACT order:
+        #   1. FORWARD      → model(x_b, return_diagnostics=True)
+        #   2. LOSS          → criterion(outputs, targets)
+        #   3. BACKWARD      → loss.backward()
+        #   4. OPTIMIZER     → optimizer.step()
+        #   5. DEEP OBSERVE  → capture diagnostics, write JSON
+        #   6. CHECKPOINT    → atomic_save (if triggered)
+        #   7. TELEMETRY     → emit to GUI/dashboard
+        #
+        # Rules:
+        #   - No diagnostic capture before BACKWARD (gradients unavailable)
+        #   - No checkpoint before DEEP OBSERVE (report must cover save batch)
+        #   - All hooks respect this ordering strictly
+        # ==========================================================
+
         for batch_idx in pbar:
             s = batch_idx * B
             e = s + B
