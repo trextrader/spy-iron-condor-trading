@@ -1,0 +1,932 @@
+//@version=5
+strategy("Multi‑Strategy Options Meta‑Engine [Quantor-MTFuzz Edition]", 
+     overlay=false, 
+     pyramiding=3, 
+     initial_capital=100000,
+     commission_type=strategy.commission.cash_per_contract, 
+     commission_value = 0.0625)
+
+//──────────────────────────────────────────────────────────────────────────────
+// 1. TRADING WINDOW
+//──────────────────────────────────────────────────────────────────────────────
+group_window = "Trading Window"
+
+startY = input.int(2011, "Start Year", group=group_window)
+startM = input.int(1, "Start Month", group=group_window)
+startD = input.int(1, "Start Day", group=group_window)
+
+finishY = input.int(2050, "Finish Year", group=group_window)
+finishM = input.int(12, "Finish Month", group=group_window)
+finishD = input.int(31, "Finish Day", group=group_window)
+
+timestart  = timestamp(startY, startM, startD, 00, 00)
+timefinish = timestamp(finishY, finishM, finishD, 23, 59)
+
+session_main = time(timeframe.period, "0945-1545:23456")
+session_exit = time(timeframe.period, "0930-1555:23456")
+
+window  = (time >= timestart and time <= timefinish) and session_main
+
+window2 = (time >= timestart and time <= timefinish) and session_exit
+
+//──────────────────────────────────────────────────────────────────────────────
+// 2. GLOBAL OPTIONS TRADING SETTINGS
+//──────────────────────────────────────────────────────────────────────────────
+group_opt = "Options Trading"
+
+trade_options      = input.bool(true,  "Enable Options Trading", group=group_opt)
+option_amt         = input.int(10,     "# of contracts", group=group_opt)
+option_multiplier  = input.float(0.007, "P&L Multiplier", step=0.001, group=group_opt)
+reinvest           = input.bool(false, "Reinvest Profits", group=group_opt)
+reinvest_percent   = input.float(20,   "Reinvest %", group=group_opt)
+daily_max          = input.float(1200, "Daily Max Profit", group=group_opt)
+
+//──────────────────────────────────────────────────────────────────────────────
+// 3. STRATEGY MODE (INCLUDING ALL‑AT‑ONCE)
+//──────────────────────────────────────────────────────────────────────────────
+group_mode = "Strategy Mode"
+
+strat_mode = input.string("All Strategies", "Mode",
+     options=[
+         "All Strategies",
+         "Single Options",
+         "Vertical Spread",
+         "Straddle",
+         "Strangle",
+         "Butterfly",
+         "Iron Condor",
+         "Credit Spread",
+         "Debit Spread"
+     ],
+     group=group_mode)
+
+//──────────────────────────────────────────────────────────────────────────────
+// 4. ATR ENGINE
+//──────────────────────────────────────────────────────────────────────────────
+group_atr = "ATR Engine"
+
+atrlen = input.int(14, "ATR Period", group=group_atr)
+atr_pct = input.float(5, "% ATR for SL/PT", step=0.1, group=group_atr)
+
+datr  = request.security(syminfo.tickerid, "1D", ta.rma(ta.tr, atrlen))
+datrp = datr * (atr_pct * 0.01)
+
+//──────────────────────────────────────────────────────────────────────────────
+// 5. VIX ENGINE
+//──────────────────────────────────────────────────────────────────────────────
+group_vix = "VIX Engine"
+
+VIX = request.security("VIX", timeframe.period, close)
+vix_thres = input.float(20.0, "VIX Threshold", step=0.5, group=group_vix)
+
+//──────────────────────────────────────────────────────────────────────────────
+// 6. TICK ENGINE
+//──────────────────────────────────────────────────────────────────────────────
+group_tick = "TICK Engine"
+
+malen1 = input.int(5,  "Fast EMA", group=group_tick)
+malen2 = input.int(21, "Slow EMA", group=group_tick)
+malen3 = input.int(21, "HMA Length", group=group_tick)
+malen4 = input.int(5,  "HMA Smooth", group=group_tick)
+
+tickC     = request.security("USI:TICK", timeframe.period, close)
+tickAVG   = ta.ema(tickC, malen1)
+tickAVG_L = ta.ema(tickC, malen2)
+
+// HMA helper (force integer lengths for WMA)
+f_hma(_src, _len) =>
+    halfLen = math.max(1, int(math.round(_len * 0.5)))
+    sqrtLen = math.max(1, int(math.round(math.sqrt(_len))))
+    ta.wma(2 * ta.wma(_src, halfLen) - ta.wma(_src, _len), sqrtLen)
+
+tickHMA    = f_hma(tickC, malen3)
+tickHMA_MA = ta.ema(tickHMA, malen4)
+
+tick_bull = tickAVG > tickAVG[1]
+tick_bear = tickAVG < tickAVG[1]
+
+//──────────────────────────────────────────────────────────────────────────────
+// 7. RSI ENGINE
+//──────────────────────────────────────────────────────────────────────────────
+group_rsi = "RSI Engine"
+
+rsi_len    = input.int(14, "RSI Length", group=group_rsi)
+rsi_ma_len = input.int(1,  "RSI MA Length", group=group_rsi)
+rsi_thres  = input.int(20, "RSI ± from 50", group=group_rsi)
+
+src = close
+rsi_up   = ta.rma(math.max(ta.change(src), 0), rsi_len)
+rsi_down = ta.rma(-math.min(ta.change(src), 0), rsi_len)
+rsi      = rsi_down == 0 ? 100 : rsi_up == 0 ? 0 : 100 - (100 / (1 + rsi_up / rsi_down))
+rsi_ma   = ta.sma(rsi, rsi_ma_len)
+rsi_avg  = math.avg(rsi, rsi_ma)
+
+rsi_bull = rsi_avg > rsi_avg[1]
+rsi_bear = rsi_avg < rsi_avg[1]
+
+//──────────────────────────────────────────────────────────────────────────────
+// 8. TICK DIVERGENCE ENGINE
+//──────────────────────────────────────────────────────────────────────────────
+group_div = "TICK Divergence"
+
+lbR = input.int(0, "Pivot Right", group=group_div)
+lbL = input.int(2, "Pivot Left", group=group_div)
+
+rangeUpper = input.int(60, "Max Lookback", group=group_div)
+rangeLower = input.int(5,  "Min Lookback", group=group_div)
+
+plotBull       = input.bool(true,  "Plot Bullish", group=group_div)
+plotHiddenBull = input.bool(true,  "Plot Hidden Bullish", group=group_div)
+plotBear       = input.bool(true,  "Plot Bearish", group=group_div)
+plotHiddenBear = input.bool(false, "Plot Hidden Bearish", group=group_div)
+
+plFound = not na(ta.pivotlow(tickC, lbL, lbR))
+phFound = not na(ta.pivothigh(tickC, lbL, lbR))
+
+_inRange(cond) =>
+    bars = ta.barssince(cond)
+    rangeLower <= bars and bars <= rangeUpper
+
+//──────────────────────────────────────────────────────────────────────────────
+// 9. PER‑STRATEGY INPUTS (BODY/WING/CENTER)
+//──────────────────────────────────────────────────────────────────────────────
+group_strat = "Per‑Strategy ATR Settings"
+
+so_body   = input.float(0.50, "Single: Body ATR",   step=0.1, group=group_strat)
+so_wing   = input.float(1.00, "Single: Wing ATR",   step=0.1, group=group_strat)
+so_center = input.float(0.00, "Single: Center ATR", step=0.1, group=group_strat)
+
+vert_body   = input.float(0.50, "Vertical: Body ATR",   step=0.1, group=group_strat)
+vert_wing   = input.float(1.00, "Vertical: Wing ATR",   step=0.1, group=group_strat)
+vert_center = input.float(0.00, "Vertical: Center ATR", step=0.1, group=group_strat)
+
+strad_center = input.float(0.00, "Straddle: Center ATR", step=0.1, group=group_strat)
+
+strang_wing   = input.float(1.00, "Strangle: Wing ATR",   step=0.1, group=group_strat)
+strang_center = input.float(0.00, "Strangle: Center ATR", step=0.1, group=group_strat)
+
+fly_body   = input.float(0.50, "Butterfly: Body ATR",   step=0.1, group=group_strat)
+fly_wing   = input.float(1.00, "Butterfly: Wing ATR",   step=0.1, group=group_strat)
+fly_center = input.float(0.00, "Butterfly: Center ATR", step=0.1, group=group_strat)
+
+ic_body   = input.float(0.50, "Iron Condor: Body ATR",   step=0.1, group=group_strat)
+ic_wing   = input.float(1.00, "Iron Condor: Wing ATR",   step=0.1, group=group_strat)
+ic_center = input.float(0.00, "Iron Condor: Center ATR", step=0.1, group=group_strat)
+
+cred_body   = input.float(0.50, "Credit: Body ATR",   step=0.1, group=group_strat)
+cred_wing   = input.float(1.00, "Credit: Wing ATR",   step=0.1, group=group_strat)
+cred_center = input.float(0.00, "Credit: Center ATR", step=0.1, group=group_strat)
+
+deb_body   = input.float(0.50, "Debit: Body ATR",   step=0.1, group=group_strat)
+deb_wing   = input.float(1.00, "Debit: Wing ATR",   step=0.1, group=group_strat)
+deb_center = input.float(0.00, "Debit: Center ATR", step=0.1, group=group_strat)
+
+//──────────────────────────────────────────────────────────────────────────────
+// 10. DASHBOARD SETTINGS (TOP‑RIGHT, AUTO‑SIZE, SMALL FONT)
+//──────────────────────────────────────────────────────────────────────────────
+group_dash = "Dashboard Panel"
+
+show_dashboard = input.bool(true, "Show Dashboard", group=group_dash)
+dash_font_size = size.small
+dash_pos       = position.top_right
+
+//──────────────────────────────────────────────────────────────────────────────
+// PART 2 — STRENGTH SCORING ENGINE + REGIME CLASSIFICATION
+//──────────────────────────────────────────────────────────────────────────────
+
+// Price EMA for trend strength
+ema_len = input.int(21, "Price EMA Length", group="RSI Engine")
+ema1    = ta.ema(close, ema_len)
+
+//──────────────────────────────────────────────────────────────────────────────
+// 1. TREND STRENGTH (0–1)
+//──────────────────────────────────────────────────────────────────────────────
+trend_score = 0.0
+
+// EMA trend
+ema_trend = close > ema1 ? 1.0 : 0.0
+
+// HMA trend
+hma_trend = tickHMA > tickHMA_MA ? 1.0 : 0.0
+
+// RSI trend
+rsi_trend = rsi_avg > 50 ? 1.0 : 0.0
+
+trend_score := (ema_trend + hma_trend + rsi_trend) / 3.0
+
+//──────────────────────────────────────────────────────────────────────────────
+// 2. MOMENTUM STRENGTH (0–1)
+//──────────────────────────────────────────────────────────────────────────────
+mom_score = 0.0
+
+tick_mom = tickAVG > tickAVG[1] ? 1.0 : 0.0
+rsi_mom  = rsi_avg > rsi_avg[1] ? 1.0 : 0.0
+
+mom_score := (tick_mom + rsi_mom) / 2.0
+
+//──────────────────────────────────────────────────────────────────────────────
+// 3. VOLATILITY REGIME (0–1)
+//──────────────────────────────────────────────────────────────────────────────
+vol_score = 0.0
+
+// VIX high = volatility up
+vix_vol = VIX > vix_thres ? 1.0 : 0.0
+
+// ATR expansion
+atr_expansion = datr > datr[1] ? 1.0 : 0.0
+
+vol_score := (vix_vol + atr_expansion) / 2.0
+
+//──────────────────────────────────────────────────────────────────────────────
+// 4. COMPRESSION REGIME (0–1)
+//──────────────────────────────────────────────────────────────────────────────
+comp_score = 0.0
+
+// ATR contraction
+atr_contraction = datr < datr[1] ? 1.0 : 0.0
+
+// Bollinger Bandwidth
+bb_basis = ta.sma(close, 20)
+bb_dev   = ta.stdev(close, 20)
+bb_width = (bb_dev / bb_basis) * 100
+
+bb_comp = bb_width < bb_width[1] ? 1.0 : 0.0
+
+comp_score := (atr_contraction + bb_comp) / 2.0
+
+//──────────────────────────────────────────────────────────────────────────────
+// 5. DIVERGENCE STRENGTH (0–1)
+//──────────────────────────────────────────────────────────────────────────────
+div_score = 0.0
+
+// Regular bullish divergence
+oscHL = tickC[lbR] > ta.valuewhen(plFound, tickC[lbR], 1) and _inRange(plFound[1])
+priceLL = low[lbR] < ta.valuewhen(plFound, low[lbR], 1)
+bull_div = oscHL and priceLL ? 1.0 : 0.0
+
+// Regular bearish divergence
+oscLH = tickC[lbR] < ta.valuewhen(phFound, tickC[lbR], 1) and _inRange(phFound[1])
+priceHH = high[lbR] > ta.valuewhen(phFound, high[lbR], 1)
+bear_div = oscLH and priceHH ? 1.0 : 0.0
+
+// Hidden divergences
+oscLL = tickC[lbR] < ta.valuewhen(plFound, tickC[lbR], 1) and _inRange(plFound[1])
+priceHL = low[lbR] > ta.valuewhen(plFound, low[lbR], 1)
+hidden_bull = oscLL and priceHL ? 1.0 : 0.0
+
+oscHH = tickC[lbR] > ta.valuewhen(phFound, tickC[lbR], 1) and _inRange(phFound[1])
+priceLH = high[lbR] < ta.valuewhen(phFound, high[lbR], 1)
+hidden_bear = oscHH and priceLH ? 1.0 : 0.0
+
+div_score := (bull_div + bear_div + hidden_bull + hidden_bear) / 4.0
+
+//──────────────────────────────────────────────────────────────────────────────
+// 6. COMPOSITE STRENGTH SCORE (0–1)
+strength_score = trend_score * 0.30 + mom_score * 0.25 + vol_score * 0.20 + comp_score * 0.15 + div_score * 0.10
+
+
+//──────────────────────────────────────────────────────────────────────────────
+// 7. BIAS CLASSIFIER
+//──────────────────────────────────────────────────────────────────────────────
+bias = "Neutral"
+
+// Bullish bias
+if trend_score > 0.60 and mom_score > 0.60
+    bias := "Bullish"
+
+// Bearish bias
+if trend_score < 0.40 and mom_score < 0.40
+    bias := "Bearish"
+
+// Volatility Up
+if vol_score > 0.65
+    bias := "VolUp"
+
+// Compression
+if comp_score > 0.65
+    bias := "Compression"
+
+// Mean Reversion
+if comp_score > 0.50 and trend_score < 0.40
+    bias := "MeanRev"
+
+
+//──────────────────────────────────────────────────────────────────────────────
+// 8. REGIME LABELS FOR DASHBOARD
+//──────────────────────────────────────────────────────────────────────────────
+vol_label  = vol_score  > 0.65 ? "↑↑" : vol_score  > 0.50 ? "↑" : vol_score  < 0.35 ? "↓" : "·"
+comp_label = comp_score > 0.65 ? "High" : comp_score > 0.50 ? "Med" : "Low"
+tick_label = tickAVG > 0 ? "Bull" : tickAVG < 0 ? "Bear" : "Flat"
+
+//------------------------------------------------------------------------------
+// PART 3 — SYNTHETIC STRIKE GENERATOR + MULTI-LEG STRUCTURE BUILDER
+//------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------
+// 1. UNIVERSAL STRIKE GENERATOR (ATR-BASED) — ARRAY RETURN
+//------------------------------------------------------------------------------
+get_strikes(_price, _atr, _body_mult, _wing_mult, _center_mult) =>
+    center = _price + _atr * _center_mult
+    body   = _atr * _body_mult
+    wing   = _atr * _wing_mult
+
+    short_call = center + body
+    long_call  = center + wing
+    short_put  = center - body
+    long_put   = center - wing
+
+    atm_call  = center
+    atm_put   = center
+    wide_call = center + wing
+    wide_put  = center - wing
+
+    array.from(short_call, long_call, short_put, long_put, atm_call, atm_put, wide_call, wide_put)
+
+//──────────────────────────────────────────────────────────────────────────────
+// STRIKE VARIABLE DECLARATIONS (EXPLICIT TYPES PER VARIABLE)
+//──────────────────────────────────────────────────────────────────────────────
+
+var float so_sc = na
+var float so_lc = na
+var float so_sp = na
+var float so_lp = na
+var float so_atmC = na
+var float so_atmP = na
+var float so_wC = na
+var float so_wP = na
+
+var float vert_sc = na
+var float vert_lc = na
+var float vert_sp = na
+var float vert_lp = na
+
+var float strad_atmC = na
+var float strad_atmP = na
+
+var float strang_wC = na
+var float strang_wP = na
+
+var float fly_sc = na
+var float fly_lc = na
+var float fly_sp = na
+var float fly_lp = na
+
+var float ic_sc = na
+var float ic_lc = na
+var float ic_sp = na
+var float ic_lp = na
+
+var float cred_sc = na
+var float cred_lc = na
+var float cred_sp = na
+var float cred_lp = na
+
+var float deb_sc = na
+var float deb_lc = na
+var float deb_sp = na
+var float deb_lp = na
+
+// Array holders
+var float[] so_arr = na
+var float[] vert_arr = na
+var float[] strad_arr = na
+var float[] strang_arr = na
+var float[] fly_arr = na
+var float[] ic_arr = na
+var float[] cred_arr = na
+var float[] deb_arr = na
+
+//──────────────────────────────────────────────────────────────────────────────
+// 2. PER-STRATEGY STRIKE SETS
+//──────────────────────────────────────────────────────────────────────────────
+
+//──────────────────────────────────────────────────────────────────────────────
+// 2. PER-STRATEGY STRIKE SETS
+//──────────────────────────────────────────────────────────────────────────────
+
+// SINGLE OPTIONS
+so_arr := get_strikes(close, datr, so_body, so_wing, so_center)
+so_sc   := array.get(so_arr, 0)
+so_lc   := array.get(so_arr, 1)
+so_sp   := array.get(so_arr, 2)
+so_lp   := array.get(so_arr, 3)
+so_atmC := array.get(so_arr, 4)
+so_atmP := array.get(so_arr, 5)
+so_wC   := array.get(so_arr, 6)
+so_wP   := array.get(so_arr, 7)
+
+// VERTICAL
+vert_arr := get_strikes(close, datr, vert_body, vert_wing, vert_center)
+vert_sc  := array.get(vert_arr, 0)
+vert_lc  := array.get(vert_arr, 1)
+vert_sp  := array.get(vert_arr, 2)
+vert_lp  := array.get(vert_arr, 3)
+
+// STRADDLE
+strad_arr   := get_strikes(close, datr, 0.0, 0.0, strad_center)
+strad_atmC  := array.get(strad_arr, 4)
+strad_atmP  := array.get(strad_arr, 5)
+
+// STRANGLE
+strang_arr := get_strikes(close, datr, 0.0, strang_wing, strang_center)
+strang_wC  := array.get(strang_arr, 6)
+strang_wP  := array.get(strang_arr, 7)
+
+// BUTTERFLY
+fly_arr := get_strikes(close, datr, fly_body, fly_wing, fly_center)
+fly_sc  := array.get(fly_arr, 0)
+fly_lc  := array.get(fly_arr, 1)
+fly_sp  := array.get(fly_arr, 2)
+fly_lp  := array.get(fly_arr, 3)
+
+// IRON CONDOR
+ic_arr := get_strikes(close, datr, ic_body, ic_wing, ic_center)
+ic_sc  := array.get(ic_arr, 0)
+ic_lc  := array.get(ic_arr, 1)
+ic_sp  := array.get(ic_arr, 2)
+ic_lp  := array.get(ic_arr, 3)
+
+// CREDIT
+cred_arr := get_strikes(close, datr, cred_body, cred_wing, cred_center)
+cred_sc  := array.get(cred_arr, 0)
+cred_lc  := array.get(cred_arr, 1)
+cred_sp  := array.get(cred_arr, 2)
+cred_lp  := array.get(cred_arr, 3)
+
+// DEBIT
+deb_arr := get_strikes(close, datr, deb_body, deb_wing, deb_center)
+deb_sc  := array.get(deb_arr, 0)
+deb_lc  := array.get(deb_arr, 1)
+deb_sp  := array.get(deb_arr, 2)
+deb_lp  := array.get(deb_arr, 3)
+
+//──────────────────────────────────────────────────────────────────────────────
+// 3. MULTI‑LEG STRUCTURE DEFINITIONS (NO TRADING YET — JUST SIGNALS)
+//──────────────────────────────────────────────────────────────────────────────
+
+// Each structure returns a "signal strength" (0–1) and a "direction" string.
+
+//──────────────────────────────────────────────────────────────────────────────
+// SINGLE OPTIONS
+//──────────────────────────────────────────────────────────────────────────────
+so_signal = 0.0
+so_dir    = "None"
+
+if trend_score > 0.55 and mom_score > 0.55
+    so_signal := strength_score
+    so_dir    := "Call"
+
+if trend_score < 0.45 and mom_score < 0.45
+    so_signal := strength_score
+    so_dir    := "Put"
+
+
+//──────────────────────────────────────────────────────────────────────────────
+// VERTICAL SPREADS
+//──────────────────────────────────────────────────────────────────────────────
+vert_signal = 0.0
+vert_dir    = "None"
+
+if so_dir == "Call"
+    vert_signal := strength_score
+    vert_dir    := "BullPut"
+
+if so_dir == "Put"
+    vert_signal := strength_score
+    vert_dir    := "BearCall"
+
+
+//──────────────────────────────────────────────────────────────────────────────
+// STRADDLE (volatility up)
+//──────────────────────────────────────────────────────────────────────────────
+strad_signal = 0.0
+strad_dir    = "None"
+
+if vol_score > 0.55
+    strad_signal := strength_score
+    strad_dir    := "VolUp"
+
+
+//──────────────────────────────────────────────────────────────────────────────
+// STRANGLE (wide volatility)
+//──────────────────────────────────────────────────────────────────────────────
+strang_signal = 0.0
+strang_dir    = "None"
+
+if vol_score > 0.60
+    strang_signal := strength_score
+    strang_dir    := "VolUpWide"
+
+
+//──────────────────────────────────────────────────────────────────────────────
+// BUTTERFLY (mean reversion)
+//──────────────────────────────────────────────────────────────────────────────
+fly_signal = 0.0
+fly_dir    = "None"
+
+if bias == "MeanRev"
+    fly_signal := strength_score
+    fly_dir    := "MeanRev"
+
+
+//──────────────────────────────────────────────────────────────────────────────
+// IRON CONDOR (compression)
+//──────────────────────────────────────────────────────────────────────────────
+ic_signal = 0.0
+ic_dir    = "None"
+
+if comp_score > 0.55
+    ic_signal := strength_score
+    ic_dir    := "Compression"
+
+
+//──────────────────────────────────────────────────────────────────────────────
+// CREDIT SPREADS (directional premium selling)
+//──────────────────────────────────────────────────────────────────────────────
+cred_signal = 0.0
+cred_dir    = "None"
+
+if so_dir == "Call"
+    cred_signal := strength_score
+    cred_dir    := "BullPutCredit"
+
+if so_dir == "Put"
+    cred_signal := strength_score
+    cred_dir    := "BearCallCredit"
+
+
+//──────────────────────────────────────────────────────────────────────────────
+// DEBIT SPREADS (directional premium buying)
+//──────────────────────────────────────────────────────────────────────────────
+deb_signal = 0.0
+deb_dir    = "None"
+
+if so_dir == "Call"
+    deb_signal := strength_score
+    deb_dir    := "BullCallDebit"
+
+if so_dir == "Put"
+    deb_signal := strength_score
+    deb_dir    := "BearPutDebit"
+
+//──────────────────────────────────────────────────────────────────────────────
+// PART 4 — MULTI-STRATEGY AGGREGATOR + RANKING ENGINE
+//──────────────────────────────────────────────────────────────────────────────
+
+// Strategy names (fixed order for dashboard)
+var string[] strat_names = array.from("Single", "Vertical", "Straddle", "Strangle", "Butterfly", "IronCondor", "CreditSpr", "DebitSpr")
+
+// Strategy signal strengths / directions (re-built each bar; ok for now)
+strat_signals = array.from(so_signal, vert_signal, strad_signal, strang_signal, fly_signal, ic_signal, cred_signal, deb_signal)
+strat_dirs    = array.from(so_dir,    vert_dir,    strad_dir,    strang_dir,    fly_dir,    ic_dir,    cred_dir,    deb_dir)
+
+//──────────────────────────────────────────────────────────────────────────────
+// 2. ALL-AT-ONCE MODE LOGIC
+//──────────────────────────────────────────────────────────────────────────────
+use_all = strat_mode == "All Strategies"
+
+if not use_all
+    for k = 0 to array.size(strat_signals) - 1
+        selected = array.get(strat_names, k) == strat_mode
+        if not selected
+            array.set(strat_signals, k, 0.0)
+            array.set(strat_dirs,    k, "None")
+
+//──────────────────────────────────────────────────────────────────────────────
+// 3. STRATEGY RANKING ENGINE (FIND STRONGEST STRATEGY)
+//──────────────────────────────────────────────────────────────────────────────
+strongest_idx = 0
+strongest_val = 0.0
+
+for k = 0 to array.size(strat_signals) - 1
+    v = array.get(strat_signals, k)
+    if v > strongest_val
+        strongest_val := v
+        strongest_idx := k
+
+strongest_name = array.get(strat_names, strongest_idx)
+strongest_dir  = array.get(strat_dirs,  strongest_idx)
+
+//──────────────────────────────────────────────────────────────────────────────
+// 4. UNIFIED SIGNAL MATRIX (FOR DASHBOARD + TRADE ENGINE)
+//──────────────────────────────────────────────────────────────────────────────
+get_signal(_i) => array.get(strat_signals, _i)
+get_dir(_i)    => array.get(strat_dirs,    _i)
+
+//──────────────────────────────────────────────────────────────────────────────
+// 5. STRATEGY CATEGORY LABELS (FOR DASHBOARD COLORING)
+//──────────────────────────────────────────────────────────────────────────────
+get_category(_dir) =>
+    string out = "None"
+    if _dir == "Call" or _dir == "Put"
+        out := "Directional"
+    else if str.contains(_dir, "Bull") or str.contains(_dir, "Bear")
+        out := "Directional"
+    else if str.contains(_dir, "Vol")
+        out := "Volatility"
+    else if _dir == "Compression"
+        out := "Compression"
+    else if _dir == "MeanRev"
+        out := "MeanRev"
+    out
+
+//──────────────────────────────────────────────────────────────────────────────
+// COLOR HELPER FUNCTIONS (GLOBAL SCOPE) — NO TERNARIES (PINE-SAFE)
+//──────────────────────────────────────────────────────────────────────────────
+f_color_strength(_s) =>
+    color c = color.new(color.red, 40)
+    if _s > 0.75
+        c := color.new(color.green, 0)
+    else if _s > 0.50
+        c := color.new(color.green, 60)
+    else if _s > 0.25
+        c := color.new(color.yellow, 40)
+    c
+
+f_color_bias(_b) =>
+    color c = color.new(color.gray, 70)
+    if _b == "Bullish"
+        c := color.new(color.green, 0)
+    else if _b == "Bearish"
+        c := color.new(color.red, 0)
+    else if _b == "VolUp"
+        c := color.new(color.blue, 0)
+    else if _b == "Compression"
+        c := color.new(color.purple, 0)
+    else if _b == "MeanRev"
+        c := color.new(color.orange, 0)
+    c
+
+f_color_category(_cat) =>
+    color c = color.new(color.gray, 85)
+    if _cat == "Directional"
+        c := color.new(color.green, 80)
+    else if _cat == "Volatility"
+        c := color.new(color.blue, 80)
+    else if _cat == "Compression"
+        c := color.new(color.purple, 80)
+    else if _cat == "MeanRev"
+        c := color.new(color.orange, 80)
+    c
+
+//──────────────────────────────────────────────────────────────────────────────
+// PART 5 — TACTICAL DASHBOARD PANEL (TOP-RIGHT)
+//──────────────────────────────────────────────────────────────────────────────
+
+// Table + helper (GLOBAL)
+var table dash = na
+
+tcell(_tbl, _col, _row, _txt, _bg, _size) =>
+    table.cell(_tbl, _col, _row, _txt, text_color=color.white, bgcolor=_bg, text_size=_size)
+
+//──────────────────────────────────────────────────────────────────────────────
+// DASHBOARD RENDER (ALL INSIDE ONE IF BLOCK — NO SCOPE LEAKS)
+//──────────────────────────────────────────────────────────────────────────────
+if show_dashboard and barstate.islast
+    if na(dash)
+        dash := table.new(dash_pos, 7, 9, border_width = 1)
+
+    // Common colors
+    hdr_bg = color.new(color.gray, 10)
+    row_bg = color.new(color.gray, 85)
+    vol_bg = color.new(color.blue, 80)
+    cmp_bg = color.new(color.purple, 80)
+    tck_bg = color.new(color.gray, 80)
+
+    // Header row
+    tcell(dash, 0, 0, "STRATEGY", hdr_bg, dash_font_size)
+    tcell(dash, 1, 0, "SIGNAL",   hdr_bg, dash_font_size)
+    tcell(dash, 2, 0, "STRENGTH", hdr_bg, dash_font_size)
+    tcell(dash, 3, 0, "BIAS",     hdr_bg, dash_font_size)
+    tcell(dash, 4, 0, "VOL",      hdr_bg, dash_font_size)
+    tcell(dash, 5, 0, "COMP",     hdr_bg, dash_font_size)
+    tcell(dash, 6, 0, "TICK",     hdr_bg, dash_font_size)
+
+    // Rows 1..8 (loop version — safe because EVERYTHING is inside this block)
+    for r = 1 to 8
+        idx = r - 1
+        nm  = array.get(strat_names,   idx)
+        sg  = array.get(strat_signals, idx)
+        dr  = array.get(strat_dirs,    idx)
+        ct  = get_category(dr)
+
+        tcell(dash, 0, r, nm, f_color_category(ct), dash_font_size)
+        tcell(dash, 1, r, dr, row_bg,               dash_font_size)
+        tcell(dash, 2, r, str.tostring(sg, "#.##"), f_color_strength(sg), dash_font_size)
+        tcell(dash, 3, r, bias, f_color_bias(bias), dash_font_size)
+        tcell(dash, 4, r, vol_label,  vol_bg, dash_font_size)
+        tcell(dash, 5, r, comp_label, cmp_bg, dash_font_size)
+        tcell(dash, 6, r, tick_label, tck_bg, dash_font_size)
+
+
+//──────────────────────────────────────────────────────────────────────────────
+// PART 6 — TRADE EXECUTION LAYER
+//──────────────────────────────────────────────────────────────────────────────
+
+group_exec = "Trade Execution"
+
+exec_mode = input.string(
+     "Strongest Only", "Execution Mode",
+     options = ["None","Strongest Only","Bullish Only","Bearish Only","Volatility Only","Compression Only","All Valid"],
+     group = group_exec)
+
+close_eod = input.bool(true, "Close All at End of Day", group=group_exec)
+
+// HARD SAFETY: cap how many open trades we allow (prevents order-count explosion)
+// Set to 1 if you want extremely conservative behavior.
+max_open_trades = input.int(3, "Max Open Trades (Safety Cap)", minval=0, group=group_exec)
+
+// Base quantity (synthetic options sizing)
+base_qty = trade_options ? option_amt : 0
+
+// Rising-edge helper: true only on the bar a signal turns ON.
+// (Safe for first bar because (_b[1] == true) will be false when _b[1] is na.)
+f_rise(_b) =>
+    _b and not (_b[1] == true)
+
+//──────────────────────────────────────────────────────────────────────────────
+// 1. HELPER: MAP STRATEGY NAME TO INDEX
+//──────────────────────────────────────────────────────────────────────────────
+f_idx(_name) =>
+    int idx = 0
+    if _name == "Single"
+        idx := 0
+    else if _name == "Vertical"
+        idx := 1
+    else if _name == "Straddle"
+        idx := 2
+    else if _name == "Strangle"
+        idx := 3
+    else if _name == "Butterfly"
+        idx := 4
+    else if _name == "IronCondor"
+        idx := 5
+    else if _name == "CreditSpr"
+        idx := 6
+    else if _name == "DebitSpr"
+        idx := 7
+    idx
+
+//──────────────────────────────────────────────────────────────────────────────
+// 2. PER-STRATEGY DIRECTIONAL FLAGS
+//──────────────────────────────────────────────────────────────────────────────
+is_bull_dir(_dir) => (_dir == "Call") or (_dir == "BullPut") or (_dir == "BullPutCredit") or (_dir == "BullCallDebit")
+is_bear_dir(_dir) => (_dir == "Put")  or (_dir == "BearCall") or (_dir == "BearCallCredit") or (_dir == "BearPutDebit")
+is_vol_dir(_dir)  => str.contains(_dir, "VolUp")
+is_comp_dir(_dir) => (_dir == "Compression")
+is_active(_sig, _dir) => (_sig > 0) and (_dir != "None")
+
+//──────────────────────────────────────────────────────────────────────────────
+// 3. EXECUTION FILTERS BY MODE
+//──────────────────────────────────────────────────────────────────────────────
+f_allow_by_mode(_name, _dir, _sig) =>
+    bool active = is_active(_sig, _dir)
+    bool is_strongest = (_name == strongest_name)
+    bool is_bull = is_bull_dir(_dir)
+    bool is_bear = is_bear_dir(_dir)
+    bool is_vol  = is_vol_dir(_dir)
+    bool is_comp = is_comp_dir(_dir)
+
+    bool allow = false
+    if exec_mode == "None"
+        allow := false
+    else if exec_mode == "Strongest Only"
+        allow := is_strongest and active
+    else if exec_mode == "Bullish Only"
+        allow := is_bull and active
+    else if exec_mode == "Bearish Only"
+        allow := is_bear and active
+    else if exec_mode == "Volatility Only"
+        allow := is_vol and active
+    else if exec_mode == "Compression Only"
+        allow := is_comp and active
+    else if exec_mode == "All Valid"
+        allow := active
+    allow
+
+//──────────────────────────────────────────────────────────────────────────────
+// 4. BUILD PER-STRATEGY EXECUTION SIGNALS
+//──────────────────────────────────────────────────────────────────────────────
+so_idx     = f_idx("Single")
+vert_idx   = f_idx("Vertical")
+strad_idx  = f_idx("Straddle")
+strang_idx = f_idx("Strangle")
+fly_idx    = f_idx("Butterfly")
+ic_idx     = f_idx("IronCondor")
+cred_idx   = f_idx("CreditSpr")
+deb_idx    = f_idx("DebitSpr")
+
+so_sig     = array.get(strat_signals, so_idx)
+so_d       = array.get(strat_dirs,    so_idx)
+vert_sig   = array.get(strat_signals, vert_idx)
+vert_d     = array.get(strat_dirs,    vert_idx)
+strad_sig  = array.get(strat_signals, strad_idx)
+strad_d    = array.get(strat_dirs,    strad_idx)
+strang_sig = array.get(strat_signals, strang_idx)
+strang_d   = array.get(strat_dirs,    strang_idx)
+fly_sig    = array.get(strat_signals, fly_idx)
+fly_d      = array.get(strat_dirs,    fly_idx)
+ic_sig     = array.get(strat_signals, ic_idx)
+ic_d       = array.get(strat_dirs,    ic_idx)
+cred_sig   = array.get(strat_signals, cred_idx)
+cred_d     = array.get(strat_dirs,    cred_idx)
+deb_sig    = array.get(strat_signals, deb_idx)
+deb_d      = array.get(strat_dirs,    deb_idx)
+
+so_allow     = f_allow_by_mode("Single",     so_d,     so_sig)
+vert_allow   = f_allow_by_mode("Vertical",   vert_d,   vert_sig)
+strad_allow  = f_allow_by_mode("Straddle",   strad_d,  strad_sig)
+strang_allow = f_allow_by_mode("Strangle",   strang_d, strang_sig)
+fly_allow    = f_allow_by_mode("Butterfly",  fly_d,    fly_sig)
+ic_allow     = f_allow_by_mode("IronCondor", ic_d,     ic_sig)
+cred_allow   = f_allow_by_mode("CreditSpr",  cred_d,   cred_sig)
+deb_allow    = f_allow_by_mode("DebitSpr",   deb_d,    deb_sig)
+
+//──────────────────────────────────────────────────────────────────────────────
+// 5. EXECUTE TRADES (EDGE-TRIGGERED + ROTATE-ON-CHANGE)
+//──────────────────────────────────────────────────────────────────────────────
+
+// Base permission gate
+can_trade_base = window and trade_options and base_qty > 0
+
+// Optional safety cap gate (max_open_trades = 0 means "no cap")
+cap_ok = (max_open_trades == 0) ? true : (strategy.opentrades < max_open_trades)
+
+can_trade = can_trade_base and cap_ok
+
+// Build raw intent flags
+so_long    = can_trade and so_allow    and is_bull_dir(so_d)
+so_short   = can_trade and so_allow    and is_bear_dir(so_d)
+
+vert_long  = can_trade and vert_allow  and is_bull_dir(vert_d)
+vert_short = can_trade and vert_allow  and is_bear_dir(vert_d)
+
+strad_long   = can_trade and strad_allow
+strang_long  = can_trade and strang_allow
+fly_long     = can_trade and fly_allow
+ic_long      = can_trade and ic_allow
+cred_long    = can_trade and cred_allow and is_bull_dir(cred_d)
+cred_short   = can_trade and cred_allow and is_bear_dir(cred_d)
+deb_long     = can_trade and deb_allow  and is_bull_dir(deb_d)
+deb_short    = can_trade and deb_allow  and is_bear_dir(deb_d)
+
+// Rotate ONLY when the strongest strategy changes (prevents close_all every bar)
+rotate = (exec_mode == "Strongest Only") and can_trade and (strongest_idx[1] == strongest_idx[1]) and (strongest_idx != strongest_idx[1])
+
+if rotate
+    strategy.close_all(comment = "Rotate Strongest")
+
+// Edge-trigger entries (prevents re-ordering every bar)
+if f_rise(so_long)
+    strategy.entry("SO_LONG", strategy.long,  qty = base_qty, comment="Single Call")
+if f_rise(so_short)
+    strategy.entry("SO_SHORT", strategy.short, qty = base_qty, comment="Single Put")
+
+if f_rise(vert_long)
+    strategy.entry("VERT_LONG", strategy.long,  qty = base_qty, comment="Vertical Bull")
+if f_rise(vert_short)
+    strategy.entry("VERT_SHORT", strategy.short, qty = base_qty, comment="Vertical Bear")
+
+if f_rise(strad_long)
+    strategy.entry("STRAD_LONG", strategy.long, qty = base_qty, comment="Straddle VolUp")
+if f_rise(strang_long)
+    strategy.entry("STRANG_LONG", strategy.long, qty = base_qty, comment="Strangle VolUpWide")
+if f_rise(fly_long)
+    strategy.entry("FLY_LONG", strategy.long, qty = base_qty, comment="Butterfly MeanRev")
+if f_rise(ic_long)
+    strategy.entry("IC_LONG", strategy.long, qty = base_qty, comment="IronCondor Compression")
+
+if f_rise(cred_long)
+    strategy.entry("CRED_LONG", strategy.long, qty = base_qty, comment="Credit Bull")
+if f_rise(cred_short)
+    strategy.entry("CRED_SHORT", strategy.short, qty = base_qty, comment="Credit Bear")
+
+if f_rise(deb_long)
+    strategy.entry("DEB_LONG", strategy.long, qty = base_qty, comment="Debit Bull")
+if f_rise(deb_short)
+    strategy.entry("DEB_SHORT", strategy.short, qty = base_qty, comment="Debit Bear")
+
+//──────────────────────────────────────────────────────────────────────────────
+// 6. END-OF-DAY CLOSE
+//──────────────────────────────────────────────────────────────────────────────
+if close_eod and not window2 and strategy.position_size != 0
+    strategy.close_all(comment = "EOD Close")
+
+//──────────────────────────────────────────────────────────────────────────────
+// PART 7 — FINAL ASSEMBLY, SAFETY CHECKS, PERFORMANCE OPTIMIZATION
+//──────────────────────────────────────────────────────────────────────────────
+f_clamp(_v) =>
+    _v < 0 ? 0 : _v > 1 ? 1 : _v
+
+trend_score    := f_clamp(trend_score)
+mom_score      := f_clamp(mom_score)
+vol_score      := f_clamp(vol_score)
+comp_score     := f_clamp(comp_score)
+div_score      := f_clamp(div_score)
+strength_score := f_clamp(strength_score)
+
+// Optional debug panel
+show_debug = input.bool(false, "Show Debug Info (Optional)", group="Debug")
+if show_debug
+    dbg = "Strongest: " + strongest_name + "\nDir: " + strongest_dir + "\nStrength: " + str.tostring(strongest_val, "#.##") + "\nBias: " + bias + "\nVOL: " + vol_label + "\nCOMP: " + comp_label + "\nTICK: " + tick_label
+    label.new(bar_index, high, dbg, xloc.bar_index, yloc.price, color.new(color.black, 0), label.style_label_left, color.white, size.small)

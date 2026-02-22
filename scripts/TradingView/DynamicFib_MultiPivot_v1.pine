@@ -1,0 +1,473 @@
+//@version=6
+indicator("Multi‑tier pivot engine + structural memory + dynamic Fib + confluence analytics [Quantor-MTFuzz]", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+
+// =============================================================================
+// INPUT GROUPS
+// =============================================================================
+string GP_WEAK   = "Weak Pivots (Set 1)"
+string GP_MED    = "Medium Pivots (Set 2)"
+string GP_STRONG = "Strong Pivots (Set 3)"
+string GP_FILT   = "Consolidation Filters"
+string GP_FIB    = "Fibonacci Display"
+string GP_FLVL   = "Fibonacci Levels"
+string GP_HIST   = "Historical Fibs"
+string GP_HEAT   = "Confluence Heatmap"
+
+// =============================================================================
+// WEAK PIVOTS
+// =============================================================================
+w_left       = input.int(17,   "Left",  group=GP_WEAK)
+w_right      = input.int(22,   "Right", group=GP_WEAK)
+w_show       = input.bool(true, "Show Weak Pivots", group=GP_WEAK)
+w_color_up   = color.new(#87CEEB, 0)
+w_color_down = color.new(#FFA500, 0)
+
+// =============================================================================
+// MEDIUM PIVOTS
+// =============================================================================
+m_left       = input.int(30,   "Left",  group=GP_MED)
+m_right      = input.int(32,   "Right", group=GP_MED)
+m_show       = input.bool(true, "Show Medium Pivots", group=GP_MED)
+m_color_up   = color.new(#1E90FF, 0)
+m_color_down = color.new(#FF0000, 0)
+
+// =============================================================================
+// STRONG PIVOTS
+// =============================================================================
+s_left       = input.int(69,   "Left",  group=GP_STRONG)
+s_right      = input.int(69,   "Right", group=GP_STRONG)
+s_show       = input.bool(true, "Show Strong Pivots", group=GP_STRONG)
+s_color_up   = color.new(#00FF00, 0)
+s_color_down = color.new(#800080, 0)
+
+// =============================================================================
+// CONSOLIDATION FILTERS
+// =============================================================================
+weak_range_N     = input.int(15,    "Weak: Lookback",        group=GP_FILT)
+weak_range_min   = input.float(0.4, "Weak: Min Avg Range",   group=GP_FILT)
+med_range_N      = input.int(25,    "Med: Lookback",         group=GP_FILT)
+med_range_min    = input.float(0.5, "Med: Min Avg Range",    group=GP_FILT)
+strong_range_N   = input.int(40,    "Strong: Lookback",      group=GP_FILT)
+strong_range_min = input.float(0.5, "Strong: Min Avg Range", group=GP_FILT)
+
+// =============================================================================
+// FIBONACCI DISPLAY
+// =============================================================================
+showFib    = input.bool(true,  "Show Fibonacci Levels", group=GP_FIB)
+var extL   = input.bool(false, "Extend Left    |    Extend Right", inline="ext", group=GP_FIB)
+var extR   = input.bool(true,  "", inline="ext", group=GP_FIB)
+fibPrices  = input.bool(true,  "Show Prices",   group=GP_FIB, display=display.none)
+fibLevShow = input.bool(true,  "Show Levels",   inline="lvl", group=GP_FIB, display=display.none)
+fibLevFmt  = input.string("Values", "", options=["Values", "Percent"], inline="lvl", group=GP_FIB, display=display.none)
+fibLblPos  = input.string("Right", "Labels Position", options=["Left", "Right"], group=GP_FIB, display=display.none)
+var int fibBgTr = input.int(85, "Background Transparency", minval=0, maxval=100, group=GP_FIB, display=display.none)
+
+var extending = extend.none
+if extL and extR
+    extending := extend.both
+else if extL
+    extending := extend.left
+else if extR
+    extending := extend.right
+
+// =============================================================================
+// FIBONACCI LEVELS  -  [show] [value] [color] | [show] [value] [color]
+// =============================================================================
+sh_n618 = input.bool(false, "", inline="FA0", group=GP_FLVL, display=display.none)
+vl_n618 = input.float(-0.618, "", inline="FA0", group=GP_FLVL, display=display.none, active=sh_n618)
+cl_n618 = input.color(#009688, "", inline="FA0", group=GP_FLVL, display=display.none, active=sh_n618)
+sh_n236 = input.bool(false, "", inline="FA0", group=GP_FLVL, display=display.none)
+vl_n236 = input.float(-0.236, "", inline="FA0", group=GP_FLVL, display=display.none, active=sh_n236)
+cl_n236 = input.color(#f44336, "", inline="FA0", group=GP_FLVL, display=display.none, active=sh_n236)
+
+sh_0   = input.bool(true, "", inline="FA1", group=GP_FLVL, display=display.none)
+vl_0   = input.float(0, "", inline="FA1", group=GP_FLVL, display=display.none, active=sh_0)
+cl_0   = input.color(#787b86, "", inline="FA1", group=GP_FLVL, display=display.none, active=sh_0)
+sh_236 = input.bool(true, "", inline="FA1", group=GP_FLVL, display=display.none)
+vl_236 = input.float(0.236, "", inline="FA1", group=GP_FLVL, display=display.none, active=sh_236)
+cl_236 = input.color(#f44336, "", inline="FA1", group=GP_FLVL, display=display.none, active=sh_236)
+
+sh_382 = input.bool(true, "", inline="FA2", group=GP_FLVL, display=display.none)
+vl_382 = input.float(0.382, "", inline="FA2", group=GP_FLVL, display=display.none, active=sh_382)
+cl_382 = input.color(#81c784, "", inline="FA2", group=GP_FLVL, display=display.none, active=sh_382)
+sh_50  = input.bool(true, "", inline="FA2", group=GP_FLVL, display=display.none)
+vl_50  = input.float(0.5, "", inline="FA2", group=GP_FLVL, display=display.none, active=sh_50)
+cl_50  = input.color(#4caf50, "", inline="FA2", group=GP_FLVL, display=display.none, active=sh_50)
+
+sh_618 = input.bool(true, "", inline="FA3", group=GP_FLVL, display=display.none)
+vl_618 = input.float(0.618, "", inline="FA3", group=GP_FLVL, display=display.none, active=sh_618)
+cl_618 = input.color(#009688, "", inline="FA3", group=GP_FLVL, display=display.none, active=sh_618)
+sh_786 = input.bool(true, "", inline="FA3", group=GP_FLVL, display=display.none)
+vl_786 = input.float(0.786, "", inline="FA3", group=GP_FLVL, display=display.none, active=sh_786)
+cl_786 = input.color(#64b5f6, "", inline="FA3", group=GP_FLVL, display=display.none, active=sh_786)
+
+sh_100  = input.bool(true, "", inline="FA4", group=GP_FLVL, display=display.none)
+vl_100  = input.float(1, "", inline="FA4", group=GP_FLVL, display=display.none, active=sh_100)
+cl_100  = input.color(#787b86, "", inline="FA4", group=GP_FLVL, display=display.none, active=sh_100)
+sh_1272 = input.bool(false, "", inline="FA4", group=GP_FLVL, display=display.none)
+vl_1272 = input.float(1.272, "", inline="FA4", group=GP_FLVL, display=display.none, active=sh_1272)
+cl_1272 = input.color(#81c784, "", inline="FA4", group=GP_FLVL, display=display.none, active=sh_1272)
+
+sh_1414 = input.bool(false, "", inline="FA5", group=GP_FLVL, display=display.none)
+vl_1414 = input.float(1.414, "", inline="FA5", group=GP_FLVL, display=display.none, active=sh_1414)
+cl_1414 = input.color(#f44336, "", inline="FA5", group=GP_FLVL, display=display.none, active=sh_1414)
+sh_1618 = input.bool(true, "", inline="FA5", group=GP_FLVL, display=display.none)
+vl_1618 = input.float(1.618, "", inline="FA5", group=GP_FLVL, display=display.none, active=sh_1618)
+cl_1618 = input.color(#2962ff, "", inline="FA5", group=GP_FLVL, display=display.none, active=sh_1618)
+
+sh_2618 = input.bool(true, "", inline="FA6", group=GP_FLVL, display=display.none)
+vl_2618 = input.float(2.618, "", inline="FA6", group=GP_FLVL, display=display.none, active=sh_2618)
+cl_2618 = input.color(#f44336, "", inline="FA6", group=GP_FLVL, display=display.none, active=sh_2618)
+sh_3618 = input.bool(true, "", inline="FA6", group=GP_FLVL, display=display.none)
+vl_3618 = input.float(3.618, "", inline="FA6", group=GP_FLVL, display=display.none, active=sh_3618)
+cl_3618 = input.color(#9c27b0, "", inline="FA6", group=GP_FLVL, display=display.none, active=sh_3618)
+
+sh_4236 = input.bool(true, "", inline="FA7", group=GP_FLVL, display=display.none)
+vl_4236 = input.float(4.236, "", inline="FA7", group=GP_FLVL, display=display.none, active=sh_4236)
+cl_4236 = input.color(#e91e63, "", inline="FA7", group=GP_FLVL, display=display.none, active=sh_4236)
+
+// =============================================================================
+// HISTORICAL FIBS
+// =============================================================================
+showHistFibs  = input.bool(true,    "Show Historical Fibs",        group=GP_HIST)
+histFibColor  = input.color(color.gray, "Historical Fib Color",    group=GP_HIST)
+histFibTransp = input.int(60,       "Historical Fib Transparency", minval=0, maxval=100, group=GP_HIST)
+maxHistSwings = input.int(90,       "Max Historical Swings",       minval=1, maxval=96, group=GP_HIST)
+
+// =============================================================================
+// CONFLUENCE HEATMAP
+// =============================================================================
+showHeatmap   = input.bool(true,    "Show Heatmap",          group=GP_HEAT)
+heatBins      = input.int(50,       "Heatmap Bins",          minval=10, maxval=100, group=GP_HEAT)
+heatLookback  = input.int(300,      "Heatmap Lookback Bars", minval=50, maxval=1000, group=GP_HEAT)
+heatPadding   = input.float(0.10,   "Heatmap Padding (%)",   minval=0.0, maxval=0.5, step=0.01, group=GP_HEAT)
+heatColor     = input.color(#FF6D00, "Heatmap Color",        group=GP_HEAT)
+heatWidth     = input.int(10,       "Heatmap Width (bars)",  minval=2, maxval=50, group=GP_HEAT)
+heatOffset    = input.int(5,        "Heatmap Offset (bars)", minval=1, maxval=50, group=GP_HEAT)
+
+// =============================================================================
+// BUILD ORDERED LEVEL ARRAYS  (negative -> positive for correct linefills)
+// =============================================================================
+var float[] fib_v = array.from(vl_n618, vl_n236, vl_0, vl_236, vl_382, vl_50, vl_618, vl_786, vl_100, vl_1272, vl_1414, vl_1618, vl_2618, vl_3618, vl_4236)
+var color[] fib_c = array.from(cl_n618, cl_n236, cl_0, cl_236, cl_382, cl_50, cl_618, cl_786, cl_100, cl_1272, cl_1414, cl_1618, cl_2618, cl_3618, cl_4236)
+var bool[]  fib_s = array.from(sh_n618, sh_n236, sh_0, sh_236, sh_382, sh_50, sh_618, sh_786, sh_100, sh_1272, sh_1414, sh_1618, sh_2618, sh_3618, sh_4236)
+
+// =============================================================================
+// FIBSWING UDT  (stores completed strong-pivot swings for historical Fibs)
+// =============================================================================
+type FibSwing
+    float hiPrice
+    float loPrice
+    int   hiBar
+    int   loBar
+    int   direction    // +1 = upswing, -1 = downswing
+
+// =============================================================================
+// CONSOLIDATION LOGIC
+// =============================================================================
+avg_range(int N) =>
+    ta.sma(high - low, N)
+
+weak_ok   = avg_range(weak_range_N)   > weak_range_min
+med_ok    = avg_range(med_range_N)    > med_range_min
+strong_ok = avg_range(strong_range_N) > strong_range_min
+
+// =============================================================================
+// PIVOT PLOTTING HELPER  (called at global scope -- no conditional wrapping)
+// =============================================================================
+plotPivot(float _ph, float _pl, int _right, color _cup, color _cdn, int _xOff) =>
+    if not na(_ph)
+        label.new(bar_index[_right] + _xOff, _ph, "PH", style=label.style_label_down, color=_cdn, textcolor=color.white, yloc=yloc.price, size=size.tiny)
+    if not na(_pl)
+        label.new(bar_index[_right] + _xOff, _pl, "PL", style=label.style_label_up, color=_cup, textcolor=color.white, yloc=yloc.price, size=size.tiny)
+
+// =============================================================================
+// PIVOT DETECTION  (ALL ta.pivothigh/low at GLOBAL scope for history consistency)
+// =============================================================================
+float w_ph = ta.pivothigh(w_left, w_right)
+float w_pl = ta.pivotlow(w_left, w_right)
+float m_ph = ta.pivothigh(m_left, m_right)
+float m_pl = ta.pivotlow(m_left, m_right)
+float s_ph = ta.pivothigh(s_left, s_right)
+float s_pl = ta.pivotlow(s_left, s_right)
+
+// Apply consolidation + visibility filters AFTER detection
+float weakHigh   = w_show and weak_ok ? w_ph : na
+float weakLow    = w_show and weak_ok ? w_pl : na
+float medHigh    = m_show and med_ok  ? m_ph : na
+float medLow     = m_show and med_ok  ? m_pl : na
+float strongHigh = strong_ok ? s_ph : na
+float strongLow  = strong_ok ? s_pl : na
+
+// Plot pivot labels at global scope with pre-filtered values
+plotPivot(weakHigh, weakLow, w_right, w_color_up, w_color_down, 0)
+plotPivot(medHigh, medLow, m_right, m_color_up, m_color_down, 1)
+plotPivot(s_show ? strongHigh : na, s_show ? strongLow : na, s_right, s_color_up, s_color_down, 2)
+
+// =============================================================================
+// TRACK LAST CONFIRMED STRONG PIVOTS  (NO REPAINT)
+//
+// ta.pivothigh/low confirms only after s_right bars have passed.
+// Once set, anchorHigh/Low persist via var and only update when a NEW
+// strong pivot is confirmed -- guaranteeing zero repaint.
+//
+// Swing sequencing: completed swings are stored as FibSwing objects.
+// A swing completes when we get an opposite-type pivot (high after low
+// or low after high). Same-type pivots just update the anchor (HH/LL).
+// =============================================================================
+var float anchorHigh    = na
+var float anchorLow     = na
+var int   anchorHighBar = na
+var int   anchorLowBar  = na
+var int   lastAnchorType = 0       // 0=none, 1=high, -1=low
+var array<FibSwing> swings = array.new<FibSwing>()
+
+if not na(strongHigh)
+    // Opposite type: low was last -> upswing completed (low to high)
+    if lastAnchorType == -1 and not na(anchorLow)
+        array.push(swings, FibSwing.new(strongHigh, anchorLow, bar_index - s_right, anchorLowBar, 1))
+        if array.size(swings) > maxHistSwings
+            array.shift(swings)
+    anchorHigh    := strongHigh
+    anchorHighBar := bar_index - s_right
+    lastAnchorType := 1
+
+if not na(strongLow)
+    // Opposite type: high was last -> downswing completed (high to low)
+    if lastAnchorType == 1 and not na(anchorHigh)
+        array.push(swings, FibSwing.new(anchorHigh, strongLow, anchorHighBar, bar_index - s_right, -1))
+        if array.size(swings) > maxHistSwings
+            array.shift(swings)
+    anchorLow    := strongLow
+    anchorLowBar := bar_index - s_right
+    lastAnchorType := -1
+
+// =============================================================================
+// FIBONACCI ANCHOR CALCULATION
+//
+// Direction logic:
+//   - If the most recent strong pivot (by bar location) was a HIGH
+//     then upswing completed, fib retracement points downward
+//     level 0 sits at the HIGH, level 1 at the LOW
+//   - If it was a LOW then mirror
+// =============================================================================
+var float fibStart  = na
+var float fibHeight = na
+var int   fibBarA   = na
+var int   fibBarB   = na
+
+if not na(anchorHigh) and not na(anchorLow) and anchorHigh != anchorLow
+    if anchorHighBar >= anchorLowBar
+        fibStart  := anchorHigh
+        fibHeight := -(anchorHigh - anchorLow)
+        fibBarA   := anchorLowBar
+        fibBarB   := anchorHighBar
+    else
+        fibStart  := anchorLow
+        fibHeight := (anchorHigh - anchorLow)
+        fibBarA   := anchorHighBar
+        fibBarB   := anchorLowBar
+
+// =============================================================================
+// FIBONACCI LEVEL PRICES  (calculated every bar for data-window output)
+// =============================================================================
+fibPrice(float val) =>
+    not na(fibStart) and not na(fibHeight) and fibHeight != 0 ? fibStart + fibHeight * val : na
+
+float fp_0    = fibPrice(vl_0)
+float fp_236  = fibPrice(vl_236)
+float fp_382  = fibPrice(vl_382)
+float fp_50   = fibPrice(vl_50)
+float fp_618  = fibPrice(vl_618)
+float fp_786  = fibPrice(vl_786)
+float fp_100  = fibPrice(vl_100)
+float fp_1618 = fibPrice(vl_1618)
+
+// =============================================================================
+// GLOBAL-SCOPE HEATMAP RANGE  (needs full bar history, must be at global scope)
+// =============================================================================
+float heatHigh = ta.highest(high, heatLookback)
+float heatLow  = ta.lowest(low,   heatLookback)
+
+// =============================================================================
+// HISTORICAL FIB + HEATMAP DRAWING ARRAYS
+// =============================================================================
+var line[] histLines = array.new_line()
+var box[]  heatBoxes = array.new_box()
+
+// =============================================================================
+// LABEL TEXT HELPER
+// =============================================================================
+_fibTxt(float lvl, float price) =>
+    t_lvl   = fibLevFmt == "Values" ? str.tostring(lvl) : str.tostring(lvl * 100) + "%"
+    t_price = "(" + str.tostring(price, format.mintick) + ")"
+    (fibLevShow ? t_lvl : "") + (fibPrices ? " " + t_price : "")
+
+// =============================================================================
+// FIBONACCI DRAWING  (only on last bar -- efficient, no leftover objects)
+// =============================================================================
+var line[]     drawnLines  = array.new_line()
+var label[]    drawnLabels = array.new_label()
+var linefill[] drawnFills  = array.new_linefill()
+
+if barstate.islast
+    // -- Cleanup previous drawings --
+    for ln in drawnLines
+        line.delete(ln)
+    array.clear(drawnLines)
+    for lb in drawnLabels
+        label.delete(lb)
+    array.clear(drawnLabels)
+    for fl in drawnFills
+        linefill.delete(fl)
+    array.clear(drawnFills)
+    for hl in histLines
+        line.delete(hl)
+    array.clear(histLines)
+    for hb in heatBoxes
+        box.delete(hb)
+    array.clear(heatBoxes)
+
+    // -- Draw Fib if we have valid anchors --
+    bool validFib = showFib and not na(fibStart) and not na(fibHeight) and fibHeight != 0
+
+    if validFib
+        line prevLine = na
+
+        for i = 0 to 14
+            doShow = array.get(fib_s, i)
+            val    = array.get(fib_v, i)
+            col    = array.get(fib_c, i)
+
+            if doShow
+                price = fibStart + fibHeight * val
+
+                // Fib level line
+                ln = line.new(fibBarA, price, fibBarB, price, color=col, width=1, extend=extending)
+                array.push(drawnLines, ln)
+
+                // Label
+                lx = fibLblPos == "Left" ? fibBarA : bar_index
+                ls = fibLblPos == "Left" ? label.style_label_right : label.style_label_left
+                lb = label.new(lx, price, _fibTxt(val, price), style=ls, color=color.new(color.white, 100), textcolor=col, size=size.small)
+                array.push(drawnLabels, lb)
+
+                // Linefill between this level and the previous drawn level
+                if not na(prevLine)
+                    newFill = linefill.new(ln, prevLine, color.new(col, fibBgTr))
+                    array.push(drawnFills, newFill)
+
+                prevLine := ln
+
+        // -- Anchor connection line (dashed: pivot-to-pivot) --
+        aPrice = anchorHighBar >= anchorLowBar ? anchorLow  : anchorHigh
+        bPrice = anchorHighBar >= anchorLowBar ? anchorHigh : anchorLow
+        anchorLn = line.new(fibBarA, aPrice, fibBarB, bPrice, color=color.gray, width=1, style=line.style_dashed)
+        array.push(drawnLines, anchorLn)
+
+    // =========================================================================
+    // ZONE 7a: HISTORICAL FIB DRAWING  (dotted lines at 5 key levels per swing)
+    // =========================================================================
+    if showHistFibs and array.size(swings) > 0
+        // Line budget: remaining lines after current Fib drawing
+        int usedLines  = array.size(drawnLines)
+        int availLines = 500 - usedLines
+        int maxDrawable = math.floor(availLines / 5)
+
+        int swingCount = array.size(swings)
+        // Skip the last swing if the current Fib is showing (prevents double-draw)
+        int skipLast = validFib ? 1 : 0
+        int drawableCount = math.max(0, swingCount - skipLast)
+        int toDraw = math.min(drawableCount, maxDrawable)
+
+        // Draw most recent N swings (oldest dropped first)
+        int startIdx = drawableCount - toDraw
+        color hCol = color.new(histFibColor, histFibTransp)
+        float[] histLevels = array.from(0.0, 0.382, 0.5, 0.618, 1.0)
+
+        for si = startIdx to drawableCount - 1
+            FibSwing sw = array.get(swings, si)
+            float swRange = sw.hiPrice - sw.loPrice
+            for li = 0 to 4
+                float lvl = array.get(histLevels, li)
+                float price = sw.direction == 1 ? sw.hiPrice - swRange * lvl : sw.loPrice + swRange * lvl
+                ln = line.new(sw.loBar < sw.hiBar ? sw.loBar : sw.hiBar, price, bar_index, price, color=hCol, width=1, style=line.style_dotted, extend=extend.right)
+                array.push(histLines, ln)
+
+    // =========================================================================
+    // ZONE 7b: CONFLUENCE HEATMAP  (box column showing Fib level clustering)
+    // =========================================================================
+    if showHeatmap and array.size(swings) > 0 and not na(heatHigh) and not na(heatLow)
+        float rangeSpan = heatHigh - heatLow
+        float pad = rangeSpan * heatPadding
+        float hmTop = heatHigh + pad
+        float hmBot = heatLow  - pad
+        float hmRange = hmTop - hmBot
+        float binSize = hmRange / heatBins
+
+        // Count fib levels falling into each bin
+        var int[] binCounts = array.new_int(heatBins, 0)
+        // Reset counts
+        for bi = 0 to heatBins - 1
+            array.set(binCounts, bi, 0)
+
+        float[] heatLevels = array.from(0.0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0)
+
+        int totalSwings = array.size(swings)
+        for si = 0 to totalSwings - 1
+            FibSwing sw = array.get(swings, si)
+            float swRange = sw.hiPrice - sw.loPrice
+            for li = 0 to 6
+                float lvl = array.get(heatLevels, li)
+                float price = sw.direction == 1 ? sw.hiPrice - swRange * lvl : sw.loPrice + swRange * lvl
+                int bin = math.floor((price - hmBot) / binSize)
+                if bin >= 0 and bin < heatBins
+                    array.set(binCounts, bin, array.get(binCounts, bin) + 1)
+
+        // Also count current fib levels if valid
+        if validFib
+            for li = 0 to 6
+                float lvl = array.get(heatLevels, li)
+                float price = fibStart + fibHeight * lvl
+                int bin = math.floor((price - hmBot) / binSize)
+                if bin >= 0 and bin < heatBins
+                    array.set(binCounts, bin, array.get(binCounts, bin) + 1)
+
+        // Render heatmap boxes
+        int boxLeft  = bar_index + heatOffset
+        int boxRight = bar_index + heatOffset + heatWidth
+        for bi = 0 to heatBins - 1
+            int cnt = array.get(binCounts, bi)
+            if cnt > 0
+                float bBot = hmBot + bi * binSize
+                float bTop = bBot + binSize
+                int transp = math.max(10, 95 - cnt * 12)
+                bx = box.new(boxLeft, bTop, boxRight, bBot, border_color=color.new(heatColor, transp), bgcolor=color.new(heatColor, transp), border_width=0)
+                array.push(heatBoxes, bx)
+
+// =============================================================================
+// ALERTS
+// =============================================================================
+alertcondition(not na(strongHigh), "Strong Pivot High", "New strong pivot HIGH confirmed")
+alertcondition(not na(strongLow),  "Strong Pivot Low",  "New strong pivot LOW confirmed")
+
+// =============================================================================
+// DATA WINDOW OUTPUT
+// =============================================================================
+plot(weakHigh,   "Weak High",       color=color.new(w_color_down, 70), display=display.data_window)
+plot(weakLow,    "Weak Low",        color=color.new(w_color_up,   70), display=display.data_window)
+plot(medHigh,    "Medium High",     color=color.new(m_color_down, 70), display=display.data_window)
+plot(medLow,     "Medium Low",      color=color.new(m_color_up,   70), display=display.data_window)
+plot(strongHigh, "Strong High",     color=color.new(s_color_down, 70), display=display.data_window)
+plot(strongLow,  "Strong Low",      color=color.new(s_color_up,   70), display=display.data_window)
+plot(anchorHigh, "Fib Anchor High", color=color.new(#00FF00, 50),      display=display.data_window)
+plot(anchorLow,  "Fib Anchor Low",  color=color.new(#FF0000, 50),      display=display.data_window)
+plot(fp_0,       "Fib 0",          color=color.new(cl_0,    50),      display=display.data_window)
+plot(fp_236,     "Fib 0.236",      color=color.new(cl_236,  50),      display=display.data_window)
+plot(fp_382,     "Fib 0.382",      color=color.new(cl_382,  50),      display=display.data_window)
+plot(fp_50,      "Fib 0.5",        color=color.new(cl_50,   50),      display=display.data_window)
+plot(fp_618,     "Fib 0.618",      color=color.new(cl_618,  50),      display=display.data_window)
+plot(fp_786,     "Fib 0.786",      color=color.new(cl_786,  50),      display=display.data_window)
+plot(fp_100,     "Fib 1.0",        color=color.new(cl_100,  50),      display=display.data_window)
+plot(fp_1618,    "Fib 1.618",      color=color.new(cl_1618, 50),      display=display.data_window)
+plot(array.size(swings), "Swing Count", display=display.data_window)
