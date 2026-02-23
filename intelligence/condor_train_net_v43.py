@@ -1667,6 +1667,18 @@ def train_condor_net_v43(args):
                 print(f"  [WARNING] GATE DEAD ZONE epoch {epoch+1}: "
                       f"gate_logit_std={_gl_std_ep:.3f} > 6.0 "
                       f"(sigmoid saturated on both tails — gradient dying)")
+            # 4. Outlier spike: logit min or max is extreme relative to std,
+            #    indicating a small number of samples dominating gate variance.
+            #    Threshold: |min| or max > 5 × std (5-sigma outlier).
+            _gl_min = all_logits.min().item()
+            _gl_max = all_logits.max().item()
+            _outlier_thresh = 5.0 * max(_gl_std_ep, 1e-6)
+            if abs(_gl_min) > _outlier_thresh or _gl_max > _outlier_thresh:
+                _gl_iqr = (all_logits.quantile(0.75) - all_logits.quantile(0.25)).item()
+                print(f"  [WARNING] GATE LOGIT OUTLIER epoch {epoch+1}: "
+                      f"min={_gl_min:.3f}  max={_gl_max:.3f}  std={_gl_std_ep:.3f}  "
+                      f"IQR={_gl_iqr:.3f}  (extreme logits inflating std — "
+                      f"lambda_std={ls:.4f} may understate routing diversity)")
 
         # ── 6. CHECKPOINT ───────────────────────────────────────────────
         epoch_ts = datetime.now().strftime("%m%d%Y_%H%M%S")
