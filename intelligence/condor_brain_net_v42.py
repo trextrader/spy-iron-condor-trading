@@ -853,7 +853,7 @@ class RelationalLogicLayer(nn.Module):
         if self.projection.bias is not None:
             nn.init.zeros_(self.projection.bias)
             
-        self.steepness = nn.Parameter(torch.tensor(20.0))
+        self.steepness = nn.Parameter(torch.tensor(5.0))   # reduced from 20→5 to prevent tanh step-fn saturation
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -1541,14 +1541,21 @@ class CondorNet(nn.Module):
                 
                 # Use Hierarchical Logic if available, else product
                 if hasattr(self, 'hierarchical_logic'):
-                    super_gate = torch.sigmoid(self.hierarchical_logic(gates))
+                    gate_logit = self.hierarchical_logic(gates).float()
+                    # Batch-mean centering: prevents sigmoid from saturating when the
+                    # projection accumulates a large positive/negative offset.
+                    gate_logit = gate_logit - gate_logit.detach().mean(dim=0, keepdim=True)
+                    super_gate = torch.sigmoid(gate_logit)
+                    # Store detached stats as model attrs — read by training loop each batch.
+                    self._last_gate_logit = gate_logit.detach()
+                    self._last_super_gate = super_gate.detach()
                     if self.verbose_math:
-                        self.log_math("HIERARCHICAL_LOGIC", "lambda = sigmoid(RELATION(S))", super_gate)
-                    
+                        self.log_math("HIERARCHICAL_LOGIC", "lambda = sigmoid(RELATION(S) - mean)", super_gate)
+
                     if not hasattr(self, '_printed_ss_debug'):
                         if gates.shape[0] >= 2:
                             print(f"  [MATH BUG HUNT] S[0:2]\nS[0]: {gates[0].tolist()}\nS[1]: {gates[1].tolist()}")
-                        print(f"  [MATH BUG HUNT] lambda std: {super_gate.float().std().item():.6f}, min: {super_gate.min().item():.6f}, max: {super_gate.max().item():.6f}")
+                        print(f"  [MATH BUG HUNT] gate_logit std: {gate_logit.float().std().item():.6f} | lambda std: {super_gate.float().std().item():.6f}, min: {super_gate.min().item():.6f}, max: {super_gate.max().item():.6f}")
                         self._printed_ss_debug = True
                 else:
                     super_gate = gates.prod(dim=-1, keepdim=True)
@@ -1593,6 +1600,23 @@ class CondorNet(nn.Module):
                 'mean': outputs.detach().mean(dim=0).tolist(),
                 'std': outputs.detach().std(dim=0).tolist(),
             }
+            # Hierarchical gate diagnostics (populated by new logit-centering path)
+            if hasattr(self, '_last_gate_logit'):
+                gl = self._last_gate_logit.float()
+                sg = self._last_super_gate.float()
+                diagnostics['gate_logit_stats'] = {
+                    'mean': gl.mean().item(),
+                    'std':  gl.std().item() if gl.numel() > 1 else 0.0,
+                    'min':  gl.min().item(),
+                    'max':  gl.max().item(),
+                }
+                diagnostics['lambda_quantiles'] = {
+                    'p05':  sg.quantile(0.05).item(),
+                    'p50':  sg.quantile(0.50).item(),
+                    'p95':  sg.quantile(0.95).item(),
+                    'mean': sg.mean().item(),
+                    'std':  sg.std().item() if sg.numel() > 1 else 0.0,
+                }
             return outputs, diagnostics
 
         return outputs, pivot_preds

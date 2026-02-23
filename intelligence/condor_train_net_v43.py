@@ -1438,6 +1438,10 @@ def train_condor_net_v43(args):
         epoch_batches_run = 0
         convergence_manager.reset()
 
+        # Buffers for hierarchical gate diagnostics (accumulated per-batch, logged per-epoch)
+        _gate_logit_buf: list = []
+        _super_gate_buf: list = []
+
         max_batches = 5 if args.dry_run else n_train_batches
         pbar = tqdm(enumerate(train_loader), total=max_batches,
                     desc=f"Epoch {epoch+1}", leave=False)
@@ -1473,6 +1477,11 @@ def train_condor_net_v43(args):
                 )
                 # ── 2. LOSS ─────────────────────────────────────────
                 loss, components = criterion(outputs, labels)
+
+            # Accumulate hierarchical gate stats (set by CondorNet.forward each batch)
+            if hasattr(model, '_last_gate_logit') and model._last_gate_logit is not None:
+                _gate_logit_buf.append(model._last_gate_logit.float().cpu())
+                _super_gate_buf.append(model._last_super_gate.float().cpu())
 
             # Gradient accumulation scaling (F7.12)
             scaled_loss = loss / args.accum_steps
@@ -1602,6 +1611,32 @@ def train_condor_net_v43(args):
         print(f"Epoch {epoch+1:3d} | Train: {avg_train_loss:.4f} | "
               f"Val: {avg_val_loss:.4f} | LR: {scheduler.get_last_lr()[0]:.2e}"
               f"{anneal_str}")
+
+        # ── Hierarchical Gate Diagnostics ────────────────────────────────────
+        if _gate_logit_buf:
+            all_logits = torch.cat(_gate_logit_buf)          # (N_batches, 1)
+            all_lambda = torch.cat(_super_gate_buf)
+            lm  = all_lambda.mean().item()
+            ls  = all_lambda.std().item() if all_lambda.numel() > 1 else 0.0
+            lp05 = all_lambda.quantile(0.05).item()
+            lp50 = all_lambda.quantile(0.50).item()
+            lp95 = all_lambda.quantile(0.95).item()
+            print(f"  Gate logit : mean={all_logits.mean():.3f}  std={all_logits.std():.3f}"
+                  f"  min={all_logits.min():.3f}  max={all_logits.max():.3f}")
+            print(f"  Lambda     : p05={lp05:.3f}  p50={lp50:.3f}  p95={lp95:.3f}"
+                  f"  mu={lm:.3f}  std={ls:.4f}")
+            writer.add_scalar('epoch/gate_logit_std', all_logits.std().item(), epoch)
+            writer.add_scalar('epoch/lambda_mean',    lm,  epoch)
+            writer.add_scalar('epoch/lambda_std',     ls,  epoch)
+            # Saturation warning
+            if lm > 0.95 and ls < 0.01:
+                _sat_n = getattr(model, '_sat_epoch_count', 0) + 1
+                model._sat_epoch_count = _sat_n
+                print(f"  [WARNING] GATE SATURATED epoch {epoch+1}: "
+                      f"lambda_mu={lm:.4f} > 0.95 and lambda_std={ls:.4f} < 0.01 "
+                      f"(consecutive saturated epochs: {_sat_n})")
+            else:
+                model._sat_epoch_count = 0
 
         # ── 6. CHECKPOINT ───────────────────────────────────────────────
         epoch_ts = datetime.now().strftime("%m%d%Y_%H%M%S")
