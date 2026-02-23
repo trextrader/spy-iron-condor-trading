@@ -938,8 +938,10 @@ class CondorNetV43(nn.Module):
         # strategy logits. This wires gradient flow back to the A_matrix,
         # predicate gates, super_sets, and hierarchical logic — without it
         # those modules compute in the forward pass but receive zero gradient.
+        # v42 CondorNet loops over T timesteps and returns final output [B, 10]
+        # (not [B, T, 10]) — no time-dim indexing needed.
         # core_out is float32 (v42 forces .float()); cast to match AMP dtype.
-        strategy_logits = strategy_logits + core_out[:, -1, :].to(dtype=strategy_logits.dtype)
+        strategy_logits = strategy_logits + core_out.to(dtype=strategy_logits.dtype)
 
         pop, ev, max_loss, var_95, cvar_95        = self.risk_head(joint_last)
         pivot_high_probs, pivot_low_probs, pivot_strength = self.pivot_pred_head(joint_last)

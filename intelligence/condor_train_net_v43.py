@@ -612,7 +612,7 @@ def _load_options_chain(path: str, max_contracts: int = 120) -> dict:
         # Days to expiry
         if 'expiration' in g.columns:
             try:
-                exp_dates = pd.to_datetime(g['expiration'])
+                exp_dates = pd.to_datetime(g['expiration'], format='mixed')
                 grid[:, 1] = (exp_dates - ts).dt.days.values.clip(0)
             except Exception:
                 grid[:, 1] = 0
@@ -961,7 +961,7 @@ def export_matrices_csv(model: nn.Module, output_dir: Path, epoch: int) -> dict:
         print(f"  -> A_matrix export failed: {e}")
 
     # B_matrix (if accessible — try backbone.B_theta.weight)
-    backbone = getattr(model, 'backbone', model)
+    backbone = getattr(model, 'condor_core', getattr(model, 'backbone', model))
     try:
         b_theta = getattr(backbone, 'B_theta', None)
         if b_theta is not None and hasattr(b_theta, 'weight'):

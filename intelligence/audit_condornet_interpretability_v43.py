@@ -159,7 +159,8 @@ def extract_learned_logic_v43(
         "b_matrix": {},
     }
 
-    backbone = getattr(model, 'backbone', model)
+    # CondorNetV43 stores the v42 core as model.condor_core (not model.backbone)
+    backbone = getattr(model, 'condor_core', getattr(model, 'backbone', model))
 
     # ── 1. Predicate Gates (v42 canonical thresholds) ──────────────────────
     if hasattr(backbone, 'pred_gates'):
@@ -534,7 +535,7 @@ def export_matrices_to_csv(model: CondorNetV43, output_dir: str = "reports") -> 
     except Exception as e:
         print(f"[AUDIT] A_matrix export failed: {e}")
 
-    backbone = getattr(model, 'backbone', model)
+    backbone = getattr(model, 'condor_core', getattr(model, 'backbone', model))
     try:
         b_theta = getattr(backbone, 'B_theta', None)
         if b_theta is not None and hasattr(b_theta, 'weight'):
