@@ -686,12 +686,33 @@ def build_dataloaders_v43(args) -> Tuple:
     h1_feat = robust_zscore_transform(safe_nan_to_num(h1_feat), h1_med, h1_scl)
 
     # Build labels dict
+    # TF_LABEL_NAMES col layout (set by data_pipeline_v43.py):
+    #   0: target_spot   1: position_size_mult  2: strategy_label
+    #   3: pop           4: ev                  5: max_loss
+    #   6: var_95        7: cvar_95
+    def _col(arr: np.ndarray, idx: int) -> Optional[np.ndarray]:
+        return arr[:min_len, idx] if arr.shape[1] > idx else None
+
     labels = {
-        'target_spot': m5_lbl[:, 0],
-        'position_size': m5_lbl[:, 1],
+        'target_spot':    m5_lbl[:min_len, 0],
+        'position_size':  m5_lbl[:min_len, 1],
+        'strategy_label': (
+            m5_lbl[:min_len, 2] if m5_lbl.shape[1] > 2
+            else np.full(min_len, ABSTAIN_IDX, dtype=np.float32)
+        ),
     }
-    # Add strategy label (defaults to abstain if not available yet)
-    labels['strategy_label'] = np.full(min_len, ABSTAIN_IDX, dtype=np.float32)
+    # Risk labels: only added when data_pipeline_v43.py has been run
+    for col_idx, name in ((3, 'pop'), (4, 'ev'), (5, 'max_loss'),
+                          (6, 'var_95'), (7, 'cvar_95')):
+        v = _col(m5_lbl, col_idx)
+        if v is not None:
+            labels[name] = v
+
+    _have = [k for k in ('pop', 'ev', 'max_loss', 'var_95', 'cvar_95') if k in labels]
+    if _have:
+        print(f"  [DATA] Risk labels loaded from CSV: {_have}")
+    else:
+        print("  [DATA] Risk labels absent — run data_pipeline_v43.py to generate them")
 
     # Load options chain
     chain_path = data_dir / args.options_file

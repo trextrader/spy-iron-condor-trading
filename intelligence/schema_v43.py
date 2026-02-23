@@ -264,8 +264,19 @@ ETL_COMPUTED_FEATURES: List[str] = (
 )
 
 # Labels (excluded from model input features)
-TF_LABEL_NAMES: List[str] = ["target_spot", "position_size_mult"]
-"""These are training targets, not input features."""
+TF_LABEL_NAMES: List[str] = [
+    "target_spot",        # col 0: 5-bar fwd log return × 100 (set by data_pipeline_v43)
+    "position_size_mult", # col 1: position size multiplier (0.5 / 0.75 / 1.0)
+    "strategy_label",     # col 2: strategy class 0-9 (set by data_pipeline_v43)
+    "pop",                # col 3: BSM Probability of Profit [0, 1]
+    "ev",                 # col 4: Expected Value / close
+    "max_loss",           # col 5: max loss / close
+    "var_95",             # col 6: 95% VaR / close
+    "cvar_95",            # col 7: 95% CVaR / close
+]
+"""Training targets. Excluded from model input.
+Columns 0-1 present in raw CSVs. Columns 2-7 added by data_pipeline_v43.py.
+_load_tf_csv fills missing columns with 0 — safe for incremental updates."""
 
 # Sparse features — NaN is semantically meaningful, NEVER impute
 TF_SPARSE_FEATURES: Set[str] = set(TF_PIVOT_FEATURES) | IVR_REVERSAL_SPARSE
