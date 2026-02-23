@@ -1245,21 +1245,20 @@ def train_condor_net_v43(args):
     print(f"[DATA] Train batches: {n_train_batches} | Val batches: {n_val_batches}")
 
     # ── Model ───────────────────────────────────────────────────────────
+    # Keys must exactly match CondorNetV43.__init__ parameter names.
+    # d_joint / d_fused / chain_d_ff are not CondorNetV43 params — omitted.
     config = {
-        'd_tf_in': args.d_tf_in,
-        'd_joint': args.d_joint,
-        'd_chain': args.d_chain,
-        'd_pivot': args.d_pivot,
-        'd_fused': args.d_fused,
-        'n_pivot_features': N_PIVOT_FEATURES,
-        'n_strategy_types': args.n_strategy_types,
+        'd_tf_in':           args.d_tf_in,
+        'd_chain':           args.d_chain,
+        'd_pivot_proj':      args.d_pivot,           # was 'd_pivot'
+        'd_pivot_in':        N_PIVOT_FEATURES,        # was 'n_pivot_features'
+        'n_strategy_types':  args.n_strategy_types,
         'chain_in_features': CHAIN_GRID_CONFIG['in_features'],
-        'chain_d_model': CHAIN_GRID_CONFIG['d_model'],
-        'chain_n_heads': CHAIN_GRID_CONFIG['n_heads'],
-        'chain_n_layers': CHAIN_GRID_CONFIG['n_layers'],
-        'chain_d_ff': CHAIN_GRID_CONFIG['d_ff'],
+        'd_model_chain':     CHAIN_GRID_CONFIG['d_model'],   # was 'chain_d_model'
+        'n_heads_chain':     CHAIN_GRID_CONFIG['n_heads'],   # was 'chain_n_heads'
+        'n_layers_chain':    CHAIN_GRID_CONFIG['n_layers'],  # was 'chain_n_layers'
     }
-    model = build_condornet_v43(config)
+    model = build_condornet_v43(**config)
     model.to(device)
 
     n_params = sum(p.numel() for p in model.parameters())
