@@ -933,6 +933,14 @@ class CondorNetV43(nn.Module):
 
         # ── Step 7: Output Heads ─────────────────────────────────────────────
         strategy_logits, leg_params, entry_signal = self.strategy_head(joint_last)
+
+        # Ensemble v43 attention-based strategy logits with v42 ETD-1/predicate
+        # strategy logits. This wires gradient flow back to the A_matrix,
+        # predicate gates, super_sets, and hierarchical logic — without it
+        # those modules compute in the forward pass but receive zero gradient.
+        # core_out is float32 (v42 forces .float()); cast to match AMP dtype.
+        strategy_logits = strategy_logits + core_out[:, -1, :].to(dtype=strategy_logits.dtype)
+
         pop, ev, max_loss, var_95, cvar_95        = self.risk_head(joint_last)
         pivot_high_probs, pivot_low_probs, pivot_strength = self.pivot_pred_head(joint_last)
         position_size = self.size_head(pop.detach(), joint_last, self.pop_sizing_weight)

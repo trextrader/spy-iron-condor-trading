@@ -27,7 +27,16 @@ import os
 import shutil
 import sys
 import time
+import warnings
 import argparse
+
+# Suppress spurious PyTorch warning: GradScaler's scaler.step(optimizer) registers
+# the optimizer step but PyTorch's scheduler tracker may not see it, causing a
+# false-positive warning about scheduler.step() order. The actual order is correct.
+warnings.filterwarnings(
+    "ignore",
+    message=".*Detected call of `lr_scheduler.step\\(\\)` before `optimizer.step\\(\\)`.*",
+)
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -791,8 +800,8 @@ def _extract_logic_v43(model: nn.Module) -> dict:
         "fuzzy_gates": {},
     }
 
-    # ── v42 backbone — use model.backbone if stored that way, else model itself ──
-    backbone = getattr(model, 'backbone', model)
+    # ── v42 backbone — CondorNetV43 stores it as model.condor_core ──
+    backbone = getattr(model, 'condor_core', getattr(model, 'backbone', model))
 
     # Predicate gates
     if hasattr(backbone, 'pred_gates'):
