@@ -763,6 +763,366 @@ class SmartEpochManager:
 
 
 # =============================================================================
+# EPOCH ANALYTICS — A/B matrix, interpretability JSON, epoch comparison
+# =============================================================================
+
+def _extract_logic_v43(model: nn.Module) -> dict:
+    """
+    Extract learned logic from CondorNetV43.
+    Covers: v42 backbone predicates + supersets, v43 strategy/risk/pivot heads,
+    TF projector Frobenius contributions.
+    """
+    logic: dict = {
+        "predicates": {},
+        "super_set": {},
+        "strategy_head": {},
+        "risk_head": {},
+        "pivot_head": {},
+        "fuzzy_gates": {},
+    }
+
+    # ── v42 backbone — use model.backbone if stored that way, else model itself ──
+    backbone = getattr(model, 'backbone', model)
+
+    # Predicate gates
+    if hasattr(backbone, 'pred_gates'):
+        pg = backbone.pred_gates
+        preds: dict = {}
+        for attr in ['iv_rank_thresh', 'spread_frac_thresh', 'rsi_thresh',
+                     'gap_frac_thresh', 'gamma_thresh', 'iv_regime_frac_thresh',
+                     'put_flow_thresh', 'spread_stress_mult_thresh']:
+            if hasattr(pg, attr):
+                t = getattr(pg, attr)
+                preds[attr.replace('_thresh', '_threshold')] = float(
+                    t.data if isinstance(t, torch.Tensor) else t
+                )
+        if hasattr(pg, 'steepness'):
+            s = pg.steepness
+            preds['steepness'] = float(s.data if isinstance(s, torch.Tensor) else s)
+        logic["predicates"] = preds
+
+    # SuperSets (relational logic)
+    if hasattr(backbone, 'super_sets') and len(backbone.super_sets) > 0:
+        ss_list = []
+        for ss_idx, ss in enumerate(backbone.super_sets):
+            ss_info = {
+                "index": ss_idx,
+                "n_sets": len(ss.sets) if hasattr(ss, 'sets') else 0,
+                "sets": [],
+            }
+            if hasattr(ss, 'sets'):
+                for i, pset in enumerate(ss.sets):
+                    set_info: dict = {"index": i}
+                    if hasattr(pset, 'relational_logic'):
+                        rl = pset.relational_logic
+                        if hasattr(rl, 'steepness'):
+                            st = rl.steepness
+                            set_info["steepness"] = float(
+                                st.data if isinstance(st, torch.Tensor) else st
+                            )
+                        w = rl.projection.weight.detach().cpu().numpy()
+                        n_pairs = getattr(rl, 'n_pairs', w.shape[1] // 3)
+                        if w.shape[1] == n_pairs * 3:
+                            w_r = w.reshape(w.shape[0], n_pairs, 3)
+                            op_w = np.abs(w_r).sum(axis=0)
+                            total = float(op_w.sum()) + 1e-8
+                            set_info["operator_weights"] = {
+                                "<": round(float(op_w[:, 0].sum()) / total * 100, 1),
+                                ">": round(float(op_w[:, 1].sum()) / total * 100, 1),
+                                "=": round(float(op_w[:, 2].sum()) / total * 100, 1),
+                            }
+                            imp = op_w.sum(axis=1)
+                            top5 = np.argsort(imp)[-5:][::-1]
+                            set_info["top_pair_indices"] = [int(p) for p in top5]
+                        else:
+                            set_info["weight_norm"] = float(
+                                rl.projection.weight.norm().item()
+                            )
+                    ss_info["sets"].append(set_info)
+            ss_list.append(ss_info)
+        logic["super_set"] = {"n_super_sets": len(ss_list), "super_sets": ss_list}
+
+    # ── v43 StrategyHead ──
+    if hasattr(model, 'strategy_head'):
+        sh = model.strategy_head
+        head_seq = getattr(sh, 'strategy_head', None)
+        if head_seq is not None:
+            last_linear = None
+            for layer in reversed(list(head_seq.children())):
+                if hasattr(layer, 'weight'):
+                    last_linear = layer
+                    break
+            if last_linear is not None:
+                w = last_linear.weight.detach().cpu().numpy()
+                norms = np.linalg.norm(w, axis=1)
+                logic["strategy_head"] = {
+                    "output_class_norms": {
+                        STRATEGY_TYPES[i]: float(norms[i])
+                        for i in range(min(len(norms), N_STRATEGY_TYPES))
+                    }
+                }
+
+    # ── v43 RiskMetricHead ──
+    if hasattr(model, 'risk_head'):
+        rh = model.risk_head
+        shared = getattr(rh, 'shared', None)
+        if shared is not None:
+            first_linear = next(
+                (m for m in shared.modules() if hasattr(m, 'weight')), None
+            )
+            if first_linear is not None:
+                logic["risk_head"] = {
+                    "shared_input_norm": float(
+                        np.linalg.norm(first_linear.weight.detach().cpu().numpy())
+                    )
+                }
+
+    # ── v43 PivotPredictionHead ──
+    horizons = [5, 10, 20, 35, 70]
+    if hasattr(model, 'pivot_pred_head'):
+        ph = model.pivot_pred_head
+        for attr_name, key in [('pivot_high_head', 'high_horizon_weights'),
+                                ('pivot_low_head', 'low_horizon_weights')]:
+            head = getattr(ph, attr_name, None)
+            if head is not None:
+                last = next(
+                    (m for m in reversed(list(head.modules())) if hasattr(m, 'weight')),
+                    None,
+                )
+                if last is not None:
+                    w = last.weight.detach().cpu().numpy()
+                    norms = np.linalg.norm(w, axis=1)
+                    logic["pivot_head"][key] = {
+                        f"h{h}": float(norms[i])
+                        for i, h in enumerate(horizons[:len(norms)])
+                    }
+
+    # ── v43 TF Projector Frobenius norms ──
+    if hasattr(model, 'tf_projector'):
+        tfp = model.tf_projector
+        contrib: dict = {}
+        for tf_name in ['m1', 'm5', 'm15', 'h1']:
+            proj = getattr(tfp, f'{tf_name}_proj', None)
+            if proj is not None:
+                first = next(
+                    (m for m in proj.modules() if hasattr(m, 'weight')), None
+                )
+                if first is not None:
+                    contrib[tf_name] = float(
+                        np.linalg.norm(first.weight.detach().cpu().numpy(), 'fro')
+                    )
+        logic["fuzzy_gates"]["tf_projector_frobenius"] = contrib
+
+    return logic
+
+
+def export_matrices_csv(model: nn.Module, output_dir: Path, epoch: int) -> dict:
+    """Export A_matrix (and B_matrix if available) per epoch. Returns stability metrics."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    result: dict = {}
+
+    # A_matrix
+    try:
+        with torch.no_grad():
+            A = model.get_A_matrix().cpu().float().numpy()
+        a_path = output_dir / f"Epoch{epoch}_A_Matrix.csv"
+        np.savetxt(str(a_path), A, delimiter=',', fmt='%.8f')
+        eigvals = np.linalg.eigvals(A)
+        mags = np.abs(eigvals)
+        result["a_matrix"] = {
+            "shape": list(A.shape),
+            "spectral_radius": float(np.max(mags)),
+            "top_5_eigenvalue_magnitudes": [float(x) for x in sorted(mags, reverse=True)[:5]],
+            "frobenius_norm": float(np.linalg.norm(A, 'fro')),
+        }
+        print(f"  -> A_matrix: {a_path.name} "
+              f"(rho={result['a_matrix']['spectral_radius']:.4f})")
+    except Exception as e:
+        result["a_matrix"] = {"error": str(e)}
+        print(f"  -> A_matrix export failed: {e}")
+
+    # B_matrix (if accessible — try backbone.B_theta.weight)
+    backbone = getattr(model, 'backbone', model)
+    try:
+        b_theta = getattr(backbone, 'B_theta', None)
+        if b_theta is not None and hasattr(b_theta, 'weight'):
+            with torch.no_grad():
+                B = b_theta.weight.cpu().float().numpy()
+            b_path = output_dir / f"Epoch{epoch}_B_Matrix.csv"
+            np.savetxt(str(b_path), B, delimiter=',', fmt='%.8f')
+            result["b_matrix"] = {
+                "shape": list(B.shape),
+                "frobenius_norm": float(np.linalg.norm(B, 'fro')),
+            }
+            print(f"  -> B_matrix: {b_path.name} "
+                  f"(frob={result['b_matrix']['frobenius_norm']:.4f})")
+    except Exception as e:
+        result["b_matrix"] = {"error": str(e)}
+
+    return result
+
+
+def extract_epoch_interpretability_v43(
+    model: nn.Module,
+    epoch: int,
+    train_loss: float,
+    val_loss: float,
+    args,
+    is_best: bool = False,
+) -> dict:
+    """Per-epoch interpretability report: logic + A/B matrix stability."""
+    n_params = sum(p.numel() for p in model.parameters())
+    report: dict = {
+        "summary": {
+            "epoch": epoch,
+            "version": f"{CN_VERSION}_{DS_VERSION}",
+            "schema_version": SCHEMA_VERSION,
+            "timestamp": datetime.now().isoformat(),
+            "train_loss": float(train_loss),
+            "val_loss": float(val_loss),
+            "val_train_gap": float(abs(val_loss - train_loss)),
+            "is_best": is_best,
+            "parameters": n_params,
+            "architecture": {
+                "d_joint": args.d_joint,
+                "d_chain": args.d_chain,
+                "d_pivot": args.d_pivot,
+                "n_strategy_types": args.n_strategy_types,
+            },
+        },
+    }
+
+    model.eval()
+    with torch.no_grad():
+        logic = _extract_logic_v43(model)
+    model.train()
+    report["learned_logic"] = logic
+
+    # Matrix stability (exports CSV side-effect)
+    mat_dir = Path("models/A_matrices")
+    mat_metrics = export_matrices_csv(model, mat_dir, epoch)
+    report.update(mat_metrics)
+
+    return report
+
+
+def _compare_predicates(best_preds: dict, epoch_preds: dict,
+                        tol: float = 0.01) -> Tuple[int, int]:
+    same, diff = 0, 0
+    all_keys = set(list(best_preds.keys()) + list(epoch_preds.keys()))
+    threshold_keys = [k for k in all_keys if 'threshold' in k or 'thresh' in k]
+    for key in threshold_keys:
+        b_v, e_v = best_preds.get(key), epoch_preds.get(key)
+        if isinstance(b_v, (int, float)) and isinstance(e_v, (int, float)):
+            if abs(b_v - e_v) <= tol:
+                same += 1
+            else:
+                diff += 1
+    return same, diff
+
+
+def _compare_structure(best_ss: dict, epoch_ss: dict,
+                       level: str = 'sets') -> Tuple[int, int]:
+    best_list = best_ss.get('super_sets', [])
+    epoch_list = epoch_ss.get('super_sets', [])
+    if level == 'super_sets':
+        n_b, n_e = len(best_list), len(epoch_list)
+        return min(n_b, n_e), abs(n_b - n_e)
+    same, diff = 0, 0
+    for b_ss, e_ss in zip(best_list, epoch_list):
+        for b_set, e_set in zip(b_ss.get('sets', []), e_ss.get('sets', [])):
+            b_ops = b_set.get('operator_weights', {})
+            e_ops = e_set.get('operator_weights', {})
+            if b_ops and e_ops:
+                if max(b_ops, key=b_ops.get) == max(e_ops, key=e_ops.get):
+                    same += 1
+                else:
+                    diff += 1
+            else:
+                b_n = b_set.get('weight_norm', 0)
+                e_n = e_set.get('weight_norm', 0)
+                if b_n > 0 and abs(b_n - e_n) / (b_n + 1e-8) < 0.01:
+                    same += 1
+                else:
+                    diff += 1
+    return same, diff
+
+
+def _compare_strategy_heads(best_logic: dict, epoch_logic: dict) -> dict:
+    b_sh = best_logic.get('strategy_head', {}).get('output_class_norms', {})
+    e_sh = epoch_logic.get('strategy_head', {}).get('output_class_norms', {})
+    changed = [
+        {"class": cls, "delta": round(abs(b_sh[cls] - e_sh.get(cls, 0)), 4)}
+        for cls in b_sh
+        if abs(b_sh[cls] - e_sh.get(cls, 0)) > 0.05
+    ]
+    return {"changed_classes": changed, "n_changed": len(changed)}
+
+
+def _compare_pivot_heads(best_logic: dict, epoch_logic: dict) -> dict:
+    b_ph = best_logic.get('pivot_head', {})
+    e_ph = epoch_logic.get('pivot_head', {})
+    changes: dict = {}
+    for key in ['high_horizon_weights', 'low_horizon_weights']:
+        b_w = b_ph.get(key, {})
+        e_w = e_ph.get(key, {})
+        for h in b_w:
+            delta = abs(b_w[h] - e_w.get(h, 0))
+            if delta > 0.02:
+                changes[f"{key}_{h}"] = round(delta, 4)
+    return changes
+
+
+def compute_epoch_comparison(epoch_snapshots: list, best_epoch: int) -> dict:
+    """Diff each epoch's learned logic against the best model epoch."""
+    comparison: dict = {"best_model": {"epoch": best_epoch}, "comparisons": {}}
+
+    best_snap = next((s for s in epoch_snapshots if s['epoch'] == best_epoch), None)
+    if best_snap is None:
+        best_snap = epoch_snapshots[0]
+        comparison["best_model"]["note"] = "No best epoch yet — using first as baseline"
+
+    comparison["best_model"]["val_loss"] = best_snap.get('val_loss', 0)
+    comparison["best_model"]["train_loss"] = best_snap.get('train_loss', 0)
+    best_logic = best_snap['interpretability'].get('learned_logic', {})
+
+    for snap in epoch_snapshots:
+        ek = f"Epoch{snap['epoch']}"
+        if snap['epoch'] == best_epoch:
+            comparison["comparisons"][ek] = "BEST MODEL — omitted from diff"
+            continue
+
+        epoch_logic = snap['interpretability'].get('learned_logic', {})
+        pred_same, pred_diff = _compare_predicates(
+            best_logic.get('predicates', {}), epoch_logic.get('predicates', {})
+        )
+        set_same, set_diff = _compare_structure(
+            best_logic.get('super_set', {}), epoch_logic.get('super_set', {}), 'sets'
+        )
+        ss_same, ss_diff = _compare_structure(
+            best_logic.get('super_set', {}), epoch_logic.get('super_set', {}), 'super_sets'
+        )
+        strat_diff = _compare_strategy_heads(best_logic, epoch_logic)
+        pivot_diff = _compare_pivot_heads(best_logic, epoch_logic)
+
+        b_rho = best_snap['interpretability'].get('a_matrix', {}).get('spectral_radius', 0)
+        e_rho = snap['interpretability'].get('a_matrix', {}).get('spectral_radius', 0)
+
+        comparison["comparisons"][ek] = {
+            "same_predicates": pred_same, "different_predicates": pred_diff,
+            "same_sets": set_same, "different_sets": set_diff,
+            "same_super_sets": ss_same, "different_super_sets": ss_diff,
+            "strategy_head_diff": strat_diff,
+            "pivot_head_diff": pivot_diff,
+            "spectral_radius_delta": round(float(e_rho) - float(b_rho), 6),
+            "val_loss": snap.get('val_loss', 0),
+            "train_loss": snap.get('train_loss', 0),
+        }
+
+    return comparison
+
+
+# =============================================================================
 # ARGUMENT PARSER (F7.1)
 # =============================================================================
 
@@ -856,7 +1216,7 @@ def train_condor_net_v43(args):
     print(f"Device: {device} | AMP dtype: {amp_dtype}")
     if device.type == 'cuda':
         print(f"GPU: {torch.cuda.get_device_name()}")
-        print(f"VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
+        print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
     # ── Crash sentinel (F7.9) ───────────────────────────────────────────
     if check_sentinel():
@@ -932,6 +1292,7 @@ def train_condor_net_v43(args):
     patience_counter = 0
     global_step = start_epoch * n_train_batches
     training_start_time = time.time()
+    epoch_snapshots: list = []      # accumulate per-epoch interpretability snapshots
 
     convergence_manager = SmartEpochManager(
         threshold=args.convergence_threshold,
@@ -1198,6 +1559,63 @@ def train_condor_net_v43(args):
             print(f"  -> Epoch {epoch+1} OVERFITTING: val ({avg_val_loss:.4f}) "
                   f">= train ({avg_train_loss:.4f})")
 
+        # ── EPOCH ANALYTICS (interpretability + A/B matrices + comparison) ──
+        interp_report = extract_epoch_interpretability_v43(
+            model, epoch + 1, avg_train_loss, avg_val_loss, args,
+            is_best=(epoch + 1 == best_epoch),
+        )
+        # Update is_best flag on the interp report now that best_epoch is set
+        interp_report["summary"]["is_best"] = (epoch + 1 == best_epoch)
+
+        reports_dir = Path("reports")
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        interp_path = reports_dir / f"Epoch{epoch+1}_{CN_VERSION}_{DS_VERSION}_{epoch_ts}.json"
+        with open(interp_path, 'w') as f:
+            json.dump(interp_report, f, indent=2)
+        print(f"  -> Interpretability: {interp_path.name}")
+
+        # Accumulate snapshot for epoch comparison
+        epoch_snapshots.append({
+            "epoch": epoch + 1,
+            "train_loss": avg_train_loss,
+            "val_loss": avg_val_loss,
+            "timestamp": epoch_ts,
+            "interpretability": interp_report,
+        })
+
+        # Epoch-vs-epoch comparison (after >= 2 epochs)
+        if len(epoch_snapshots) >= 2:
+            comparison = compute_epoch_comparison(epoch_snapshots, best_epoch)
+            # Rotate: delete old comparison file, write fresh one
+            for old_f in glob.glob(str(reports_dir / "EPOCH_Comparison_*.json")):
+                try:
+                    os.remove(old_f)
+                except OSError:
+                    pass
+            comp_path = reports_dir / f"EPOCH_Comparison_{epoch_ts}.json"
+            with open(comp_path, 'w') as f:
+                json.dump(comparison, f, indent=2)
+            print(f"  -> Comparison: {comp_path.name}")
+
+        # TensorBoard: A_matrix spectral radius
+        a_rho = interp_report.get("a_matrix", {}).get("spectral_radius", None)
+        if a_rho is not None:
+            writer.add_scalar('epoch/spectral_radius', a_rho, epoch)
+        b_frob = interp_report.get("b_matrix", {}).get("frobenius_norm", None)
+        if b_frob is not None:
+            writer.add_scalar('epoch/b_matrix_frobenius', b_frob, epoch)
+
+        # GUI Telemetry: epoch summary
+        if emitter:
+            emitter.emit_epoch_summary(
+                epoch=epoch + 1,
+                train_loss=avg_train_loss,
+                val_loss=avg_val_loss,
+                metrics={k: v / max(1, epoch_batches_run)
+                         for k, v in epoch_components.items()},
+                is_best=(epoch + 1 == best_epoch),
+            )
+
         # Early stopping
         if patience_counter >= args.patience:
             print(f"\nEarly stopping at epoch {epoch+1} (patience={args.patience})")
@@ -1214,6 +1632,8 @@ def train_condor_net_v43(args):
     print(f"Best gap: {best_val_train_gap:.4f}")
     print(f"Model saved to: {args.output}")
     print(f"Checkpoints: {args.checkpoint_dir}")
+    print(f"Reports: reports/")
+    print(f"A/B Matrices: models/A_matrices/")
     print(f"{'='*60}")
 
     # Clean exit
