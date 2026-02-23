@@ -1099,8 +1099,26 @@ def _compare_structure(best_ss: dict, epoch_ss: dict,
     best_list = best_ss.get('super_sets', [])
     epoch_list = epoch_ss.get('super_sets', [])
     if level == 'super_sets':
-        n_b, n_e = len(best_list), len(epoch_list)
-        return min(n_b, n_e), abs(n_b - n_e)
+        # Compare internal sets instead of just length
+        for b_ss, e_ss in zip(best_list, epoch_list):
+            for b_set, e_set in zip(b_ss.get('sets', []), e_ss.get('sets', [])):
+                b_ops = b_set.get('operator_weights', {})
+                e_ops = e_set.get('operator_weights', {})
+                if b_ops and e_ops:
+                    if max(b_ops, key=b_ops.get) == max(e_ops, key=e_ops.get):
+                        same += 1
+                    else:
+                        diff += 1
+                else:
+                    b_n = b_set.get('weight_norm', 0)
+                    e_n = e_set.get('weight_norm', 0)
+                    if b_n > 0 and abs(b_n - e_n) / (b_n + 1e-8) < 0.01:
+                        same += 1
+                    else:
+                        diff += 1
+        # Add remaining unmatched as different
+        diff += abs(len(best_list) - len(epoch_list))
+        return same, diff
     same, diff = 0, 0
     for b_ss, e_ss in zip(best_list, epoch_list):
         for b_set, e_set in zip(b_ss.get('sets', []), e_ss.get('sets', [])):
