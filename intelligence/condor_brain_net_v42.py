@@ -925,12 +925,6 @@ class RelationalLogicLayer(nn.Module):
             
             rel_features = torch.cat([lt, gt, eq], dim=-1)
             out = self.projection(rel_features)
-            
-            # Diagnostic hooks for first batch
-            if not hasattr(self, '_printed_relation'):
-                print(f"\n  [MATH BUG HUNT] RELATION(S) shape: {out.shape}, std: {out.float().std().item():.6f}, min: {out.min().item():.6f}, max: {out.max().item():.6f}")
-                self._printed_relation = True
-                
             return out
 
 
