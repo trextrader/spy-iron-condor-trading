@@ -39,7 +39,21 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 
 ---
 
-## TRACK 1 — Options Strategy Universe
+## TRACK 1 — Options Chain Encoder
+
+### F3: options_chain_encoder.py — Transformer Chain Encoder
+- [ ] F3.1 — `build_chain_grid(chain_snapshot, spot, n_strikes=20, n_expiries=3)` → Tensor[N,10]
+- [ ] F3.2 — `OptionsChainEncoder.__init__(in_features=10, d_model=64, n_heads=4, n_layers=2, d_chain=128)`
+- [ ] F3.3 — Linear projection layer: 10 → d_model
+- [ ] F3.4 — Moneyness-based positional encoding (sort contracts by moneyness)
+- [ ] F3.5 — Transformer encoder (2 layers, 4 heads, d_ff=256)
+- [ ] F3.6 — Mean pooling over N_contracts dimension → [B, d_model]
+- [ ] F3.7 — Output projection → [B, d_chain=128]
+- [ ] F3.8 — Handle padding mask for missing contracts (key_padding_mask)
+- [ ] F3.9 — Handle empty chain (all-zero fallback with warning log)
+- [ ] F3.10 — Target label generation integration (`target_labeler_v43.py`)
+
+## TRACK 2 — Options Strategy Universe
 
 ### F4: strategy_generator.py — 9-Strategy Grammar
 - [ ] F4.1 — `Strategy` dataclass: legs, strategy_type, net_credit, breakevens
@@ -59,7 +73,7 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 
 ---
 
-## TRACK 2 — Payoff Calculator
+## TRACK 3 — Payoff Calculator
 
 ### F5: payoff_calculator.py — PoP / EV / VaR
 - [ ] F5.1 — `payoff_at_expiry(strategy, S_T)` → float: net payoff for given underlying price
@@ -74,19 +88,7 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 
 ---
 
-## TRACK 3 — Options Chain Encoder
-
-### F3: options_chain_encoder.py — Transformer Chain Encoder
-- [ ] F3.1 — `build_chain_grid(chain_snapshot, spot, n_strikes=20, n_expiries=3)` → Tensor[N,10]
-- [ ] F3.2 — `OptionsChainEncoder.__init__(in_features=10, d_model=64, n_heads=4, n_layers=2, d_chain=128)`
-- [ ] F3.3 — Linear projection layer: 10 → d_model
-- [ ] F3.4 — Moneyness-based positional encoding (sort contracts by moneyness)
-- [ ] F3.5 — Transformer encoder (2 layers, 4 heads, d_ff=256)
-- [ ] F3.6 — Mean pooling over N_contracts dimension → [B, d_model]
-- [ ] F3.7 — Output projection → [B, d_chain=128]
-- [ ] F3.8 — Handle padding mask for missing contracts (key_padding_mask)
-- [ ] F3.9 — Handle empty chain (all-zero fallback with warning log)
-- [ ] F3.10 — Target label generation integration (`target_labeler_v43.py`)
+## TRACK 4 — Target Label Generation
 
 ### F6: target_labeler_v43.py — Training Label Generation
 - [ ] F6.1 — Load all 4 TF datasets and options chain
@@ -99,7 +101,7 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 
 ---
 
-## TRACK 4 — Model Architecture Updates
+## TRACK 5 — Model Architecture Updates
 
 ### U2: condor_brain_net.py — New Architecture Components
 - [ ] U2.1 — Add `MultiTFProjector(nn.Module)` class: 4 × [B,T,64] → [B,T,256]
@@ -142,7 +144,7 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 
 ---
 
-## TRACK 5 — Training Loop v4.3
+## TRACK 6 — Training Loop v4.3
 
 ### F7: condor_train_net_v43.py — Full Training Loop
 - [ ] F7.1 — Argument parser: --data-dir, --labels, --d-chain, --n-strategy-types, and all existing v42 flags
