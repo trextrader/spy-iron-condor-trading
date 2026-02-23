@@ -881,10 +881,8 @@ class CondorNetV43(nn.Module):
         x_h1:            torch.Tensor,                    # [B, T, d_tf_in]
         chain:           torch.Tensor,                    # [B, N_contracts, 10]
         chain_mask:      Optional[torch.Tensor] = None,   # [B, N_contracts] True=padded
-        pivot_m1:        Optional[torch.Tensor] = None,   # [B, T, 13] pivot mask M1
-        pivot_m5:        Optional[torch.Tensor] = None,   # [B, T, 13]
-        pivot_m15:       Optional[torch.Tensor] = None,   # [B, T, 13]
-        pivot_h1:        Optional[torch.Tensor] = None,   # [B, T, 13]
+        pivot_features:  Optional[torch.Tensor] = None,   # [B, T, 13] actual values (NaN→0)
+        pivot_mask:      Optional[torch.Tensor] = None,   # [B, T, 13] bool — True=NaN
         return_diagnostics: bool = False,
     ) -> CondorNetOutput:
         """
@@ -894,7 +892,8 @@ class CondorNetV43(nn.Module):
             x_m1/m5/m15/h1:  TF feature tensors [B, T, d_tf_in]
             chain:            Options chain grid [B, N, 10]
             chain_mask:       Padding mask [B, N] — True=padded (ignored by attention)
-            pivot_m1/m5/m15/h1: Per-TF pivot masks [B, T, 13] — True=NaN (no event)
+            pivot_features:   Pivot feature values [B, T, 13] — NaN replaced with 0
+            pivot_mask:       Pivot NaN mask [B, T, 13] — True=NaN (no pivot event)
             return_diagnostics: Include full v42 diagnostic dict in output
 
         Returns:
@@ -907,11 +906,10 @@ class CondorNetV43(nn.Module):
         # tf_joint: [B, T, 256]
 
         # ── Step 2: Pivot Projection + Fusion ───────────────────────────────
-        # Use M5 pivot features as primary (M5 is the canonical TF)
-        # Other TF pivots are passed to interpretability hooks only
-        if pivot_m5 is not None:
-            pivot_values = x_m5.new_zeros(B, T, 13)   # Placeholder — real pivots from dataset
-            pivot_embed = self.pivot_proj(pivot_values, pivot_m5)   # [B, T, 16]
+        if pivot_features is not None:
+            if pivot_mask is None:
+                pivot_mask = torch.zeros_like(pivot_features, dtype=torch.bool)
+            pivot_embed = self.pivot_proj(pivot_features, pivot_mask)   # [B, T, 16]
         else:
             pivot_embed = torch.zeros(B, T, self.pivot_proj.d_out, device=x_m1.device, dtype=x_m1.dtype)
 
