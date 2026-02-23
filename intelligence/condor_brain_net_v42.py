@@ -907,7 +907,14 @@ class RelationalLogicLayer(nn.Module):
             gt = torch.sigmoid(self.steepness * tri_diffs)
             eq = torch.exp(-self.steepness * (tri_diffs ** 2))
             rel_features = torch.cat([lt, gt, eq], dim=-1)
-            return self.projection(rel_features)
+            out = self.projection(rel_features)
+            
+            # Diagnostic hooks for first batch
+            if not hasattr(self, '_printed_relation'):
+                print(f"\n  [MATH BUG HUNT] RELATION(S) shape: {out.shape}, std: {out.float().std().item():.6f}, min: {out.min().item():.6f}, max: {out.max().item():.6f}")
+                self._printed_relation = True
+                
+            return out
 
 
 
@@ -1400,6 +1407,12 @@ class CondorNet(nn.Module):
             F_k, phi1 = etd1_kernel(A_full, dt)
             self.log_math("TRANSITION", "F_k = exp(A_full * deltat)", F_k)
             self.log_math("PHI_1", "phi1 = M_pinv @ (expM - I)", phi1)
+            
+            # Definitive numerical verification (one-time per instantiation)
+            if not hasattr(self, '_printed_phi1_diff'):
+                diff = torch.max(torch.abs(phi1 - F_k)).item()
+                print(f"\n  [MATH BUG HUNT] max_abs(phi1 - F_k) = {diff:.8f}")
+                self._printed_phi1_diff = True
 
             # Capture CDE spectral diagnostics
             if return_diagnostics:
@@ -1509,7 +1522,7 @@ class CondorNet(nn.Module):
             # Hierarchical Relational Logic (HAL) Gating
             if self.super_sets is not None:
                 # V21: Concatenate super-set outputs and pass through hierarchical relation layer
-                gates = torch.cat([ss(p_k).float() for ss in self.super_sets], dim=-1)
+                gates = torch.cat([ss(p_final).float() for ss in self.super_sets], dim=-1)
                 self.log_math("SUPER_SETS", "S = concat([SuperSet_i(p) for i in 1..N])", gates)
                 
                 # Use Hierarchical Logic if available, else product
@@ -1517,6 +1530,12 @@ class CondorNet(nn.Module):
                     super_gate = torch.sigmoid(self.hierarchical_logic(gates))
                     if self.verbose_math:
                         self.log_math("HIERARCHICAL_LOGIC", "lambda = sigmoid(RELATION(S))", super_gate)
+                    
+                    if not hasattr(self, '_printed_ss_debug'):
+                        if gates.shape[0] >= 2:
+                            print(f"  [MATH BUG HUNT] S[0:2]\nS[0]: {gates[0].tolist()}\nS[1]: {gates[1].tolist()}")
+                        print(f"  [MATH BUG HUNT] lambda std: {super_gate.float().std().item():.6f}, min: {super_gate.min().item():.6f}, max: {super_gate.max().item():.6f}")
+                        self._printed_ss_debug = True
                 else:
                     super_gate = gates.prod(dim=-1, keepdim=True)
             else:
