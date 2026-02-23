@@ -1,0 +1,36 @@
+{
+  "schema": "loss_weights_v43",
+  "version": "1.0",
+  "description": "9-component loss weights for CondorNet v4.3. Loaded by condor_train_net_v43.py at startup.",
+  "initial": {
+    "strategy_ce":  1.0,
+    "pop_bce":      0.8,
+    "ev_mse":       0.5,
+    "risk_mse":     0.5,
+    "size_mse":     0.4,
+    "spot_mse":     0.3,
+    "fuzzy_var":    0.2,
+    "pattern_ent":  0.1,
+    "robust":       0.2
+  },
+  "annealing": {
+    "type": "linear",
+    "note": "Weights ramp linearly from initial value to end_weight between start_epoch and end_epoch. All other weights remain constant.",
+    "schedules": {
+      "pop_bce":   {"start_epoch": 0,  "end_epoch": 10, "end_weight": 1.2},
+      "ev_mse":    {"start_epoch": 5,  "end_epoch": 20, "end_weight": 0.8},
+      "fuzzy_var": {"start_epoch": 10, "end_epoch": 30, "end_weight": 0.05}
+    }
+  },
+  "component_notes": {
+    "strategy_ce":  "Cross-entropy over 10 strategy classes (9 real + abstain). Constant weight — strategy selection is always critical.",
+    "pop_bce":      "Binary cross-entropy for PoP calibration. Ramps up to 1.2 to emphasize probability accuracy early.",
+    "ev_mse":       "MSE for Expected Value. Delayed ramp allows model to stabilize before EV supervision intensifies.",
+    "risk_mse":     "MSE for VaR + CVaR + max_loss combined. Constant — risk boundary enforcement never relaxes.",
+    "size_mse":     "MSE for fuzzy position size output (0-1). Constant.",
+    "spot_mse":     "MSE for target spot price (auxiliary task). Low weight — serves as regularizer only.",
+    "fuzzy_var":    "Variance penalty on fuzzy gate outputs. Decays to near-zero as model stabilizes.",
+    "pattern_ent":  "Entropy regularizer on predicate pattern activations. Low constant weight.",
+    "robust":       "Huber loss component for outlier robustness in EV/risk predictions."
+  }
+}

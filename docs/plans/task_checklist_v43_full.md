@@ -22,6 +22,16 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 - [ ] F1.11 — Implement `validate_tf_dataframe(df, tf_name) → ValidationReport`
 - [ ] F1.12 — Implement `validate_options_chain(df) → ValidationReport`
 - [ ] F1.13 — Set `SCHEMA_VERSION = "v4.3.0"`
+- [ ] F1.14 — Define `CANONICAL_TF = "m5"` + canonical timestamp contract rules (drop T failing any condition)
+- [ ] F1.15 — Define `SPOT_PRICE_RULE = "M5 close at timestamp T"` constant
+- [ ] F1.16 — Define `CHAIN_GRID_CONFIG` dict (n_strikes=20, n_expiries=3, max_contracts=120, liquidity_min_oi=100, pad rules)
+- [ ] F1.17 — Define `FRICTION_CANDIDATE_WINDOWS = [5, 10, 20, 40, 60]`
+- [ ] F1.18 — Define `strategy_json_version = "1.0"` + required/optional field schema
+- [ ] F1.19 — Define `ABSTAIN_CONFIDENCE_THRESHOLD = 0.60` + `ABSTAIN_LABEL_SCORE_CUTOFF = 0.40`
+- [ ] F1.20 — Define `DTE_AFFINITY` matrix dict (10 types × 4 DTE buckets)
+- [ ] F1.21 — Define `MIN_STRIKE_INCREMENT = 0.50` (SPY)
+- [ ] F1.22 — Define `PIVOT_MASK_CONTRACT = "four_separate"` (not stacked)
+- [ ] F1.23 — Define `TOD_TRADING_MINUTES = 390` (9:30am–4:00pm)
 
 ### F2: data_pipeline_v43.py — ETL + Temporal Alignment
 - [ ] F2.1 — `load_tf_dataset(path, tf_name)` — reads CSV, validates schema, returns DataFrame
@@ -36,6 +46,12 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 - [ ] F2.10 — Handle CROSS_TF anomalies: friction_ratio cast, WeightedAlpha/Slope range normalization
 - [ ] F2.11 — Ensure all timestamps are tz-naive (tz_localize(None)) before alignment
 - [ ] F2.12 — Train/val/test split: 70/15/15 by date (not random shuffle — temporal integrity)
+- [ ] F2.13 — `align_timestamps()`: enforce canonical contract — drop any T failing any TF or chain condition
+- [ ] F2.14 — `fit_and_save_normalizer(train_df, path)` — RobustScaler on train only, save pkl, idempotency guard
+- [ ] F2.15 — `load_normalizer(path)` — load and apply at inference; raise RuntimeError if not yet fit
+- [ ] F2.16 — `compute_friction_features(df)` — 5 binary columns `friction_ok_5/10/20/40/60` (replaces dead friction_ratio)
+- [ ] F2.17 — `compute_tod_features(df)` — `tod_sin`, `tod_cos` from minute_of_day / 390
+- [ ] F2.18 — `compute_regime_persistence(df)` — consecutive bars in same (vol_bucket, trend_bucket)
 
 ---
 
@@ -52,6 +68,9 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 - [ ] F3.8 — Handle padding mask for missing contracts (key_padding_mask)
 - [ ] F3.9 — Handle empty chain (all-zero fallback with warning log)
 - [ ] F3.10 — Target label generation integration (`target_labeler_v43.py`)
+- [ ] F3.11 — Apply `liquidity_min_oi=100` mask: OI < 100 → mask=True in chain_mask (not dropped)
+- [ ] F3.12 — Extract skew signal: `skew = put_iv_25d - call_iv_25d` appended to chain encoder output
+- [ ] F3.13 — Chain encoder diagnostics hook (E1): contract count, expiry/strike/IV distributions per batch
 
 ## TRACK 2 — Options Strategy Universe
 
@@ -70,6 +89,12 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 - [ ] F4.12 — `StrategyGenerator.sample(chain_snapshot, spot, n_candidates)` — sample N from universe
 - [ ] F4.13 — Fail-fast validation: all 4 legs must have valid bid/ask for iron condor (same rule as existing code)
 - [ ] F4.14 — Leg serialization: `Strategy.to_json()` and `Strategy.from_json()`
+- [ ] F4.15 — Strategy ID: `sha256(timestamp|type|sorted_legs)[:16]` — deterministic, globally consistent
+- [ ] F4.16 — Per-leg friction gate: each leg's `spread < HL_N` for at least one N in candidate windows
+- [ ] F4.17 — `build_abstain()` → Strategy with strategy_type="abstain", all risk metrics None
+- [ ] F4.18 — Apply `DTE_AFFINITY` prior score to each candidate strategy at generation time
+- [ ] F4.19 — Strategy JSON validation: assert all required fields present before serialize/save
+- [ ] F4.20 — `StrategyGenerator.compare_all(chain, spot, dte)` → ranked list by composite score
 
 ---
 
@@ -85,6 +110,9 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 - [ ] F5.7 — `compute_var_cvar(strategy, spot, iv, r, tau, confidence=0.95)` → tuple[float, float]
 - [ ] F5.8 — Validate: PoP ∈ [0,1], EV finite, VaR ≥ 0, CVaR ≥ VaR
 - [ ] F5.9 — Unit tests: verify Iron Condor PoP ≈ expected values for known IV/spot scenarios
+- [ ] F5.10 — Per-leg IV: always use `leg.implied_volatility`; fallback to M5 `vol_ewma` with warning log
+- [ ] F5.11 — `compute_pin_risk(strategy, spot)` → bool, True when spot within 0.5 strikes of short leg with DTE≤2
+- [ ] F5.12 — `compute_net_greeks()` validation: net_delta within regime-appropriate bounds
 
 ---
 
@@ -98,6 +126,10 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 - [ ] F6.5 — Save to `data/Datasetv4/v43/labels_v43.parquet` (schema: timestamp, strategy_id, strategy_type, legs_json, pop, ev, max_profit, max_loss, var_95, cvar_95, net_delta, net_gamma, net_theta, net_vega, is_ideal)
 - [ ] F6.6 — Validate label distribution: PoP histogram, strategy type frequency, EV distribution
 - [ ] F6.7 — Log label generation summary (n_timestamps, n_strategies_per_ts, % valid labels)
+- [ ] F6.8 — Generate abstain labels: when best candidate score < 0.40, label = abstain
+- [ ] F6.9 — Add `dte_affinity_score` column to labels parquet
+- [ ] F6.10 — Add `pin_risk_flag` column to labels parquet
+- [ ] F6.11 — Add `friction_gate_ok` column to labels parquet (True only when ALL legs pass)
 
 ---
 
@@ -112,6 +144,10 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 - [ ] U2.6 — Update `CondorNet.forward` to accept (x_m1, x_m5, x_m15, x_h1, chain, chain_mask, pivot_features)
 - [ ] U2.7 — Add backward-compat wrapper: single `x` arg routes to all 4 TFs (for existing backtest engine)
 - [ ] U2.8 — Add `CondorNetOutput` dataclass: all outputs in a single typed return
+- [ ] U2.9 — `PivotProjector(nn.Module)`: Linear(13→16) + ReLU; output fused with TF before chain concat
+- [ ] U2.10 — `TFFusionBlock`: Linear(272→256) + LayerNorm after cat(TF[256], PivotProj[16])
+- [ ] U2.11 — Chain embed broadcast: `chain_embed.unsqueeze(1).expand(-1, T, -1)` then cat → [B,T,384]
+- [ ] U2.12 — `MultiTFContributionRatios` hook: log Frobenius norms of M1/M5/M15/H1 projections per forward
 
 ### U3: condor_brain.py — Facade Updates
 - [ ] U3.1 — Update `CondorSignal` dataclass: add strategy_type, strategy_legs, pop, ev, max_loss, var_95, cvar_95
@@ -119,6 +155,9 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 - [ ] U3.3 — Update `CondorBrain.forward` signature to accept 4-TF input + chain
 - [ ] U3.4 — Update `CondorBrainEngine.predict` to return full CondorSignal (including new risk fields)
 - [ ] U3.5 — Preserve backward compat: existing single-TF callers still work via routing wrapper
+- [ ] U3.6 — `CondorBrainEngine` inference chain snapshot builder: raw chain DataFrame → build_chain_grid()
+- [ ] U3.7 — `CondorBrainEngine` inference strategy constructor: leg_params → real strikes/expiries
+- [ ] U3.8 — Chain encoder inference cache: key=(date, bar_time, round(spot,2)), invalidate on new bar
 
 ### U4: fuzzy_engine.py — PoP-Based Sizing
 - [ ] U4.1 — Define linguistic terms: POP_VERY_HIGH, POP_HIGH, POP_MEDIUM, POP_LOW, POP_VERY_LOW (triangular MFs)
@@ -141,6 +180,20 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 - [ ] U6.3 — Add to `StrategyConfig`: `pop_sizing_weight = 0.5`, `ev_weight = 0.15`, `var_weight = 0.15`
 - [ ] U6.4 — Add to `RunConfig`: `chain_n_strikes = 20`, `chain_n_expiries = 3`, `d_chain = 128`
 - [ ] U6.5 — Update `config.template.py` to match
+- [ ] U6.6 — Add `risk_free_rate: float = 0.05` to RunConfig
+- [ ] U6.7 — Add `grad_accum_steps: int = 4` to RunConfig
+- [ ] U6.8 — Add `chain_liquidity_min_oi: int = 100` to RunConfig
+- [ ] U6.9 — Add `abstain_confidence_threshold: float = 0.60` to StrategyConfig
+- [ ] U6.10 — Add `abstain_label_score_cutoff: float = 0.40` to StrategyConfig
+
+### U7: configs/loss_weights_v43.json — Loss Weight Schedule
+- [ ] U7.1 — Create JSON with initial 9-component weights (strategy_ce=1.0, pop_bce=0.8, ev_mse=0.5, risk_mse=0.5, size_mse=0.4, spot_mse=0.3, fuzzy_var=0.2, pattern_ent=0.1, robust=0.2)
+- [ ] U7.2 — Implement linear annealing loader in training loop (pop_bce→1.2 by ep10, ev_mse→0.8 by ep20, fuzzy_var→0.05 by ep30)
+
+### U8: tests/test_backward_compat_v42.py — Backward Compatibility
+- [ ] U8.1 — Test `CondorBrain(x)` single-tensor call (old v42 signature) still runs without exception
+- [ ] U8.2 — Test `CondorBrainEngine.predict(features_dict)` still returns valid CondorSignal
+- [ ] U8.3 — Test all v42 CondorSignal fields (direction, confidence, size) still present in v43 output
 
 ---
 
@@ -156,6 +209,9 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 - [ ] F7.7 — Validation loop with loss logging and PoP calibration check (ECE)
 - [ ] F7.8 — `--resume` flag: load checkpoint and continue from correct epoch/batch
 - [ ] F7.9 — Crash sentinel: write `.training_active` on start, delete on clean exit
+- [ ] F7.10 — Load `configs/loss_weights_v43.json`; implement linear weight annealing per epoch
+- [ ] F7.11 — `collate_fn`: right-pad chain grids to batch max N_contracts, generate `chain_mask` BoolTensor
+- [ ] F7.12 — Gradient accumulation: `loss /= grad_accum_steps`, zero_grad every N steps
 
 ### F8: training/training_hooks_v43.py — All Track A–D Hooks
 - [ ] F8.1 — `save_convergence_checkpoint(model, optimizer, epoch, batch, loss, config)` (A1.4)
@@ -218,6 +274,9 @@ Legend: ✅ = complete | [ ] = pending | 🔄 = in progress
 - [ ] F8.58 — Batch replay tool: replay forward pass for any batch index (D5.1)
 - [ ] F8.59 — Model DNA export: `model_dna.json` (D6.1)
 - [ ] F8.60 — Validation deep-observe mode (--deep-observe-val) (D0.2)
+- [ ] F8.61 — Strategy distribution drift telemetry (E2): type frequency per epoch + >20% drift alert
+- [ ] F8.62 — Chain encoder diagnostics (E1): contract count, IV/strike/expiry histograms per batch
+- [ ] F8.63 — Multi-TF contribution ratios (E3): M1/M5/M15/H1 Frobenius norm ratios per batch
 
 ---
 

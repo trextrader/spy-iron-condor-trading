@@ -804,4 +804,167 @@ All Track A–D hooks live in `intelligence/training/training_hooks_v43.py`.
 
 ---
 
+## Addendum — Audit Corrections & Missing Specifications (2026-02-23)
+
+> Identified during comprehensive pre-implementation audit. All A-series items are **critical** and
+> must be implemented before any training code is written.
+
+### A1 — Canonical Timestamp Contract
+`align_timestamps()` enforces: valid T = intersection where M1 has ≥5 complete bars ending at T
+(no gaps), M15 has a complete window including T, H1 has a complete window including T, and the
+options chain has a snapshot at or before T (forward-fill ≤5 min). Any T failing any condition is
+**dropped** — no partial rows, ever. `CANONICAL_TF = "m5"` in `schema_v43.py`.
+
+### A2 — Pivot Mask Contract
+Four separate masks: `pivot_mask_m1`, `pivot_mask_m5`, `pivot_mask_m15`, `pivot_mask_h1` — each
+`[B, T, 13]` bool. Passed separately into `CondorNet.forward()`. Stacked `[B, T, 52]` view via
+`torch.cat()` for B3/B4 hooks only. Not used by core attention layers.
+
+### A3 — Normalization Persistence
+Scalers fit on train split only (first 70% by date). Saved:
+`data/Datasetv4/v43/normalization_v43.pkl` (dict of `RobustScaler` per feature group).
+Ternary / bounded / sparse: passthrough. Double-fit raises `RuntimeError`.
+
+### A4 — Spot Price Rule (Global)
+```
+SPOT_PRICE_RULE = "M5 close at canonical timestamp T"
+moneyness = log(M5_close[T] / strike)
+```
+Applied identically in ETL, chain encoder, strategy generator, and payoff calculator.
+Chain mid-price implied spot is **never** used.
+
+### A5 — Chain Snapshot Fallback Rules
+```python
+CHAIN_GRID_CONFIG = {
+    "n_strikes": 20, "n_expiries": 3, "max_contracts": 120,
+    "liquidity_min_oi": 100, "pad_value": 0.0, "pad_with_mask": True,
+}
+```
+<20 strikes → pad+mask. <3 expiries → pad+mask. >120 contracts → keep 60 nearest calls + 60 puts
+by |moneyness|. OI<100 → mask=True (in tensor but ignored by attention).
+
+### B1 — Strategy ID Determinism
+```python
+strategy_id = sha256(f"{timestamp}|{strategy_type}|{sorted_leg_fingerprints}".encode()).hexdigest()[:16]
+```
+Legs sorted by `(expiry_days, strike, option_type)`. Stable across all runs and machines.
+
+### B2 — Strategy JSON Schema v1.0
+`strategy_json_version = "1.0"` in `schema_v43.py`.
+Required: `schema_version`, `strategy_id`, `strategy_type`, `timestamp`, `legs[]`, `friction_gate_ok`.
+Per-leg required: `strike`, `expiry_days`, `option_type`, `direction`, `qty`, `iv`, `bid`, `ask`, `mid`, `open_interest`, `friction_ok`.
+Portfolio optional: `pop`, `ev`, `max_profit`, `max_loss`, `var_95`, `cvar_95`, net greeks, `pin_risk_flag`, `dte_affinity_score`.
+
+### B3 — Risk-Free Rate
+`risk_free_rate: float = 0.05` in `RunConfig`. Constant for v4.3. Per-expiry term structure deferred to v4.4.
+
+### B4 — Per-Leg IV Rule
+Each leg uses `leg.implied_volatility` from its own chain row. No cross-leg averaging.
+Missing IV fallback: `vol_ewma` from M5 at timestamp T + WARNING log.
+
+### C1 — Joint Fusion Architecture
+```
+TF output:       [B, T, 256]   (4 × Linear(64→64) concat)
+PivotProj:       [B, T, 16]    (Linear(13→16) + ReLU)
+Fused TF:        Linear(272→256) + LayerNorm  →  [B, T, 256]
+Chain embed:     [B, 128]  →  broadcast  →  [B, T, 128]
+Joint:           cat  →  [B, T, 384]  →  LayerNorm  →  CondorNet core
+```
+
+### C2 — Pivot Features Routing
+`PivotProjector: Linear(13→16) + ReLU` → fused with TF features before chain concat.
+Also passed **raw** (no transform) to B3/B4 interpretability hooks.
+
+### C3 — Backward Compatibility Tests
+`tests/test_backward_compat_v42.py`: old `CondorBrain(x)` single-tensor call, old
+`CondorBrainEngine.predict(features_dict)`, all v42 `CondorSignal` fields present.
+
+### D1 — Loss Weight Schedule
+`configs/loss_weights_v43.json`: initial weights (strategy_ce=1.0, pop_bce=0.8, ev_mse=0.5,
+risk_mse=0.5, size_mse=0.4, spot_mse=0.3, fuzzy_var=0.2, pattern_ent=0.1, robust=0.2).
+Linear annealing: pop_bce→1.2 by ep10, ev_mse→0.8 by ep20, fuzzy_var→0.05 by ep30.
+
+### D2 — Chain Padding Collation
+`collate_fn`: right-pad to `max(N_contracts)` in batch with 0.0. `chain_mask: BoolTensor[B, N_max]`
+where True=padded (ignored by transformer attention).
+
+### D3 — Gradient Accumulation
+`grad_accum_steps: int = 4` in `RunConfig`. Effective batch = 256×4 = 1024 for Lightning AI A100.
+`loss /= grad_accum_steps`, `optimizer.zero_grad()` every N steps.
+
+### E1 — Chain Encoder Diagnostics
+Per-batch: contract_count mean/min/max, days_to_exp histogram, moneyness histogram, IV mean/std per expiry.
+
+### E2 — Strategy Distribution Drift
+Per-epoch: type frequency %, mean leg count, delta distribution. Alert on >20% shift epoch-over-epoch.
+
+### E3 — Multi-TF Contribution Ratios
+Per forward: `||proj_tf(x_tf)||_F` for each TF, normalized to ratios summing to 1.0.
+
+### F1 — Inference Chain Snapshot Builder
+`CondorBrainEngine`: raw chain DataFrame → `create_chain_snapshot()` + `build_chain_grid()`.
+Cached per closed bar. Cache key: `(date, bar_time, round(spot, 2))`.
+
+### F2 — Inference Strategy Constructor
+`StrategyHead` outputs `leg_params [B, 4, 5]` = (moneyness_offset, expiry_bucket, long_short, qty, delta_target).
+Mapping: `target_strike = spot * exp(moneyness_offset)`, expiry_bucket→[nearest_weekly, 2nd_weekly, monthly].
+Any leg failing friction/liquidity validation → abstain.
+
+### Friction Gate (Hard Rule — Set in Stone)
+```python
+FRICTION_CANDIDATE_WINDOWS = [5, 10, 20, 40, 60]   # bars
+# Per bar, computed in ETL:
+friction_ok_N = int((ask - bid) < (high.rolling(N).max() - low.rolling(N).min()))
+# Gate opens if ANY window passes (model attention selects which N matters most)
+# Applied PER LEG — all legs must individually pass
+```
+Five `friction_ok_*` columns replace the dead `friction_ratio` placeholder in the feature set.
+
+### Abstain / No-Trade (Strategy Class 10)
+`strategy_type = "abstain"` — 10th output class. Triggered when
+`softmax(strategy_logits).max() < abstain_confidence_threshold` (default 0.60).
+Training labels: `is_ideal=True` for abstain when best candidate score < 0.40.
+
+### Time-of-Day Features (added to all TF tensors)
+```python
+tod_sin = sin(2 * pi * minute_of_day / 390)
+tod_cos = cos(2 * pi * minute_of_day / 390)
+```
+390 = trading minutes 9:30am–4:00pm. Both added as features alongside existing 64.
+
+### DTE-Strategy Affinity Matrix (hardcoded prior, `strategy_generator.py`)
+```python
+DTE_AFFINITY = {
+    "single_call":      {"0-2": 0.9, "3-7": 0.7, "8-21": 0.3, "22+": 0.1},
+    "single_put":       {"0-2": 0.9, "3-7": 0.7, "8-21": 0.3, "22+": 0.1},
+    "bull_call_spread": {"0-2": 0.3, "3-7": 0.7, "8-21": 0.9, "22+": 0.5},
+    "bear_put_spread":  {"0-2": 0.3, "3-7": 0.7, "8-21": 0.9, "22+": 0.5},
+    "straddle":         {"0-2": 0.8, "3-7": 0.5, "8-21": 0.3, "22+": 0.1},
+    "strangle":         {"0-2": 0.7, "3-7": 0.5, "8-21": 0.4, "22+": 0.2},
+    "butterfly_call":   {"0-2": 0.2, "3-7": 0.6, "8-21": 0.8, "22+": 0.7},
+    "iron_condor":      {"0-2": 0.2, "3-7": 0.5, "8-21": 0.9, "22+": 1.0},
+    "custom_multi_leg": {"0-2": 0.5, "3-7": 0.7, "8-21": 0.7, "22+": 0.5},
+    "abstain":          {"0-2": 0.0, "3-7": 0.0, "8-21": 0.0, "22+": 0.0},
+}
+```
+
+### Pin Risk Detector (`payoff_calculator.py`)
+```python
+pin_risk = any(
+    abs(spot - leg.strike) < 0.5 * MIN_STRIKE_INCREMENT   # $0.50 for SPY
+    and leg.direction == "short" and leg.expiry_days <= 2
+    for leg in strategy.legs
+)
+```
+
+### Volatility Skew Signal (`options_chain_encoder.py`)
+`skew = put_iv_at_delta_neg25 - call_iv_at_delta_pos25`
+Positive=put skew (crash fear)→favor put spreads/iron condors. Appended to chain encoder output.
+
+### Regime Persistence Counter (`data_pipeline_v43.py`)
+Consecutive bars in same `(vol_bucket, trend_bucket)` where vol_bucket from `atr_pct` quantiles,
+trend_bucket from `psar_trend`. Added as 1 integer feature column.
+
+---
+
 *Last updated: 2026-02-22 | Next milestone: Phase 0 complete (schema_v43.py + ETL validation)*
