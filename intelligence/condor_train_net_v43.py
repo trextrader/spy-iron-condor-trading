@@ -1267,7 +1267,9 @@ def parse_args_v43():
     # === Convergence ===
     p.add_argument('--convergence-threshold', type=float, default=1e-5)
     p.add_argument('--convergence-patience', type=int, default=50)
-    p.add_argument('--convergence-active', action='store_true', default=True)
+    p.add_argument('--convergence-active', action='store_true', default=False,
+                   help='Enable intra-epoch early stopping (default: OFF). '
+                        'When disabled, patience operates at epoch boundaries only.')
 
     # === Checkpointing ===
     p.add_argument('--output', type=str, default='models/condornet_v43_best.pth')
@@ -1478,10 +1480,13 @@ def train_condor_net_v43(args):
                 # ── 2. LOSS ─────────────────────────────────────────
                 loss, components = criterion(outputs, labels)
 
-            # Accumulate hierarchical gate stats (set by CondorNet.forward each batch)
-            if hasattr(model, '_last_gate_logit') and model._last_gate_logit is not None:
-                _gate_logit_buf.append(model._last_gate_logit.float().cpu())
-                _super_gate_buf.append(model._last_super_gate.float().cpu())
+            # Accumulate hierarchical gate stats.
+            # _last_gate_logit is set on the v42 backbone (model.condor_core), not the
+            # top-level CondorNetV43 wrapper — use the same lookup pattern as _extract_logic_v43.
+            _backbone = getattr(model, 'condor_core', model)
+            if hasattr(_backbone, '_last_gate_logit') and _backbone._last_gate_logit is not None:
+                _gate_logit_buf.append(_backbone._last_gate_logit.float().cpu())
+                _super_gate_buf.append(_backbone._last_super_gate.float().cpu())
 
             # Gradient accumulation scaling (F7.12)
             scaled_loss = loss / args.accum_steps
@@ -1613,6 +1618,9 @@ def train_condor_net_v43(args):
               f"{anneal_str}")
 
         # ── Hierarchical Gate Diagnostics ────────────────────────────────────
+        if not _gate_logit_buf:
+            print(f"  [WARNING] Gate stats missing epoch {epoch+1} — "
+                  f"check _last_gate_logit attribute path (expected on model.condor_core)")
         if _gate_logit_buf:
             all_logits = torch.cat(_gate_logit_buf)          # (N_batches, 1)
             all_lambda = torch.cat(_super_gate_buf)

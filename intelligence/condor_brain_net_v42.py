@@ -1552,19 +1552,19 @@ class CondorNet(nn.Module):
                     #   L1: PredicateSet → sigmoid(RelationalLogicLayer(p))   ∈ [0,1]
                     #   L2: SuperSet     → sigmoid(RelationalLogicLayer(S))   ∈ [0,1]
                     #   L3: here         → sigmoid(RelationalLogicLayer(G))   ∈ [0,1]
-                    # The inputs to L3 are already bounded [0,1], so RELATION(G) behaves
-                    # like a logit. We normalise it (mean + std) before the final sigmoid
-                    # so λ distributes around 0.5 regardless of weight magnitude.
+                    # Mean-only centering: removes runaway offset drift while still
+                    # allowing the model to learn a persistent gate bias (open/closed
+                    # preference per regime). Std-normalization was tested in Run #3
+                    # and proved too restrictive — gate_logit std≈1.0 every batch
+                    # means the model cannot accumulate a stable directional signal.
                     gate_logit = self.hierarchical_logic(gates).float()
-                    _gl_mean = gate_logit.detach().mean(dim=0, keepdim=True)
-                    _gl_std  = gate_logit.detach().std(dim=0, keepdim=True)
-                    gate_logit = (gate_logit - _gl_mean) / (_gl_std + 1e-6)
+                    gate_logit = gate_logit - gate_logit.detach().mean(dim=0, keepdim=True)
                     super_gate = torch.sigmoid(gate_logit)
                     # Store detached stats as model attrs — read by training loop each batch.
                     self._last_gate_logit = gate_logit.detach()
                     self._last_super_gate = super_gate.detach()
                     if self.verbose_math:
-                        self.log_math("HIERARCHICAL_LOGIC", "lambda = sigmoid(RELATION(S) - mean)", super_gate)
+                        self.log_math("HIERARCHICAL_LOGIC", "lambda = sigmoid(RELATION(S) - E[RELATION(S)])", super_gate)
 
                     if not hasattr(self, '_printed_ss_debug'):
                         if gates.shape[0] >= 2:
