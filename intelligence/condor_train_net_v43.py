@@ -1100,6 +1100,7 @@ def _compare_structure(best_ss: dict, epoch_ss: dict,
     epoch_list = epoch_ss.get('super_sets', [])
     if level == 'super_sets':
         # Compare internal sets instead of just length
+        same, diff = 0, 0
         for b_ss, e_ss in zip(best_list, epoch_list):
             for b_set, e_set in zip(b_ss.get('sets', []), e_ss.get('sets', [])):
                 b_ops = b_set.get('operator_weights', {})
