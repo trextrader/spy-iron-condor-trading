@@ -853,7 +853,11 @@ class RelationalLogicLayer(nn.Module):
         if self.projection.bias is not None:
             nn.init.zeros_(self.projection.bias)
             
-        self.steepness = nn.Parameter(torch.tensor(5.0))   # reduced from 20→5 to prevent tanh step-fn saturation
+        # Bounded steepness via reparameterization: α = 1 + 7·σ(β) ∈ [1, 8].
+        # Free learnable β cannot push α out of the safe range even after many epochs,
+        # preventing the "fixed for 3 epochs then drifted back" failure mode.
+        # σ(0) = 0.5 → α_init ≈ 4.5 (previously hard-coded 5.0; effectively identical).
+        self._steepness_raw = nn.Parameter(torch.tensor(0.0))  # β; unconstrained
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -866,43 +870,46 @@ class RelationalLogicLayer(nn.Module):
         if self.n_inputs < 2:
             return self.projection(x)
 
+        # Bounded steepness (computed once per forward call): α ∈ [1, 8]
+        steepness = 1.0 + 7.0 * torch.sigmoid(self._steepness_raw)
+
         batch_size = x.shape[0]
         device = x.device
-        
+
         # Pre-compute upper triangle indices once
         iu = torch.triu_indices(self.n_inputs, self.n_inputs, offset=1, device=device)
         n_pairs = iu.shape[1]
-        
+
         # Use chunked processing if too many pairs
         if n_pairs > self.chunk_size:
             # Accumulate result via projection chunks
             out = torch.zeros(batch_size, self.out_dim, device=device)
             weight = self.projection.weight  # (out_dim, n_pairs*3)
-            
+
             for start in range(0, n_pairs, self.chunk_size):
                 end = min(start + self.chunk_size, n_pairs)
                 chunk_iu0 = iu[0, start:end]
                 chunk_iu1 = iu[1, start:end]
-                
+
                 # Compute diffs for this chunk only
                 tri_diffs = x[:, chunk_iu0] - x[:, chunk_iu1]  # (batch, chunk)
-                
+
                 # Soft Logic Operators (Center around 0, unit variance)
                 # Instead of [0, 1] sigmoid which adds positive bias, use tanh [-1, 1]
-                lt = torch.tanh(-self.steepness * tri_diffs)
-                gt = torch.tanh(self.steepness * tri_diffs)
-                eq = torch.exp(-self.steepness * (tri_diffs ** 2)) * 2 - 1 # [-1, 1]
-                
+                lt = torch.tanh(-steepness * tri_diffs)
+                gt = torch.tanh(steepness * tri_diffs)
+                eq = torch.exp(-steepness * (tri_diffs ** 2)) * 2 - 1 # [-1, 1]
+
                 # Accumulate projection contribution from this chunk
                 chunk_features = torch.cat([lt, gt, eq], dim=-1)  # (batch, chunk*3)
-                
+
                 # Slice the weight matrix for this chunk's features
                 feat_start = start * 3
                 feat_end = end * 3
                 chunk_weight = weight[:, feat_start:feat_end]  # (out_dim, chunk*3)
-                
+
                 out += torch.mm(chunk_features, chunk_weight.t())
-            
+
             # Add bias once at the end
             if self.projection.bias is not None:
                 out += self.projection.bias
@@ -910,11 +917,11 @@ class RelationalLogicLayer(nn.Module):
         else:
             # Standard processing for small inputs
             tri_diffs = x[:, iu[0]] - x[:, iu[1]]
-            
+
             # Soft Logic Operators (Center around 0, [-1, 1] variance)
-            lt = torch.tanh(-self.steepness * tri_diffs)
-            gt = torch.tanh(self.steepness * tri_diffs)
-            eq = torch.exp(-self.steepness * (tri_diffs ** 2)) * 2 - 1
+            lt = torch.tanh(-steepness * tri_diffs)
+            gt = torch.tanh(steepness * tri_diffs)
+            eq = torch.exp(-steepness * (tri_diffs ** 2)) * 2 - 1
             
             rel_features = torch.cat([lt, gt, eq], dim=-1)
             out = self.projection(rel_features)
@@ -1541,10 +1548,17 @@ class CondorNet(nn.Module):
                 
                 # Use Hierarchical Logic if available, else product
                 if hasattr(self, 'hierarchical_logic'):
+                    # Architecture note: this is a 3-level sigmoid chain —
+                    #   L1: PredicateSet → sigmoid(RelationalLogicLayer(p))   ∈ [0,1]
+                    #   L2: SuperSet     → sigmoid(RelationalLogicLayer(S))   ∈ [0,1]
+                    #   L3: here         → sigmoid(RelationalLogicLayer(G))   ∈ [0,1]
+                    # The inputs to L3 are already bounded [0,1], so RELATION(G) behaves
+                    # like a logit. We normalise it (mean + std) before the final sigmoid
+                    # so λ distributes around 0.5 regardless of weight magnitude.
                     gate_logit = self.hierarchical_logic(gates).float()
-                    # Batch-mean centering: prevents sigmoid from saturating when the
-                    # projection accumulates a large positive/negative offset.
-                    gate_logit = gate_logit - gate_logit.detach().mean(dim=0, keepdim=True)
+                    _gl_mean = gate_logit.detach().mean(dim=0, keepdim=True)
+                    _gl_std  = gate_logit.detach().std(dim=0, keepdim=True)
+                    gate_logit = (gate_logit - _gl_mean) / (_gl_std + 1e-6)
                     super_gate = torch.sigmoid(gate_logit)
                     # Store detached stats as model attrs — read by training loop each batch.
                     self._last_gate_logit = gate_logit.detach()

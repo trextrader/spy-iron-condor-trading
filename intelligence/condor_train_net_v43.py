@@ -1625,18 +1625,30 @@ def train_condor_net_v43(args):
                   f"  min={all_logits.min():.3f}  max={all_logits.max():.3f}")
             print(f"  Lambda     : p05={lp05:.3f}  p50={lp50:.3f}  p95={lp95:.3f}"
                   f"  mu={lm:.3f}  std={ls:.4f}")
-            writer.add_scalar('epoch/gate_logit_std', all_logits.std().item(), epoch)
+            _gl_std_ep = all_logits.std().item()
+            writer.add_scalar('epoch/gate_logit_std', _gl_std_ep, epoch)
             writer.add_scalar('epoch/lambda_mean',    lm,  epoch)
             writer.add_scalar('epoch/lambda_std',     ls,  epoch)
-            # Saturation warning
+            # ── Gate health checks (three independent failure modes) ──────────
+            # 1. Always-on saturation: gate stuck at 1 → model ignores gate path
             if lm > 0.95 and ls < 0.01:
                 _sat_n = getattr(model, '_sat_epoch_count', 0) + 1
                 model._sat_epoch_count = _sat_n
-                print(f"  [WARNING] GATE SATURATED epoch {epoch+1}: "
-                      f"lambda_mu={lm:.4f} > 0.95 and lambda_std={ls:.4f} < 0.01 "
-                      f"(consecutive saturated epochs: {_sat_n})")
+                print(f"  [WARNING] GATE SATURATED (always-on) epoch {epoch+1}: "
+                      f"lambda_mu={lm:.4f} > 0.95  lambda_std={ls:.4f} < 0.01 "
+                      f"(consecutive: {_sat_n})")
             else:
                 model._sat_epoch_count = 0
+            # 2. Always-off collapse: gate stuck at 0 → z_gated ≈ 0 every step
+            if lm < 0.05 and ls < 0.01:
+                print(f"  [WARNING] GATE DEAD (always-off) epoch {epoch+1}: "
+                      f"lambda_mu={lm:.4f} < 0.05  lambda_std={ls:.4f} < 0.01")
+            # 3. Dead zone: logit range too wide → sigmoid saturated on both tails,
+            #    gradients vanish even if mean λ looks healthy.
+            if _gl_std_ep > 6.0:
+                print(f"  [WARNING] GATE DEAD ZONE epoch {epoch+1}: "
+                      f"gate_logit_std={_gl_std_ep:.3f} > 6.0 "
+                      f"(sigmoid saturated on both tails — gradient dying)")
 
         # ── 6. CHECKPOINT ───────────────────────────────────────────────
         epoch_ts = datetime.now().strftime("%m%d%Y_%H%M%S")
