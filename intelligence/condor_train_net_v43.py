@@ -216,7 +216,8 @@ class V43Dataset(torch.utils.data.Dataset):
         h1_features: np.ndarray,    # [N_total, d_tf]
         m5_pivots: np.ndarray,      # [N_total, 13] — NaN-bearing pivot features
         labels: dict,               # {name: np.ndarray[N_total, ...]}
-        chain_snapshots: dict,      # {idx: np.ndarray[N_contracts, 10]}
+        chain_snapshots: dict,      # {date_str: np.ndarray[N_contracts, 10]}
+        m5_dates: np.ndarray,       # [N_total] date strings for matching options
         seq_len: int = 64,
     ):
         self.m1 = m1_features
@@ -226,6 +227,7 @@ class V43Dataset(torch.utils.data.Dataset):
         self.pivots = m5_pivots
         self.labels = labels
         self.chain_snapshots = chain_snapshots
+        self.m5_dates = m5_dates
         self.seq_len = seq_len
         self.N = len(m5_features)
 
@@ -250,8 +252,9 @@ class V43Dataset(torch.utils.data.Dataset):
 
         # Chain snapshot for the last timestep in the window
         target_idx = e - 1
-        if target_idx in self.chain_snapshots:
-            chain = torch.tensor(self.chain_snapshots[target_idx], dtype=torch.float32)
+        target_date = self.m5_dates[target_idx]
+        if target_date in self.chain_snapshots:
+            chain = torch.tensor(self.chain_snapshots[target_date], dtype=torch.float32)
             chain_mask = torch.zeros(chain.shape[0], dtype=torch.bool)
         else:
             # No chain data — single dummy contract, fully masked
@@ -594,8 +597,6 @@ def _load_options_chain(path: str, max_contracts: int = 120) -> dict:
     # Schema: moneyness, days_to_exp, iv, delta, gamma, theta, vega, bid, ask, oi_norm
     snapshots = {}
     grouped = df.groupby('timestamp')
-    ts_sorted = sorted(grouped.groups.keys())
-    ts_to_idx = {ts: i for i, ts in enumerate(ts_sorted)}
 
     for ts, group in grouped:
         n = min(len(group), max_contracts)
@@ -637,9 +638,8 @@ def _load_options_chain(path: str, max_contracts: int = 120) -> dict:
         oi_max = oi_log.max() if oi_log.max() > 0 else 1.0
         grid[:, 9] = oi_log / oi_max
 
-        idx = ts_to_idx.get(ts, None)
-        if idx is not None:
-            snapshots[idx] = grid
+        date_str = ts.strftime('%Y-%m-%d') if hasattr(ts, 'strftime') else str(ts)[:10]
+        snapshots[date_str] = grid
 
     print(f"    -> Built {len(snapshots)} chain snapshots")
     return snapshots
@@ -660,17 +660,46 @@ def build_dataloaders_v43(args) -> Tuple:
     m15_feat, m15_piv, _ = _load_tf_csv(str(data_dir / args.m15_file), "m15")
     h1_feat, h1_piv, _ = _load_tf_csv(str(data_dir / args.h1_file), "h1")
 
-    # Use the shortest TF length as the alignment point
-    min_len = min(len(m1_feat), len(m5_feat), len(m15_feat), len(h1_feat))
-    print(f"  [DATA] Aligned length: {min_len} (m1={len(m1_feat)}, m5={len(m5_feat)}, "
-          f"m15={len(m15_feat)}, h1={len(h1_feat)})")
+    # ── Canonical alignment: M5 is the master clock (schema_v43 contract) ──
+    # Each TF CSV is at its native resolution (M1=1min, M5=5min, M15=15min, H1=1hr).
+    # Align all to M5 length by forward-filling coarser TFs and subsampling M1.
+    # Previous approach (min_len = shortest = H1 = 1,661) discarded 91% of data.
+    canon_len = len(m5_feat)  # 18,494 — the authoritative length
 
-    m1_feat = m1_feat[:min_len]
-    m5_feat = m5_feat[:min_len]
-    m15_feat = m15_feat[:min_len]
-    h1_feat = h1_feat[:min_len]
-    m5_piv = m5_piv[:min_len]
-    m5_lbl = m5_lbl[:min_len]
+    def _upsample_to_canon(feat: np.ndarray, target: int) -> np.ndarray:
+        """Forward-fill a coarser-TF array to M5 canonical length."""
+        ratio = max(round(target / len(feat)), 1)
+        out = np.repeat(feat, ratio, axis=0)
+        if len(out) < target:                       # pad last row if short
+            out = np.vstack([out, np.tile(out[-1:], (target - len(out), 1))])
+        return out[:target]
+
+    def _downsample_to_canon(feat: np.ndarray, target: int) -> np.ndarray:
+        """Subsample a finer-TF array to M5 canonical length (last bar of window)."""
+        ratio = max(len(feat) // target, 1)
+        idx = np.arange(ratio - 1, ratio * target, ratio)[:target]
+        return feat[idx]
+
+    print(f"  [DATA] Native lengths: m1={len(m1_feat)}, m5={len(m5_feat)}, "
+          f"m15={len(m15_feat)}, h1={len(h1_feat)}")
+
+    # M1 (finer) → subsample to M5 resolution (last M1 bar of each 5-bar window)
+    m1_feat = _downsample_to_canon(m1_feat, canon_len)
+    # M15, H1 (coarser) → forward-fill to M5 resolution
+    m15_feat = _upsample_to_canon(m15_feat, canon_len)
+    h1_feat  = _upsample_to_canon(h1_feat,  canon_len)
+
+    print("  [DATA] Extracting alignment dates from M5...")
+    m5_df = pd.read_csv(str(data_dir / args.m5_file), usecols=['timestamp'])
+    m5_dates = m5_df['timestamp'].str.slice(0, 10).values
+
+    # M5 and its pivots/labels are already canonical length
+    m5_piv = m5_piv[:canon_len]
+    m5_lbl = m5_lbl[:canon_len]
+    m5_dates = m5_dates[:canon_len]
+
+    min_len = canon_len  # keep variable name for downstream splits
+    print(f"  [DATA] Aligned length: {min_len} (canonical M5 — all TFs resampled)")
 
     # Normalize features (fit on train split only = first 70%)
     split_train = int(min_len * 0.70)
@@ -729,7 +758,8 @@ def build_dataloaders_v43(args) -> Tuple:
         m15_feat[:split_train], h1_feat[:split_train],
         m5_piv[:split_train],
         {k: v[:split_train] for k, v in labels.items()},
-        {k: v for k, v in chain_snapshots.items() if k < split_train},
+        chain_snapshots,
+        m5_dates[:split_train],
         seq_len=args.lookback,
     )
     val_ds = V43Dataset(
@@ -737,8 +767,8 @@ def build_dataloaders_v43(args) -> Tuple:
         m15_feat[split_train:split_val], h1_feat[split_train:split_val],
         m5_piv[split_train:split_val],
         {k: v[split_train:split_val] for k, v in labels.items()},
-        {k - split_train: v for k, v in chain_snapshots.items()
-         if split_train <= k < split_val},
+        chain_snapshots,
+        m5_dates[split_train:split_val],
         seq_len=args.lookback,
     )
 
