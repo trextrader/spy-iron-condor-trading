@@ -847,6 +847,12 @@ class RelationalLogicLayer(nn.Module):
         relational_dim = self.n_pairs * 3 if n_inputs > 1 else n_inputs
         
         self.projection = nn.Linear(relational_dim, out_dim)
+        # BLUEPRINT CORE 4: Properly scale the logic projection to unit variance
+        # Standard initialization makes W too small, causing output to vanish to 0.0 -> Sigmoid(0)=0.5
+        nn.init.xavier_normal_(self.projection.weight, gain=1.0)
+        if self.projection.bias is not None:
+            nn.init.zeros_(self.projection.bias)
+            
         self.steepness = nn.Parameter(torch.tensor(20.0))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -881,10 +887,11 @@ class RelationalLogicLayer(nn.Module):
                 # Compute diffs for this chunk only
                 tri_diffs = x[:, chunk_iu0] - x[:, chunk_iu1]  # (batch, chunk)
                 
-                # Soft Logic Operators
-                lt = torch.sigmoid(-self.steepness * tri_diffs)
-                gt = torch.sigmoid(self.steepness * tri_diffs)
-                eq = torch.exp(-self.steepness * (tri_diffs ** 2))
+                # Soft Logic Operators (Center around 0, unit variance)
+                # Instead of [0, 1] sigmoid which adds positive bias, use tanh [-1, 1]
+                lt = torch.tanh(-self.steepness * tri_diffs)
+                gt = torch.tanh(self.steepness * tri_diffs)
+                eq = torch.exp(-self.steepness * (tri_diffs ** 2)) * 2 - 1 # [-1, 1]
                 
                 # Accumulate projection contribution from this chunk
                 chunk_features = torch.cat([lt, gt, eq], dim=-1)  # (batch, chunk*3)
@@ -903,9 +910,12 @@ class RelationalLogicLayer(nn.Module):
         else:
             # Standard processing for small inputs
             tri_diffs = x[:, iu[0]] - x[:, iu[1]]
-            lt = torch.sigmoid(-self.steepness * tri_diffs)
-            gt = torch.sigmoid(self.steepness * tri_diffs)
-            eq = torch.exp(-self.steepness * (tri_diffs ** 2))
+            
+            # Soft Logic Operators (Center around 0, [-1, 1] variance)
+            lt = torch.tanh(-self.steepness * tri_diffs)
+            gt = torch.tanh(self.steepness * tri_diffs)
+            eq = torch.exp(-self.steepness * (tri_diffs ** 2)) * 2 - 1
+            
             rel_features = torch.cat([lt, gt, eq], dim=-1)
             out = self.projection(rel_features)
             
@@ -1518,6 +1528,10 @@ class CondorNet(nn.Module):
                 S_t_minus_1[:, -1].float(),
                 gamma[:, -1].float(),
             ).float()
+            
+            if not hasattr(self, '_printed_pfinal_debug'):
+                print(f"  [MATH BUG HUNT] p_final shape: {p_final.shape}, std: {p_final.float().std().item():.6f}, min: {p_final.min().item():.6f}, max: {p_final.max().item():.6f}")
+                self._printed_pfinal_debug = True
 
             # Hierarchical Relational Logic (HAL) Gating
             if self.super_sets is not None:

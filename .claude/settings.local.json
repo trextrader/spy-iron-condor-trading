@@ -38,7 +38,12 @@
       "Bash(if not exist \"C:\\\\SPYOptionTrader_test\\\\data_factory\\\\scripts\" mkdir \"C:\\\\SPYOptionTrader_test\\\\data_factory\\\\scripts\")",
       "Bash(powershell -Command:*)",
       "Bash(py -3.12 data_factory/scripts/options_math.py:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(py -3 -c:*)",
+      "Bash(py -3.12 -W ignore -c:*)",
+      "Bash(printf:*)",
+      "Bash(# Write:*)",
+      "Bash(py -3.12:*)"
     ]
   }
 }
