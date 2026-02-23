@@ -924,7 +924,32 @@ class CondorNetV43(nn.Module):
         # ── Step 5: v42 Core (ETD-1 + Predicate Logic) ──────────────────────
         # Feed fused TF (adapted) into v42 CondorNet for predicate/set dynamics
         core_input = self.core_input_proj(tf_fused)   # [B, T, v42.d_input]
-        core_out, core_diag = self.condor_core(core_input, return_diagnostics=True)
+        
+        # BLUEPRINT FIX: Safely extract proxy physics features from x_m1 to prevent 
+        # lambda gating constancy (all-zero collapse).
+        def safe_extract(name: str, fallback_val: float = 0.0):
+            try:
+                idx = TF_FEATURE_NAMES.index(name)
+                return x_m1[:, :, idx]
+            except ValueError:
+                return torch.full((B, T), fallback_val, device=x_m1.device, dtype=x_m1.dtype)
+
+        close_p = safe_extract("close", 500.0)
+        # S_t_minus_1 is shifted close with duplication on 0th step
+        close_p_m1 = torch.cat([close_p[:, :1], close_p[:, :-1]], dim=1)
+
+        core_out, core_diag = self.condor_core(
+            core_input, 
+            iv_rank=safe_extract("fuzzy_reversion_11", 50.0),
+            bid_ask_spread=safe_extract("spread_ratio", 0.01),
+            price=close_p,
+            rsi=safe_extract("rsi_dyn", 50.0),
+            delta_rsi=safe_extract("log_return", 0.0), # proxy for rate of change
+            S_t=close_p,
+            S_t_minus_1=close_p_m1,
+            gamma=safe_extract("gap_risk_score", 0.0), # proxy for curvature risk
+            return_diagnostics=True
+        )
         # core_out: [B, T, d_x] — last timestep used for heads
 
         # ── Step 6: Aggregate to [B, d_joint] for output heads ───────────────
@@ -1059,21 +1084,21 @@ if __name__ == "__main__":
     print("CondorNet™ v4.3 — Architecture Self-Test")
     print("=" * 70)
 
-    B, T, F = 2, 64, 64       # batch=2, seq=64, features=64
+    B, T, F_dim = 2, 64, 64       # batch=2, seq=64, features=64
     N = 40                     # contracts in chain
 
-    model = build_condornet_v43(d_tf_in=F, verbose=True)
+    model = build_condornet_v43(d_tf_in=F_dim, verbose=True)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"\nTotal parameters: {n_params:,}")
 
     # Build dummy inputs
-    x = torch.randn(B, T, F)
+    x = torch.randn(B, T, F_dim)
     chain = torch.randn(B, N, 10)
     chain_mask = torch.zeros(B, N, dtype=torch.bool)
     chain_mask[:, 35:] = True   # Last 5 are padded
 
     print(f"\nForward pass test:")
-    print(f"  Input TF:    ({B}, {T}, {F}) × 4 TFs")
+    print(f"  Input TF:    ({B}, {T}, {F_dim}) × 4 TFs")
     print(f"  Chain grid:  ({B}, {N}, 10) | mask: {chain_mask.sum()} padded")
 
     with torch.no_grad():
