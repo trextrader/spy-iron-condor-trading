@@ -429,10 +429,12 @@ class CondorLossV43(nn.Module):
             components['strategy_ce'] = torch.tensor(0.0, device=device)
 
         # === 2. PoP BCE ===
+        # NOTE: F.binary_cross_entropy is unsafe inside AMP autocast.
+        # Cast both operands to float32 explicitly to bypass the restriction.
         if 'pop' in labels:
             pop_target = labels['pop'].unsqueeze(-1) if labels['pop'].dim() == 1 else labels['pop']
             components['pop_bce'] = F.binary_cross_entropy(
-                outputs.pop.clamp(1e-7, 1 - 1e-7), pop_target
+                outputs.pop.float().clamp(1e-7, 1 - 1e-7), pop_target.float()
             )
         else:
             components['pop_bce'] = torch.tensor(0.0, device=device)
