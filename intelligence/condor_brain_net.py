@@ -1385,6 +1385,11 @@ class CondorNet(nn.Module):
             F_k, phi1 = etd1_kernel(A_full, dt)
             self.log_math("TRANSITION", "F_k = exp(A_full * deltat)", F_k)
             self.log_math("PHI_1", "phi1 = M_pinv @ (expM - I)", phi1)
+            
+            if not hasattr(self, '_printed_phi1_diff'):
+                diff_phi1 = torch.max(torch.abs(phi1 - F_k)).item()
+                print(f"\n  [MATH BUG HUNT] max_abs(phi1 - F_k) = {diff_phi1:.8f}")
+                self._printed_phi1_diff = True
 
             # === TIME LOOP ===
             for t in range(seq_len - 1):
@@ -1480,14 +1485,26 @@ class CondorNet(nn.Module):
             # Hierarchical Relational Logic (HAL) Gating
             if self.super_sets is not None:
                 # V21: Concatenate super-set outputs and pass through hierarchical relation layer
-                gates = torch.cat([ss(p_k).float() for ss in self.super_sets], dim=-1)
+                gates = torch.cat([ss(p_final).float() for ss in self.super_sets], dim=-1)
                 self.log_math("SUPER_SETS", "S = concat([SuperSet_i(p) for i in 1..N])", gates)
+                
+                if not hasattr(self, '_printed_ss_debug'):
+                    shapes = [ss(p_final).shape for ss in self.super_sets]
+                    print(f"  [MATH BUG HUNT] SuperSet pre-concat shapes: {shapes}")
+                    print(f"  [MATH BUG HUNT] S min={gates.min().item():.6f}, max={gates.max().item():.6f}")
+                    if gates.shape[0] > 1:
+                        diff_S = torch.mean(torch.abs(gates[0] - gates[1])).item()
+                        print(f"  [MATH BUG HUNT] S[0] - S[1] L1 norm: {diff_S:.8f}")
+                    self._printed_ss_debug = True
                 
                 # Use Hierarchical Logic if available, else product
                 if hasattr(self, 'hierarchical_logic'):
                     super_gate = torch.sigmoid(self.hierarchical_logic(gates))
                     if self.verbose_math:
                         self.log_math("HIERARCHICAL_LOGIC", "lambda = sigmoid(RELATION(S))", super_gate)
+                    if hasattr(self, '_printed_ss_debug') and not hasattr(self, '_printed_lambda_debug'):
+                        print(f"  [MATH BUG HUNT] lambda min={super_gate.min().item():.6f}, max={super_gate.max().item():.6f}")
+                        self._printed_lambda_debug = True
                 else:
                     super_gate = gates.prod(dim=-1, keepdim=True)
             else:

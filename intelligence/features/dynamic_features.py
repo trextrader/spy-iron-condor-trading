@@ -206,7 +206,7 @@ def compute_dynamic_psar(
     atr_arr = atr_pct.to_numpy()
     
     # Reference ATR for scaling
-    atr_ref = np.nanmean(atr_arr)
+    atr_ref = np.nanmean(atr_arr) if len(atr_arr) > 0 and not np.isnan(atr_arr).all() else 0.0
     if atr_ref <= 0 or np.isnan(atr_ref):
         atr_ref = 0.01
     
