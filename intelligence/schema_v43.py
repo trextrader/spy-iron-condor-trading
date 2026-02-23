@@ -164,9 +164,103 @@ TOD_FEATURE_NAMES: List[str] = ["tod_sin", "tod_cos"]
 REGIME_PERSISTENCE_FEATURE: str = "regime_persistence"
 """Integer: count of consecutive bars in same (vol_bucket, trend_bucket)."""
 
+# =============================================================================
+# IVR REVERSAL ENGINE FEATURES
+# Derived from IVR Reversal Engine PineScript logic.
+# These 9 features encode the IVR×stretch×pivot composite reversal signals.
+# Computed during ETL from raw OHLCV + IV data. Model learns OPTIMAL WEIGHTS
+# and COMBINATIONS — it is NOT hard-coding the PineScript logic.
+#
+# ETL computation formulas (MA_len=20, ATR_len=14, IVR_len=252):
+#   ivr                   = (iv_src - iv_252d_low) / (iv_252d_high - iv_252d_low)
+#   price_stretch         = (close - SMA(close, 20)) / (ATR(14) + ε)      clipped ±10
+#   ivr_zone              = +1 if ivr>0.70, -1 if ivr<0.30, else 0        ternary
+#   stretch_zone          = +1 if price_stretch>2.0, -1 if <-2.0, else 0  ternary
+#   reversal_score        = 1.0×ivr + 1.0×price_stretch + (pivotStrength × pivotDir)
+#   strong_pivot_slope_h  = slope of line connecting last two strong PIVOT HIGHs
+#                           = (ph2 - ph1) / max(bar_dist_h, 1); NaN if < 2 strong highs
+#   strong_pivot_slope_l  = slope of line connecting last two strong PIVOT LOWs
+#   strong_pivot_bar_dist_h = bar count between last two strong PIVOT HIGHs; NaN initially
+#   strong_pivot_bar_dist_l = bar count between last two strong PIVOT LOWs
+#
+# Pivot strength definitions (must match pivot ETL):
+#   medium: ta.pivothigh(high, L=30, R=32) or ta.pivotlow(low, L=30, R=32)
+#   strong: ta.pivothigh(high, L=69, R=69) or ta.pivotlow(low, L=69, R=69)
+#   pivotStrength = 3 if strong, 2 if medium, 1 if weak (not used here), 0 if none
+#   pivotDir      = +1 if pivot low, -1 if pivot high, 0 if no pivot
+#
+# Note: `ivr` is already in TF_FEATURE_NAMES via fuzzy_reversion_11 proxy.
+#       These 9 features are the NEW ADDITIONS from the IVR Reversal Engine.
+#       Enabling them changes d_tf_in by +9. Update --d-tf-in accordingly.
+# =============================================================================
+
+IVR_REVERSAL_FEATURE_NAMES: List[str] = [
+    "price_stretch",            # (close - SMA20) / ATR14 — deviation from MA in ATR units
+    "ivr_zone",                 # Ternary: +1=high IV (>0.70), -1=low IV (<0.30), 0=normal
+    "stretch_zone",             # Ternary: +1=above K*ATR, -1=below -K*ATR, 0=normal
+    "reversal_score",           # α×IVR + β×stretch + γ×(pivotStrength×pivotDir)
+    "strong_pivot_slope_h",     # Slope between last two strong pivot HIGHS (descending → falling resistance)
+    "strong_pivot_slope_l",     # Slope between last two strong pivot LOWS (ascending → rising support)
+    "strong_pivot_bar_dist_h",  # Bar count between last two strong pivot HIGHS (pivot frequency)
+    "strong_pivot_bar_dist_l",  # Bar count between last two strong pivot LOWS
+    "bars_since_strong_pivot",  # Bars since last confirmed strong pivot (high or low)
+]
+"""
+9 IVR Reversal Engine features.
+
+Reversal signal logic the model learns from (NOT hard-coded):
+  Bullish reversal = ivr_zone == -1 AND stretch_zone == -1 AND last pivot was LOW
+                     AND bars_since_strong_pivot >= confirm_bars
+  Bearish reversal = ivr_zone == +1 AND stretch_zone == +1 AND last pivot was HIGH
+                     AND bars_since_strong_pivot >= confirm_bars
+
+The model discovers which weights (α, β, γ, confirm_bars) are optimal.
+NaN rules: strong_pivot_slope_* and strong_pivot_bar_dist_* are NaN until
+two confirmed strong pivots of that type are available. Treat as SPARSE
+(same masking as TF_PIVOT_FEATURES — NaN = no data, not zero).
+"""
+
+# IVR reversal features that are sparse (NaN = no strong pivot available yet)
+IVR_REVERSAL_SPARSE: Set[str] = {
+    "strong_pivot_slope_h", "strong_pivot_slope_l",
+    "strong_pivot_bar_dist_h", "strong_pivot_bar_dist_l",
+    "bars_since_strong_pivot",
+}
+
+# IVR reversal ternary features
+IVR_REVERSAL_TERNARY: List[str] = ["ivr_zone", "stretch_zone"]
+
+# Bounded ranges for IVR reversal features
+IVR_REVERSAL_BOUNDED: Dict[str, Tuple[float, float]] = {
+    "price_stretch":  (-10.0, 10.0),
+    "ivr_zone":       (-1.0, 1.0),
+    "stretch_zone":   (-1.0, 1.0),
+    "reversal_score": (-10.0, 10.0),
+}
+
+# Configuration constants for IVR Reversal Engine (mirror PineScript defaults)
+IVR_REVERSAL_CONFIG: Dict = {
+    "ivr_lookback":       252,   # IVR lookback bars (1 year)
+    "ivr_high_threshold": 0.70,  # IVR > 0.70 → high vol regime
+    "ivr_low_threshold":  0.30,  # IVR < 0.30 → low vol regime
+    "ma_length":          20,    # SMA length for price stretch
+    "atr_length":         14,    # ATR length for price stretch
+    "stretch_k":          2.0,   # Stretch threshold in ATR units
+    "alpha_ivr":          1.0,   # Weight for IVR in reversal_score
+    "beta_stretch":       1.0,   # Weight for stretch in reversal_score
+    "gamma_pivot":        1.0,   # Weight for pivot strength×dir in reversal_score
+    "score_threshold":    2.0,   # Minimum |reversal_score| to trigger reversal signal
+    "confirm_bars":       5,     # Bars after pivot point required for confirmation
+    "strong_left":        69,    # Strong pivot left lookback
+    "strong_right":       69,    # Strong pivot right lookback
+    "medium_left":        30,    # Medium pivot left lookback
+    "medium_right":       32,    # Medium pivot right lookback
+}
+
 # All computed features added by ETL (not in raw CSV)
 ETL_COMPUTED_FEATURES: List[str] = (
     FRICTION_FEATURE_NAMES + TOD_FEATURE_NAMES + [REGIME_PERSISTENCE_FEATURE]
+    + IVR_REVERSAL_FEATURE_NAMES
 )
 
 # Labels (excluded from model input features)
@@ -174,11 +268,11 @@ TF_LABEL_NAMES: List[str] = ["target_spot", "position_size_mult"]
 """These are training targets, not input features."""
 
 # Sparse features — NaN is semantically meaningful, NEVER impute
-TF_SPARSE_FEATURES: Set[str] = set(TF_PIVOT_FEATURES)
+TF_SPARSE_FEATURES: Set[str] = set(TF_PIVOT_FEATURES) | IVR_REVERSAL_SPARSE
 """NaN in these columns means 'no event occurred'. Do not fill with 0 or mean."""
 
 # Ternary features — valid values are {-1, 0, 1} or {-1, 1}
-TF_TERNARY_FEATURES: List[str] = ["breakout_score", "psar_trend"]
+TF_TERNARY_FEATURES: List[str] = ["breakout_score", "psar_trend"] + IVR_REVERSAL_TERNARY
 
 # =============================================================================
 # DTYPE MAP
