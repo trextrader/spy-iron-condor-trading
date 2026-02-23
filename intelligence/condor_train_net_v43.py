@@ -1243,6 +1243,14 @@ def parse_args_v43():
     p.add_argument('--d-pivot', type=int, default=16)
     p.add_argument('--d-fused', type=int, default=256)
     p.add_argument('--n-strategy-types', type=int, default=N_STRATEGY_TYPES)
+    p.add_argument('--d-h', type=int, default=256)
+    p.add_argument('--d-v', type=int, default=32)
+    p.add_argument('--d-m', type=int, default=64)
+    p.add_argument('--d-r', type=int, default=32)
+    p.add_argument('--d-control', type=int, default=128)
+    p.add_argument('--n-predicates', type=int, default=8)
+    p.add_argument('--n-sets', type=int, default=4)
+    p.add_argument('--n-super-sets', type=int, default=1)
 
     # === Training ===
     p.add_argument('--epochs', type=int, default=50)
@@ -1338,6 +1346,14 @@ def train_condor_net_v43(args):
         'd_model_chain':     CHAIN_GRID_CONFIG['d_model'],   # was 'chain_d_model'
         'n_heads_chain':     CHAIN_GRID_CONFIG['n_heads'],   # was 'chain_n_heads'
         'n_layers_chain':    CHAIN_GRID_CONFIG['n_layers'],  # was 'chain_n_layers'
+        'd_h':               args.d_h,
+        'd_v':               args.d_v,
+        'd_m':               args.d_m,
+        'd_r':               args.d_r,
+        'd_control':         args.d_control,
+        'n_predicates':      args.n_predicates,
+        'n_sets':            args.n_sets,
+        'n_super_sets':      args.n_super_sets,
     }
     model = build_condornet_v43(**config)
     model.to(device)
