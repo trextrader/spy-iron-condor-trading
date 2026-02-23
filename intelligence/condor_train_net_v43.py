@@ -1361,7 +1361,11 @@ def train_condor_net_v43(args):
             piv_vals = batch['pivot_values'].to(device)
             labels = {k: v.to(device) for k, v in batch['labels'].items()}
 
-            # ── 1. FORWARD ──────────────────────────────────────────
+            # ── 1. FORWARD + LOSS (inside autocast) ─────────────────
+            # Criterion must share the same dtype context as the forward
+            # pass — running it outside autocast creates a Float/Half
+            # gradient mismatch on backward. GradScaler provides the
+            # precision benefit; keeping both inside is the standard pattern.
             with torch.amp.autocast(device_type=device.type, dtype=amp_dtype,
                                      enabled=(device.type == 'cuda')):
                 outputs = model(
@@ -1369,9 +1373,8 @@ def train_condor_net_v43(args):
                     chain=chain, chain_mask=chain_mask,
                     pivot_features=piv_vals, pivot_mask=piv_mask,
                 )
-
-            # ── 2. LOSS (outside autocast for precision) ────────────
-            loss, components = criterion(outputs, labels)
+                # ── 2. LOSS ─────────────────────────────────────────
+                loss, components = criterion(outputs, labels)
 
             # Gradient accumulation scaling (F7.12)
             scaled_loss = loss / args.accum_steps
