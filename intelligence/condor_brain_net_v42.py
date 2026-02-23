@@ -1182,6 +1182,7 @@ class CondorNet(nn.Module):
         n_super_sets: int = 1,
         enforce_sparsity: bool = True,
         verbose_math: bool = False,
+        gate_temp_init: float = 3.0,
     ):
         super().__init__()
         self.verbose_math = verbose_math
@@ -1249,6 +1250,11 @@ class CondorNet(nn.Module):
             ])
             # V21: Hierarchical Relational Logic comparing the super-sets themselves
             self.hierarchical_logic = RelationalLogicLayer(n_super_sets, 1)
+            # Run 5: learnable routing temperature τ.
+            # Multiplies gate logits before sigmoid so the gate can make
+            # meaningful binary routing decisions.
+            # Init = gate_temp_init (default 3.0).  Target λ std: 0.15–0.30.
+            self.gate_temperature = nn.Parameter(torch.tensor(float(gate_temp_init)))
         else:
             self.super_sets = None
 
@@ -1557,19 +1563,24 @@ class CondorNet(nn.Module):
                     # preference per regime). Std-normalization was tested in Run #3
                     # and proved too restrictive — gate_logit std≈1.0 every batch
                     # means the model cannot accumulate a stable directional signal.
-                    gate_logit = self.hierarchical_logic(gates).float()
+                    #
+                    # Run 5: temperature τ = self.gate_temperature scales logit
+                    # amplitude before centering so λ std targets 0.15–0.30.
+                    tau = self.gate_temperature.clamp(1.0, 10.0)
+                    gate_logit = self.hierarchical_logic(gates).float() * tau
                     gate_logit = gate_logit - gate_logit.detach().mean(dim=0, keepdim=True)
                     super_gate = torch.sigmoid(gate_logit)
                     # Store detached stats as model attrs — read by training loop each batch.
                     self._last_gate_logit = gate_logit.detach()
                     self._last_super_gate = super_gate.detach()
+                    self._last_gate_temperature = tau.item()
                     if self.verbose_math:
-                        self.log_math("HIERARCHICAL_LOGIC", "lambda = sigmoid(RELATION(S) - E[RELATION(S)])", super_gate)
+                        self.log_math("HIERARCHICAL_LOGIC", f"lambda = sigmoid(tau*RELATION(S) - E[tau*RELATION(S)])  tau={tau.item():.3f}", super_gate)
 
                     if not hasattr(self, '_printed_ss_debug'):
                         if gates.shape[0] >= 2:
                             print(f"  [MATH BUG HUNT] S[0:2]\nS[0]: {gates[0].tolist()}\nS[1]: {gates[1].tolist()}")
-                        print(f"  [MATH BUG HUNT] gate_logit std: {gate_logit.float().std().item():.6f} | lambda std: {super_gate.float().std().item():.6f}, min: {super_gate.min().item():.6f}, max: {super_gate.max().item():.6f}")
+                        print(f"  [MATH BUG HUNT] tau={tau.item():.3f} | gate_logit std: {gate_logit.float().std().item():.6f} | lambda std: {super_gate.float().std().item():.6f}, min: {super_gate.min().item():.6f}, max: {super_gate.max().item():.6f}")
                         self._printed_ss_debug = True
                 else:
                     super_gate = gates.prod(dim=-1, keepdim=True)

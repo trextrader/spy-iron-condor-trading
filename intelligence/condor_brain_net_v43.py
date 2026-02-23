@@ -805,6 +805,7 @@ class CondorNetV43(nn.Module):
         n_predicates:      int   = 8,
         n_sets:            int   = 4,
         n_super_sets:      int   = 1,
+        gate_temp_init:    float = 3.0,
         # Strategy head
         n_strategy_types:  int   = 10,      # includes abstain
         max_legs:          int   = 4,
@@ -864,6 +865,7 @@ class CondorNetV43(nn.Module):
             n_super_sets=n_super_sets,
             enforce_sparsity=enforce_sparsity,
             verbose_math=verbose,
+            gate_temp_init=gate_temp_init,
         )
         # Projector to adapt d_tf_joint → v42 expected d_input
         self.core_input_proj = nn.Linear(d_tf_joint, self.condor_core.d_input)

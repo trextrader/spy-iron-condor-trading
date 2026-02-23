@@ -1252,6 +1252,9 @@ def parse_args_v43():
     p.add_argument('--n-predicates', type=int, default=8)
     p.add_argument('--n-sets', type=int, default=4)
     p.add_argument('--n-super-sets', type=int, default=1)
+    p.add_argument('--gate-temp', type=float, default=3.0,
+                   help='Initial gate temperature τ (Run 5+). Amplifies routing logits '
+                        'so λ std targets 0.15–0.30.  Learnable; clamped to [1, 10].')
 
     # === Training ===
     p.add_argument('--epochs', type=int, default=50)
@@ -1357,6 +1360,7 @@ def train_condor_net_v43(args):
         'n_predicates':      args.n_predicates,
         'n_sets':            args.n_sets,
         'n_super_sets':      args.n_super_sets,
+        'gate_temp_init':    args.gate_temp,
     }
     model = build_condornet_v43(**config)
     model.to(device)
@@ -1629,14 +1633,20 @@ def train_condor_net_v43(args):
             lp05 = all_lambda.quantile(0.05).item()
             lp50 = all_lambda.quantile(0.50).item()
             lp95 = all_lambda.quantile(0.95).item()
-            print(f"  Gate logit : mean={all_logits.mean():.3f}  std={all_logits.std():.3f}"
-                  f"  min={all_logits.min():.3f}  max={all_logits.max():.3f}")
-            print(f"  Lambda     : p05={lp05:.3f}  p50={lp50:.3f}  p95={lp95:.3f}"
-                  f"  mu={lm:.3f}  std={ls:.4f}")
             _gl_std_ep = all_logits.std().item()
+            # Read current τ from backbone (set in forward as _last_gate_temperature)
+            _backbone = getattr(model, 'condor_core', model)
+            tau_val = getattr(_backbone, '_last_gate_temperature', float('nan'))
+            lambda_ok = 0.15 <= ls <= 0.30
+            lambda_status = "OK" if lambda_ok else ("LOW" if ls < 0.15 else "HIGH")
+            print(f"  Gate logit : mean={all_logits.mean():.3f}  std={all_logits.std():.3f}"
+                  f"  min={all_logits.min():.3f}  max={all_logits.max():.3f}  tau={tau_val:.3f}")
+            print(f"  Lambda     : p05={lp05:.3f}  p50={lp50:.3f}  p95={lp95:.3f}"
+                  f"  mu={lm:.3f}  std={ls:.4f}  [target: 0.15-0.30 → {lambda_status}]")
             writer.add_scalar('epoch/gate_logit_std', _gl_std_ep, epoch)
             writer.add_scalar('epoch/lambda_mean',    lm,  epoch)
             writer.add_scalar('epoch/lambda_std',     ls,  epoch)
+            writer.add_scalar('epoch/gate_temperature', tau_val, epoch)
             # ── Gate health checks (three independent failure modes) ──────────
             # 1. Always-on saturation: gate stuck at 1 → model ignores gate path
             if lm > 0.95 and ls < 0.01:
@@ -1683,45 +1693,42 @@ def train_condor_net_v43(args):
             print(f"  -> Checkpoint saved: {epoch_ckpt_name}")
             rotate_checkpoints(checkpoint_dir, keep_n=args.keep_ckpts)
 
-        # ── Best model (generalization gate) ────────────────────────────
+        # ── Best model: lowest val loss always wins ──────────────────────
+        # Run 5: removed the `val < train` gate — that heuristic blocked
+        # saving genuinely better checkpoints (Run 4 epoch 7 val=1.8488
+        # was rejected; only epoch 2 val=2.099 was saved).
+        # Correct criterion: strictly lower validation loss.
+        # Overfitting tag is diagnostic only — never a save blocker.
         val_train_gap = abs(avg_val_loss - avg_train_loss)
+        is_overfit = avg_val_loss > avg_train_loss
+        overfit_tag = " [overfit]" if is_overfit else ""
 
-        if avg_val_loss < avg_train_loss:
-            is_new_best = False
-            if best_val_loss == float('inf'):
-                is_new_best = True
-                reason = "First epoch passing generalization"
-            elif avg_val_loss < best_val_loss and val_train_gap < best_val_train_gap:
-                is_new_best = True
-                reason = (f"Better val ({avg_val_loss:.4f} < {best_val_loss:.4f}) "
-                          f"AND tighter gap ({val_train_gap:.4f} < "
-                          f"{best_val_train_gap:.4f})")
-            elif avg_val_loss < best_val_loss:
-                is_new_best = True
-                reason = f"Better val ({avg_val_loss:.4f} < {best_val_loss:.4f})"
-            else:
-                reason = f"Val not better, best remains Epoch {best_epoch}"
+        is_new_best = False
+        if best_val_loss == float('inf'):
+            is_new_best = True
+            reason = "First epoch"
+        elif avg_val_loss < best_val_loss:
+            is_new_best = True
+            reason = f"Better val ({avg_val_loss:.4f} < {best_val_loss:.4f})"
+        else:
+            reason = f"Val not better ({avg_val_loss:.4f} >= {best_val_loss:.4f}), best remains Epoch {best_epoch}"
 
-            if is_new_best:
-                best_val_loss = avg_val_loss
-                best_train_loss = avg_train_loss
-                best_val_train_gap = val_train_gap
-                best_epoch = epoch + 1
-                patience_counter = 0
+        if is_new_best:
+            best_val_loss = avg_val_loss
+            best_train_loss = avg_train_loss
+            best_val_train_gap = val_train_gap
+            best_epoch = epoch + 1
+            patience_counter = 0
 
-                os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
-                best_data = dict(ckpt_data)
-                best_data['best_val_loss'] = best_val_loss
-                if atomic_save(best_data, args.output):
-                    print(f"  -> NEW BEST MODEL (Epoch {epoch+1}): {reason}")
-                    print(f"     Saved: {args.output}")
-            else:
-                patience_counter += 1
-                print(f"  -> Epoch {epoch+1} generalizes but NOT new best: {reason}")
+            os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
+            best_data = dict(ckpt_data)
+            best_data['best_val_loss'] = best_val_loss
+            if atomic_save(best_data, args.output):
+                print(f"  -> NEW BEST MODEL (Epoch {epoch+1}){overfit_tag}: {reason}")
+                print(f"     Saved: {args.output}")
         else:
             patience_counter += 1
-            print(f"  -> Epoch {epoch+1} OVERFITTING: val ({avg_val_loss:.4f}) "
-                  f">= train ({avg_train_loss:.4f})")
+            print(f"  -> Epoch {epoch+1}{overfit_tag}: {reason}")
 
         # ── EPOCH ANALYTICS (interpretability + A/B matrices + comparison) ──
         interp_report = extract_epoch_interpretability_v43(

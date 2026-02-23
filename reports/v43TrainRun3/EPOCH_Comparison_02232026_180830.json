@@ -1,0 +1,154 @@
+{
+  "best_model": {
+    "epoch": 2,
+    "val_loss": 2.1571778853734336,
+    "train_loss": 2.319805607795715
+  },
+  "comparisons": {
+    "Epoch1": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 511,
+      "different_sets": 1,
+      "same_super_sets": 511,
+      "different_super_sets": 1,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.039226,
+      "val_loss": 2.8554232006981257,
+      "train_loss": 3.1018267273902893
+    },
+    "Epoch2": "BEST MODEL \u2014 omitted from diff",
+    "Epoch3": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 510,
+      "different_sets": 2,
+      "same_super_sets": 510,
+      "different_super_sets": 2,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.007283,
+      "val_loss": 2.092771223613194,
+      "train_loss": 2.018031174061345
+    },
+    "Epoch4": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 508,
+      "different_sets": 4,
+      "same_super_sets": 508,
+      "different_super_sets": 4,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.012628,
+      "val_loss": 2.0616650524593534,
+      "train_loss": 1.9793793594135958
+    },
+    "Epoch5": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.015908,
+      "val_loss": 2.052756042707534,
+      "train_loss": 1.972787345327982
+    },
+    "Epoch6": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 508,
+      "different_sets": 4,
+      "same_super_sets": 508,
+      "different_super_sets": 4,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.017285,
+      "val_loss": 2.0657652502968196,
+      "train_loss": 1.9761002779006958
+    },
+    "Epoch7": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.017793,
+      "val_loss": 2.0880443084807623,
+      "train_loss": 1.9990957590841478
+    },
+    "Epoch8": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.018106,
+      "val_loss": 2.1120617673510598,
+      "train_loss": 2.017588872462511
+    },
+    "Epoch9": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.01854,
+      "val_loss": 2.1349221695037115,
+      "train_loss": 2.058681587378184
+    },
+    "Epoch10": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.01854,
+      "val_loss": 2.162703587895348,
+      "train_loss": 2.0856857070556054
+    }
+  }
+}
