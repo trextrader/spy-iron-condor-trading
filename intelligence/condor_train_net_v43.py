@@ -563,10 +563,20 @@ def _load_options_chain(path: str, max_contracts: int = 120) -> dict:
     """
     print(f"  [DATA] Loading options chain from {path}...")
 
-    # Chunked read for large files
-    df = pd.read_csv(path, parse_dates=['timestamp'])
+    # Chunked read for large files — low_memory=False prevents mixed-dtype warnings
+    df = pd.read_csv(path, parse_dates=['timestamp'], low_memory=False)
     print(f"    -> {len(df)} contracts across "
           f"{df['timestamp'].nunique()} timestamps")
+
+    # Coerce numeric columns that may have loaded as object due to mixed types
+    numeric_cols = [
+        'strike', 'last', 'mark', 'bid', 'bid_size', 'ask', 'ask_size',
+        'volume', 'open_interest', 'implied_volatility',
+        'delta', 'gamma', 'theta', 'vega', 'rho',
+    ]
+    for col in numeric_cols:
+        if col in df.columns and df[col].dtype == object:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
 
     # Build chain grid features per timestamp
     # Schema: moneyness, days_to_exp, iv, delta, gamma, theta, vega, bid, ask, oi_norm
@@ -579,7 +589,7 @@ def _load_options_chain(path: str, max_contracts: int = 120) -> dict:
         n = min(len(group), max_contracts)
         grid = np.zeros((n, len(CHAIN_FEATURE_NAMES)), dtype=np.float32)
 
-        # Select top contracts by open_interest
+        # Select top contracts by open_interest (now guaranteed numeric)
         if len(group) > max_contracts:
             group = group.nlargest(max_contracts, 'open_interest')
 
@@ -1220,9 +1230,8 @@ def train_condor_net_v43(args):
 
     # ── Crash sentinel (F7.9) ───────────────────────────────────────────
     if check_sentinel():
-        print(f"  ⚠  CRASH SENTINEL detected from previous run!")
-        if not args.resume:
-            print(f"     Use --resume to continue, or delete .training_active manually")
+        print(f"  ⚠  CRASH SENTINEL detected from previous run — clearing and starting fresh.")
+        remove_sentinel()   # auto-clear; use --resume only to restore checkpoint state
     write_sentinel()
 
     # ── GUI telemetry ───────────────────────────────────────────────────
