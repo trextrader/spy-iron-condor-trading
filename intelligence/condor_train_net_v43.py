@@ -235,6 +235,32 @@ def logit_iqr_floor(lambda_probs: torch.Tensor,
     return alpha * hinge
 
 
+def logit_mad_floor(lambda_probs: torch.Tensor,
+                    mad_target: float = 0.9,
+                    alpha: float = 0.05,
+                    eps: float = 1e-3,
+                    logit_eps: float = 1e-4) -> torch.Tensor:
+    """
+    Enforce mean(|z_approx|) >= mad_target where z_approx = logit(λ).
+
+    Variance and IQR floors permit small symmetric distributions that happen to
+    be centered at 0 — e.g. z ~ N(0, 0.1) gives var=0.01 and IQR≈0.13, both
+    low, but also mean|z|≈0.08.  MAD directly pushes the distribution *away
+    from zero mass*, complementing the spread penalties.
+
+    mad_target=0.9 corresponds to N(0, σ≈1.1), consistent with the healthy
+    gate_logit magnitude observed at epoch 1 of Run 7/8.
+    """
+    if lambda_probs is None:
+        return torch.tensor(0.0, device='cpu')
+    z = _logit_safe(lambda_probs, eps=logit_eps).reshape(-1)
+    if z.numel() < 2:
+        return z.new_zeros(())
+    mad = z.abs().mean()
+    hinge = F.softplus((mad_target - mad) / eps) * eps
+    return alpha * hinge
+
+
 # =============================================================================
 # CRASH SENTINEL
 # =============================================================================
@@ -1413,6 +1439,13 @@ def parse_args_v43():
     p.add_argument('--logit-warmup-frac', type=float, default=0.0,
                    help='Run 9: fraction of epochs for logit-space α warmup ramp. '
                         '0.0 = full α from epoch 1 (no warmup). Default: 0.0.')
+    p.add_argument('--logit-mad-alpha', type=float, default=0.05,
+                   help='Run 9: MAD floor coefficient. Forces mean(|z|) ≥ mad_target. '
+                        'Attacks symmetric shrinkage toward 0 that var+IQR can miss. '
+                        'Default: 0.05.')
+    p.add_argument('--logit-mad-target', type=float, default=0.9,
+                   help='Run 9: target minimum mean(|z_approx|). '
+                        '0.9 ≈ N(0, σ=1.1) — healthy gate magnitude. Default: 0.9.')
 
     # === Training ===
     p.add_argument('--epochs', type=int, default=50)
@@ -1611,7 +1644,8 @@ def train_condor_net_v43(args):
     print(f"  Gate τ init: {args.gate_temp} | λ-hinge α: {args.diversity_alpha} (std_target: {args.diversity_std_target})")
     _lwf_e = max(1, int(args.epochs * args.logit_warmup_frac)) if args.logit_warmup_frac > 0 else 0
     print(f"  Z-var floor: α={args.logit_var_alpha} var_target={args.logit_var_target} | "
-          f"IQR floor: α={args.logit_iqr_alpha} iqr_target={args.logit_iqr_target} "
+          f"IQR floor: α={args.logit_iqr_alpha} iqr_target={args.logit_iqr_target} | "
+          f"MAD floor: α={args.logit_mad_alpha} mad_target={args.logit_mad_target} "
           f"(warmup: {_lwf_e} epochs{' [immediate full-α]' if args.logit_warmup_frac == 0.0 else ''})")
     print(f"  Output: {args.output}")
     print(f"{'='*60}\n")
@@ -1637,7 +1671,7 @@ def train_condor_net_v43(args):
             alpha_max=args.diversity_alpha,
             warmup_frac=0.3,
         )
-        # α ramp: logit-space regularizers over first 10% of epochs (Run 8, fast ramp)
+        # α ramp: logit-space regularizers (Run 8/9, warmup_frac from CLI)
         alpha_z_sched = compute_alpha(
             epoch, args.epochs,
             alpha_max=args.logit_var_alpha,
@@ -1646,6 +1680,11 @@ def train_condor_net_v43(args):
         alpha_iqr_sched = compute_alpha(
             epoch, args.epochs,
             alpha_max=args.logit_iqr_alpha,
+            warmup_frac=args.logit_warmup_frac,
+        )
+        alpha_mad_sched = compute_alpha(
+            epoch, args.epochs,
+            alpha_max=args.logit_mad_alpha,
             warmup_frac=args.logit_warmup_frac,
         )
 
@@ -1734,7 +1773,19 @@ def train_condor_net_v43(args):
                     loss = loss + _ziqr_loss
                     components['logit_ziqr'] = _ziqr_loss.detach()
 
-                # ── Per-batch z-space logging at batch 0 (Run 8) ─────
+                # ── Logit MAD floor (Run 9, primary) ─────────────────
+                _zmad_loss = loss.new_zeros(())
+                if outputs.final_gate is not None and alpha_mad_sched > 0.0:
+                    _zmad_loss = logit_mad_floor(
+                        outputs.final_gate,
+                        mad_target=args.logit_mad_target,
+                        alpha=alpha_mad_sched,
+                        logit_eps=args.logit_eps,
+                    )
+                    loss = loss + _zmad_loss
+                    components['logit_zmad'] = _zmad_loss.detach()
+
+                # ── Per-batch z-space logging at batch 0 (Run 8/9) ───
                 if batch_idx == 0 and outputs.final_gate is not None:
                     with torch.no_grad():
                         _fg = outputs.final_gate.float()
@@ -1742,12 +1793,14 @@ def train_condor_net_v43(args):
                         _z_b0 = _logit_safe(_fg, eps=args.logit_eps).view(-1)
                         _z_std_b0  = _z_b0.std().item()
                         _z_iqr_b0  = (_z_b0.quantile(0.75) - _z_b0.quantile(0.25)).item()
-                    _zvar_str = f"  zvar_loss={_zvar_loss.item():.6f}" if alpha_z_sched > 0 and outputs.final_gate is not None else ""
-                    _ziqr_str = f"  ziqr_loss={_ziqr_loss.item():.6f}" if alpha_iqr_sched > 0 and outputs.final_gate is not None else ""
-                    print(f"  [Gate B0] lambda_std={_lambda_std_b0:.4f}  "
-                          f"z_std={_z_std_b0:.4f}  z_iqr={_z_iqr_b0:.4f}  "
-                          f"alpha_z={alpha_z_sched:.4f}  alpha_iqr={alpha_iqr_sched:.4f}"
-                          f"{_zvar_str}{_ziqr_str}")
+                        _z_mad_b0  = _z_b0.abs().mean().item()
+                    _zvar_str = f"  zvar={_zvar_loss.item():.5f}" if alpha_z_sched > 0 and outputs.final_gate is not None else ""
+                    _ziqr_str = f"  ziqr={_ziqr_loss.item():.5f}" if alpha_iqr_sched > 0 and outputs.final_gate is not None else ""
+                    _zmad_str = f"  zmad={_zmad_loss.item():.5f}" if alpha_mad_sched > 0 and outputs.final_gate is not None else ""
+                    print(f"  [Gate B0] λ_std={_lambda_std_b0:.4f}  "
+                          f"z_std={_z_std_b0:.4f}  z_iqr={_z_iqr_b0:.4f}  z_mad={_z_mad_b0:.4f}  "
+                          f"α_z={alpha_z_sched:.4f}  α_iqr={alpha_iqr_sched:.4f}  α_mad={alpha_mad_sched:.4f}"
+                          f"{_zvar_str}{_ziqr_str}{_zmad_str}")
 
             # Accumulate hierarchical gate stats.
             # _last_gate_logit is set on the v42 backbone (model.condor_core), not the
@@ -1973,22 +2026,28 @@ def train_condor_net_v43(args):
             writer.add_scalar('epoch/alpha_z',   alpha_z_sched,   epoch)
             writer.add_scalar('epoch/alpha_iqr',  alpha_iqr_sched, epoch)
 
-            # ── Z-space epoch diagnostics (Run 8) ────────────────────
+            # ── Z-space epoch diagnostics (Run 8/9) ──────────────────
             with torch.no_grad():
                 _z_all = _logit_safe(all_lambda, eps=args.logit_eps).view(-1)
                 _z_std_ep  = _z_all.std().item()
                 _z_iqr_ep  = (_z_all.quantile(0.75) - _z_all.quantile(0.25)).item()
                 _z_var_ep  = _z_all.var(unbiased=False).item()
+                _z_mad_ep  = _z_all.abs().mean().item()
             _z_std_ok  = 1.0 <= _z_std_ep <= 2.0
             _z_iqr_ok  = _z_iqr_ep >= 0.8
+            _z_mad_ok  = _z_mad_ep >= 0.7
             _z_std_tag = "OK" if _z_std_ok else ("LOW" if _z_std_ep < 1.0 else "HIGH")
             _z_iqr_tag = "OK" if _z_iqr_ok else "LOW"
+            _z_mad_tag = "OK" if _z_mad_ok else "LOW"
             print(f"  Z-space   : std={_z_std_ep:.4f} [{_z_std_tag}]  "
                   f"var={_z_var_ep:.4f}  IQR={_z_iqr_ep:.4f} [{_z_iqr_tag}]  "
-                  f"[targets: z_std 1.0-2.0, IQR ≥ 0.8]")
+                  f"MAD={_z_mad_ep:.4f} [{_z_mad_tag}]  "
+                  f"[targets: std 1.0-2.0, IQR ≥ 0.8, MAD ≥ 0.7]")
             writer.add_scalar('epoch/z_std',  _z_std_ep,  epoch)
             writer.add_scalar('epoch/z_var',  _z_var_ep,  epoch)
             writer.add_scalar('epoch/z_iqr',  _z_iqr_ep,  epoch)
+            writer.add_scalar('epoch/z_mad',  _z_mad_ep,  epoch)
+            writer.add_scalar('epoch/alpha_mad', alpha_mad_sched, epoch)
             # Tier 1: worst-batch z-space report
             if _worst_batch_ziqr < float('inf'):
                 print(f"  Z worst-batch: z_IQR_min={_worst_batch_ziqr:.4f} "
