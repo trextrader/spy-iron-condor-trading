@@ -1003,6 +1003,23 @@ class SmartEpochManager:
 # EPOCH ANALYTICS — A/B matrix, interpretability JSON, epoch comparison
 # =============================================================================
 
+def _build_pair_lookup(n_inputs: int, feature_names: List[str]) -> Dict[int, Tuple[str, str]]:
+    """Map pair_idx (upper-triangle ordering) → (feat_a, feat_b) name strings.
+
+    RelationalLogicLayer pairs features by torch.triu_indices(n_inputs, n_inputs, offset=1).
+    Indices beyond len(feature_names) fall back to 'feat_N' generics.
+    """
+    iu = np.triu_indices(n_inputs, k=1)
+    n = len(iu[0])
+    return {
+        k: (
+            feature_names[int(iu[0][k])] if int(iu[0][k]) < len(feature_names) else f"feat_{iu[0][k]}",
+            feature_names[int(iu[1][k])] if int(iu[1][k]) < len(feature_names) else f"feat_{iu[1][k]}",
+        )
+        for k in range(n)
+    }
+
+
 def _extract_logic_v43(model: nn.Module) -> dict:
     """
     Extract learned logic from CondorNetV43.
@@ -1040,6 +1057,17 @@ def _extract_logic_v43(model: nn.Module) -> dict:
 
     # SuperSets (relational logic)
     if hasattr(backbone, 'super_sets') and len(backbone.super_sets) > 0:
+        # Build pair lookup once from the first RelationalLogicLayer's n_inputs.
+        # Pairs are upper-triangle (i,j) over predicate activations; we label them
+        # with TF_FEATURE_NAMES and fall back to 'feat_N' for indices beyond the list.
+        pair_lookup: Dict[int, Tuple[str, str]] = {}
+        first_ss = backbone.super_sets[0]
+        if hasattr(first_ss, 'sets') and len(first_ss.sets) > 0:
+            first_rl = getattr(first_ss.sets[0], 'relational_logic', None)
+            if first_rl is not None:
+                n_rl_inputs = getattr(first_rl, 'n_inputs', len(TF_FEATURE_NAMES))
+                pair_lookup = _build_pair_lookup(n_rl_inputs, TF_FEATURE_NAMES)
+
         ss_list = []
         for ss_idx, ss in enumerate(backbone.super_sets):
             ss_info = {
@@ -1071,6 +1099,24 @@ def _extract_logic_v43(model: nn.Module) -> dict:
                             imp = op_w.sum(axis=1)
                             top5 = np.argsort(imp)[-5:][::-1]
                             set_info["top_pair_indices"] = [int(p) for p in top5]
+                            # Human-readable comparisons (restored from v4.2)
+                            comparisons = []
+                            for p_idx in top5:
+                                ops_row = op_w[int(p_idx)]
+                                dom_op = ["<", ">", "="][int(np.argmax(ops_row))]
+                                feat_a, feat_b = pair_lookup.get(
+                                    int(p_idx), (f"feat_{p_idx}a", f"feat_{p_idx}b")
+                                )
+                                comparisons.append({
+                                    "comparison": f"{feat_a} {dom_op} {feat_b}",
+                                    "dominant_op": dom_op,
+                                    "weights": {
+                                        "<": round(float(ops_row[0]), 4),
+                                        ">": round(float(ops_row[1]), 4),
+                                        "=": round(float(ops_row[2]), 4),
+                                    },
+                                })
+                            set_info["top_comparisons"] = comparisons
                         else:
                             set_info["weight_norm"] = float(
                                 rl.projection.weight.norm().item()
