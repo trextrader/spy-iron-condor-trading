@@ -12,11 +12,23 @@
 
 CondorNet™ v4.3 is a multi-modal, multi-objective parametric policy network for full-spectrum SPY options strategy selection across ten strategy classes: single calls, single puts, bull call spreads, bear put spreads, straddles, strangles, butterfly calls, iron condors, custom multi-leg structures, and a learned abstain class. The system synthesizes three mathematically complementary temporal integration paradigms — **Exponential Time Differencing order-1 (ETD-1)**, **Temporal Fusion Transformer (TFT)**, and **Neural Controlled Differential Equations (Neural CDE)** — into a unified backbone that simultaneously handles stiff multi-scale dynamics, cross-timeframe attention, and continuous path-driven latent state evolution. These are not sequential stages but fused components that interact through shared latent representations.
 
-The input manifold consists of four independent timeframe projections (M1, M5, M15, H1) each encoding 52 base technical features plus 12 ETL-computed features totaling a 64-dimensional per-timeframe input vector, a separate 13-dimensional sparse pivot geometry pathway, and a Transformer-encoded 120-contract options chain embedding capturing the full implied volatility surface. The three streams are fused through a **JointFusionLayer** before entering the ETD-1 backbone, which integrates temporal dynamics as a stiff ordinary differential equation using the exact exponential integrator formula $\mathbf{z}_{t+1} = e^{h\mathbf{L}} \mathbf{z}_t + h\,\varphi_1(h\mathbf{L})\,\mathbf{g}(t)$, avoiding the Courant–Friedrichs–Lewy instability constraint that limits explicit Euler discretizations to short lookback windows.
+The input manifold consists of four independent timeframe projections (M1, M5, M15, H1) each encoding 52 base technical features plus 12 ETL-computed features totaling a 64-dimensional per-timeframe input vector, a separate 13-dimensional sparse pivot geometry pathway, and a Transformer-encoded 120-contract options chain embedding capturing the full implied volatility surface. The three streams are fused through a **JointFusionLayer** before entering the ETD-1 backbone, which integrates temporal dynamics as a stiff ordinary differential equation using the exact exponential integrator formula
 
-Atop the ETD-1 temporal backbone, a three-tier **symbolic routing hierarchy** — 64 learned predicate comparisons over 2,016 unique pairwise feature relations, composing into 32 fuzzy sets and 16 supersets via continuous gate routing $\lambda = \sigma(z/\tau)$ with temperature $\tau = 3$ — provides a directly inspectable fuzzy rule base where every superset activation reads back as a human-readable conjunction of feature comparisons such as $\texttt{m5.rsi\_dyn} > \texttt{m15.adx\_adaptive}$. The Neural CDE component furnishes a path-response layer that treats the full input sequence as a controlled differential equation driven by the signal control path, capturing long-range dependency without the $O(T^2)$ cost of full attention.
+$$
+\mathbf{z}_{t+1} = e^{h\mathbf{L}} \mathbf{z}_t + h\,\varphi_1(h\mathbf{L})\,\mathbf{g}(t)
+$$
 
-Training is governed by a **9-component composite loss function** with independent annealing schedules, supervised simultaneously on strategy class selection (10-class cross-entropy), probability-of-profit calibration (binary cross-entropy), expected value, VaR/CVaR risk boundaries, fuzzy position sizing (five MSE objectives), and three regularizers targeting gate diversity, predicate pattern entropy, and Huber robustness. Gate logit stability is enforced through a four-floor regularization system — variance, interquartile range, median absolute deviation, and a novel **logit tail penalty** $\mathcal{L}_{\text{tail}} = \alpha_{\text{tail}}\,\mathbb{E}[\max(0, |z| - L)^2]$ that directly penalizes squared excess beyond a saturation band of $|z| > 8$, preventing rare extreme logit outliers that bulk-distribution controls miss.
+avoiding the Courant–Friedrichs–Lewy instability constraint that limits explicit Euler discretizations to short lookback windows.
+
+Atop the ETD-1 temporal backbone, a three-tier **symbolic routing hierarchy** — 64 learned predicate comparisons over 2,016 unique pairwise feature relations, composing into 32 fuzzy sets and 16 supersets via continuous gate routing $\lambda = \sigma(z/\tau)$ with temperature $\tau = 3$ — provides a directly inspectable fuzzy rule base where every superset activation reads back as a human-readable conjunction of feature comparisons such as `m5.rsi_dyn > m15.adx_adaptive`. The Neural CDE component furnishes a path-response layer that treats the full input sequence as a controlled differential equation driven by the signal control path, capturing long-range dependency without the $O(T^2)$ cost of full attention.
+
+Training is governed by a **9-component composite loss function** with independent annealing schedules, supervised simultaneously on strategy class selection (10-class cross-entropy), probability-of-profit calibration (binary cross-entropy), expected value, VaR/CVaR risk boundaries, fuzzy position sizing (five MSE objectives), and three regularizers targeting gate diversity, predicate pattern entropy, and Huber robustness. Gate logit stability is enforced through a four-floor regularization system — variance, interquartile range, median absolute deviation, and a novel **logit tail penalty**
+
+$$
+\mathcal{L}_{\text{tail}} = \alpha_{\text{tail}}\,\mathbb{E}\!\left[\max(0,\, |z| - L)^2\right]
+$$
+
+that directly penalizes squared excess beyond a saturation band of $|z| > 8$, preventing rare extreme logit outliers that bulk-distribution controls miss.
 
 > **Migration Note:** This document supersedes the CDE v3.0 specification (2026-01-27). The CDE component remains present as the path-response layer but is no longer the primary temporal integrator. The ETD-1 + TFT fusion constitutes the new backbone. See `docs/legacy/` for archived documentation.
 
@@ -98,26 +110,41 @@ The following 12 features are appended to the base 52 during ETL, yielding the 6
 
 **Friction gate formulation:** For each window $N \in \{5, 10, 20, 40, 60\}$:
 
-$$\text{HL}_N = \max_{i \leq t}(\text{high}_{t-N:t}) - \min_{i \leq t}(\text{low}_{t-N:t})$$
+$$
+\text{HL}_N = \max_{i \leq t}(\text{high}_{t-N:t}) - \min_{i \leq t}(\text{low}_{t-N:t})
+$$
 
-$$\text{friction\_ok}_N = \mathbb{1}[\text{bid\_ask\_spread}_t < \text{HL}_N]$$
+$$
+\text{friction\_ok}_N = \mathbb{1}[\text{bid\_ask\_spread}_t < \text{HL}_N]
+$$
 
 The gate opens if **any** window passes (OR logic), allowing the model's attention over 5 friction columns to learn which lookback is most relevant for current conditions.
 
 **Curvature proxy and manifold-aware indicators** (within base 52):
 
-$$\kappa_t = \frac{\text{EMA}_{64}(r_t - 2r_{t-1} + r_{t-2})}{\sigma_t + \varepsilon}, \qquad E_t = \ln(1 + \alpha|\kappa_t|), \quad \alpha = 1000$$
+$$
+\kappa_t = \frac{\text{EMA}_{64}(r_t - 2r_{t-1} + r_{t-2})}{\sigma_t + \varepsilon}, \qquad E_t = \ln(1 + \alpha|\kappa_t|), \quad \alpha = 1000
+$$
 
-$$\text{rsi\_dyn}(t) = \text{RSI}_{14}(t) \cdot (1 + \beta E_t), \qquad \text{adx\_adaptive}(t) = \frac{\text{ADX}_{14}(t)}{1 + \gamma E_t}$$
+$$
+\text{rsi\_dyn}(t) = \text{RSI}_{14}(t) \cdot (1 + \beta E_t), \qquad \text{adx\_adaptive}(t) = \frac{\text{ADX}_{14}(t)}{1 + \gamma E_t}
+$$
 
-$$\text{psar\_adaptive}(t) = \frac{C_t - \text{PSAR}_t}{\text{ATR}_{14}(t) + \varepsilon}$$
+$$
+\text{psar\_adaptive}(t) = \frac{C_t - \text{PSAR}_t}{\text{ATR}_{14}(t) + \varepsilon}
+$$
 
 ### 1.4 Pivot Feature Pathway (13 sparse, separate)
 
 Thirteen pivot geometry features are passed separately as a masked pathway and never concatenated with base features:
 
-$$\mathcal{P} = \{\texttt{PivotHigh}, \texttt{PivotLow}, \texttt{PivotResidual}, \texttt{PivotResidualATR}, \texttt{PivotResidualZ}, \texttt{PivotCurvatureATR}, \texttt{PivotCurvatureProxy},$$
-$$\texttt{PivotSegmentLengthBars}, \texttt{PivotSegmentLengthMinutes}, \texttt{PivotSegmentResidualStd}, \texttt{PivotSegmentVolatility}, \texttt{Slope}, \texttt{SlopeATR}\}$$
+$$
+\mathcal{P} = \{\texttt{PivotHigh},\ \texttt{PivotLow},\ \texttt{PivotResidual},\ \texttt{PivotResidualATR},\ \texttt{PivotResidualZ},\ \texttt{PivotCurvatureATR},\ \texttt{PivotCurvatureProxy},
+$$
+
+$$
+\texttt{PivotSegmentLengthBars},\ \texttt{PivotSegmentLengthMinutes},\ \texttt{PivotSegmentResidualStd},\ \texttt{PivotSegmentVolatility},\ \texttt{Slope},\ \texttt{SlopeATR}\}
+$$
 
 NaN = no pivot event at bar $t$. These are **never imputed** — sparsity is semantically meaningful and handled via masked mean pooling.
 
@@ -148,7 +175,9 @@ Contracts with OI $< 100$ are masked (not dropped) — padded positions receive 
 
 Four independent linear projectors map each timeframe's feature tensor from $\mathbb{R}^{52}$ to a shared latent dimension $d_H = 128$:
 
-$$\text{MultiTFProjector}: \quad \mathbf{h}^{(\ell)}_t = \text{LayerNorm}\left(W^{(\ell)}_{\text{proj}} \mathbf{x}^{(\ell)}_t + \mathbf{b}^{(\ell)}_{\text{proj}}\right), \quad \ell \in \{\text{M1}, \text{M5}, \text{M15}, \text{H1}\}$$
+$$
+\text{MultiTFProjector}: \quad \mathbf{h}^{(\ell)}_t = \text{LayerNorm}\left(W^{(\ell)}_{\text{proj}} \mathbf{x}^{(\ell)}_t + \mathbf{b}^{(\ell)}_{\text{proj}}\right), \quad \ell \in \{\text{M1}, \text{M5}, \text{M15}, \text{H1}\}
+$$
 
 where $W^{(\ell)}_{\text{proj}} \in \mathbb{R}^{128 \times 52}$, producing per-timeframe tensors of shape $[\mathcal{B}, T, 128]$ for batch size $\mathcal{B}$ and lookback $T = 200$.
 
@@ -156,7 +185,9 @@ where $W^{(\ell)}_{\text{proj}} \in \mathbb{R}^{128 \times 52}$, producing per-t
 
 ### 2.2 Dimensional Analysis
 
-$$\underbrace{[\mathcal{B}, T, 52]}_{\text{per TF input}} \xrightarrow{W^{(\ell)}_{\text{proj}}} \underbrace{[\mathcal{B}, T, 128]}_{\text{per TF hidden}} \times 4 \xrightarrow{\text{stack}} \underbrace{[\mathcal{B}, T, 512]}_{\text{concat before TFFusion}}$$
+$$
+\underbrace{[\mathcal{B}, T, 52]}_{\text{per TF input}} \xrightarrow{W^{(\ell)}_{\text{proj}}} \underbrace{[\mathcal{B}, T, 128]}_{\text{per TF hidden}} \times 4 \xrightarrow{\text{stack}} \underbrace{[\mathcal{B}, T, 512]}_{\text{concat before TFFusion}}
+$$
 
 The four projections are concatenated along the feature dimension, yielding $\mathbf{H}_t^{\text{TF}} \in \mathbb{R}^{512}$ per timestep before fusion.
 
@@ -168,9 +199,13 @@ The four projections are concatenated along the feature dimension, yielding $\ma
 
 Pivot features are sparse — NaN at most timesteps. The `PivotProjector` applies masked mean pooling to collapse the 13-dimensional pivot vector into a dense $d_{\text{pivot}} = 16$-dimensional embedding:
 
-$$\tilde{\mathbf{p}}_t = \frac{\sum_{j=1}^{13} m_{t,j} \cdot p_{t,j}}{\sum_{j=1}^{13} m_{t,j} + \varepsilon}, \qquad m_{t,j} = \mathbb{1}[\text{not NaN}(p_{t,j})]$$
+$$
+\tilde{\mathbf{p}}_t = \frac{\sum_{j=1}^{13} m_{t,j} \cdot p_{t,j}}{\sum_{j=1}^{13} m_{t,j} + \varepsilon}, \qquad m_{t,j} = \mathbb{1}[\text{not NaN}(p_{t,j})]
+$$
 
-$$\mathbf{h}^{(\text{piv})}_t = W_{\text{piv}} \tilde{\mathbf{p}}_t + \mathbf{b}_{\text{piv}} \in \mathbb{R}^{16}$$
+$$
+\mathbf{h}^{(\text{piv})}_t = W_{\text{piv}} \tilde{\mathbf{p}}_t + \mathbf{b}_{\text{piv}} \in \mathbb{R}^{16}
+$$
 
 When no pivot event occurs at $t$ (all NaN), $\tilde{\mathbf{p}}_t = \mathbf{0}$ and the pivot pathway contributes a zero vector — the model learns to distinguish "no pivot" from actual structural geometry.
 
@@ -186,15 +221,21 @@ The masking operation ensures the model never treats imputed values as genuine p
 
 The `TFFusionBlock` fuses the stacked 4-timeframe representation $\mathbf{H}^{\text{TF}} \in \mathbb{R}^{512}$ with the pivot embedding $\mathbf{h}^{(\text{piv})} \in \mathbb{R}^{16}$ using a TFT-inspired architecture:
 
-$$\mathbf{H}^{\text{fused}} = \text{TFFusionBlock}\left(\mathbf{H}^{\text{TF}},\, \mathbf{h}^{(\text{piv})}\right) \in [\mathcal{B}, T, 256]$$
+$$
+\mathbf{H}^{\text{fused}} = \text{TFFusionBlock}\left(\mathbf{H}^{\text{TF}},\, \mathbf{h}^{(\text{piv})}\right) \in [\mathcal{B}, T, 256]
+$$
 
 ### 4.2 Gated Residual Network (GRN)
 
 Each sub-module uses a Gated Residual Network for controlled information flow:
 
-$$\text{GRN}(\mathbf{a}, \mathbf{c}) = \text{LayerNorm}\left(\mathbf{a} + \text{GLU}(W_1 \mathbf{a} + W_2 \mathbf{c} + \mathbf{b}_1)\right)$$
+$$
+\text{GRN}(\mathbf{a}, \mathbf{c}) = \text{LayerNorm}\left(\mathbf{a} + \text{GLU}(W_1 \mathbf{a} + W_2 \mathbf{c} + \mathbf{b}_1)\right)
+$$
 
-$$\text{GLU}(\mathbf{x}) = \mathbf{x}_{[:d]} \odot \sigma(\mathbf{x}_{[d:]}), \quad \text{(Gated Linear Unit)}$$
+$$
+\text{GLU}(\mathbf{x}) = \mathbf{x}_{[:d]} \odot \sigma(\mathbf{x}_{[d:]}), \quad \text{(Gated Linear Unit)}
+$$
 
 where $\mathbf{c}$ is an optional context vector (the pivot embedding). The gating mechanism allows the network to suppress irrelevant features dynamically — a pivot absence $\mathbf{h}^{(\text{piv})} = \mathbf{0}$ leaves the TF stream unperturbed.
 
@@ -202,9 +243,13 @@ where $\mathbf{c}$ is an optional context vector (the pivot embedding). The gati
 
 The concatenated TF tensor is processed through multi-head attention to model cross-timeframe dependencies:
 
-$$\text{Attn}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d_k}}\right)\mathbf{V}$$
+$$
+\text{Attn}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\!\left(\frac{\mathbf{Q}\mathbf{K}^\top}{\sqrt{d_k}}\right)\mathbf{V}
+$$
 
-$$\mathbf{H}^{\text{attn}} = \text{MultiHead}(\mathbf{H}^{\text{TF}}) = \text{concat}(\text{head}_1, \ldots, \text{head}_h) W^O$$
+$$
+\mathbf{H}^{\text{attn}} = \text{MultiHead}(\mathbf{H}^{\text{TF}}) = \text{concat}(\text{head}_1, \ldots, \text{head}_h) W^O
+$$
 
 where $h = 4$ heads, $d_k = 512/h = 128$. The attention mechanism discovers time-varying importance weighting across the four timeframe representations: in high-volatility regimes the M1 micro-structure heads may dominate; in trending regimes the H1 macro anchor may dominate.
 
@@ -212,9 +257,13 @@ where $h = 4$ heads, $d_k = 512/h = 128$. The attention mechanism discovers time
 
 A soft variable selection weight vector calibrates the relative importance of each timeframe:
 
-$$\mathbf{v} = \text{softmax}\!\left(W_{\text{sel}} \cdot \text{concat}(\mathbf{H}^{\text{TF}}_{t}, \mathbf{h}^{(\text{piv})}_{t})\right) \in \mathbb{R}^4$$
+$$
+\mathbf{v} = \text{softmax}\!\left(W_{\text{sel}} \cdot \text{concat}(\mathbf{H}^{\text{TF}}_{t}, \mathbf{h}^{(\text{piv})}_{t})\right) \in \mathbb{R}^4
+$$
 
-$$\mathbf{H}^{\text{sel}}_t = \sum_{\ell \in \{M1,M5,M15,H1\}} v^{(\ell)}_t \cdot \mathbf{h}^{(\ell)}_t$$
+$$
+\mathbf{H}^{\text{sel}}_t = \sum_{\ell \in \{M1,M5,M15,H1\}} v^{(\ell)}_t \cdot \mathbf{h}^{(\ell)}_t
+$$
 
 This provides a differentiable attention mechanism over the four timeframes, interpretable as a learned multi-resolution selector.
 
@@ -226,13 +275,21 @@ This provides a differentiable attention mechanism over the four timeframes, int
 
 The `OptionsChainEncoder` maps the 120-contract chain grid to a 128-dimensional embedding using a 2-layer Transformer encoder:
 
-$$\text{Chain input}: \mathbf{C} \in [\mathcal{B}, 120, 10]$$
+$$
+\text{Chain input}: \mathbf{C} \in [\mathcal{B}, 120, 10]
+$$
 
-$$\mathbf{C}^{(0)} = \text{Linear}_{10 \to 64}(\mathbf{C}), \quad \mathbf{C}^{(0)} \in [\mathcal{B}, 120, 64]$$
+$$
+\mathbf{C}^{(0)} = \text{Linear}_{10 \to 64}(\mathbf{C}), \quad \mathbf{C}^{(0)} \in [\mathcal{B}, 120, 64]
+$$
 
-$$\mathbf{C}^{(l)} = \text{TransformerEncoderLayer}^{(l)}(\mathbf{C}^{(l-1)}), \quad l \in \{1, 2\}$$
+$$
+\mathbf{C}^{(l)} = \text{TransformerEncoderLayer}^{(l)}(\mathbf{C}^{(l-1)}), \quad l \in \{1, 2\}
+$$
 
-$$\mathbf{h}^{(\text{chain})} = \text{Linear}_{64 \to 128}\left(\text{MaskedMeanPool}(\mathbf{C}^{(2)})\right) \in \mathbb{R}^{128}$$
+$$
+\mathbf{h}^{(\text{chain})} = \text{Linear}_{64 \to 128}\left(\text{MaskedMeanPool}(\mathbf{C}^{(2)})\right) \in \mathbb{R}^{128}
+$$
 
 Transformer configuration: $d_{\text{model}} = 64$, $n_{\text{heads}} = 4$, $d_{\text{ff}} = 256$. Masked positions (low-OI contracts) are excluded from the pooling via the liquidity mask.
 
@@ -240,7 +297,9 @@ Transformer configuration: $d_{\text{model}} = 64$, $n_{\text{heads}} = 4$, $d_{
 
 The chain encoder ingests the full implied volatility term structure across 120 strikes spanning multiple expiry buckets. The moneyness coordinate $m = \ln(S/K)$ together with $\tau$ (days to expiration) provides a discretization of the IV surface in $(m, \tau)$ space:
 
-$$\sigma_{\text{imp}}(m, \tau) \approx \sigma_{\text{imp}}(0, \tau) + \frac{\partial \sigma}{\partial m} m + \frac{1}{2} \frac{\partial^2 \sigma}{\partial m^2} m^2 + \cdots$$
+$$
+\sigma_{\text{imp}}(m, \tau) \approx \sigma_{\text{imp}}(0, \tau) + \frac{\partial \sigma}{\partial m} m + \frac{1}{2} \frac{\partial^2 \sigma}{\partial m^2} m^2 + \cdots
+$$
 
 The transformer learns to encode skew ($\partial \sigma / \partial m$), term structure ($\partial \sigma / \partial \tau$), and convexity simultaneously, producing a latent surface embedding that informs strategy selection: steep put skew favors bear put spreads; flat term structure with high ATM IV favors iron condors; rising term structure with low ATM IV favors butterfly structures.
 
@@ -250,9 +309,13 @@ The transformer learns to encode skew ($\partial \sigma / \partial m$), term str
 
 The `JointFusionLayer` concatenates the three streams and projects to $d_{\text{joint}} = 128$:
 
-$$\mathbf{z}^{(\text{joint})}_t = W_J \cdot \text{concat}\!\left(\mathbf{H}^{\text{fused}}_t \in \mathbb{R}^{256},\; \mathbf{h}^{(\text{chain})} \in \mathbb{R}^{128}\right) + \mathbf{b}_J$$
+$$
+\mathbf{z}^{(\text{joint})}_t = W_J \cdot \text{concat}\!\left(\mathbf{H}^{\text{fused}}_t \in \mathbb{R}^{256},\; \mathbf{h}^{(\text{chain})} \in \mathbb{R}^{128}\right) + \mathbf{b}_J
+$$
 
-$$\mathbf{z}^{(\text{joint})}_t \in \mathbb{R}^{128}, \qquad [\mathcal{B}, T, 384] \xrightarrow{W_J \in \mathbb{R}^{128 \times 384}} [\mathcal{B}, T, 128]$$
+$$
+\mathbf{z}^{(\text{joint})}_t \in \mathbb{R}^{128}, \qquad [\mathcal{B}, T, 384] \xrightarrow{W_J \in \mathbb{R}^{128 \times 384}} [\mathcal{B}, T, 128]
+$$
 
 This bottleneck fusion forces the model to compress the multi-modal information — price dynamics across four timescales, pivot geometry, and the IV surface — into a unified 128-dimensional state before temporal integration. The compression acts as an information bottleneck regularizer that prevents the backbone from overfitting to any single modality.
 
@@ -270,27 +333,37 @@ Financial time series are inherently **stiff** — they exhibit dynamics operati
 
 The latent state $\mathbf{z}_t \in \mathbb{R}^{d_H}$ evolves according to a partitioned ODE:
 
-$$\frac{d\mathbf{z}}{dt} = \underbrace{\mathbf{L}\,\mathbf{z}}_{\text{stiff linear}} + \underbrace{\mathbf{g}(t)}_{\text{nonlinear forcing}}$$
+$$
+\frac{d\mathbf{z}}{dt} = \underbrace{\mathbf{L}\,\mathbf{z}}_{\text{stiff linear}} + \underbrace{\mathbf{g}(t)}_{\text{nonlinear forcing}}
+$$
 
 where $\mathbf{L} \in \mathbb{R}^{d_H \times d_H}$ is a learnable linear decay operator and $\mathbf{g}(t) = W_g \mathbf{z}^{(\text{joint})}_t + \mathbf{b}_g$ is the input injection function derived from the joint fusion output.
 
 The exact solution over one step $h = 1$:
 
-$$\mathbf{z}_{t+1} = e^{h\mathbf{L}} \mathbf{z}_t + h\,\varphi_1(h\mathbf{L})\,\mathbf{g}(t)$$
+$$
+\mathbf{z}_{t+1} = e^{h\mathbf{L}} \mathbf{z}_t + h\,\varphi_1(h\mathbf{L})\,\mathbf{g}(t)
+$$
 
 where the **$\varphi_1$ function** is the first exponential integrator function:
 
-$$\varphi_1(\mathbf{X}) = \mathbf{X}^{-1}(e^{\mathbf{X}} - \mathbf{I}) = \int_0^1 e^{(1-s)\mathbf{X}}\,ds$$
+$$
+\varphi_1(\mathbf{X}) = \mathbf{X}^{-1}(e^{\mathbf{X}} - \mathbf{I}) = \int_0^1 e^{(1-s)\mathbf{X}}\,ds
+$$
 
 For diagonal $\mathbf{L} = \text{diag}(\lambda_1, \ldots, \lambda_{d_H})$ (efficient implementation):
 
-$$z_{t+1,k} = e^{h\lambda_k} z_{t,k} + h \cdot \frac{e^{h\lambda_k} - 1}{h\lambda_k} \cdot g_k(t)$$
+$$
+z_{t+1,k} = e^{h\lambda_k} z_{t,k} + h \cdot \frac{e^{h\lambda_k} - 1}{h\lambda_k} \cdot g_k(t)
+$$
 
 ### 7.3 Stability Analysis
 
 For $\text{Re}(\lambda_k) < 0$ (decaying modes), $|e^{h\lambda_k}| < 1$ for all $h > 0$ — the ETD-1 scheme is **unconditionally stable** for the linear part regardless of step size. For the forcing term, the $\varphi_1$ coefficient satisfies:
 
-$$\left|\frac{e^{h\lambda_k} - 1}{h\lambda_k}\right| \leq 1 \quad \forall\, h\lambda_k \leq 0$$
+$$
+\left|\frac{e^{h\lambda_k} - 1}{h\lambda_k}\right| \leq 1 \quad \forall\, h\lambda_k \leq 0
+$$
 
 This bounds the influence of any single input on the state update, preventing divergence even when $|\lambda_k| \gg 1$ (stiff modes).
 
@@ -307,7 +380,9 @@ This bounds the influence of any single input on the state update, preventing di
 
 The spectral radius $\rho(\mathbf{J})$ of the Jacobian of the complete system (ETD-1 + predicate routing) is tracked per epoch as a proxy for representational compression:
 
-$$\rho(\mathbf{J}) = \max_i |\lambda_i(\mathbf{J})|$$
+$$
+\rho(\mathbf{J}) = \max_i |\lambda_i(\mathbf{J})|
+$$
 
 **Interpretation:** Rising spectral radius in later epochs ($\rho$ increasing from 0.013 to 0.163 across Runs 12–14) indicates growing signal amplification — the model is committing stronger representational energy to features it has learned are predictive. The `spectral_radius_delta` in the EPOCH_Comparison JSON records the deviation of each epoch's $\rho$ from the best-model checkpoint.
 
@@ -319,9 +394,13 @@ $$\rho(\mathbf{J}) = \max_i |\lambda_i(\mathbf{J})|$$
 
 Upstream of the relational logic hierarchy, 8 **hard predicate gates** act as learned input selectors that concentrate gradient flow toward the subset of predicates most activated by the training distribution:
 
-$$\lambda^{(\text{gate})}_k = \sigma\!\left(\frac{z^{(\text{gate})}_k}{\tau}\right), \quad k = 1, \ldots, 8, \quad \tau = 3$$
+$$
+\lambda^{(\text{gate})}_k = \sigma\!\left(\frac{z^{(\text{gate})}_k}{\tau}\right), \quad k = 1, \ldots, 8, \quad \tau = 3
+$$
 
-$$\mathbf{x}^{(\text{gated})} = \lambda^{(\text{gate})} \odot \mathbf{x}^{(\text{in})}$$
+$$
+\mathbf{x}^{(\text{gated})} = \lambda^{(\text{gate})} \odot \mathbf{x}^{(\text{in})}
+$$
 
 Each gate $k$ selects a subset of the 64 predicate activations. Gates with $\lambda \approx 0$ suppress their predicate block entirely; gates with $\lambda \approx 1$ pass their block through at full strength.
 
@@ -351,15 +430,21 @@ The full v4.3 backbone contains:
 
 The `RelationalLogicLayer` operates on $n_{\text{inputs}} = 64$ features (the full ETL feature vector) and computes comparisons over all pairs from the upper triangular index set:
 
-$$\mathcal{I} = \{(i,j) \mid 0 \leq i < j < n_{\text{inputs}}\}, \quad |\mathcal{I}| = \binom{64}{2} = 2{,}016$$
+$$
+\mathcal{I} = \{(i,j) \mid 0 \leq i < j < n_{\text{inputs}}\}, \quad |\mathcal{I}| = \binom{64}{2} = 2{,}016
+$$
 
 For each pair $(i, j)$, three soft comparison operators are computed:
 
-$$c^{(<)}_{ij} = \sigma\!\left(\frac{x_j - x_i}{\sigma_{\text{scale}} + \varepsilon}\right), \quad c^{(>)}_{ij} = 1 - c^{(<)}_{ij}, \quad c^{(=)}_{ij} = 1 - 2\left|c^{(<)}_{ij} - 0.5\right|$$
+$$
+c^{(<)}_{ij} = \sigma\!\left(\frac{x_j - x_i}{\sigma_{\text{scale}} + \varepsilon}\right), \quad c^{(>)}_{ij} = 1 - c^{(<)}_{ij}, \quad c^{(=)}_{ij} = 1 - 2\left|c^{(<)}_{ij} - 0.5\right|
+$$
 
 The dominant operator is:
 
-$$\text{op}^*(i,j) = \arg\max_{o \in \{<,>,=\}} w_o \cdot c^{(o)}_{ij}$$
+$$
+\text{op}^*(i,j) = \arg\max_{o \in \{<,>,=\}} w_o \cdot c^{(o)}_{ij}
+$$
 
 where $w_o$ are learned operator weights, giving the interpretable comparison `feature_i op* feature_j`.
 
@@ -380,7 +465,9 @@ superset 0 → set 0:
 
 Sets implement fuzzy **conjunction** (AND) semantics — a set activates when all its constituent predicates are simultaneously active:
 
-$$A_s = \prod_{k \in \mathcal{P}_s} \lambda_k^{(\text{pred})}, \qquad A_s \in [0, 1]$$
+$$
+A_s = \prod_{k \in \mathcal{P}_s} \lambda_k^{(\text{pred})}, \qquad A_s \in [0, 1]
+$$
 
 where $\mathcal{P}_s$ is the set of predicate indices assigned to set $s$ and $\lambda_k^{(\text{pred})} = \sigma(z_k^{(\text{pred})}/\tau)$.
 
@@ -390,7 +477,9 @@ The product formulation is equivalent to the probabilistic AND operation under t
 
 Supersets implement fuzzy **disjunction** (OR) semantics — a superset activates when at least one of its constituent sets is active:
 
-$$A_{ss} = 1 - \prod_{s \in \mathcal{S}_{ss}} (1 - A_s), \qquad A_{ss} \in [0, 1]$$
+$$
+A_{ss} = 1 - \prod_{s \in \mathcal{S}_{ss}} (1 - A_s), \qquad A_{ss} \in [0, 1]
+$$
 
 where $\mathcal{S}_{ss}$ is the collection of sets assigned to superset $ss$. The product-of-complements formulation is the standard probabilistic OR relaxation.
 
@@ -398,8 +487,8 @@ where $\mathcal{S}_{ss}$ is the collection of sets assigned to superset $ss$. Th
 
 The predicate–set–superset hierarchy constitutes an inspectable three-level **fuzzy rule base**:
 
-- **Level 1 (Predicates):** Atomic comparisons — "Is $\texttt{rsi\_dyn}$ greater than $\texttt{bandwidth}$?"
-- **Level 2 (Sets):** Conjunctions — "Is $\texttt{rsi\_dyn} > \texttt{bandwidth}$ AND $\texttt{atr\_pct} < \texttt{ivr\_zone}$ AND $\ldots$?"
+- **Level 1 (Predicates):** Atomic comparisons — "Is `rsi_dyn` greater than `bandwidth`?"
+- **Level 2 (Sets):** Conjunctions — "Is `rsi_dyn > bandwidth` AND `atr_pct < ivr_zone` AND ...?"
 - **Level 3 (Supersets):** Disjunctions — "Does any of the following market condition sets hold?"
 
 This is not a metaphor for learned representations — it is a directly readable fuzzy rule base. The `top_comparisons` field in each epoch JSON provides the full human-readable rule text. Unlike attention weights in transformers, these comparisons have unambiguous semantic meaning: each one states a directional relationship between two named market features.
@@ -412,7 +501,9 @@ This is not a metaphor for learned representations — it is a directly readable
 
 All gate activations — predicate gates, predicate activations, and set activations — use the sigmoid with learned temperature $\tau$:
 
-$$\lambda = \sigma\!\left(\frac{z}{\tau}\right) = \frac{1}{1 + e^{-z/\tau}}$$
+$$
+\lambda = \sigma\!\left(\frac{z}{\tau}\right) = \frac{1}{1 + e^{-z/\tau}}
+$$
 
 **Temperature role:** $\tau = 3$ (configured via `--gate-temp 3`) controls the sharpness of the gate:
 
@@ -429,11 +520,15 @@ Higher temperature $\tau$ means the gate requires larger logit magnitude to comm
 
 The gradient of the loss through a gate is:
 
-$$\frac{\partial \mathcal{L}}{\partial z} = \frac{\partial \mathcal{L}}{\partial \lambda} \cdot \lambda(1-\lambda) \cdot \frac{1}{\tau}$$
+$$
+\frac{\partial \mathcal{L}}{\partial z} = \frac{\partial \mathcal{L}}{\partial \lambda} \cdot \lambda(1-\lambda) \cdot \frac{1}{\tau}
+$$
 
 The sigmoid derivative $\lambda(1-\lambda)$ approaches zero as $|z| \to \infty$ — the **vanishing gradient problem** for saturated gates. At $z = -37.586$ (observed in Run 14, Epoch 7):
 
-$$\lambda(1-\lambda)\big|_{z=-37.586/3} \approx \sigma(-12.53)(1-\sigma(-12.53)) \approx 3.6 \times 10^{-6}$$
+$$
+\lambda(1-\lambda)\big|_{z=-37.586/3} \approx \sigma(-12.53)(1-\sigma(-12.53)) \approx 3.6 \times 10^{-6}
+$$
 
 This gate receives essentially zero gradient from the loss and can only be recovered by weight decay ($\nabla_z \mathcal{L}_{\text{WD}} = -\eta \cdot \lambda_{\text{WD}} \cdot z$) or the logit tail penalty (Section 14).
 
@@ -447,7 +542,7 @@ Per-epoch gate health is logged with the following statistics:
 | $\lambda_{\sigma}$ | 0.15–0.30 | Routing diversity |
 | $\lambda_{p05}$ | > 0.05 | Gates not fully off |
 | $\lambda_{p95}$ | < 0.95 | Gates not fully on |
-| $\texttt{clamp}(\lambda \leq \varepsilon)$ | < 5% | Fraction of fully-off gates |
+| `clamp` $(\lambda \leq \varepsilon)$ | < 5% | Fraction of fully-off gates |
 | $z_{\text{std}}$ | 1.0–3.0 | Logit spread (bulk) |
 | $z_{\text{IQR}}$ | $\geq 0.8$ | Logit interquartile range |
 | $z_{\text{MAD}}$ | $\geq 0.7$ | Logit median absolute deviation |
@@ -460,9 +555,13 @@ Per-epoch gate health is logged with the following statistics:
 
 The Neural CDE component provides a path-driven response mechanism operating on the ETD-1 output states $\mathbf{z}^{(\text{ETD})}_t$. The latent state $\mathbf{u} \in \mathbb{R}^{d_H}$ evolves according to:
 
-$$d\mathbf{u}_t = f(\mathbf{u}_t;\,\theta)\,d\mathbf{X}_t$$
+$$
+d\mathbf{u}_t = f(\mathbf{u}_t;\,\theta)\,d\mathbf{X}_t
+$$
 
-$$\mathbf{u}_T = \mathbf{u}_0 + \int_0^T f(\mathbf{u}_t;\,\theta)\,d\mathbf{X}_t$$
+$$
+\mathbf{u}_T = \mathbf{u}_0 + \int_0^T f(\mathbf{u}_t;\,\theta)\,d\mathbf{X}_t
+$$
 
 where $\mathbf{X}_t$ is the **control path** — the continuous interpolation of the joint fusion sequence, and $f: \mathbb{R}^{d_H} \to \mathbb{R}^{d_H \times d_{\text{joint}}}$ is the learned vector field.
 
@@ -470,7 +569,9 @@ where $\mathbf{X}_t$ is the **control path** — the continuous interpolation of
 
 The vector field $f$ is parameterized as a 2-layer MLP with tanh stabilization:
 
-$$f(\mathbf{u}) = \tanh\!\left(W_2 \cdot \text{SiLU}(W_1 \mathbf{u} + \mathbf{b}_1) + \mathbf{b}_2\right) \in \mathbb{R}^{d_H \times d_{\text{joint}}}$$
+$$
+f(\mathbf{u}) = \tanh\!\left(W_2 \cdot \text{SiLU}(W_1 \mathbf{u} + \mathbf{b}_1) + \mathbf{b}_2\right) \in \mathbb{R}^{d_H \times d_{\text{joint}}}
+$$
 
 The $\tanh$ activation ensures $\|f(\mathbf{u})\|_\infty \leq 1$, bounding the rate of state change per unit of control path increment and preventing state explosion over the $T = 200$ step lookback.
 
@@ -478,7 +579,9 @@ The $\tanh$ activation ensures $\|f(\mathbf{u})\|_\infty \leq 1$, bounding the r
 
 On the observation grid:
 
-$$\mathbf{u}_{t+1} = \mathbf{u}_t + f(\mathbf{u}_t) \cdot (\mathbf{z}^{(\text{joint})}_{t+1} - \mathbf{z}^{(\text{joint})}_t)$$
+$$
+\mathbf{u}_{t+1} = \mathbf{u}_t + f(\mathbf{u}_t) \cdot (\mathbf{z}^{(\text{joint})}_{t+1} - \mathbf{z}^{(\text{joint})}_t)
+$$
 
 The **control increment** $d\mathbf{X}_t = \mathbf{z}^{(\text{joint})}_{t+1} - \mathbf{z}^{(\text{joint})}_t$ measures how much the fused representation changes from bar to bar. Regime shifts (large $d\mathbf{X}_t$) drive proportionally larger state updates, while quiet consolidation periods (small $d\mathbf{X}_t$) produce minimal latent state evolution — a natural signal-to-noise filtering property.
 
@@ -486,7 +589,9 @@ The **control increment** $d\mathbf{X}_t = \mathbf{z}^{(\text{joint})}_{t+1} - \
 
 The CDE operates **in series** after the ETD-1: the ETD-1 handles temporal integration of the fused multi-modal sequence while the CDE captures the differential path geometry of that sequence. The ETD-1 state $\mathbf{z}^{(\text{ETD})}_T$ provides stable long-range memory; the CDE state $\mathbf{u}_T$ provides a path-sensitive local response to recent control signal structure. Both states are concatenated before the predicate gate layer:
 
-$$\mathbf{h}_T = \text{concat}(\mathbf{z}^{(\text{ETD})}_T,\, \mathbf{u}_T) \in \mathbb{R}^{2d_H}$$
+$$
+\mathbf{h}_T = \text{concat}(\mathbf{z}^{(\text{ETD})}_T,\, \mathbf{u}_T) \in \mathbb{R}^{2d_H}
+$$
 
 ---
 
@@ -513,7 +618,9 @@ The **abstain class** is a first-class citizen in the loss function — the mode
 
 ### 12.2 Five Output Heads
 
-$$\mathbf{h}_T \xrightarrow{\text{5 heads}} \{\hat{\mathbf{s}},\, \hat{p},\, \hat{v},\, \hat{\mathbf{r}},\, \hat{q}\}$$
+$$
+\mathbf{h}_T \xrightarrow{\text{5 heads}} \{\hat{\mathbf{s}},\, \hat{p},\, \hat{v},\, \hat{\mathbf{r}},\, \hat{q}\}
+$$
 
 | Head | Output | Shape | Activation | Loss Type |
 |------|--------|-------|------------|-----------|
@@ -525,11 +632,15 @@ $$\mathbf{h}_T \xrightarrow{\text{5 heads}} \{\hat{\mathbf{s}},\, \hat{p},\, \ha
 
 ### 12.3 Strategy Head Mathematics
 
-$$\hat{\mathbf{s}} = \text{softmax}\!\left(\frac{W_s \mathbf{h}_T}{\sqrt{d_H}}\right), \quad \hat{s}_k = \frac{e^{(W_s \mathbf{h}_T)_k / \sqrt{d_H}}}{\sum_{j=0}^{9} e^{(W_s \mathbf{h}_T)_j / \sqrt{d_H}}}$$
+$$
+\hat{\mathbf{s}} = \text{softmax}\!\left(\frac{W_s \mathbf{h}_T}{\sqrt{d_H}}\right), \quad \hat{s}_k = \frac{e^{(W_s \mathbf{h}_T)_k / \sqrt{d_H}}}{\sum_{j=0}^{9} e^{(W_s \mathbf{h}_T)_j / \sqrt{d_H}}}
+$$
 
 Abstain is triggered at inference if:
 
-$$\max_k \hat{s}_k < \theta_{\text{abstain}} = 0.60$$
+$$
+\max_k \hat{s}_k < \theta_{\text{abstain}} = 0.60
+$$
 
 The `output_class_norms` in epoch JSONs track the L2 norm of each class's output vector, providing a measure of which strategies the model is committing representational energy to:
 
@@ -547,7 +658,9 @@ Uniform norms (~0.60) indicate the model is not yet specialized; spreading norms
 
 The total training objective is a weighted sum of nine components:
 
-$$\mathcal{L}_{\text{total}} = \sum_{c \in \mathcal{C}} w_c(e) \cdot \mathcal{L}_c$$
+$$
+\mathcal{L}_{\text{total}} = \sum_{c \in \mathcal{C}} w_c(e) \cdot \mathcal{L}_c
+$$
 
 where $w_c(e)$ is the epoch-dependent annealed weight for component $c$.
 
@@ -569,7 +682,9 @@ where $w_c(e)$ is the epoch-dependent annealed weight for component $c$.
 
 Weight annealing is linear interpolation between start and end values:
 
-$$w_c(e) = w_c^{(0)} + \frac{\min(e, e_{\text{end}}) - e_{\text{start}}}{e_{\text{end}} - e_{\text{start}}} \cdot \left(w_c^{(T)} - w_c^{(0)}\right)$$
+$$
+w_c(e) = w_c^{(0)} + \frac{\min(e, e_{\text{end}}) - e_{\text{start}}}{e_{\text{end}} - e_{\text{start}}} \cdot \left(w_c^{(T)} - w_c^{(0)}\right)
+$$
 
 | Component | $e_{\text{start}}$ | $e_{\text{end}}$ | $w^{(0)}$ | $w^{(T)}$ | Rationale |
 |-----------|--------------------|-----------------|-----------|-----------|-----------|
@@ -581,7 +696,9 @@ $$w_c(e) = w_c^{(0)} + \frac{\min(e, e_{\text{end}}) - e_{\text{start}}}{e_{\tex
 
 ### 13.4 Huber Loss Component
 
-$$\text{Huber}_\delta(e) = \begin{cases} \frac{1}{2}e^2 & |e| \leq \delta \\ \delta|e| - \frac{1}{2}\delta^2 & |e| > \delta \end{cases}$$
+$$
+\text{Huber}_\delta(e) = \begin{cases} \frac{1}{2}e^2 & |e| \leq \delta \\ \delta|e| - \frac{1}{2}\delta^2 & |e| > \delta \end{cases}
+$$
 
 Applied jointly to EV and risk predictions, the Huber component provides outlier robustness: large prediction errors (e.g., rare high-vol days) are penalized linearly rather than quadratically, preventing the loss from being dominated by a small number of extreme samples.
 
@@ -595,19 +712,25 @@ Without explicit regularization, gate logits drift toward saturation under gradi
 
 ### 14.2 Floor 1: Variance Penalty
 
-$$\mathcal{L}_{\text{var}} = \alpha_z \cdot \max\!\left(0,\, v_{\text{target}} - \text{Var}(z)\right)^2, \quad \alpha_z = 0.10, \quad v_{\text{target}} = 2.0$$
+$$
+\mathcal{L}_{\text{var}} = \alpha_z \cdot \max\!\left(0,\, v_{\text{target}} - \text{Var}(z)\right)^2, \quad \alpha_z = 0.10, \quad v_{\text{target}} = 2.0
+$$
 
 **Target:** $\text{Var}(z) \geq 2.0$. The squared hinge ensures the penalty is zero when variance is healthy and grows quadratically when it collapses.
 
 ### 14.3 Floor 2: IQR Penalty
 
-$$\mathcal{L}_{\text{IQR}} = \alpha_{\text{IQR}} \cdot \max\!\left(0,\, I_{\text{target}} - \text{IQR}(z)\right)^2, \quad \alpha_{\text{IQR}} = 0.08, \quad I_{\text{target}} = 1.0$$
+$$
+\mathcal{L}_{\text{IQR}} = \alpha_{\text{IQR}} \cdot \max\!\left(0,\, I_{\text{target}} - \text{IQR}(z)\right)^2, \quad \alpha_{\text{IQR}} = 0.08, \quad I_{\text{target}} = 1.0
+$$
 
 **Target:** $\text{IQR}(z) \geq 1.0$. The IQR is robust to outliers — it measures the spread of the middle 50% of logits and penalizes collapse of the bulk distribution independently of extreme values.
 
 ### 14.4 Floor 3: MAD Penalty
 
-$$\mathcal{L}_{\text{MAD}} = \alpha_{\text{MAD}} \cdot \max\!\left(0,\, M_{\text{target}} - \text{MAD}(z)\right)^2, \quad \alpha_{\text{MAD}} = 0.05, \quad M_{\text{target}} = 0.9$$
+$$
+\mathcal{L}_{\text{MAD}} = \alpha_{\text{MAD}} \cdot \max\!\left(0,\, M_{\text{target}} - \text{MAD}(z)\right)^2, \quad \alpha_{\text{MAD}} = 0.05, \quad M_{\text{target}} = 0.9
+$$
 
 **Target:** $\text{MAD}(z) \geq 0.9$. The Median Absolute Deviation $= \text{median}(|z - \text{median}(z)|)$ provides a third, independently robust measure of spread. The three-floor system (var + IQR + MAD) cross-validates gate diversity — a gate distribution can fail one check while passing others, so requiring all three provides stronger guarantees.
 
@@ -617,19 +740,25 @@ The three floor penalties protect the **bulk distribution** but are insensitive 
 
 The **logit tail penalty** directly targets absolute excess beyond a saturation band $L = 8$:
 
-$$\mathcal{L}_{\text{tail}} = \alpha_{\text{tail}} \cdot \mathbb{E}\!\left[\max(0,\, |z| - L)^2\right]$$
+$$
+\mathcal{L}_{\text{tail}} = \alpha_{\text{tail}} \cdot \mathbb{E}\!\left[\max(0,\, |z| - L)^2\right]
+$$
 
 where $L = 8$ corresponds to $\sigma(\pm 8) = 0.9997$ — full saturation. Any gate at $|z| > 8$ is effectively hard-clamped and contributes a squared penalty proportional to its excess.
 
 **Gradient effect:** For a gate at $z = -37$ with $L = 8$:
 
-$$\frac{\partial \mathcal{L}_{\text{tail}}}{\partial z} = \alpha_{\text{tail}} \cdot 2 \cdot (|z| - L) \cdot \text{sign}(z) = 0.03 \times 2 \times 29 \times (-1) = -1.74$$
+$$
+\frac{\partial \mathcal{L}_{\text{tail}}}{\partial z} = \alpha_{\text{tail}} \cdot 2 \cdot (|z| - L) \cdot \text{sign}(z) = 0.03 \times 2 \times 29 \times (-1) = -1.74
+$$
 
 This is a direct, strong pull toward $z = 0$ regardless of the sigmoid gradient vanishing. At $\alpha_{\text{tail}} = 0.01$ (Run 12) this gradient was $-0.58$ — present but insufficient to overcome weight accumulation. At $\alpha_{\text{tail}} = 0.1$ (Run 13) it was $-5.8$ — strong enough to disrupt routing structure. The empirically optimal value $\alpha_{\text{tail}} = 0.03$ (Run 14, best val = 0.9553) provides a gradient of $-1.74$, balancing suppression of outliers with preservation of the model's ability to commit to strong routing decisions.
 
 ### 14.6 Diversity Penalty
 
-$$\mathcal{L}_{\text{div}} = \alpha_{\text{div}} \cdot \max\!\left(0,\, \sigma_{\text{target}} - \text{std}(\lambda)\right)^2, \quad \alpha_{\text{div}} = 0.005, \quad \sigma_{\text{target}} = 0.14$$
+$$
+\mathcal{L}_{\text{div}} = \alpha_{\text{div}} \cdot \max\!\left(0,\, \sigma_{\text{target}} - \text{std}(\lambda)\right)^2, \quad \alpha_{\text{div}} = 0.005, \quad \sigma_{\text{target}} = 0.14
+$$
 
 Penalizes collapse of the $\lambda$ distribution toward uniformity, ensuring the model maintains diverse routing strength across gates.
 
@@ -657,7 +786,9 @@ The system is designed so that each regularizer fills the blind spots of the oth
 
 All continuous features are normalized using RobustScaler (fit on train split only):
 
-$$x_{\text{scaled}} = \frac{x - \text{median}(x)}{1.4826 \times \text{MAD}(x)}$$
+$$
+x_{\text{scaled}} = \frac{x - \text{median}(x)}{1.4826 \times \text{MAD}(x)}
+$$
 
 The constant 1.4826 makes MAD consistent with standard deviation for normal distributions. Clipping to $[-10, 10]$ prevents Black Swan market events from generating pathological gradients.
 
@@ -676,7 +807,9 @@ The following features are **excluded from normalization** (passthrough):
 
 The `V43Dataset` constructs fixed-length windows of shape $[\mathcal{B}, T, d_{\text{feat}}]$:
 
-$$\mathcal{D} = \left\{(X_{\tau:\tau+T},\, \mathbf{y}_{\tau+T}) \mid \tau \in [0,\, N-T)\right\}$$
+$$
+\mathcal{D} = \left\{(X_{\tau:\tau+T},\, \mathbf{y}_{\tau+T}) \mid \tau \in [0,\, N-T)\right\}
+$$
 
 where $T = 200$ (lookback), $N$ = total M5 rows = 18,494, yielding approximately 18,294 sequences.
 
@@ -734,7 +867,9 @@ py -3.12 intelligence/condor_train_net_v43.py \
 
 ### 16.3 Cosine Learning Rate Schedule
 
-$$\text{LR}(e) = \text{LR}_{\text{min}} + \frac{1}{2}(\text{LR}_{\text{max}} - \text{LR}_{\text{min}})\left(1 + \cos\!\left(\frac{\pi e}{E_{\text{total}}}\right)\right)$$
+$$
+\text{LR}(e) = \text{LR}_{\text{min}} + \frac{1}{2}(\text{LR}_{\text{max}} - \text{LR}_{\text{min}})\left(1 + \cos\!\left(\frac{\pi e}{E_{\text{total}}}\right)\right)
+$$
 
 with $\text{LR}_{\text{max}} = 10^{-4}$, $\text{LR}_{\text{min}} \approx 0$, $E_{\text{total}} = 40$. The LR decays from $9.98 \times 10^{-5}$ at epoch 1 to $1.20 \times 10^{-5}$ at epoch 31 (typical early stop epoch).
 
@@ -742,7 +877,9 @@ with $\text{LR}_{\text{max}} = 10^{-4}$, $\text{LR}_{\text{min}} \approx 0$, $E_
 
 Effective batch gradient:
 
-$$\nabla_\theta^{\text{eff}} = \frac{1}{K} \sum_{k=1}^{K} \nabla_\theta \mathcal{L}^{(k)}, \qquad K = 2$$
+$$
+\nabla_\theta^{\text{eff}} = \frac{1}{K} \sum_{k=1}^{K} \nabla_\theta \mathcal{L}^{(k)}, \qquad K = 2
+$$
 
 Effective batch size = $256 \times 2 = 512$ sequences. This provides stable gradient estimates across more diverse market contexts per update while maintaining GPU memory efficiency.
 
@@ -763,7 +900,9 @@ Effective batch size = $256 \times 2 = 512$ sequences. This provides stable grad
 
 The pop_bce head converges to the unconditional binary entropy $H(0.5) = \ln 2 \approx 0.613$ by epoch 2 — the PoP signal is difficult to predict beyond the prior. With a weight ramp from 0.8 to 1.2 over 10 epochs, the measured val loss includes an artificial linear trend:
 
-$$\mathcal{L}_{\text{val}}^{\text{measured}}(e) = \mathcal{L}_{\text{val}}^{\text{true}}(e) + \underbrace{0.613 \times \Delta w(e)}_{\text{artifact}}$$
+$$
+\mathcal{L}_{\text{val}}^{\text{measured}}(e) = \mathcal{L}_{\text{val}}^{\text{true}}(e) + \underbrace{0.613 \times \Delta w(e)}_{\text{artifact}}
+$$
 
 At $\Delta w = 0.04$ per epoch, the artifact adds $\approx 0.025$ per epoch to the measured val loss, causing early stopping to select E2 (best measured) when the true minimum was E7 (val = 0.8806 corrected). Fix: constant pop_bce weight = 1.0.
 
@@ -803,7 +942,9 @@ The train-val gap at the best epoch (~0.06–0.07) is consistent across all runs
 
 The backbone spectral radius $\rho(\mathbf{J})$ where $\mathbf{J}$ is the Jacobian of the full forward pass is computed per epoch. The `spectral_radius_delta` in the EPOCH_Comparison JSON records:
 
-$$\Delta\rho(e) = \rho(\mathbf{J}^{(e)}) - \rho(\mathbf{J}^{(e^*)})$$
+$$
+\Delta\rho(e) = \rho(\mathbf{J}^{(e)}) - \rho(\mathbf{J}^{(e^*)})
+$$
 
 where $e^*$ is the best-model epoch. Positive $\Delta\rho$ indicates growing amplification relative to the best checkpoint.
 
@@ -818,11 +959,15 @@ In Runs 12–14, spectral radius grows from +0.013 at E1 to +0.163 at E31, consi
 
 Each epoch produces an activation correlation matrix saved as `Epoch{N}_A_Matrix.csv`. The Pearson correlation $\rho_{ij}$ between predicate activations $\lambda_i$ and $\lambda_j$ across the validation set:
 
-$$\rho_{ij} = \frac{\text{Cov}(\lambda_i, \lambda_j)}{\sqrt{\text{Var}(\lambda_i) \cdot \text{Var}(\lambda_j)}}$$
+$$
+\rho_{ij} = \frac{\text{Cov}(\lambda_i, \lambda_j)}{\sqrt{\text{Var}(\lambda_i) \cdot \text{Var}(\lambda_j)}}
+$$
 
 The overall Frobenius norm of the off-diagonal A-matrix:
 
-$$\rho_{\text{epoch}} = \frac{1}{N(N-1)} \sum_{i \neq j} |\rho_{ij}|$$
+$$
+\rho_{\text{epoch}} = \frac{1}{N(N-1)} \sum_{i \neq j} |\rho_{ij}|
+$$
 
 is logged as `rho=X.XXXX` in training output. High $\rho_{\text{epoch}}$ indicates predicate co-activation (correlated routes); low $\rho_{\text{epoch}}$ indicates diverse, independent route usage. Target: $\rho_{\text{epoch}} < 0.15$ (Run 14 Epoch 7: $\rho = 0.1301$).
 
@@ -904,11 +1049,15 @@ The comparison JSON tracks structural drift from the best-model checkpoint:
 
 Feature pair $(i,j)$ is stored as the index $k$ into the upper triangular matrix:
 
-$$k = \text{triu\_index}(i, j, n) = ni - \frac{i(i+1)}{2} + j - i - 1, \qquad 0 \leq i < j < n$$
+$$
+k = \text{triu\_index}(i, j, n) = ni - \frac{i(i+1)}{2} + j - i - 1, \qquad 0 \leq i < j < n
+$$
 
 Inverse lookup:
 
-$$i = \left\lfloor \frac{2n - 1 - \sqrt{(2n-1)^2 - 8k}}{2} \right\rfloor, \qquad j = k - \text{triu\_index}(i, i+1, n) + i + 1$$
+$$
+i = \left\lfloor \frac{2n - 1 - \sqrt{(2n-1)^2 - 8k}}{2} \right\rfloor, \qquad j = k - \text{triu\_index}(i, i+1, n) + i + 1
+$$
 
 Implemented via `numpy.triu_indices(n_inputs, k=1)` for $n_{\text{inputs}} = 64$, yielding $\binom{64}{2} = 2{,}016$ unique feature pairs.
 
@@ -931,7 +1080,9 @@ An Iron Condor consists of exactly four legs. The fail-fast rule in `build_condo
 
 **Net credit received:**
 
-$$C_{\text{net}} = (C_{K_{sc}} - C_{K_{lc}}) + (P_{K_{sp}} - P_{K_{lp}})$$
+$$
+C_{\text{net}} = (C_{K_{sc}} - C_{K_{lc}}) + (P_{K_{sp}} - P_{K_{lp}})
+$$
 
 where $C_K$ and $P_K$ denote call and put mid-prices at strike $K$.
 
@@ -941,15 +1092,21 @@ where $C_K$ and $P_K$ denote call and put mid-prices at strike $K$.
 
 **Probability of Profit (theoretical BSM):**
 
-$$\text{PoP} = N(d_1(K_{sc})) - N(d_1(K_{sp}))$$
+$$
+\text{PoP} = N(d_1(K_{sc})) - N(d_1(K_{sp}))
+$$
 
 where $N(\cdot)$ is the standard normal CDF and $d_1(K) = [\ln(S/K) + (r + \sigma^2/2)\tau] / (\sigma\sqrt{\tau})$.
 
 ### 20.3 Mark-to-Market P&L
 
-$$\text{PnL}(t) = (C_{\text{net}} - \text{CurrentCost}(t)) \times N \times 100$$
+$$
+\text{PnL}(t) = (C_{\text{net}} - \text{CurrentCost}(t)) \times N \times 100
+$$
 
-$$\text{CurrentCost}(t) = (C_{K_{sc},t} - C_{K_{lc},t}) + (P_{K_{sp},t} - P_{K_{lp},t})$$
+$$
+\text{CurrentCost}(t) = (C_{K_{sc},t} - C_{K_{lc},t}) + (P_{K_{sp},t} - P_{K_{lp},t})
+$$
 
 where all option prices are mid-prices from the synthetic Black-Scholes chain at time $t$.
 
@@ -957,11 +1114,15 @@ where all option prices are mid-prices from the synthetic Black-Scholes chain at
 
 **Value at Risk (95%):**
 
-$$\text{VaR}_{95} = \inf\{l : P(\text{Loss} > l) \leq 0.05\}$$
+$$
+\text{VaR}_{95} = \inf\{l : P(\text{Loss} > l) \leq 0.05\}
+$$
 
 **Conditional VaR (Expected Shortfall at 95%):**
 
-$$\text{CVaR}_{95} = \frac{1}{0.05} \int_{0.95}^{1} \text{VaR}_u\, du = \mathbb{E}[\text{Loss} \mid \text{Loss} \geq \text{VaR}_{95}]$$
+$$
+\text{CVaR}_{95} = \frac{1}{0.05} \int_{0.95}^{1} \text{VaR}_u\, du = \mathbb{E}[\text{Loss} \mid \text{Loss} \geq \text{VaR}_{95}]
+$$
 
 Both are estimated from Monte Carlo simulation of the options positions over the distribution of SPY log-returns. These serve as regression targets for the `risk_head`.
 
@@ -990,7 +1151,9 @@ A model checkpoint is deployment-safe if all of the following hold:
 
 At inference, the model abstains if:
 
-$$\max_k \hat{s}_k < 0.60 \quad \lor \quad \hat{p} < 0.45 \quad \lor \quad \text{friction\_gate} = 0$$
+$$
+\max_k \hat{s}_k < 0.60 \quad \lor \quad \hat{p} < 0.45 \quad \lor \quad \text{friction\_gate} = 0
+$$
 
 The friction gate requires at least one `friction_ok_N = 1` for any window $N \in \{5, 10, 20, 40, 60\}$ — equivalent to requiring that the bid-ask spread is smaller than the recent price range at some lookback scale. This is enforced **per leg** in multi-leg strategies.
 
@@ -998,7 +1161,9 @@ The friction gate requires at least one `friction_ok_N = 1` for any window $N \i
 
 Feature importance is assessed via permutation:
 
-$$I_j = \frac{1}{K} \sum_{k=1}^{K} \left[\mathcal{L}(f(X^{(j,k)}), y) - \mathcal{L}(f(X), y)\right]$$
+$$
+I_j = \frac{1}{K} \sum_{k=1}^{K} \left[\mathcal{L}(f(X^{(j,k)}), y) - \mathcal{L}(f(X), y)\right]
+$$
 
 where $X^{(j,k)}$ has feature $j$ randomly permuted across the validation batch. High $I_j$ identifies features critical to the current checkpoint's decisions.
 
@@ -1006,7 +1171,9 @@ where $X^{(j,k)}$ has feature $j$ randomly permuted across the validation batch.
 
 Local feature sensitivity at inference:
 
-$$S_j = \frac{1}{N} \sum_{i=1}^{N} \left|\frac{\partial \hat{s}^{(i)}}{\partial x_j^{(i)}}\right|$$
+$$
+S_j = \frac{1}{N} \sum_{i=1}^{N} \left|\frac{\partial \hat{s}^{(i)}}{\partial x_j^{(i)}}\right|
+$$
 
 Combined with the `top_comparisons` readout from the epoch JSON, this provides a two-level interpretability system: $S_j$ gives aggregate feature importance; `top_comparisons` gives the specific relational rules the model has learned to use.
 
@@ -1014,7 +1181,9 @@ Combined with the `top_comparisons` readout from the epoch JSON, this provides a
 
 The Hessian trace of the loss landscape:
 
-$$\text{Tr}(H) = \text{Tr}(\nabla^2 \mathcal{L})$$
+$$
+\text{Tr}(H) = \text{Tr}(\nabla^2 \mathcal{L})
+$$
 
 Lower trace correlates with flatter minima and improved out-of-distribution generalization (PAC-Bayes sharpness bounds). Monitored per checkpoint to ensure training converges to flat minima rather than sharp basins.
 
