@@ -176,6 +176,66 @@ def _parse_epoch_id(eid) -> int:
 
 
 # =============================================================================
+# LOGIT-SPACE GATE REGULARIZERS (Run 8)
+# =============================================================================
+
+def _logit_safe(p: torch.Tensor, eps: float = 1e-4) -> torch.Tensor:
+    """Numerically stable logit: log(p) - log(1-p) with clamped input."""
+    p = p.float().clamp(eps, 1.0 - eps)
+    return torch.log(p) - torch.log1p(-p)
+
+
+def logit_variance_floor(lambda_probs: torch.Tensor,
+                         var_target: float = 2.0,
+                         alpha: float = 0.02,
+                         eps: float = 1e-3,
+                         logit_eps: float = 1e-4) -> torch.Tensor:
+    """
+    Enforce Var(z_approx) >= var_target, where z_approx = logit(λ).
+
+    Attacks σ_z contraction at the source: if the pre-sigmoid logit distribution
+    collapses toward a spike at 0, this hinge pushes variance back up.
+    Gradient flows through λ → hierarchical_logic → relational layers.
+
+    var_target=2.0 corresponds to z_std≈1.4, matching healthy epoch-1 gate_logit
+    std observed in Run 7.
+    """
+    if lambda_probs is None:
+        return torch.tensor(0.0, device='cpu')
+    z = _logit_safe(lambda_probs, eps=logit_eps).reshape(-1)
+    if z.numel() < 2:
+        return z.new_zeros(())
+    var_z = z.var(unbiased=False)
+    hinge = F.softplus((var_target - var_z) / eps) * eps
+    return alpha * hinge
+
+
+def logit_iqr_floor(lambda_probs: torch.Tensor,
+                    iqr_target: float = 1.0,
+                    alpha: float = 0.01,
+                    eps: float = 1e-3,
+                    logit_eps: float = 1e-4) -> torch.Tensor:
+    """
+    Enforce IQR(z_approx) >= iqr_target to prevent bulk-degeneracy.
+
+    Variance can be inflated by a hard-negative outlier tail while the bulk
+    (middle 50%) stays pinned near 0 (IQR≈0.024, as observed in Run 7 epoch 15).
+    This hinge forces the middle 50% to spread, directly addressing the bimodal
+    pathology where most mass sits at λ≈0.5 and a sparse tail saturates hard-off.
+    """
+    if lambda_probs is None:
+        return torch.tensor(0.0, device='cpu')
+    z = _logit_safe(lambda_probs, eps=logit_eps).reshape(-1)
+    if z.numel() < 2:
+        return z.new_zeros(())
+    q25 = torch.quantile(z, 0.25)
+    q75 = torch.quantile(z, 0.75)
+    iqr = q75 - q25
+    hinge = F.softplus((iqr_target - iqr) / eps) * eps
+    return alpha * hinge
+
+
+# =============================================================================
 # CRASH SENTINEL
 # =============================================================================
 SENTINEL_PATH = Path(".training_active")
@@ -1330,12 +1390,26 @@ def parse_args_v43():
     p.add_argument('--gate-temp', type=float, default=3.0,
                    help='Initial gate temperature τ (Run 5+). Amplifies routing logits '
                         'so λ std targets 0.15–0.30.  Learnable; clamped to [1, 10].')
-    p.add_argument('--diversity-alpha', type=float, default=0.02,
-                   help='Run 7: gate diversity loss max coefficient α. '
-                        'Ramps 0 → α over first 30%% of epochs (see compute_alpha).')
+    p.add_argument('--diversity-alpha', type=float, default=0.005,
+                   help='λ-std diversity hinge coefficient (demoted in Run 8 to sanity rail). '
+                        'Ramps 0 → α over first 30%% of epochs.')
     p.add_argument('--diversity-std-target', type=float, default=0.14,
-                   help='Run 7: target minimum std(λ) for diversity hinge (default 0.14). '
-                        'Reduce to 0.12 if val degrades sharply in first 5 epochs.')
+                   help='Target minimum std(λ) for diversity hinge (default 0.14).')
+    # Run 8: logit-space regularizers
+    p.add_argument('--logit-var-alpha', type=float, default=0.02,
+                   help='Run 8: logit variance floor coefficient. '
+                        'Ramps 0 → α over first 10%% of epochs.')
+    p.add_argument('--logit-var-target', type=float, default=2.0,
+                   help='Run 8: target minimum Var(z_approx). '
+                        '2.0 ≈ z_std 1.4 (observed at healthy epoch 1, Run 7).')
+    p.add_argument('--logit-iqr-alpha', type=float, default=0.02,
+                   help='Run 8: IQR floor coefficient. '
+                        'Ramps 0 → α over first 10%% of epochs.')
+    p.add_argument('--logit-iqr-target', type=float, default=1.0,
+                   help='Run 8: target minimum IQR(z_approx). '
+                        '1.0 forces middle 50%% to spread ≥1 logit unit.')
+    p.add_argument('--logit-eps', type=float, default=1e-4,
+                   help='Run 8: ε for logit clamping in _logit_safe (default 1e-4).')
 
     # === Training ===
     p.add_argument('--epochs', type=int, default=50)
@@ -1531,8 +1605,10 @@ def train_condor_net_v43(args):
     print(f"  Epochs: {args.epochs} | Batch: {args.batch_size} | LR: {args.lr}")
     print(f"  Lookback: {args.lookback} | Accum Steps: {args.accum_steps}")
     print(f"  Grad Clip: {args.grad_clip} | Patience: {args.patience}")
-    print(f"  Gate τ init: {args.gate_temp} | Diversity α: {args.diversity_alpha} "
-          f"(std_target: {args.diversity_std_target}, ramp: {int(args.epochs * 0.3)} epochs)")
+    print(f"  Gate τ init: {args.gate_temp} | λ-hinge α: {args.diversity_alpha} (std_target: {args.diversity_std_target})")
+    print(f"  Z-var floor: α={args.logit_var_alpha} var_target={args.logit_var_target} | "
+          f"IQR floor: α={args.logit_iqr_alpha} iqr_target={args.logit_iqr_target} "
+          f"(ramp: {max(1,int(args.epochs*0.10))} epochs)")
     print(f"  Output: {args.output}")
     print(f"{'='*60}\n")
 
@@ -1551,11 +1627,22 @@ def train_condor_net_v43(args):
         model.train()
         criterion.set_epoch(epoch)
 
-        # α ramp: 0 → diversity_alpha_max over first 30% of epochs (Run 7)
+        # α ramp: 0 → diversity_alpha_max over first 30% of epochs (Run 7, demoted)
         alpha_sched = compute_alpha(
             epoch, args.epochs,
             alpha_max=args.diversity_alpha,
             warmup_frac=0.3,
+        )
+        # α ramp: logit-space regularizers over first 10% of epochs (Run 8, fast ramp)
+        alpha_z_sched = compute_alpha(
+            epoch, args.epochs,
+            alpha_max=args.logit_var_alpha,
+            warmup_frac=0.10,
+        )
+        alpha_iqr_sched = compute_alpha(
+            epoch, args.epochs,
+            alpha_max=args.logit_iqr_alpha,
+            warmup_frac=0.10,
         )
 
         epoch_loss = 0.0
@@ -1606,7 +1693,7 @@ def train_condor_net_v43(args):
                 # ── 2. LOSS ─────────────────────────────────────────
                 loss, components = criterion(outputs, labels)
 
-                # ── Gate diversity regularizer (Run 7) ───────────────
+                # ── λ-std diversity hinge (Run 7, demoted to sanity rail) ─
                 if outputs.final_gate is not None and alpha_sched > 0.0:
                     _div_loss = gate_diversity_loss(
                         outputs.final_gate,
@@ -1615,13 +1702,43 @@ def train_condor_net_v43(args):
                     )
                     loss = loss + _div_loss
                     components['gate_diversity'] = _div_loss.detach()
-                    # Per-batch gate logging at first batch only
-                    if batch_idx == 0:
-                        with torch.no_grad():
-                            _gate_std_b0 = outputs.final_gate.float().view(-1).std().item()
-                        print(f"  [Gate B0] std={_gate_std_b0:.4f}  "
-                              f"alpha={alpha_sched:.4f}  "
-                              f"gate_loss={_div_loss.item():.6f}")
+
+                # ── Logit variance floor (Run 8, primary) ────────────
+                if outputs.final_gate is not None and alpha_z_sched > 0.0:
+                    _zvar_loss = logit_variance_floor(
+                        outputs.final_gate,
+                        var_target=args.logit_var_target,
+                        alpha=alpha_z_sched,
+                        logit_eps=args.logit_eps,
+                    )
+                    loss = loss + _zvar_loss
+                    components['logit_zvar'] = _zvar_loss.detach()
+
+                # ── IQR floor (Run 8, bulk anti-degeneracy) ──────────
+                if outputs.final_gate is not None and alpha_iqr_sched > 0.0:
+                    _ziqr_loss = logit_iqr_floor(
+                        outputs.final_gate,
+                        iqr_target=args.logit_iqr_target,
+                        alpha=alpha_iqr_sched,
+                        logit_eps=args.logit_eps,
+                    )
+                    loss = loss + _ziqr_loss
+                    components['logit_ziqr'] = _ziqr_loss.detach()
+
+                # ── Per-batch z-space logging at batch 0 (Run 8) ─────
+                if batch_idx == 0 and outputs.final_gate is not None:
+                    with torch.no_grad():
+                        _fg = outputs.final_gate.float()
+                        _lambda_std_b0 = _fg.view(-1).std().item()
+                        _z_b0 = _logit_safe(_fg, eps=args.logit_eps).view(-1)
+                        _z_std_b0  = _z_b0.std().item()
+                        _z_iqr_b0  = (_z_b0.quantile(0.75) - _z_b0.quantile(0.25)).item()
+                    _zvar_str = f"  zvar_loss={_zvar_loss.item():.6f}" if alpha_z_sched > 0 and outputs.final_gate is not None else ""
+                    _ziqr_str = f"  ziqr_loss={_ziqr_loss.item():.6f}" if alpha_iqr_sched > 0 and outputs.final_gate is not None else ""
+                    print(f"  [Gate B0] lambda_std={_lambda_std_b0:.4f}  "
+                          f"z_std={_z_std_b0:.4f}  z_iqr={_z_iqr_b0:.4f}  "
+                          f"alpha_z={alpha_z_sched:.4f}  alpha_iqr={alpha_iqr_sched:.4f}"
+                          f"{_zvar_str}{_ziqr_str}")
 
             # Accumulate hierarchical gate stats.
             # _last_gate_logit is set on the v42 backbone (model.condor_core), not the
@@ -1833,6 +1950,25 @@ def train_condor_net_v43(args):
                       f"IQR={_gl_iqr:.3f}{_worst_b_str}  (extreme logits inflating std — "
                       f"lambda_std={ls:.4f} may understate routing diversity)")
             writer.add_scalar('epoch/diversity_alpha', alpha_sched, epoch)
+            writer.add_scalar('epoch/alpha_z',   alpha_z_sched,   epoch)
+            writer.add_scalar('epoch/alpha_iqr',  alpha_iqr_sched, epoch)
+
+            # ── Z-space epoch diagnostics (Run 8) ────────────────────
+            with torch.no_grad():
+                _z_all = _logit_safe(all_lambda, eps=args.logit_eps).view(-1)
+                _z_std_ep  = _z_all.std().item()
+                _z_iqr_ep  = (_z_all.quantile(0.75) - _z_all.quantile(0.25)).item()
+                _z_var_ep  = _z_all.var(unbiased=False).item()
+            _z_std_ok  = 1.0 <= _z_std_ep <= 2.0
+            _z_iqr_ok  = _z_iqr_ep >= 0.8
+            _z_std_tag = "OK" if _z_std_ok else ("LOW" if _z_std_ep < 1.0 else "HIGH")
+            _z_iqr_tag = "OK" if _z_iqr_ok else "LOW"
+            print(f"  Z-space   : std={_z_std_ep:.4f} [{_z_std_tag}]  "
+                  f"var={_z_var_ep:.4f}  IQR={_z_iqr_ep:.4f} [{_z_iqr_tag}]  "
+                  f"[targets: z_std 1.0-2.0, IQR ≥ 0.8]")
+            writer.add_scalar('epoch/z_std',  _z_std_ep,  epoch)
+            writer.add_scalar('epoch/z_var',  _z_var_ep,  epoch)
+            writer.add_scalar('epoch/z_iqr',  _z_iqr_ep,  epoch)
 
         # ── 6. CHECKPOINT ───────────────────────────────────────────────
         epoch_ts = datetime.now().strftime("%m%d%Y_%H%M%S")
