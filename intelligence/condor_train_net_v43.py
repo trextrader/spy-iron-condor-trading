@@ -90,6 +90,22 @@ from intelligence.schema_v43 import (
     N_PIVOT_FEATURES,
     ABSTAIN_IDX,
     NORMALIZATION_PASSTHROUGH,
+    FRICTION_FEATURE_NAMES,
+    TOD_FEATURE_NAMES,
+    REGIME_PERSISTENCE_FEATURE,
+    IVR_REVERSAL_FEATURE_NAMES,
+)
+
+# Full 64-feature name list in the exact order they are concatenated into the
+# model's input tensor: 52 base TF features + 5 friction gates + 2 ToD + 1
+# regime persistence + first 4 IVR reversal features (price_stretch, ivr_zone,
+# stretch_zone, reversal_score).  Indices 52-63 previously rendered as feat_N.
+_FULL_FEATURE_NAMES: List[str] = (
+    TF_FEATURE_NAMES
+    + FRICTION_FEATURE_NAMES                # [52] friction_ok_5/10/20/40/60
+    + TOD_FEATURE_NAMES                     # [57] tod_sin, tod_cos
+    + [REGIME_PERSISTENCE_FEATURE]          # [59] regime_persistence
+    + IVR_REVERSAL_FEATURE_NAMES[:4]        # [60] price_stretch, ivr_zone, stretch_zone, reversal_score
 )
 
 # GUI Telemetry (optional)
@@ -1098,15 +1114,16 @@ def _extract_logic_v43(model: nn.Module) -> dict:
     # SuperSets (relational logic)
     if hasattr(backbone, 'super_sets') and len(backbone.super_sets) > 0:
         # Build pair lookup once from the first RelationalLogicLayer's n_inputs.
-        # Pairs are upper-triangle (i,j) over predicate activations; we label them
-        # with TF_FEATURE_NAMES and fall back to 'feat_N' for indices beyond the list.
+        # Uses _FULL_FEATURE_NAMES (64 entries: 52 base TF + 12 ETL-computed) so
+        # that friction_ok_*, tod_sin/cos, regime_persistence, and the four IVR
+        # reversal features resolve to readable names instead of feat_N.
         pair_lookup: Dict[int, Tuple[str, str]] = {}
         first_ss = backbone.super_sets[0]
         if hasattr(first_ss, 'sets') and len(first_ss.sets) > 0:
             first_rl = getattr(first_ss.sets[0], 'relational_logic', None)
             if first_rl is not None:
-                n_rl_inputs = getattr(first_rl, 'n_inputs', len(TF_FEATURE_NAMES))
-                pair_lookup = _build_pair_lookup(n_rl_inputs, TF_FEATURE_NAMES)
+                n_rl_inputs = getattr(first_rl, 'n_inputs', len(_FULL_FEATURE_NAMES))
+                pair_lookup = _build_pair_lookup(n_rl_inputs, _FULL_FEATURE_NAMES)
 
         ss_list = []
         for ss_idx, ss in enumerate(backbone.super_sets):
