@@ -1757,8 +1757,13 @@ def train_condor_net_v43(args):
                     loss = loss + _div_loss
                     components['gate_diversity'] = _div_loss.detach()
 
-                # ── Logit variance floor (Run 8, primary) ────────────
-                if outputs.final_gate is not None and alpha_z_sched > 0.0:
+            # ── Gate logit-space regularizers (Run 8/9) ──────────────────────
+            # Intentionally OUTSIDE autocast: _logit_safe() forces .float() so
+            # all hinge math is fp32.  This eliminates any risk of fp16 underflow
+            # on small hinge gradients even when amp_dtype=torch.float16.
+            _zvar_loss = _ziqr_loss = _zmad_loss = None
+            if outputs.final_gate is not None:
+                if alpha_z_sched > 0.0:
                     _zvar_loss = logit_variance_floor(
                         outputs.final_gate,
                         var_target=args.logit_var_target,
@@ -1768,8 +1773,7 @@ def train_condor_net_v43(args):
                     loss = loss + _zvar_loss
                     components['logit_zvar'] = _zvar_loss.detach()
 
-                # ── IQR floor (Run 8, bulk anti-degeneracy) ──────────
-                if outputs.final_gate is not None and alpha_iqr_sched > 0.0:
+                if alpha_iqr_sched > 0.0:
                     _ziqr_loss = logit_iqr_floor(
                         outputs.final_gate,
                         iqr_target=args.logit_iqr_target,
@@ -1779,9 +1783,7 @@ def train_condor_net_v43(args):
                     loss = loss + _ziqr_loss
                     components['logit_ziqr'] = _ziqr_loss.detach()
 
-                # ── Logit MAD floor (Run 9, primary) ─────────────────
-                _zmad_loss = loss.new_zeros(())
-                if outputs.final_gate is not None and alpha_mad_sched > 0.0:
+                if alpha_mad_sched > 0.0:
                     _zmad_loss = logit_mad_floor(
                         outputs.final_gate,
                         mad_target=args.logit_mad_target,
@@ -1790,23 +1792,6 @@ def train_condor_net_v43(args):
                     )
                     loss = loss + _zmad_loss
                     components['logit_zmad'] = _zmad_loss.detach()
-
-                # ── Per-batch z-space logging at batch 0 (Run 8/9) ───
-                if batch_idx == 0 and outputs.final_gate is not None:
-                    with torch.no_grad():
-                        _fg = outputs.final_gate.float()
-                        _lambda_std_b0 = _fg.view(-1).std().item()
-                        _z_b0 = _logit_safe(_fg, eps=args.logit_eps).view(-1)
-                        _z_std_b0  = _z_b0.std().item()
-                        _z_iqr_b0  = (_z_b0.quantile(0.75) - _z_b0.quantile(0.25)).item()
-                        _z_mad_b0  = _z_b0.abs().mean().item()
-                    _zvar_str = f"  zvar={_zvar_loss.item():.5f}" if alpha_z_sched > 0 and outputs.final_gate is not None else ""
-                    _ziqr_str = f"  ziqr={_ziqr_loss.item():.5f}" if alpha_iqr_sched > 0 and outputs.final_gate is not None else ""
-                    _zmad_str = f"  zmad={_zmad_loss.item():.5f}" if alpha_mad_sched > 0 and outputs.final_gate is not None else ""
-                    print(f"  [Gate B0] λ_std={_lambda_std_b0:.4f}  "
-                          f"z_std={_z_std_b0:.4f}  z_iqr={_z_iqr_b0:.4f}  z_mad={_z_mad_b0:.4f}  "
-                          f"α_z={alpha_z_sched:.4f}  α_iqr={alpha_iqr_sched:.4f}  α_mad={alpha_mad_sched:.4f}"
-                          f"{_zvar_str}{_ziqr_str}{_zmad_str}")
 
             # Accumulate hierarchical gate stats.
             # _last_gate_logit is set on the v42 backbone (model.condor_core), not the
@@ -1838,6 +1823,21 @@ def train_condor_net_v43(args):
                     if _bz_var < _worst_batch_zvar:
                         _worst_batch_zvar = _bz_var
                         _worst_batch_zvar_idx = batch_idx
+                # Multi-batch gate trace: B00, B01, B05, B10 — α-verification
+                if batch_idx in {0, 1, 5, 10}:
+                    _sg_f   = _super_gate_buf[-1].view(-1)
+                    _z_std_b = _bl_flat.std().item()
+                    _z_iqr_b = (_bl_flat.quantile(0.75) - _bl_flat.quantile(0.25)).item() \
+                               if _bl_flat.numel() >= 4 else 0.0
+                    _z_mad_b = _bl_flat.abs().mean().item()
+                    _lmb_s   = _sg_f.std().item()
+                    _zvar_s  = f"  zvar={_zvar_loss.item():.5f}" if _zvar_loss is not None else ""
+                    _ziqr_s  = f"  ziqr={_ziqr_loss.item():.5f}" if _ziqr_loss is not None else ""
+                    _zmad_s  = f"  zmad={_zmad_loss.item():.5f}" if _zmad_loss is not None else ""
+                    print(f"  [Gate B{batch_idx:02d}] λ_std={_lmb_s:.4f}  "
+                          f"z_std={_z_std_b:.4f}  z_iqr={_z_iqr_b:.4f}  z_mad={_z_mad_b:.4f}  "
+                          f"α_z={alpha_z_sched:.4f}  α_iqr={alpha_iqr_sched:.4f}  α_mad={alpha_mad_sched:.4f}"
+                          f"{_zvar_s}{_ziqr_s}{_zmad_s}")
 
             # Gradient accumulation scaling (F7.12)
             scaled_loss = loss / args.accum_steps
