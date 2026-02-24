@@ -1,0 +1,617 @@
+/**
+ * CondorNet™ v4.3 — Full System Architecture
+ * From raw data sources → model training → live Iron Condor trading
+ *
+ * Render:  dot -Tsvg condornet_v43_architecture.dot -o condornet_v43_architecture.svg
+ *          dot -Tpdf condornet_v43_architecture.dot -o condornet_v43_architecture.pdf
+ *
+ * Color legend:
+ *   #E3F2FD / #1565C0  — Data sources & pipeline
+ *   #E8F5E9 / #2E7D32  — Feature engineering / ETL
+ *   #F3E5F5 / #6A1B9A  — CondorNet v43 model internals
+ *   #FFF3E0 / #E65100  — v42 backbone (predicate / gate logic)
+ *   #FCE4EC / #880E4F  — Output heads
+ *   #E0F2F1 / #00695C  — Loss & training
+ *   #E8EAF6 / #283593  — Inference / live trading
+ *   #FFFDE7 / #F57F17  — Decision logic & execution
+ */
+
+digraph CondorNetV43 {
+    rankdir=TB;
+    compound=true;
+    fontname="Helvetica Neue";
+    fontsize=11;
+    graph [pad=0.6, ranksep=0.7, nodesep=0.5];
+    node  [fontname="Helvetica Neue", fontsize=10, style="filled,rounded",
+           fillcolor=white, shape=box, margin="0.15,0.08"];
+    edge  [fontname="Helvetica Neue", fontsize=9, arrowsize=0.75];
+
+    // =========================================================================
+    // CLUSTER 1 — RAW DATA SOURCES
+    // =========================================================================
+    subgraph cluster_sources {
+        label=<<B>① RAW DATA SOURCES</B>>;
+        style=filled; fillcolor="#E3F2FD"; color="#1565C0"; penwidth=2;
+        fontname="Helvetica Neue"; fontsize=11;
+
+        m1_csv [label=<<B>M1 Bars CSV</B><BR/>92,462 rows × 84 cols<BR/>SPY 1-minute OHLCV<BR/><FONT COLOR="#555">m1_dataset_v43_final.csv</FONT>>,
+                shape=cylinder, fillcolor="#BBDEFB"];
+        m5_csv [label=<<B>M5 Bars CSV  ★ CANONICAL</B><BR/>18,494 rows × 84 cols<BR/>SPY 5-minute OHLCV<BR/><FONT COLOR="#555">m5_dataset_v43_final.csv</FONT>>,
+                shape=cylinder, fillcolor="#90CAF9"];
+        m15_csv [label=<<B>M15 Bars CSV</B><BR/>6,166 rows × 84 cols<BR/>SPY 15-minute OHLCV<BR/><FONT COLOR="#555">m15_dataset_v43_final.csv</FONT>>,
+                 shape=cylinder, fillcolor="#BBDEFB"];
+        h1_csv  [label=<<B>H1 Bars CSV</B><BR/>1,661 rows × 84 cols<BR/>SPY 1-hour OHLCV<BR/><FONT COLOR="#555">h1_dataset_v43_final.csv</FONT>>,
+                 shape=cylinder, fillcolor="#BBDEFB"];
+        opt_csv [label=<<B>Options Chain CSV</B><BR/>2,320,198 contracts<BR/>239 timestamps<BR/>bid/ask/iv/delta/gamma/<BR/>theta/vega/strike/expiry/OI<BR/><FONT COLOR="#555">options_2025_v43.csv</FONT>>,
+                 shape=cylinder, fillcolor="#B3E5FC"];
+
+        // Alpaca / Polygon feeds (live data equivalent)
+        alpaca  [label=<<B>Alpaca Market Data</B><BR/>REST + WebSocket<BR/>Live OHLCV bars>,
+                 shape=cylinder, fillcolor="#E1F5FE", style="filled,dashed,rounded"];
+        polygon [label=<<B>Polygon.io</B><BR/>Options quotes<BR/>Live chain snapshots>,
+                 shape=cylinder, fillcolor="#E1F5FE", style="filled,dashed,rounded"];
+    }
+
+    // =========================================================================
+    // CLUSTER 2 — FEATURE ENGINEERING (ETL)
+    // =========================================================================
+    subgraph cluster_etl {
+        label=<<B>② FEATURE ENGINEERING  (data_factory/sync_engine.py)</B>>;
+        style=filled; fillcolor="#E8F5E9"; color="#2E7D32"; penwidth=2;
+        fontname="Helvetica Neue"; fontsize=11;
+
+        indicators [label=<<B>Technical Indicators  (pandas-ta)</B><BR ALIGN="LEFT"/>
+Price/Trend (12): open, high, low, close, MA, FRAMA, sma,<BR ALIGN="LEFT"/>
+  TurtleChn-Up/Low, TrendSeekerUp/Down, AnchoredVWAP<BR ALIGN="LEFT"/>
+Momentum (10): rsi_dyn, stoch_k_dyn, adx_adaptive, ret_z,<BR ALIGN="LEFT"/>
+  log_return, AccDistWill, AccDistWillMovAvg,<BR ALIGN="LEFT"/>
+  WilderAccSwingIndex, breakout_score, WeightedAlpha<BR ALIGN="LEFT"/>
+Volatility (8): ATR_recon, atr_pct, bb_upper/lower/mu/sigma_dyn,<BR ALIGN="LEFT"/>
+  bandwidth, bw_expansion_rate<BR ALIGN="LEFT"/>
+Volume (6): volume, trade_count, OSC-Volume, vol_energy,<BR ALIGN="LEFT"/>
+  vol_ewma, spread_ratio<BR ALIGN="LEFT"/>
+Regime (10): psar_adaptive, psar_mark, psar_trend, psar_reversion_mu,<BR ALIGN="LEFT"/>
+  pressure_up/down, max_dd_60m, bb_percentile,<BR ALIGN="LEFT"/>
+  fuzzy_reversion_11, consolidation_score<BR ALIGN="LEFT"/>
+Risk (5): gap_risk_score, chaos_membership, kappa_proxy,<BR ALIGN="LEFT"/>
+  McClellanOsc, Slope, SlopeATR<BR ALIGN="LEFT"/>
+<FONT COLOR="#777">→ 51 TF features  ×  4 timeframes  =  204 raw indicator columns</FONT>>,
+                    fillcolor="#C8E6C9", align=left];
+
+        etl_extra [label=<<B>ETL-Computed Features</B><BR ALIGN="LEFT"/>
+Friction Gates (5): friction_ok_{5,10,20,40,60}<BR ALIGN="LEFT"/>
+  bid_ask_spread &lt; high.rolling(N).max() − low.rolling(N).min()<BR ALIGN="LEFT"/>
+Time-of-Day (2): tod_sin, tod_cos  (minute_of_day / 390)<BR ALIGN="LEFT"/>
+IVR Reversal (9): price_stretch, ivr_zone, stretch_zone,<BR ALIGN="LEFT"/>
+  reversal_score, strong_pivot_slope_h/l,<BR ALIGN="LEFT"/>
+  strong_pivot_bar_dist_h/l, bars_since_strong_pivot<BR ALIGN="LEFT"/>
+Regime Persistence (1): bars in same (vol_bucket, trend_bucket)>,
+                    fillcolor="#C8E6C9", align=left];
+
+        pivot_eng [label=<<B>Pivot Feature Engineering  (13 sparse)</B><BR ALIGN="LEFT"/>
+PivotHigh, PivotLow, PivotResidual, PivotResidualATR,<BR ALIGN="LEFT"/>
+PivotResidualZ, PivotCurvatureATR, PivotCurvatureProxy,<BR ALIGN="LEFT"/>
+PivotSegmentLengthBars, PivotSegmentLengthMinutes,<BR ALIGN="LEFT"/>
+PivotSegmentResidualStd, PivotSegmentVolatility,<BR ALIGN="LEFT"/>
+Slope, SlopeATR<BR ALIGN="LEFT"/>
+<FONT COLOR="#777">NaN = no pivot event at bar t  (NEVER imputed)</FONT>>,
+                    fillcolor="#A5D6A7", align=left];
+
+        labels_eng [label=<<B>Label Generation  (per M5 bar)</B><BR ALIGN="LEFT"/>
+strategy_label: class 0–9  (which strategy fits this bar)<BR ALIGN="LEFT"/>
+pop: P(profit) ∈ [0,1]  (probability of profit)<BR ALIGN="LEFT"/>
+ev: expected value ($)<BR ALIGN="LEFT"/>
+max_loss: maximum possible loss ≥ 0<BR ALIGN="LEFT"/>
+var_95: 95% Value-at-Risk ≥ 0<BR ALIGN="LEFT"/>
+cvar_95: 95% Conditional VaR ≥ var_95<BR ALIGN="LEFT"/>
+position_size_mult: 0.5 / 0.75 / 1.0<BR ALIGN="LEFT"/>
+target_spot: 5-bar fwd log-return × 100>,
+                    fillcolor="#A5D6A7", align=left];
+
+        chain_eng [label=<<B>Options Chain Processing</B><BR ALIGN="LEFT"/>
+10 features per contract:<BR ALIGN="LEFT"/>
+  moneyness (log(spot/strike)), days_to_exp, iv,<BR ALIGN="LEFT"/>
+  delta, gamma, theta, vega, bid, ask, oi_norm<BR ALIGN="LEFT"/>
+Forward-fill gap tolerance: ≤ 5 minutes<BR ALIGN="LEFT"/>
+Pad to 120 contracts per snapshot (mask illiquid/absent)<BR ALIGN="LEFT"/>
+<FONT COLOR="#777">Grid shape: [B, 120, 10]  +  bool mask [B, 120]</FONT>>,
+                    fillcolor="#A5D6A7", align=left];
+
+        alignment [label=<<B>MTFSyncEngine  —  Temporal Alignment</B><BR/>
+Master clock: M5 close timestamps<BR/>
+M1: ≥5 complete bars ending at T<BR/>
+M15: complete 15-min window at T<BR/>
+H1: complete 1-hour window at T<BR/>
+<FONT COLOR="#777">get_snapshot(current_time) → aligned 4-TF dict</FONT>>,
+                    fillcolor="#81C784"];
+    }
+
+    // =========================================================================
+    // CLUSTER 3 — DATASET & DATALOADER
+    // =========================================================================
+    subgraph cluster_dataset {
+        label=<<B>③ DATASET  (V43Dataset)</B>>;
+        style=filled; fillcolor="#EDE7F6"; color="#4527A0"; penwidth=2;
+        fontname="Helvetica Neue"; fontsize=11;
+
+        dataset [label=<<B>V43Dataset  —  Sequence Windowing</B><BR ALIGN="LEFT"/>
+Lookback T (train run 12: T=200 bars)<BR ALIGN="LEFT"/>
+Train: 12,745 sequences  |  Val: 2,574 sequences<BR ALIGN="LEFT"/>
+Batch size: 256<BR ALIGN="LEFT"/>
+<BR ALIGN="LEFT"/>
+Per sample:<BR ALIGN="LEFT"/>
+  x_m1  : [T, 52]  (51 features + 1 session token)<BR ALIGN="LEFT"/>
+  x_m5  : [T, 52]<BR ALIGN="LEFT"/>
+  x_m15 : [T, 52]<BR ALIGN="LEFT"/>
+  x_h1  : [T, 52]<BR ALIGN="LEFT"/>
+  chain : [120, 10]  +  bool mask [120]<BR ALIGN="LEFT"/>
+  pivot : [T, 13]  +  bool mask [T, 13]<BR ALIGN="LEFT"/>
+  labels: {strategy, pop, ev, max_loss, var_95, cvar_95,<BR ALIGN="LEFT"/>
+           size_mult, target_spot}>,
+                 fillcolor="#D1C4E9", align=left];
+    }
+
+    // =========================================================================
+    // CLUSTER 4 — CONDORNET V43 MODEL
+    // =========================================================================
+    subgraph cluster_model {
+        label=<<B>④ CONDORNET™ v4.3  (10,955,687 parameters)</B>>;
+        style=filled; fillcolor="#F3E5F5"; color="#6A1B9A"; penwidth=2.5;
+        fontname="Helvetica Neue"; fontsize=11;
+
+        // --- 4a: MULTI-TF PROJECTOR ---
+        subgraph cluster_tf_proj {
+            label=<<B>MultiTFProjector</B>>;
+            style=filled; fillcolor="#E1BEE7"; color="#7B1FA2"; penwidth=1.5;
+
+            m1_proj  [label=<M1 Projector<BR/>[B,T,52]→[B,T,64]<BR/>Linear+LN+GELU+Drop>,  fillcolor="#CE93D8"];
+            m5_proj  [label=<M5 Projector<BR/>[B,T,52]→[B,T,64]<BR/>Linear+LN+GELU+Drop>,  fillcolor="#CE93D8"];
+            m15_proj [label=<M15 Projector<BR/>[B,T,52]→[B,T,64]<BR/>Linear+LN+GELU+Drop>, fillcolor="#CE93D8"];
+            h1_proj  [label=<H1 Projector<BR/>[B,T,52]→[B,T,64]<BR/>Linear+LN+GELU+Drop>,  fillcolor="#CE93D8"];
+
+            tf_concat [label=<<B>Concatenate 4 TFs</B><BR/>[B,T,64]×4 → [B,T,256]>,
+                       fillcolor="#BA68C8"];
+        }
+
+        // --- 4b: PIVOT PROJECTOR ---
+        subgraph cluster_pivot_proj {
+            label=<<B>PivotProjector</B>>;
+            style=filled; fillcolor="#E1BEE7"; color="#7B1FA2"; penwidth=1.5;
+
+            pivot_proj [label=<Pivot Projector<BR/>[B,T,13]+mask<BR/>→ [B,T,16]<BR/>Lin(13→26)→GELU<BR/>→Lin(26→16)+LN<BR/>Learned no_pivot_embed[16]>,
+                        fillcolor="#CE93D8"];
+        }
+
+        // --- 4c: TF FUSION ---
+        subgraph cluster_tf_fusion {
+            label=<<B>TFFusionBlock</B>>;
+            style=filled; fillcolor="#E1BEE7"; color="#7B1FA2"; penwidth=1.5;
+
+            tf_fusion [label=<<B>TF Fusion</B><BR/>Cat [B,T,256]+[B,T,16]<BR/>→ [B,T,272]<BR/>Linear(272→256)<BR/>+GELU+Drop+Residual+LN<BR/><B>Output: [B,T,256]</B>>,
+                       fillcolor="#AB47BC"];
+        }
+
+        // --- 4d: OPTIONS CHAIN ENCODER ---
+        subgraph cluster_chain_enc {
+            label=<<B>OptionsChainEncoder</B>>;
+            style=filled; fillcolor="#E1BEE7"; color="#7B1FA2"; penwidth=1.5;
+
+            chain_in  [label=<Input Proj<BR/>[B,120,10]→[B,120,64]<BR/>Linear(10→64)>,        fillcolor="#CE93D8"];
+            chain_pos [label=<Moneyness-Rank<BR/>Positional Encoding<BR/>Embedding(121, 64)>,   fillcolor="#CE93D8"];
+            chain_tx  [label=<TransformerEncoder<BR/>d_model=64, heads=4<BR/>layers=2, d_ff=256<BR/>norm_first=True>,  fillcolor="#BA68C8"];
+            chain_pool[label=<Masked Mean Pool<BR/>→ [B, 64]>,                                 fillcolor="#CE93D8"];
+            chain_skew[label=<IV Skew Extractor<BR/>put_iv[25Δ]−call_iv[25Δ]<BR/>Linear(1→8)>,fillcolor="#CE93D8"];
+            chain_out [label=<<B>Chain Embed</B><BR/>Linear(64+8→128)+LN<BR/><B>[B, 128]</B>>, fillcolor="#AB47BC"];
+
+            chain_in -> chain_pos [style=invis];
+            chain_pos -> chain_tx;
+            chain_tx -> chain_pool;
+            chain_pool -> chain_out;
+            chain_skew -> chain_out;
+        }
+
+        // --- 4e: JOINT FUSION ---
+        subgraph cluster_joint {
+            label=<<B>JointFusionLayer</B>>;
+            style=filled; fillcolor="#E1BEE7"; color="#7B1FA2"; penwidth=1.5;
+
+            joint [label=<<B>Joint Fusion</B><BR/>Broadcast chain [B,128]→[B,T,128]<BR/>Cat with TF [B,T,256]<BR/>→ [B,T,384] + LN + Drop<BR/><B>Last timestep: [B, 384]</B>>,
+                   fillcolor="#8E24AA"];
+        }
+
+        // --- 4f: V42 BACKBONE ---
+        subgraph cluster_backbone {
+            label=<<B>v42 Backbone  (condor_core)</B>>;
+            style=filled; fillcolor="#FFE0B2"; color="#E65100"; penwidth=2;
+            fontname="Helvetica Neue"; fontsize=11;
+
+            etd1 [label=<<B>ETD-1 Exponential Integrator</B><BR ALIGN="LEFT"/>
+Continuous-time state dynamics<BR ALIGN="LEFT"/>
+Learns temporal dependencies across<BR ALIGN="LEFT"/>
+variable-length lookback windows<BR ALIGN="LEFT"/>
+A_theta: trainable state matrix<BR ALIGN="LEFT"/>
+B_theta: input projection<BR ALIGN="LEFT"/>
+Spectral radius ρ(A) monitored per epoch<BR ALIGN="LEFT"/>
+<FONT COLOR="#777">Input: [B,T,d_x]  →  Output: [B,T,d_h]</FONT>>,
+                   fillcolor="#FFCC80", align=left];
+
+            pred_gates [label=<<B>8 Canonical Predicate Gates  (pred_gates)</B><BR ALIGN="LEFT"/>
+<FONT COLOR="#777">Each gate: sigmoid(steepness × (feature − threshold))</FONT><BR ALIGN="LEFT"/>
+1. iv_rank_threshold       — IV Rank regime filter<BR ALIGN="LEFT"/>
+2. spread_frac_threshold   — Bid-ask spread friction<BR ALIGN="LEFT"/>
+3. rsi_threshold           — Momentum regime (40-60 neutral)<BR ALIGN="LEFT"/>
+4. gap_frac_threshold      — Overnight gap risk filter<BR ALIGN="LEFT"/>
+5. gamma_threshold         — Options gamma exposure<BR ALIGN="LEFT"/>
+6. iv_regime_frac_threshold— IV percentile regime<BR ALIGN="LEFT"/>
+7. put_flow_threshold      — Put/call flow imbalance<BR ALIGN="LEFT"/>
+8. spread_stress_mult_threshold — Spread stress multiple<BR ALIGN="LEFT"/>
+<FONT COLOR="#777">Thresholds are LEARNED via backprop (not fixed)</FONT><BR ALIGN="LEFT"/>
+<B>Output: [B, 64] predicate activations ∈ (0,1)</B>>,
+                         fillcolor="#FFB74D", align=left];
+
+            relational [label=<<B>RelationalLogicLayer  (Sets &amp; SuperSets)</B><BR ALIGN="LEFT"/>
+n_predicates=64  →  C(64,2)=2,016 pairwise comparisons<BR ALIGN="LEFT"/>
+For each pair (i,j): soft_lt, soft_gt, soft_eq<BR ALIGN="LEFT"/>
+Chunked to prevent OOM (chunk_size configurable)<BR ALIGN="LEFT"/>
+<BR ALIGN="LEFT"/>
+32 CondorSets per SuperSet:<BR ALIGN="LEFT"/>
+  Each Set: RelationalLogicLayer(64→1) over predicates<BR ALIGN="LEFT"/>
+  Learns which inequalities matter per set<BR ALIGN="LEFT"/>
+<BR ALIGN="LEFT"/>
+16 SuperSets:<BR ALIGN="LEFT"/>
+  Each SuperSet: RelationalLogicLayer(32→1) over sets<BR ALIGN="LEFT"/>
+  Hierarchical aggregation of set logic<BR ALIGN="LEFT"/>
+<BR ALIGN="LEFT"/>
+Top-5 most important inequalities per set stored in<BR ALIGN="LEFT"/>
+Epoch JSON as "top_comparisons":<BR ALIGN="LEFT"/>
+  e.g. "m5.rsi_dyn &gt; m15.adx_adaptive"<BR ALIGN="LEFT"/>
+<B>Output: [B, 16] superset activations</B>>,
+                         fillcolor="#FFA726", align=left];
+
+            gate_routing [label=<<B>Gate Routing  (HierarchicalLogicGate)</B><BR ALIGN="LEFT"/>
+λ = σ(z / τ)   where z = gate logit, τ = temperature<BR ALIGN="LEFT"/>
+τ init=3.0 (soft), trainable via backprop<BR ALIGN="LEFT"/>
+λ → 0: route to "off" branch (gate closed)<BR ALIGN="LEFT"/>
+λ → 1: route to "on" branch  (gate open)<BR ALIGN="LEFT"/>
+<BR ALIGN="LEFT"/>
+Gate health monitored per epoch:<BR ALIGN="LEFT"/>
+  z_std  : 1.0–3.0 OK  (var floor: target ≥ 2.0)<BR ALIGN="LEFT"/>
+  z_IQR  : ≥ 0.8    (IQR floor: target ≥ 1.0)<BR ALIGN="LEFT"/>
+  z_MAD  : ≥ 0.7    (MAD floor: target ≥ 0.9)<BR ALIGN="LEFT"/>
+  |z|    : ≤ 8.0    (tail penalty: α=0.01, band=8)<BR ALIGN="LEFT"/>
+  λ_std  : target 0.15–0.30 (diversity hinge)<BR ALIGN="LEFT"/>
+final_gate: [B, T]  (diagnostic tensor)<BR ALIGN="LEFT"/>
+<B>Clamp hits: λ≤ε and λ≥1-ε tracked per epoch</B>>,
+                           fillcolor="#FF9800", align=left];
+        }
+
+        // --- 4g: OUTPUT HEADS ---
+        subgraph cluster_heads {
+            label=<<B>Output Heads  (all operate on last-timestep [B,384])</B>>;
+            style=filled; fillcolor="#FCE4EC"; color="#880E4F"; penwidth=2;
+            fontname="Helvetica Neue"; fontsize=11;
+
+            strat_head [label=<<B>StrategyHead</B><BR ALIGN="LEFT"/>
+MLP: [B,384] → [B,256] → [B,128]<BR ALIGN="LEFT"/>
+↓<BR ALIGN="LEFT"/>
+strategy_logits: [B,10]  softmax over 10 classes<BR ALIGN="LEFT"/>
+  0: single_call        (0-2 DTE, trending bull)<BR ALIGN="LEFT"/>
+  1: single_put         (0-2 DTE, trending bear)<BR ALIGN="LEFT"/>
+  2: bull_call_spread   (8-21 DTE, low vol)<BR ALIGN="LEFT"/>
+  3: bear_put_spread    (8-21 DTE, low vol)<BR ALIGN="LEFT"/>
+  4: straddle           (0-2 DTE, choppy)<BR ALIGN="LEFT"/>
+  5: strangle           (0-2 DTE, high vol)<BR ALIGN="LEFT"/>
+  6: butterfly_call     (8-21 DTE, low vol)<BR ALIGN="LEFT"/>
+  7: iron_condor        (22+ DTE, high vol ★)<BR ALIGN="LEFT"/>
+  8: custom_multi_leg   (regime-neutral)<BR ALIGN="LEFT"/>
+  9: abstain            (no entry signal)<BR ALIGN="LEFT"/>
+leg_params: [B, 4, 5] per-leg details<BR ALIGN="LEFT"/>
+  [moneyness_offset, expiry_bucket,<BR ALIGN="LEFT"/>
+   long_short, qty, delta_target]<BR ALIGN="LEFT"/>
+entry_signal: [B,1] ∈ [0,1]  (sigmoid)>,
+                           fillcolor="#F48FB1", align=left];
+
+            risk_head [label=<<B>RiskMetricHead</B><BR ALIGN="LEFT"/>
+Shared MLP: [B,384] → d_hidden → d_hidden<BR ALIGN="LEFT"/>
+↓<BR ALIGN="LEFT"/>
+pop:    [B,1] ∈ [0,1]  P(profit)  (sigmoid)<BR ALIGN="LEFT"/>
+ev:     [B,1] ∈ ℝ      expected value ($)<BR ALIGN="LEFT"/>
+max_loss: [B,1] ≥ 0   (softplus)<BR ALIGN="LEFT"/>
+var_95:   [B,1] ≥ 0   95% VaR  (softplus)<BR ALIGN="LEFT"/>
+cvar_95:  [B,1] ≥ var_95  (var + softplus(offset))<BR ALIGN="LEFT"/>
+<FONT COLOR="#777">Constraint cvar ≥ var enforced by construction</FONT>>,
+                          fillcolor="#F06292", align=left];
+
+            pivot_head [label=<<B>PivotPredictionHead  (leading indicator)</B><BR ALIGN="LEFT"/>
+Horizons: [5, 10, 20, 35, 70] bars ahead<BR ALIGN="LEFT"/>
+↓<BR ALIGN="LEFT"/>
+pivot_high_probs: [B,5]  P(high in N bars) sigmoid<BR ALIGN="LEFT"/>
+pivot_low_probs:  [B,5]  P(low in N bars)  sigmoid<BR ALIGN="LEFT"/>
+pivot_strength:   [B,2]  medium / strong logits<BR ALIGN="LEFT"/>
+<BR ALIGN="LEFT"/>
+Learned leading signals:<BR ALIGN="LEFT"/>
+  RSI divergence, BB squeeze, PSAR proximity,<BR ALIGN="LEFT"/>
+  PivotResidualZ extremes, ADX falling,<BR ALIGN="LEFT"/>
+  Stoch OB/OS, TurtleChannel proximity,<BR ALIGN="LEFT"/>
+  pressure_up/down imbalance>,
+                           fillcolor="#EC407A", align=left];
+
+            size_head [label=<<B>PositionSizeHead</B><BR ALIGN="LEFT"/>
+50% PoP-based:  higher PoP → larger size<BR ALIGN="LEFT"/>
+50% Fuzzy 10-factor:<BR ALIGN="LEFT"/>
+  MTF consensus, IV Rank, VIX regime,<BR ALIGN="LEFT"/>
+  RSI, Stochastic, ADX, SMA distance,<BR ALIGN="LEFT"/>
+  PSAR, Bollinger Bands, Relative Volume<BR ALIGN="LEFT"/>
+↓<BR ALIGN="LEFT"/>
+position_size: [B,1] ∈ [0,1]  (sigmoid)<BR ALIGN="LEFT"/>
+→ scaled by max_account_risk_per_trade>,
+                          fillcolor="#E91E63", align=left];
+
+            spot_head [label=<<B>SpotPredHead  (auxiliary)</B><BR/>
+[B,384]→[B,64]→[B,1]<BR/>
+target: 5-bar fwd log-return×100<BR/>
+Weight: 0.0  (pure regularizer)>,
+                          fillcolor="#F8BBD9"];
+        }
+
+        // Internal model flow edges
+        { rank=same; m1_proj; m5_proj; m15_proj; h1_proj; }
+        m1_proj  -> tf_concat;
+        m5_proj  -> tf_concat;
+        m15_proj -> tf_concat;
+        h1_proj  -> tf_concat;
+        tf_concat -> tf_fusion;
+        pivot_proj -> tf_fusion;
+        tf_fusion -> joint [label="[B,T,256]"];
+        chain_out -> joint [label="[B,128]"];
+        joint -> etd1 [label="[B,T,384]\nproject to v42 d_input"];
+        joint -> strat_head [label="last step\n[B,384]"];
+        joint -> risk_head  [label="last step\n[B,384]"];
+        joint -> pivot_head [label="last step\n[B,384]"];
+        joint -> size_head  [label="last step\n[B,384]"];
+        joint -> spot_head  [label="last step\n[B,384]"];
+        etd1 -> pred_gates  [label="[B,T,d_h]"];
+        pred_gates -> relational [label="[B,64] pred\nactivations"];
+        relational -> gate_routing [label="[B,16] superset\nactivations"];
+        gate_routing -> strat_head [label="gate logits\nfused"];
+    }
+
+    // =========================================================================
+    // CLUSTER 5 — CONDORNET OUTPUT
+    // =========================================================================
+    subgraph cluster_output {
+        label=<<B>⑤ CondorNetOutput  (dataclass)</B>>;
+        style=filled; fillcolor="#E8EAF6"; color="#283593"; penwidth=2;
+        fontname="Helvetica Neue"; fontsize=11;
+
+        output_node [label=<<B>CondorNetOutput</B><BR ALIGN="LEFT"/>
+strategy_logits : [B, 10]    10-class strategy probs<BR ALIGN="LEFT"/>
+leg_params      : [B, 4, 5]  per-leg construction params<BR ALIGN="LEFT"/>
+entry_signal    : [B, 1]     ∈ [0,1]<BR ALIGN="LEFT"/>
+pop             : [B, 1]     P(profit) ∈ [0,1]<BR ALIGN="LEFT"/>
+ev              : [B, 1]     expected value ($)<BR ALIGN="LEFT"/>
+max_loss        : [B, 1]     ≥ 0<BR ALIGN="LEFT"/>
+var_95          : [B, 1]     95% VaR<BR ALIGN="LEFT"/>
+cvar_95         : [B, 1]     ≥ var_95<BR ALIGN="LEFT"/>
+pivot_high_probs: [B, 5]     P(high in 5/10/20/35/70 bars)<BR ALIGN="LEFT"/>
+pivot_low_probs : [B, 5]     P(low in 5/10/20/35/70 bars)<BR ALIGN="LEFT"/>
+pivot_strength  : [B, 2]     medium / strong logits<BR ALIGN="LEFT"/>
+position_size   : [B, 1]     ∈ [0,1]<BR ALIGN="LEFT"/>
+spot_pred       : [B, 1]     target spot (aux)<BR ALIGN="LEFT"/>
+final_gate      : [B, T]     gate λ values (diagnostics)<BR ALIGN="LEFT"/>
+diagnostics     : Dict       full v42 diag dict>,
+                    fillcolor="#C5CAE9", shape=record, align=left];
+    }
+
+    // =========================================================================
+    // CLUSTER 6 — TRAINING PATH
+    // =========================================================================
+    subgraph cluster_training {
+        label=<<B>⑥ TRAINING LOOP  (condor_train_net_v43.py)</B>>;
+        style=filled; fillcolor="#E0F2F1"; color="#00695C"; penwidth=2;
+        fontname="Helvetica Neue"; fontsize=11;
+
+        loss [label=<<B>CondorLossV43  —  9-Component Composite Loss</B><BR ALIGN="LEFT"/>
+<BR ALIGN="LEFT"/>
+1. strategy_ce  × 1.0  — CrossEntropy(logits, label)  constant<BR ALIGN="LEFT"/>
+2. pop_bce      × 1.0  — BCE(pop, pop_true)            constant (plateaus ~0.613)<BR ALIGN="LEFT"/>
+3. ev_mse       × 0.5→0.8 — MSE(ev, ev_true)          ramp epochs 5→20<BR ALIGN="LEFT"/>
+4. risk_mse     × 0.5  — MSE(var+cvar+max_loss)        constant<BR ALIGN="LEFT"/>
+5. size_mse     × 0.4  — MSE(size, size_mult)          constant<BR ALIGN="LEFT"/>
+6. spot_mse     × 0.0  — MSE(spot_pred, target_spot)   disabled (aux only)<BR ALIGN="LEFT"/>
+7. fuzzy_var    × 0.2→0.05 — Var penalty(gate outputs) decay epochs 10→30<BR ALIGN="LEFT"/>
+8. pattern_ent  × 0.1  — Entropy(predicate activations) constant<BR ALIGN="LEFT"/>
+9. robust       × 0.2  — Huber(ev+risk outliers)        constant<BR ALIGN="LEFT"/>
+<BR ALIGN="LEFT"/>
+Gate Regularizers (OUTSIDE autocast — fp32):<BR ALIGN="LEFT"/>
++ logit_zvar    α=0.10  Var(z) ≥ 2.0  (spread floor)<BR ALIGN="LEFT"/>
++ logit_ziqr    α=0.08  IQR(z) ≥ 1.0  (bulk floor)<BR ALIGN="LEFT"/>
++ logit_zmad    α=0.05  MAD(z) ≥ 0.9  (shrink floor)<BR ALIGN="LEFT"/>
++ logit_ztail   α=0.01  E[max(0,|z|−8)²]  (runaway clamp)>,
+               fillcolor="#80CBC4", align=left];
+
+        optimizer [label=<<B>Optimizer &amp; Schedule</B><BR ALIGN="LEFT"/>
+AdamW: lr=1e-4, weight_decay=1e-3<BR ALIGN="LEFT"/>
+Grad clip: max_norm=1.0<BR ALIGN="LEFT"/>
+AMP: torch.float16 (weights float32)<BR ALIGN="LEFT"/>
+Accum steps: 2 (effective batch 512)<BR ALIGN="LEFT"/>
+LR schedule: CosineAnnealingLR<BR ALIGN="LEFT"/>
+Patience: 25 epochs early stop>,
+                   fillcolor="#4DB6AC", align=left];
+
+        epoch_json [label=<<B>Per-Epoch Interpretability JSON</B><BR ALIGN="LEFT"/>
+EpochN_CNv43_DSv43_TIMESTAMP.json<BR ALIGN="LEFT"/>
+  predicates: 8 learned thresholds<BR ALIGN="LEFT"/>
+  super_set: 16 × 32 sets<BR ALIGN="LEFT"/>
+    operator_weights: {&lt;: %, &gt;: %, =: %}<BR ALIGN="LEFT"/>
+    top_comparisons: "m5.rsi_dyn &gt; m15.adx_adaptive" ★<BR ALIGN="LEFT"/>
+  strategy_head: output_class_norms<BR ALIGN="LEFT"/>
+  a_matrix: spectral_radius, top-5 eigenvalues<BR ALIGN="LEFT"/>
+EPOCH_Comparison_TIMESTAMP.json<BR ALIGN="LEFT"/>
+  same/different sets vs best epoch<BR ALIGN="LEFT"/>
+  spectral_radius_delta>,
+                  fillcolor="#B2DFDB", align=left];
+
+        checkpoint [label=<<B>Model Checkpoint  (.pth)</B><BR/>
+models/condor_net_v43.pth<BR/>
+models/ckpts/EpochN_CNv43_DSv43_*.pth<BR/>
+  state_dict, feature_cols,<BR/>
+  normalization (median/MAD),<BR/>
+  hyperparameters, epoch>,
+                   shape=cylinder, fillcolor="#26A69A"];
+    }
+
+    // =========================================================================
+    // CLUSTER 7 — INFERENCE & LIVE TRADING
+    // =========================================================================
+    subgraph cluster_inference {
+        label=<<B>⑦ INFERENCE &amp; LIVE TRADING  (core/main.py → backtest_engine.py)</B>>;
+        style=filled; fillcolor="#FFFDE7"; color="#F57F17"; penwidth=2;
+        fontname="Helvetica Neue"; fontsize=11;
+
+        model_load [label=<<B>CondorBrain  —  Inference Facade</B><BR ALIGN="LEFT"/>
+Load condor_net_v43.pth<BR ALIGN="LEFT"/>
+Apply RobustScaler normalization (median/MAD)<BR ALIGN="LEFT"/>
+model.eval() + torch.no_grad()<BR ALIGN="LEFT"/>
+Build 4-TF input tensors from MTFSyncEngine snapshot<BR ALIGN="LEFT"/>
+Forward pass → CondorNetOutput>,
+                   fillcolor="#FFF9C4", align=left];
+
+        decision [label=<<B>Strategy Decision Logic</B><BR ALIGN="LEFT"/>
+<BR ALIGN="LEFT"/>
+IF max(softmax(strategy_logits)) &lt; 0.60:<BR ALIGN="LEFT"/>
+  → ABSTAIN  (no entry)<BR ALIGN="LEFT"/>
+ELIF argmax == 9 (abstain class):<BR ALIGN="LEFT"/>
+  → ABSTAIN<BR ALIGN="LEFT"/>
+ELIF entry_signal &lt; 0.50:<BR ALIGN="LEFT"/>
+  → SKIP  (entry not confirmed)<BR ALIGN="LEFT"/>
+ELSE:<BR ALIGN="LEFT"/>
+  selected = argmax(strategy_logits)<BR ALIGN="LEFT"/>
+  → BUILD TRADE  (see construction below)>,
+                  fillcolor="#FFF176", align=left, shape=diamond];
+
+        friction [label=<<B>Friction Gate Check  (all 4 legs)</B><BR ALIGN="LEFT"/>
+friction_ok_N = bid_ask_spread &lt;<BR ALIGN="LEFT"/>
+  high.rolling(N).max() − low.rolling(N).min()<BR ALIGN="LEFT"/>
+N ∈ {5, 10, 20, 40, 60} bars<BR ALIGN="LEFT"/>
+All 4 legs must pass ALL friction windows<BR ALIGN="LEFT"/>
+→ REJECT if any leg fails>,
+                  fillcolor="#FFE57F", align=left];
+
+        ic_build [label=<<B>Iron Condor Construction  (4-leg, fail-fast)</B><BR ALIGN="LEFT"/>
+Short Call: nearest_by_delta(target_delta=0.15-0.20)<BR ALIGN="LEFT"/>
+Long  Call: wing above short call<BR ALIGN="LEFT"/>
+Short Put:  nearest_by_delta(target_delta=0.15-0.20)<BR ALIGN="LEFT"/>
+Long  Put:  wing below short put<BR ALIGN="LEFT"/>
+<BR ALIGN="LEFT"/>
+Strike selection: min |market_delta − target_delta|<BR ALIGN="LEFT"/>
+Credit received = (SC_mid−LC_mid) + (SP_mid−LP_mid)<BR ALIGN="LEFT"/>
+Reject entire trade if ANY leg has no valid pricing<BR ALIGN="LEFT"/>
+DTE from leg_params expiry_bucket:<BR ALIGN="LEFT"/>
+  0 → nearest weekly, 1 → 2nd weekly, 2 → monthly>,
+                  fillcolor="#FFD740", align=left];
+
+        sizing [label=<<B>Position Sizing</B><BR ALIGN="LEFT"/>
+Neural size output: position_size ∈ [0,1]<BR ALIGN="LEFT"/>
+<BR ALIGN="LEFT"/>
+Blend:<BR ALIGN="LEFT"/>
+  50% pop-based:  pop × max_account_risk<BR ALIGN="LEFT"/>
+  50% fuzzy 10-factor:<BR ALIGN="LEFT"/>
+    MTF consensus, IV Rank, VIX regime,<BR ALIGN="LEFT"/>
+    RSI neutral, Stoch neutral,<BR ALIGN="LEFT"/>
+    ADX weak, SMA distance &lt;2%,<BR ALIGN="LEFT"/>
+    PSAR crossover, BB squeeze, Rel. Volume<BR ALIGN="LEFT"/>
+<BR ALIGN="LEFT"/>
+Final qty = max(2, floor(size × max_lots))>,
+                  fillcolor="#FFCA28", align=left];
+
+        exit_logic [label=<<B>Exit Logic  (checked every 5-min bar)</B><BR ALIGN="LEFT"/>
+P&amp;L(t) = (Credit − Current_cost) × qty × 100<BR ALIGN="LEFT"/>
+Current_cost = (SC_mid−LC_mid) + (SP_mid−LP_mid)<BR ALIGN="LEFT"/>
+<BR ALIGN="LEFT"/>
+Profit target:  Current_cost &lt; Credit × (1−profit_take_pct)<BR ALIGN="LEFT"/>
+  default profit_take_pct = 0.90  (close at 90% max profit)<BR ALIGN="LEFT"/>
+Loss cutoff:    Current_cost &gt; Credit × loss_close_multiple<BR ALIGN="LEFT"/>
+  default loss_close_multiple = 1.2×<BR ALIGN="LEFT"/>
+Max hold:       bars_held &gt; max_hold_days × 390 bars/day<BR ALIGN="LEFT"/>
+Neural exit:    exit_signal &gt; 0.50  (from StrategyHead)<BR ALIGN="LEFT"/>
+Pivot warning:  pivot_high_probs[0] &gt; 0.70 AND short-call threat<BR ALIGN="LEFT"/>
+                pivot_low_probs[1]  &gt; 0.70 AND short-put  threat>,
+                   fillcolor="#FFC107", align=left];
+
+        live_result [label=<<B>Trade Result</B><BR/>
+P&amp;L logged to CSV<BR/>
+Metrics: Sharpe (√19656 × μ/σ),<BR/>
+Net Profit, Max Drawdown<BR/>
+Report: reports/top100_*.csv>,
+                    shape=ellipse, fillcolor="#FFB300"];
+    }
+
+    // =========================================================================
+    // GLOBAL EDGES — DATA FLOW
+    // =========================================================================
+
+    // Sources → ETL
+    m1_csv  -> alignment [label="raw 1m bars"];
+    m5_csv  -> alignment [label="canonical clock"];
+    m15_csv -> alignment [label="raw 15m bars"];
+    h1_csv  -> alignment [label="raw 1h bars"];
+    alignment -> indicators [label="aligned 4-TF dict"];
+    alignment -> pivot_eng;
+    alignment -> labels_eng;
+    opt_csv -> chain_eng [label="2.3M contracts"];
+
+    // Live equivalents
+    alpaca  -> alignment [style=dashed, label="live bars", color="#1565C0"];
+    polygon -> chain_eng [style=dashed, label="live quotes", color="#1565C0"];
+
+    // ETL → Dataset
+    indicators -> dataset [label="64 features×4TFs"];
+    etl_extra  -> dataset;
+    pivot_eng  -> dataset [label="13 sparse features"];
+    labels_eng -> dataset [label="8 label columns"];
+    chain_eng  -> dataset [label="[120,10] chain grid"];
+
+    // Dataset → Model inputs
+    dataset -> m1_proj  [label="x_m1 [B,T,52]"];
+    dataset -> m5_proj  [label="x_m5 [B,T,52]"];
+    dataset -> m15_proj [label="x_m15 [B,T,52]"];
+    dataset -> h1_proj  [label="x_h1 [B,T,52]"];
+    dataset -> pivot_proj [label="pivot [B,T,13]+mask"];
+    dataset -> chain_in   [label="chain [B,120,10]+mask"];
+
+    // Model → Output
+    strat_head -> output_node;
+    risk_head  -> output_node;
+    pivot_head -> output_node;
+    size_head  -> output_node;
+    spot_head  -> output_node;
+    gate_routing -> output_node [label="final_gate\n[B,T]"];
+
+    // Output → Training path
+    output_node -> loss [label="training\nforward"];
+    dataset -> loss [label="ground\ntruth labels"];
+    loss -> optimizer;
+    optimizer -> checkpoint [label="best val epoch\n(early stop patience=25)"];
+    optimizer -> epoch_json [label="per-epoch\nanalysis"];
+
+    // Checkpoint → Inference
+    checkpoint -> model_load [label="load .pth\nnormalization stats", style=bold];
+
+    // Inference path
+    alignment -> model_load [label="live snapshot\n4-TF aligned", style=dashed];
+    chain_eng -> model_load [label="live chain\ngrid", style=dashed];
+    model_load -> output_node [label="inference\nCondorNetOutput", style=dashed];
+    output_node -> decision [label="strategy_logits\nentry_signal", style=dashed];
+    decision -> friction [label="entry\nconfirmed", style=dashed];
+    decision -> live_result [label="ABSTAIN →\nno trade", style=dashed, color="#880E4F"];
+    friction -> ic_build [label="all legs\npassed", style=dashed];
+    friction -> live_result [label="friction\nrejected", style=dashed, color="#880E4F"];
+    ic_build -> sizing [label="4-leg structure\n+ credit", style=dashed];
+    sizing -> exit_logic [label="position\nentered", style=dashed];
+    exit_logic -> live_result [label="trade\nclosed", style=dashed];
+
+    // Pivot feedback loop
+    output_node -> exit_logic [label="pivot_high/low_probs\nfor early exit hints",
+                                style=dashed, color="#880E4F"];
+}
