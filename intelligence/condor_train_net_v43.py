@@ -267,6 +267,46 @@ def logit_mad_floor(lambda_probs: torch.Tensor,
     return alpha * hinge
 
 
+def logit_tail_penalty(lambda_probs: torch.Tensor,
+                       clip_band: float = 8.0,
+                       alpha: float = 0.01,
+                       logit_eps: float = 1e-4) -> torch.Tensor:
+    """
+    Squared-excess penalty on gate logit magnitudes beyond a safe band.
+
+    Targets the runaway hard-off / hard-on tail that variance, IQR, and MAD
+    floors cannot stop — those controls act on the distribution bulk while a
+    handful of extreme outliers (z → -33) sail past undetected.
+
+    Loss fires only on the excess beyond |z| > clip_band:
+
+        L_tail = alpha * E[max(0, |z| - clip_band)²]
+
+    At clip_band=8, σ(±8) = 0.9997 — the gate is already fully saturated, so
+    any further magnitude growth is pure waste and kills gradient flow for those
+    gates.  The squared excess gives a smooth, proportional pull-back.
+
+    Intentionally OUTSIDE autocast (fp32) — consistent with other logit
+    regularizers in this file.
+
+    Args:
+        lambda_probs: final_gate tensor, any shape, values in (0,1)
+        clip_band:    safe |z| radius; excess beyond this is penalized (default 8.0)
+        alpha:        loss coefficient (default 0.01)
+        logit_eps:    clamping eps fed into _logit_safe (default 1e-4)
+
+    Returns:
+        scalar loss tensor (zero when all |z| <= clip_band)
+    """
+    if lambda_probs is None:
+        return torch.tensor(0.0, device='cpu')
+    z = _logit_safe(lambda_probs, eps=logit_eps).reshape(-1)
+    if z.numel() < 1:
+        return z.new_zeros(())
+    excess = (z.abs() - clip_band).clamp(min=0.0)   # max(0, |z| - L)
+    return alpha * excess.pow(2).mean()
+
+
 # =============================================================================
 # CRASH SENTINEL
 # =============================================================================
@@ -1498,6 +1538,14 @@ def parse_args_v43():
     p.add_argument('--logit-mad-target', type=float, default=0.9,
                    help='Run 9: target minimum mean(|z_approx|). '
                         '0.9 ≈ N(0, σ=1.1) — healthy gate magnitude. Default: 0.9.')
+    p.add_argument('--logit-tail-alpha', type=float, default=0.0,
+                   help='Tail penalty coefficient. Penalizes squared excess of |z| beyond '
+                        '--logit-tail-band. Targets runaway hard-off/on outliers that '
+                        'var/IQR/MAD floors miss. 0.0 = disabled. Recommended: 0.01.')
+    p.add_argument('--logit-tail-band', type=float, default=8.0,
+                   help='Safe |z| radius for tail penalty. Excess beyond this is penalized. '
+                        'σ(±8)≈0.9997 — gates are fully saturated at this magnitude. '
+                        'Default: 8.0.')
 
     # === Training ===
     p.add_argument('--epochs', type=int, default=50)
@@ -1842,6 +1890,17 @@ def train_condor_net_v43(args):
                     loss = loss + _zmad_loss
                     components['logit_zmad'] = _zmad_loss.detach()
 
+                # ── Logit tail penalty (targets runaway |z| outliers) ─────────
+                if args.logit_tail_alpha > 0.0:
+                    _ztail_loss = logit_tail_penalty(
+                        outputs.final_gate,
+                        clip_band=args.logit_tail_band,
+                        alpha=args.logit_tail_alpha,
+                        logit_eps=args.logit_eps,
+                    )
+                    loss = loss + _ztail_loss
+                    components['logit_ztail'] = _ztail_loss.detach()
+
             # Accumulate hierarchical gate stats.
             # _last_gate_logit is set on the v42 backbone (model.condor_core), not the
             # top-level CondorNetV43 wrapper — use the same lookup pattern as _extract_logic_v43.
@@ -1883,10 +1942,18 @@ def train_condor_net_v43(args):
                     _zvar_s  = f"  zvar={_zvar_loss.item():.5f}" if _zvar_loss is not None else ""
                     _ziqr_s  = f"  ziqr={_ziqr_loss.item():.5f}" if _ziqr_loss is not None else ""
                     _zmad_s  = f"  zmad={_zmad_loss.item():.5f}" if _zmad_loss is not None else ""
+                    # tail penalty: pct of |z| > band and mean excess
+                    if args.logit_tail_alpha > 0.0 and _bl_flat.numel() > 0:
+                        _tail_mask = _bl_flat.abs() > args.logit_tail_band
+                        _pct_tail = 100.0 * _tail_mask.float().mean().item()
+                        _mean_excess = (_bl_flat.abs() - args.logit_tail_band).clamp(min=0).mean().item()
+                        _ztail_s = f"  tail>{args.logit_tail_band:.0f}: {_pct_tail:.2f}% excess={_mean_excess:.3f}"
+                    else:
+                        _ztail_s = ""
                     print(f"  [Gate B{batch_idx:02d}] λ_std={_lmb_s:.4f}  "
                           f"z_std={_z_std_b:.4f}  z_iqr={_z_iqr_b:.4f}  z_mad={_z_mad_b:.4f}  "
                           f"α_z={alpha_z_sched:.4f}  α_iqr={alpha_iqr_sched:.4f}  α_mad={alpha_mad_sched:.4f}"
-                          f"{_zvar_s}{_ziqr_s}{_zmad_s}")
+                          f"{_zvar_s}{_ziqr_s}{_zmad_s}{_ztail_s}")
 
             # Gradient accumulation scaling (F7.12)
             scaled_loss = loss / args.accum_steps
@@ -2117,6 +2184,16 @@ def train_condor_net_v43(args):
                 _n_high = (_lf >= 1.0 - args.logit_eps).sum().item()
             print(f"  Clamp hits  : λ≤ε {100.*_n_low/_n_lf:.2f}%  "
                   f"λ≥1-ε {100.*_n_high/_n_lf:.2f}%  (ε={args.logit_eps})")
+            # Tail penalty epoch summary (only when penalty is active)
+            if args.logit_tail_alpha > 0.0 and _gate_logit_buf:
+                _all_z_ep = torch.cat([b.view(-1) for b in _gate_logit_buf])
+                _tail_mask_ep = _all_z_ep.abs() > args.logit_tail_band
+                _pct_tail_ep  = 100.0 * _tail_mask_ep.float().mean().item()
+                _mean_exc_ep  = (_all_z_ep.abs() - args.logit_tail_band).clamp(min=0).mean().item()
+                _max_abs_ep   = _all_z_ep.abs().max().item()
+                print(f"  Tail penalty: |z|>{args.logit_tail_band:.0f} → {_pct_tail_ep:.3f}%  "
+                      f"mean_excess={_mean_exc_ep:.4f}  max|z|={_max_abs_ep:.2f}  "
+                      f"α_tail={args.logit_tail_alpha}")
 
         # ── 6. CHECKPOINT ───────────────────────────────────────────────
         epoch_ts = datetime.now().strftime("%m%d%Y_%H%M%S")
