@@ -105,8 +105,8 @@ The following 12 features are appended to the base 52 during ETL, yielding the 6
 | 59 | `regime_persistence` | Count of consecutive bars in same $(v_b, \tau_b)$ | Regime stability counter |
 | 60 | `price_stretch` | $(C_t - \text{SMA}_{20}) / (\text{ATR}_{14} + \varepsilon)$, clipped $\pm 10$ | Mean deviation in ATR units |
 | 61 | `ivr_zone` | $+1$ if $\text{IVR} > 0.70$; $-1$ if $\text{IVR} < 0.30$; else $0$ | IV rank regime ternary |
-| 62 | `stretch_zone` | $+1$ if $\text{price\_stretch} > 2$; $-1$ if $< -2$; else $0$ | Stretch regime ternary |
-| 63 | `reversal_score` | $\alpha \cdot \text{IVR} + \beta \cdot \text{price\_stretch} + \gamma \cdot (\text{pivotStr} \times \text{pivotDir})$ | Composite reversal signal |
+| 62 | `stretch_zone` | $+1$ if $\text{price_stretch} > 2$; $-1$ if $< -2$; else $0$ | Stretch regime ternary |
+| 63 | `reversal_score` | $\alpha \cdot \text{IVR} + \beta \cdot \text{price_stretch} + \gamma \cdot (\text{pivotStr} \times \text{pivotDir})$ | Composite reversal signal |
 
 **Friction gate formulation:** For each window $N \in \{5, 10, 20, 40, 60\}$:
 
@@ -115,7 +115,7 @@ $$
 $$
 
 $$
-\text{friction\_ok}_N = \mathbb{1}[\text{bid\_ask\_spread}_t < \text{HL}_N]
+\text{friction_ok}_N = \mathbb{1}[\text{bid_ask_spread}_t < \text{HL}_N]
 $$
 
 The gate opens if **any** window passes (OR logic), allowing the model's attention over 5 friction columns to learn which lookback is most relevant for current conditions.
@@ -127,11 +127,11 @@ $$
 $$
 
 $$
-\text{rsi\_dyn}(t) = \text{RSI}_{14}(t) \cdot (1 + \beta E_t), \qquad \text{adx\_adaptive}(t) = \frac{\text{ADX}_{14}(t)}{1 + \gamma E_t}
+\text{rsi_dyn}(t) = \text{RSI}_{14}(t) \cdot (1 + \beta E_t), \qquad \text{adx_adaptive}(t) = \frac{\text{ADX}_{14}(t)}{1 + \gamma E_t}
 $$
 
 $$
-\text{psar\_adaptive}(t) = \frac{C_t - \text{PSAR}_t}{\text{ATR}_{14}(t) + \varepsilon}
+\text{psar_adaptive}(t) = \frac{C_t - \text{PSAR}_t}{\text{ATR}_{14}(t) + \varepsilon}
 $$
 
 ### 1.4 Pivot Feature Pathway (13 sparse, separate)
@@ -1050,13 +1050,13 @@ The comparison JSON tracks structural drift from the best-model checkpoint:
 Feature pair $(i,j)$ is stored as the index $k$ into the upper triangular matrix:
 
 $$
-k = \text{triu\_index}(i, j, n) = ni - \frac{i(i+1)}{2} + j - i - 1, \qquad 0 \leq i < j < n
+k = \text{triu_index}(i, j, n) = ni - \frac{i(i+1)}{2} + j - i - 1, \qquad 0 \leq i < j < n
 $$
 
 Inverse lookup:
 
 $$
-i = \left\lfloor \frac{2n - 1 - \sqrt{(2n-1)^2 - 8k}}{2} \right\rfloor, \qquad j = k - \text{triu\_index}(i, i+1, n) + i + 1
+i = \left\lfloor \frac{2n - 1 - \sqrt{(2n-1)^2 - 8k}}{2} \right\rfloor, \qquad j = k - \text{triu_index}(i, i+1, n) + i + 1
 $$
 
 Implemented via `numpy.triu_indices(n_inputs, k=1)` for $n_{\text{inputs}} = 64$, yielding $\binom{64}{2} = 2{,}016$ unique feature pairs.
@@ -1152,7 +1152,7 @@ A model checkpoint is deployment-safe if all of the following hold:
 At inference, the model abstains if:
 
 $$
-\max_k \hat{s}_k < 0.60 \quad \lor \quad \hat{p} < 0.45 \quad \lor \quad \text{friction\_gate} = 0
+\max_k \hat{s}_k < 0.60 \quad \lor \quad \hat{p} < 0.45 \quad \lor \quad \text{friction_gate} = 0
 $$
 
 The friction gate requires at least one `friction_ok_N = 1` for any window $N \in \{5, 10, 20, 40, 60\}$ — equivalent to requiring that the bid-ask spread is smaller than the recent price range at some lookback scale. This is enforced **per leg** in multi-leg strategies.
