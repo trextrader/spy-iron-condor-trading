@@ -1051,7 +1051,7 @@ def build_condornet_v43(
     d_chain:           int   = 128,
     n_strategy_types:  int   = 10,
     pop_sizing_weight: float = 0.5,
-    verbose:           bool  = True,
+    verbose:           bool  = False,
     **kwargs,
 ) -> CondorNetV43:
     """
