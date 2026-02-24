@@ -1,6 +1,9 @@
 # Architecture Diagrams Glossary
 
-This directory contains the visual specifications for the CondorBrain system. Below is a description of each diagram's purpose.
+This directory contains the visual specifications for the CondorBrain system (CondorNet™ v4.3). Below is a description of each diagram's purpose.
+
+## 🆕 CondorNet™ v4.3
+- **[condornet_v43_architecture.png](condornet_v43_architecture.png)**: Complete v4.3 architecture — MultiTFProjector (4×TF), PivotProjector, TFFusionBlock, OptionsChainEncoder (Transformer), JointFusionLayer, StrategyHead (10 types), RiskMetricHead (PoP/EV/VaR/CVaR), PivotPredictionHead, PositionSizeHead. 10.9M params.
 
 ## 🗺️ Master Maps
 - **[diagram_map.png](diagram_map.png)**: The master navigational map that links all other diagrams together, organized by functional cluster (Data, Intelligence, Logic, Execution, Optimization).

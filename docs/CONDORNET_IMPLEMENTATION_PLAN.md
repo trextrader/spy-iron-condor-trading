@@ -2,7 +2,12 @@
 
 ## Overview
 
-This document outlines the complete implementation plan for transitioning from the Neural CDE architecture to the new **CondorNet** fused architecture. This is a first-of-its-kind implementation combining:
+This document outlines the complete implementation plan for the **CondorNet** architecture. Originally targeting the transition from Neural CDE to CondorNet v4.0, this document has been updated with the **v4.3 addendum** covering the multi-strategy extensions.
+
+> [!IMPORTANT]
+> As of 2026-02-24, the authoritative implementation is `intelligence/condor_brain_net_v43.py` (CondorNet™ v4.3). The v4.0 core (Parts 1-2 below) is preserved as the `CondorNet` class in `condor_brain_net_v42.py` and used as the inner core engine of `CondorNetV43`.
+
+This is a first-of-its-kind implementation combining:
 
 - **ETD-1 (Exponential Time Differencing)** matrix exponential integrator
 - **Neural CDE** controlled differential equations
@@ -1224,7 +1229,74 @@ parser.add_argument("--strict-causality", action="store_true", default=False,
 
 ---
 
+## Part 3: CondorNet™ v4.3 Architecture (Addendum)
+
+> [!IMPORTANT]
+> CondorNet v4.3 is implemented in `intelligence/condor_brain_net_v43.py` (1139 lines).
+> The v4.2 core (Parts 1-2 above) is fully preserved and used as the inner ETD-1/CDE engine.
+
+### 3.1 v4.3 Component Overview
+
+| Component | Class | Input | Output | New in v4.3 |
+|-----------|-------|-------|--------|-------------|
+| MultiTFProjector | `MultiTFProjector` | 4×[B,T,64] | [B,T,256] | ✅ |
+| PivotProjector | `PivotProjector` | [B,T,13] | [B,T,16] | ✅ |
+| TFFusionBlock | `TFFusionBlock` | [B,T,256]+[B,T,16] | [B,T,256] | ✅ |
+| OptionsChainEncoder | `OptionsChainEncoder` | [B,N,10] | [B,128] | ✅ |
+| JointFusion | `JointFusionLayer` | [B,T,256]+[B,128] | [B,T,384] | ✅ |
+| Strategy Selection | `StrategyHead` | [B,384] | 10 logits + legs + entry | ✅ |
+| Risk Metrics | `RiskMetricHead` | [B,384] | PoP/EV/MaxLoss/VaR/CVaR | ✅ |
+| Pivot Prediction | `PivotPredictionHead` | [B,384] | P(pivot at 5 horizons) | ✅ |
+| Position Sizing | `PositionSizeHead` | PoP + [B,384] | [B,1] | ✅ |
+| v4.2 Core Engine | `CondorNet` (from v42) | [B,T,d_input] | [B,10] | Preserved |
+
+### 3.2 Strategy Universe (10 Types)
+
+Defined in `intelligence/schema_v43.py`:
+
+```python
+STRATEGY_TYPES = [
+    "single_call", "single_put",
+    "bull_call_spread", "bear_put_spread",
+    "straddle", "strangle",
+    "butterfly_call", "iron_condor",
+    "custom_multi_leg", "abstain",
+]
+```
+
+Abstain threshold: softmax(logits).max() < 0.60 → no trade.
+
+### 3.3 Risk Metric Head (CVaR ≥ VaR Constraint)
+
+```python
+pop      = sigmoid(W_pop @ h)           # [0, 1]
+ev       = W_ev @ h                     # unbounded
+max_loss = softplus(W_ml @ h)           # ≥ 0
+var_95   = softplus(W_var @ h)          # ≥ 0
+cvar_95  = var_95 + softplus(W_off @ h) # ≥ VaR (enforced)
+```
+
+### 3.4 Backward Compatibility
+
+`CondorNetV43.forward_compat(x)` routes a single TF input to all 4 TFs with a zero-valued chain, preserving the v4.2 API for existing backtest engine calls.
+
+### 3.5 Training Parameters (v43TrainRun12)
+
+| Parameter | Value |
+|-----------|-------|
+| Total parameters | 10,955,687 |
+| d_joint | 128 |
+| d_chain | 128 |
+| d_h / d_v / d_m / d_r | 256 / 32 / 64 / 32 |
+| n_predicates | 8 |
+| n_strategy_types | 10 |
+| batch_size | 256 |
+| lookback | 200 |
+| learning_rate | 1e-4 |
+| schema_version | v4.3.0 |
+
+---
+
 *Document created: 2026-02-03*
-*Updated: 2026-02-04 (Mathematical Faithfulness Patches)*
-*Author: Claude Code (Opus 4.5)*
-*Version: 1.1*
+*Updated: 2026-02-24 (CondorNet v4.3 Addendum)*
+*Version: 4.3*

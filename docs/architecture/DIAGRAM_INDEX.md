@@ -10,7 +10,7 @@ This document provides a comprehensive index of all architecture diagrams in the
 |----------|-------|--------------|
 | Master Maps | 4 | `complete_system_v23.png`, `system_overview.png` |
 | GUI & Training | 5 | `gui_architecture.png`, `training_telemetry_flow.png` |
-| Intelligence Core | 6 | `CondorNet_NN_Architecture.png`, `enhanced_architecture.png` |
+| Intelligence Core | 7 | `condornet_v43_architecture.png`, `CondorNet_NN_Architecture.png`, `enhanced_architecture.png` |
 | Data Pipeline | 3 | `data_pipeline_detailed.png`, `lag_alignment_flow.png` |
 | Decision Logic | 6 | `fuzzy_sizing_pipeline.png`, `membership_curves.png` |
 | Execution | 2 | `institutional_execution_flow.png`, `optimization_pipeline.png` |
@@ -23,7 +23,7 @@ This document provides a comprehensive index of all architecture diagrams in the
 ### complete_system_v23.png (NEW)
 **File:** [complete_system_v23.png](complete_system_v23.png)
 **Source:** [complete_system_v23.dot](complete_system_v23.dot)
-**Description:** Complete CondorBrain system architecture v2.3 showing all layers: Data, Intelligence (CondorNet v4.0), Training, Execution, and the new GUI Layer (Phase 6). This is the primary reference diagram for the current system state.
+**Description:** Complete CondorBrain system architecture v2.3 showing all layers: Data, Intelligence (CondorNet v4.0 era; see `condornet_v43_architecture.png` for current v4.3), Training, Execution, and the GUI Layer (Phase 6).
 
 ### system_overview.png
 **File:** [system_overview.png](system_overview.png)
@@ -38,7 +38,11 @@ This document provides a comprehensive index of all architecture diagrams in the
 ### full_system_architecture.png
 **File:** [full_system_architecture.png](full_system_architecture.png)
 **Source:** [full_system_architecture.dot](full_system_architecture.dot)
-**Description:** Detailed V4.0 specification diagram with CondorNet and Diffusion components.
+**Description:** Detailed V4.0 specification diagram with CondorNet and Diffusion components. See `condornet_v43_architecture.png` for the current v4.3 architecture.
+
+### condornet_v43_architecture.png (v4.3 — CURRENT)
+**File:** [condornet_v43_architecture.png](condornet_v43_architecture.png)
+**Description:** Complete CondorNet™ v4.3 architecture diagram showing the multi-source data fusion pipeline: 4× MultiTFProjector → PivotProjector + TFFusionBlock → OptionsChainEncoder → JointFusionLayer → v4.2 ETD-1/CDE Core → StrategyHead (10 types) + RiskMetricHead (PoP/EV/VaR/CVaR) + PivotPredictionHead + PositionSizeHead. 10.9M parameters.
 
 ---
 
@@ -86,7 +90,7 @@ This document provides a comprehensive index of all architecture diagrams in the
 
 ---
 
-## Intelligence Core (CondorNet v4.0)
+## Intelligence Core (CondorNet v4.0 → v4.3)
 
 ### CondorNet_NN_Architecture.png
 **File:** [CondorNet_NN_Architecture.png](CondorNet_NN_Architecture.png)

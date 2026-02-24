@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Training Dashboard provides real-time visualization of CondorNet model training. This guide explains how to interpret each metric, chart, and visualization.
+The Training Dashboard provides real-time visualization of CondorNet™ v4.3 model training. This guide explains how to interpret each metric, chart, and visualization.
 
 ---
 
@@ -18,16 +18,18 @@ The heatmap displays **predicate gate activations** in real-time, showing which 
 | **0.5** | Mid (orange) | Gate is **uncertain** - near decision threshold |
 | **1.0** | Bright (yellow/white) | Gate is **ON** - condition strongly met |
 
-### Gate Definitions (Rows 0-9)
+### Gate Definitions (v4.3 — 8 Predicate Gates)
 
 | Gate | Name | Learned Rule | Trading Implication |
 |------|------|--------------|---------------------|
-| 0 | Vol Spike | `IVR > 75` | High IV environment - favorable for selling premium |
-| 1 | Liquidity Lock | `Spread/Price > 1.12%` | Wide spreads - block entry to avoid slippage |
-| 2 | Trend Reversal | `RSI < 25` | Oversold condition - potential mean reversion |
-| 3 | Gap Guard | `1m price jump > 1.12%` | Sudden move detected - increase caution |
-| 4 | Gamma Hedge | `|Γ| > 0.011` | High gamma exposure - consider hedging |
-| 5-9 | Learned Predicates | Data-driven | Model-discovered patterns from training data |
+| 0 | IV Rank Threshold | `IVR > threshold` | Elevated implied volatility — favorable for selling premium |
+| 1 | Spread Ratio | `Spread/Price > 0.4%` | Wide spreads — block entry to avoid slippage |
+| 2 | RSI Signal | `RSI < 25` | Oversold condition — potential mean reversion |
+| 3 | Delta RSI | `ΔRSI < 0` | Declining momentum |
+| 4 | Momentum Reversal | `RSI < 25 ∧ ΔRSI < 0` | Compound reversal signal |
+| 5 | Gap Risk | `|ΔS|/S > 1.2%` | Sudden move detected — increase caution |
+| 6 | Greeks Pressure | `|Γ| > threshold` | High gamma exposure — consider hedging |
+| 7 | IV Regime Fraction | IV regime signal | Regime transition indicator |
 
 ### Reading the Heatmap
 
@@ -298,5 +300,5 @@ The dashboard connects via WebSocket for real-time updates.
 
 ---
 
-*Generated: 2026-02-08*
-*CondorBrain GUI v2.3.0*
+*Updated: 2026-02-24*
+*CondorBrain GUI v4.3.0 — CondorNet™*

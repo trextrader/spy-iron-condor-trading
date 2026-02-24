@@ -2,9 +2,9 @@
 
 ![CondorNet™ Equation Graph](docs/architecture/condornet_equation_graph_premium_1770200590388.png)
 
-## 🚀 New in v4.0 (CondorNet™ - Unified Architecture)
+## 🚀 New in v4.3 (CondorNet™ - Multi-Strategy Options Intelligence)
 
-**CondorNet™** is a first-of-its-kind unified neural architecture that fuses three paradigms:
+**CondorNet™ v4.3** is a first-of-its-kind unified neural architecture that fuses ETD-1 exponential integration, Neural CDE path response, TFT control synthesis, and **multi-timeframe + options chain intelligence** into a single 10.9M parameter model.
 
 $$x_k = e^{A_\theta(u_k)\Delta t_k} x_{k-1} + \Delta t_k \varphi_1(A_\theta(u_k)\Delta t_k) B_\theta(u_k) + G_\theta(x_{k-1}, u_k) \Delta X_k + D(\text{Greeks}_k, r_{k-1}, q_k)$$
 
@@ -14,14 +14,18 @@ $$x_k = e^{A_\theta(u_k)\Delta t_k} x_{k-1} + \Delta t_k \varphi_1(A_\theta(u_k)
 | v1.x | TFT (Temporal Fusion Transformer) | Failed to converge |
 | v2.x | Mamba-2 SSM | NaN explosions |
 | v3.x | Neural CDE | Overfitting, poor regime adaptation |
-| **v4.0** | **CondorNet™** | **Unified fusion with ETD-1 stability** |
+| v4.0 | CondorNet™ | Unified fusion with ETD-1 stability |
+| **v4.3** | **CondorNet™ v4.3** | **Multi-TF × Chain × Pivot, 10 strategy types, 10.9M params** |
 
-### Key Innovations
+### Key Innovations (v4.3)
+- **Multi-Timeframe Fusion**: 4× independent TF projectors (M1/M5/M15/H1) → 256-dim joint representation
+- **Options Chain Transformer**: Transformer encoder over chain grid `[B, N, 10]` with skew signal extraction → 128-dim embedding
+- **Pivot Prediction Engine**: Anticipates reversals BEFORE confirmation at [5, 10, 20, 35, 70] bar horizons
+- **10 Strategy Types**: `single_call, single_put, bull_call_spread, bear_put_spread, straddle, strangle, butterfly_call, iron_condor, custom_multi_leg, abstain`
+- **8 Predicate Gates**: Volatility spike, liquidity compression, momentum reversal, gap risk, Greeks pressure, IV regime, put flow, spread stress
+- **Risk Metric Heads**: PoP, EV, MaxLoss, VaR₉₅, CVaR₉₅ predictions with enforced CVaR ≥ VaR constraint
 - **ETD-1 Exponential Integrator**: φ₁(M) = M⁻¹(e^M - I) for guaranteed numerical stability
-- **4-Block Augmented State**: x_k = [h_k; v_k; m_k; r_k] - latent, portfolio, memory, regime
-- **5 Canonical Predicate Gates**: Volatility spike, liquidity compression, momentum reversal, gap risk, Greeks pressure
-- **TFT Control Synthesis**: Long-range temporal context without direct prediction
-- **HAL-SNN Path Response**: G_θ(x, u) · ΔX_k for market-driven state evolution
+- **4-Block Augmented State**: x_k = [h_k; v_k; m_k; r_k] - latent (256), portfolio (32), memory (64), regime (32)
 
 Full technical details in [CondorNet Implementation Plan](docs/CONDORNET_IMPLEMENTATION_PLAN.md) and [Scientific Specification](docs/scientific_spec.md).
 
@@ -113,45 +117,47 @@ CondorBrain is an advanced algorithmic trading system designed for SPY Iron Cond
 - **High-Fidelity Backtesting**: 5-minute bar simulation with accurate mark-to-market P&L, leg-by-leg exit logic, and realistic slippage/commissions
 - **Phased Serial Optimization**: Grid-search engine optimizing for **Net Profit / Max Drawdown** ratio with hardware benchmarking
 - **10-Factor Fuzzy Intelligence**: Dynamic position sizing based on MTF Consensus, IV Rank, VIX Regime, RSI, ADX, Bollinger Bands, Stochastic, Volume, SMA Distance, and **Parabolic SAR**
-- **CondorNet™ Forecasting**: Unified ETD-1 + Neural CDE + TFT architecture with **5 Predicate Gates** for regime detection and **4-Block Augmented State** for comprehensive market modeling.
+- **CondorNet™ v4.3 Forecasting**: Multi-TF + Chain + Pivot intelligence with **8 Predicate Gates**, **10 Strategy Types**, and **4-Block Augmented State** for comprehensive market modeling.
 
-## 🧠 CondorNet™ Core Engine
+## 🧠 CondorNet™ v4.3 Core Engine
 
-The system uses the novel **CondorNet™** architecture that unifies three previously separate approaches (TFT, HAL-SNN, Mamba/SSD) into a single mathematically principled framework.
+The system uses the novel **CondorNet™ v4.3** architecture — a unified multi-strategy options intelligence model combining ETD-1 exponential integration, multi-timeframe fusion, options chain encoding, and pivot prediction in a single 10.9M parameter framework.
 
 ### Mathematical Foundation
-The core mechanism is the CondorNet™ Master Equation:
+The core ETD-1 state evolution equation:
 
 $$x_k = e^{A_\theta(u_k)\Delta t_k} x_{k-1} + \Delta t_k \varphi_1(A_\theta(u_k)\Delta t_k) B_\theta(u_k) + G_\theta(x_{k-1}, u_k) \Delta X_k + D(\text{Greeks}_k, r_{k-1}, q_k)$$
 
-Where:
-*   $x_k = [h_k; v_k; m_k; r_k]$ is the **4-block augmented state** (latent, portfolio, memory, regime)
-*   $e^{A_\theta \Delta t}$ is the **ETD-1 matrix exponential** for stable time evolution
-*   $\varphi_1(M) = M^{-1}(e^M - I)$ is the **ETD-1 basis function**
-*   $u_k = \text{TFT}(X_{1:k})$ is the **control embedding** from Temporal Fusion Transformer
-*   $G_\theta(x, u) \cdot \Delta X_k$ is the **HAL-SNN path response**
-*   $D(\text{Greeks}, r_{k-1}, q)$ is the **4-block forcing** (uses $r_{k-1}$ for causality)
+The v4.3 data fusion pipeline:
 
-In the **CondorNet™** implementation (`intelligence/condor_brain_net.py`):
-*   **Input**: $(B, T, 54)$ tensor [V2.2 Feature Set]
-*   **Backbone**: ETD-1 Integrator + HAL-SNN + TFT Control
-*   **State**: 4-block augmented $[h; v; m; r]$ with d_total = 384
-*   **Output**: 10-head policy (IC parameters + confidence + entry/exit)
+$$z_{\text{joint}} = [\text{proj}_{M1}(x_{M1}); \text{proj}_{M5}(x_{M5}); \text{proj}_{M15}(x_{M15}); \text{proj}_{H1}(x_{H1})]$$
 
-### Training Workflow (v2.2 Fast-Track)
+$$z_{\text{fused}} = \text{LayerNorm}(\text{Linear}(z_{\text{joint}} \| \text{PivotProj}(p)) + z_{\text{joint}})$$
+
+$$c = \text{OutputProj}(\text{MaskedMeanPool}(\text{TransformerEnc}(\text{ChainGrid}))) + \text{SkewProj}(\sigma_{\text{put}} - \sigma_{\text{call}})$$
+
+$$j = \text{LayerNorm}(z_{\text{fused}} \| \text{broadcast}(c)) \in \mathbb{R}^{B \times T \times 384}$$
+
+In the **CondorNet™ v4.3** implementation (`intelligence/condor_brain_net_v43.py`):
+*   **Input**: $4 \times (B, T, 64)$ per TF + $(B, N, 10)$ chain grid + $(B, T, 13)$ pivot features
+*   **Backbone**: MultiTFProjector → PivotFusion → ChainEncoder → JointFusion → ETD-1/CDE Core
+*   **State**: Joint representation $d_{\text{joint}} = 384$ (256 TF + 128 chain)
+*   **Output**: 10 strategy logits + 4-leg params + PoP/EV/MaxLoss/VaR₉₅/CVaR₉₅ + pivot predictions + position sizing
+
+### Training Workflow (v4.3 — Lightning AI)
 
 **1. Data Acquisition**
 ```bash
-# Generate the 5M row V2.2 dataset (requires 'data_factory/')
-python data_factory/pipeline.py --generate-v22
+# Generate the v4.3 multi-TF datasets (M1/M5/M15/H1 + options chain + pivots)
+python data_factory/data_pipeline_v43.py --config configs/condor_net_config_v46.yaml
 ```
 
-**2. "Fast-Track" Training (Lightning AI)**
-We use a **Ratchet Logic** approach that saves models immediately upon finding a loss $< 1.0$, short-circuiting the epoch to validatate instantly.
-
+**2. Training (Lightning AI — T4/A100)**
 ```bash
-# Launches background training on 3M rows
-bash run_training.sh
+# Launch v4.3 training on Lightning AI
+python intelligence/condor_train_net_v43.py \
+  --batch-size 256 --lookback 200 --lr 1e-4 \
+  --epochs 30 --deep-observe
 ```
 
 **Key Flags:**
@@ -327,7 +333,7 @@ Optimizes the 11-factor fuzzy weight blend including Neural Network influence.
 
 ## 🏗️ Architecture: Quantor-MTFuzz Specification
 
-The system architecture is tiered into four layers of intelligence, combining high-fidelity **CondorNet (HAL-SNN)** forecasting with a robust Neural-Fuzzy decision suite.
+The system architecture is tiered into four layers of intelligence, combining high-fidelity **CondorNet™ v4.3** multi-strategy forecasting with a robust Neural-Fuzzy decision suite.
 
 - **[Weekly Technical Progress Report (Jan 13)](docs/internal/WEEKLY_SUMMARY_2026-01-13.md):** Summary of recent high-impact work.
 - **[Technical Architecture Summary](docs/architecture/technical_architecture_summary.md):** A one-page engineering overview.
@@ -360,7 +366,12 @@ intelligence/
 ├── fuzzifier.py      → Feature extraction (ADX/RSI/IV Rank)
 ├── fuzzy_engine.py   → Fuzzy position sizing
 ├── regime_filter.py  → Market regime classification
-└── condor_brain.py   → Neural forecasting (HAL-SNN)
+├── condor_brain_net.py    → CondorNet™ v4.0 base (legacy)
+├── condor_brain_net_v42.py → CondorNet™ v4.2 core components
+├── condor_brain_net_v43.py → CondorNet™ v4.3 unified model (CURRENT)
+├── condor_train_net_v43.py → v4.3 training loop + deep observation
+├── schema_v43.py          → v4.3 feature schema + validators
+└── predicate_discovery_v43.py → Predicate learning + pruning
 
 analytics/            [Phase 1]
 ├── realized_vol.py   → Realized volatility calculator

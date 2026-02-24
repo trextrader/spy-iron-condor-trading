@@ -1,5 +1,42 @@
 # Changelog
 
+## [v4.3.0] - 2026-02-24
+### CondorNet™ v4.3 — Multi-Strategy Options Intelligence
+
+Major architecture upgrade from v4.0 single-TF model to multi-TF + options chain intelligence.
+
+#### Architecture (10.9M Parameters)
+- **MultiTFProjector**: 4 independent TF inputs (M1/M5/M15/H1) `[B,T,64]` → `[B,T,256]` joint
+- **PivotProjector**: 13 sparse pivot features → `[B,T,16]` dense embedding (NaN-masked)
+- **TFFusionBlock**: Fuses TF joint + pivot projection with residual connection
+- **OptionsChainEncoder**: Transformer over chain grid `[B,N,10]` → `[B,128]` (2L/4H, moneyness-ranked positional encoding, skew signal extraction)
+- **JointFusionLayer**: `[B,T,256]` + `[B,128]` → `[B,T,384]` with LayerNorm
+- **StrategyHead**: 10 strategy types (incl. abstain) + 4-leg params + entry signal
+- **RiskMetricHead**: PoP, EV, MaxLoss, VaR₉₅, CVaR₉₅ (CVaR ≥ VaR enforced)
+- **PivotPredictionHead**: Anticipates reversals at [5, 10, 20, 35, 70] bar horizons
+- **PositionSizeHead**: PoP-blended fuzzy sizing
+- **8 Predicate Gates** (up from 5): iv_rank, spread_ratio, rsi, delta_rsi, momentum_reversal, gap_risk, greeks_pressure, iv_regime_frac
+
+#### Dataset v4.3
+- 64 input features across 7 functional groups (V2.2 schema) + 9 IVR Reversal Engine features
+- 13 sparse pivot features with NaN masking (medium + strong only, no weak)
+- Full options chain grid (120 contracts max, 10 features each)
+- Schema version `v4.3.0` with comprehensive validators (`schema_v43.py`)
+
+#### Training
+- Training Run 12 (latest): 31 epochs on T4, batch=256, lr=1e-4, lookback=200
+- Loss convergence: train 2.24→0.82, val 1.38→0.97
+- Best model at epoch 6 (val_loss=0.9574)
+- Deep observation reports with 7-section JSON schema
+
+#### New Files
+- `intelligence/condor_brain_net_v43.py` — Full v4.3 model architecture
+- `intelligence/condor_train_net_v43.py` — v4.3 training loop with deep observation
+- `intelligence/schema_v43.py` — Feature schema, strategy types, validators
+- `intelligence/predicate_discovery_v43.py` — Predicate learning and pruning
+
+---
+
 ## [v2.3.0] - 2026-02-07
 ### Phase 6: CondorBrain GUI - Real-time Training Visualization
 

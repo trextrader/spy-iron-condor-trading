@@ -1,6 +1,6 @@
-# CondorNet™ Unified Governing Equation
+# CondorNet™ Unified Governing Equation (v4.3)
 
-**Mathematical Foundations & Derivations**
+**Mathematical Foundations & Derivations — Updated for CondorNet™ v4.3**
 
 © 2026 Dr. T. Jerry Mahabub, Ph.D — All rights reserved.
 
@@ -442,6 +442,82 @@ x_k = e^{A·Δt}·x_{k-1} + Δt·φ₁(A·Δt)·B_k + G_k·ΔX_k + D_k
 
 ---
 
+## v4.3 Extensions: Multi-Source Data Fusion
+
+CondorNet™ v4.3 extends the core ETD-1 evolution equation with a multi-source data fusion pipeline that combines 4 timeframes, options chain data, and pivot features.
+
+### Multi-Timeframe Joint Projection
+
+Four independent timeframe inputs are projected and concatenated:
+
+$$z_{\text{joint}} = [\text{proj}_{M1}(x_{M1}); \text{proj}_{M5}(x_{M5}); \text{proj}_{M15}(x_{M15}); \text{proj}_{H1}(x_{H1})] \in \mathbb{R}^{B \times T \times 256}$$
+
+Where each projector $\text{proj}_{\tau}: \mathbb{R}^{64} \to \mathbb{R}^{64}$ applies Linear → LayerNorm → GELU.
+
+The per-TF contribution ratio is tracked via Frobenius norms:
+
+$$\rho_\tau = \frac{\|\text{proj}_\tau(x_\tau)\|_F}{\sum_{\tau'} \|\text{proj}_{\tau'}(x_{\tau'})\|_F}$$
+
+### Pivot Projection + Fusion
+
+Sparse pivot features (13 dims, NaN-masked) are embedded:
+
+$$p_{\text{embed}} = \begin{cases} \text{Proj}(p \odot \neg\text{mask}) & \text{if any valid data} \\ e_{\text{no-pivot}} & \text{if all NaN} \end{cases} \in \mathbb{R}^{B \times T \times 16}$$
+
+Fusion with residual:
+
+$$z_{\text{fused}} = \text{LayerNorm}(\text{Linear}_{272 \to 256}(z_{\text{joint}} \| p_{\text{embed}}) + W_{\text{res}} \cdot z_{\text{joint}})$$
+
+### Options Chain Transformer Encoding
+
+The options chain grid is processed by a Transformer encoder:
+
+$$h_{\text{chain}} = \text{TransformerEncoder}(\text{InputProj}(\text{ChainGrid}_{\text{sorted}}) + \text{PosEnc}_{\text{moneyness}})$$
+
+$$c_{\text{pool}} = \frac{\sum_i h_i \cdot \mathbb{1}_{\text{valid}(i)}}{\sum_i \mathbb{1}_{\text{valid}(i)}}$$
+
+Skew signal extraction and final projection:
+
+$$\sigma_{\text{skew}} = \overline{\text{IV}}_{\text{put}, \delta \in [-0.30, -0.20]} - \overline{\text{IV}}_{\text{call}, \delta \in [0.20, 0.30]}$$
+
+$$c = \text{Linear}_{136 \to 128}(\text{OutputProj}(c_{\text{pool}}) \| \text{SkewProj}(\sigma_{\text{skew}})) \in \mathbb{R}^{B \times 128}$$
+
+### Joint Fusion
+
+The chain embedding is broadcast across time and concatenated:
+
+$$j = \text{LayerNorm}(z_{\text{fused}} \| \text{broadcast}(c)) \in \mathbb{R}^{B \times T \times 384}$$
+
+### v4.3 Output Head Equations
+
+**Strategy selection** (cross-entropy + ETD-1 residual):
+$$\hat{s} = \text{StrategyHead}(j_{T}) + \text{CondorCore}(\text{proj}_{\text{core}}(z_{\text{fused}}))$$
+
+**Risk metrics** (with CVaR ≥ VaR constraint):
+$$\text{PoP} = \sigma(W_{\text{pop}} h), \quad \text{VaR}_{95} = \text{softplus}(W_{\text{var}} h), \quad \text{CVaR}_{95} = \text{VaR}_{95} + \text{softplus}(W_{\text{offset}} h)$$
+
+**Pivot prediction** (multi-horizon binary classification):
+$$P(\text{pivot\_high at horizon } n) = \sigma(W_{\text{high}} h), \quad n \in \{5, 10, 20, 35, 70\}$$
+
+### Extended Predicate Gates (8 Gates)
+
+v4.3 extends the canonical 5 predicate gates to 8:
+
+| # | Gate | Inequality Condition |
+|---|------|---------------------|
+| 1 | IV Rank | $\text{IVR}_t > \tau_1$ |
+| 2 | Spread Ratio | $\text{spread}/\text{price} > \tau_2$ |
+| 3 | RSI Signal | $\text{RSI}_t < \tau_3$ |
+| 4 | Delta RSI | $\Delta\text{RSI}_t < \tau_4$ |
+| 5 | Momentum Reversal | $\text{RSI}_t < \tau_5 \wedge \Delta\text{RSI}_t < 0$ |
+| 6 | Gap Risk | $|\Delta S|/S > \tau_6$ |
+| 7 | Greeks Pressure | $|\Gamma| > \tau_7$ |
+| 8 | IV Regime | $\text{IV regime signal} > \tau_8$ |
+
+All gates use differentiable steep sigmoid approximation: $P_i = \sigma(s_i \cdot (f_a(x) - f_b(x) - \tau_i))$
+
+---
+
 ## References
 
 1. Cox, S.M. & Matthews, P.C. (2002). "Exponential Time Differencing for Stiff Systems." *J. Comp. Physics*.
@@ -450,6 +526,6 @@ x_k = e^{A·Δt}·x_{k-1} + Δt·φ₁(A·Δt)·B_k + G_k·ΔX_k + D_k
 
 ---
 
-**Document Version:** 2.0
-**Last Updated:** 2026-02-09
-**Validated Against:** Mathematica Stability Notebook, Epoch 5 Checkpoint
+**Document Version:** 4.3
+**Last Updated:** 2026-02-24
+**Validated Against:** v43TrainRun12 (31 epochs, T4), condor_brain_net_v43.py
