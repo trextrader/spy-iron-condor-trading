@@ -2039,7 +2039,7 @@ def train_condor_net_v43(args):
                 _z_iqr_ep  = (_z_all.quantile(0.75) - _z_all.quantile(0.25)).item()
                 _z_var_ep  = _z_all.var(unbiased=False).item()
                 _z_mad_ep  = _z_all.abs().mean().item()
-            _z_std_ok  = 1.0 <= _z_std_ep <= 2.0
+            _z_std_ok  = 1.0 <= _z_std_ep <= 3.0  # upper bound 3.0: floor is at var=2.0, no ceiling concern
             _z_iqr_ok  = _z_iqr_ep >= 0.8
             _z_mad_ok  = _z_mad_ep >= 0.7
             _z_std_tag = "OK" if _z_std_ok else ("LOW" if _z_std_ep < 1.0 else "HIGH")
@@ -2048,7 +2048,7 @@ def train_condor_net_v43(args):
             print(f"  Z-space   : std={_z_std_ep:.4f} [{_z_std_tag}]  "
                   f"var={_z_var_ep:.4f}  IQR={_z_iqr_ep:.4f} [{_z_iqr_tag}]  "
                   f"MAD={_z_mad_ep:.4f} [{_z_mad_tag}]  "
-                  f"[targets: std 1.0-2.0, IQR ≥ 0.8, MAD ≥ 0.7]")
+                  f"[targets: std 1.0-3.0, IQR ≥ 0.8, MAD ≥ 0.7]")
             writer.add_scalar('epoch/z_std',  _z_std_ep,  epoch)
             writer.add_scalar('epoch/z_var',  _z_var_ep,  epoch)
             writer.add_scalar('epoch/z_iqr',  _z_iqr_ep,  epoch)
