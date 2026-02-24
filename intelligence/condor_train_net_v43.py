@@ -103,6 +103,78 @@ except ImportError:
 
 EPS = 1e-6
 
+
+# =============================================================================
+# GATE DIVERSITY REGULARIZER (Run 7)
+# =============================================================================
+
+def gate_diversity_loss(lambda_probs: torch.Tensor,
+                        std_target: float = 0.14,
+                        alpha: float = 0.01,
+                        eps: float = 1e-3) -> torch.Tensor:
+    """
+    Enforce non-collapse of gating distribution.
+
+    Penalizes runs where std(λ) < std_target — smooth hinge fires only when
+    routing diversity is below target, gradient is zero above it.
+
+        L = alpha * softplus((std_target - std(λ)) / eps) * eps
+
+    Args:
+        lambda_probs: on-graph super_gate tensor (outputs.final_gate), any shape
+        std_target:   target minimum routing std (default 0.14)
+        alpha:        loss coefficient (pre-multiplied, managed by compute_alpha)
+        eps:          softplus smoothing scale
+
+    Returns:
+        scalar loss tensor (differentiable zero when diversity is sufficient)
+    """
+    if lambda_probs is None:
+        return torch.tensor(0.0, device='cpu')
+
+    gate_flat = lambda_probs.float().view(-1)
+    if gate_flat.numel() < 2:
+        return gate_flat.new_zeros(())
+
+    # std across all gate values in the batch (our gate is scalar-per-sample)
+    std_mean = gate_flat.std(unbiased=False)
+
+    # smooth hinge: zero when std >= std_target
+    hinge = F.softplus((std_target - std_mean) / eps) * eps
+    return alpha * hinge
+
+
+def compute_alpha(epoch: int, total_epochs: int,
+                  alpha_max: float = 0.01,
+                  warmup_frac: float = 0.3) -> float:
+    """
+    Linear α ramp: 0 → alpha_max over first warmup_frac fraction of epochs.
+    Constant at alpha_max thereafter.
+    """
+    warmup_epochs = max(1, int(total_epochs * warmup_frac))
+    if epoch >= warmup_epochs:
+        return alpha_max
+    return alpha_max * (epoch / warmup_epochs)
+
+
+def _parse_epoch_id(eid) -> int:
+    """
+    Normalize epoch identifier to int.
+    Handles: int 30, '30', 'Epoch30', 'EpEpoch30'.
+    Extracts the trailing contiguous digit sequence.
+    """
+    if isinstance(eid, int):
+        return eid
+    s = str(eid)
+    digits = ''
+    for c in reversed(s):
+        if c.isdigit():
+            digits = c + digits
+        elif digits:
+            break
+    return int(digits) if digits else 0
+
+
 # =============================================================================
 # CRASH SENTINEL
 # =============================================================================
@@ -1169,7 +1241,9 @@ def compute_epoch_comparison(epoch_snapshots: list, best_epoch: int) -> dict:
     """Diff each epoch's learned logic against the best model epoch."""
     comparison: dict = {"best_model": {"epoch": best_epoch}, "comparisons": {}}
 
-    best_snap = next((s for s in epoch_snapshots if s['epoch'] == best_epoch), None)
+    best_snap = next(
+        (s for s in epoch_snapshots if _parse_epoch_id(s['epoch']) == best_epoch), None
+    )
     if best_snap is None:
         best_snap = epoch_snapshots[0]
         comparison["best_model"]["note"] = "No best epoch yet — using first as baseline"
@@ -1179,8 +1253,9 @@ def compute_epoch_comparison(epoch_snapshots: list, best_epoch: int) -> dict:
     best_logic = best_snap['interpretability'].get('learned_logic', {})
 
     for snap in epoch_snapshots:
-        ek = f"Epoch{snap['epoch']}"
-        if snap['epoch'] == best_epoch:
+        epoch_num = _parse_epoch_id(snap['epoch'])   # normalize "Epoch30" → 30
+        ek = f"Epoch{epoch_num}"
+        if epoch_num == best_epoch:
             comparison["comparisons"][ek] = "BEST MODEL — omitted from diff"
             continue
 
@@ -1255,6 +1330,12 @@ def parse_args_v43():
     p.add_argument('--gate-temp', type=float, default=3.0,
                    help='Initial gate temperature τ (Run 5+). Amplifies routing logits '
                         'so λ std targets 0.15–0.30.  Learnable; clamped to [1, 10].')
+    p.add_argument('--diversity-alpha', type=float, default=0.02,
+                   help='Run 7: gate diversity loss max coefficient α. '
+                        'Ramps 0 → α over first 30%% of epochs (see compute_alpha).')
+    p.add_argument('--diversity-std-target', type=float, default=0.14,
+                   help='Run 7: target minimum std(λ) for diversity hinge (default 0.14). '
+                        'Reduce to 0.12 if val degrades sharply in first 5 epochs.')
 
     # === Training ===
     p.add_argument('--epochs', type=int, default=50)
@@ -1379,6 +1460,30 @@ def train_condor_net_v43(args):
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     scaler = GradScaler() if not use_bf16 else None
 
+    # ── τ trainability verification (Run 7) ──────────────────────────────
+    print("\n--- Tau Parameter Verification ---")
+    _tau_found = False
+    for _tname, _tp in model.named_parameters():
+        if "tau" in _tname.lower() or "gate_temperature" in _tname.lower():
+            print(f"  Found τ param : {_tname} | val={_tp.item():.4f} "
+                  f"| requires_grad={_tp.requires_grad}")
+            _tau_found = True
+    if not _tau_found:
+        print("  WARNING: τ/gate_temperature NOT found in model.named_parameters() — "
+              "τ is not learnable")
+
+    # Verify τ is inside the optimizer param groups
+    _tau_ids = {
+        id(p) for n, p in model.named_parameters()
+        if "tau" in n.lower() or "gate_temperature" in n.lower()
+    }
+    _opt_ids = {id(p) for pg in optimizer.param_groups for p in pg['params']}
+    if _tau_ids and not _tau_ids.intersection(_opt_ids):
+        print("  WARNING: τ NOT present in optimizer param groups — gradient will NOT apply!")
+    elif _tau_ids:
+        print("  τ is in optimizer param groups — τ IS trainable")
+    print("----------------------------------\n")
+
     # ── Resume from checkpoint (F7.8) ───────────────────────────────────
     start_epoch = 0
     best_val_loss = float('inf')
@@ -1406,6 +1511,11 @@ def train_condor_net_v43(args):
     training_start_time = time.time()
     epoch_snapshots: list = []      # accumulate per-epoch interpretability snapshots
 
+    # Global worst-logit tracker across ALL epochs (Run 7)
+    worst_logit_value = 0.0         # tracks most negative gate logit seen
+    worst_logit_epoch = None
+    worst_logit_batch = None
+
     convergence_manager = SmartEpochManager(
         threshold=args.convergence_threshold,
         patience=args.convergence_patience,
@@ -1421,6 +1531,8 @@ def train_condor_net_v43(args):
     print(f"  Epochs: {args.epochs} | Batch: {args.batch_size} | LR: {args.lr}")
     print(f"  Lookback: {args.lookback} | Accum Steps: {args.accum_steps}")
     print(f"  Grad Clip: {args.grad_clip} | Patience: {args.patience}")
+    print(f"  Gate τ init: {args.gate_temp} | Diversity α: {args.diversity_alpha} "
+          f"(std_target: {args.diversity_std_target}, ramp: {int(args.epochs * 0.3)} epochs)")
     print(f"  Output: {args.output}")
     print(f"{'='*60}\n")
 
@@ -1439,6 +1551,13 @@ def train_condor_net_v43(args):
         model.train()
         criterion.set_epoch(epoch)
 
+        # α ramp: 0 → diversity_alpha_max over first 30% of epochs (Run 7)
+        alpha_sched = compute_alpha(
+            epoch, args.epochs,
+            alpha_max=args.diversity_alpha,
+            warmup_frac=0.3,
+        )
+
         epoch_loss = 0.0
         epoch_components = {}
         epoch_batches_run = 0
@@ -1447,6 +1566,9 @@ def train_condor_net_v43(args):
         # Buffers for hierarchical gate diagnostics (accumulated per-batch, logged per-epoch)
         _gate_logit_buf: list = []
         _super_gate_buf: list = []
+        # Per-epoch worst-batch tracker (reported in outlier warning)
+        _worst_batch_idx = -1
+        _worst_batch_abs = 0.0
 
         max_batches = 5 if args.dry_run else n_train_batches
         pbar = tqdm(enumerate(train_loader), total=max_batches,
@@ -1484,13 +1606,42 @@ def train_condor_net_v43(args):
                 # ── 2. LOSS ─────────────────────────────────────────
                 loss, components = criterion(outputs, labels)
 
+                # ── Gate diversity regularizer (Run 7) ───────────────
+                if outputs.final_gate is not None and alpha_sched > 0.0:
+                    _div_loss = gate_diversity_loss(
+                        outputs.final_gate,
+                        std_target=args.diversity_std_target,
+                        alpha=alpha_sched,
+                    )
+                    loss = loss + _div_loss
+                    components['gate_diversity'] = _div_loss.detach()
+                    # Per-batch gate logging at first batch only
+                    if batch_idx == 0:
+                        with torch.no_grad():
+                            _gate_std_b0 = outputs.final_gate.float().view(-1).std().item()
+                        print(f"  [Gate B0] std={_gate_std_b0:.4f}  "
+                              f"alpha={alpha_sched:.4f}  "
+                              f"gate_loss={_div_loss.item():.6f}")
+
             # Accumulate hierarchical gate stats.
             # _last_gate_logit is set on the v42 backbone (model.condor_core), not the
             # top-level CondorNetV43 wrapper — use the same lookup pattern as _extract_logic_v43.
             _backbone = getattr(model, 'condor_core', model)
             if hasattr(_backbone, '_last_gate_logit') and _backbone._last_gate_logit is not None:
-                _gate_logit_buf.append(_backbone._last_gate_logit.float().cpu())
+                _bl = _backbone._last_gate_logit.float().cpu()
+                _gate_logit_buf.append(_bl)
                 _super_gate_buf.append(_backbone._last_super_gate.float().cpu())
+                # Per-epoch worst-batch tracking
+                _bl_abs = max(abs(_bl.min().item()), _bl.max().item())
+                if _bl_abs > _worst_batch_abs:
+                    _worst_batch_abs = _bl_abs
+                    _worst_batch_idx = batch_idx
+                # Global worst-logit tracker (Run 7)
+                _bl_min = _bl.min().item()
+                if _bl_min < worst_logit_value:
+                    worst_logit_value = _bl_min
+                    worst_logit_epoch = epoch + 1
+                    worst_logit_batch = batch_idx
 
             # Gradient accumulation scaling (F7.12)
             scaled_loss = loss / args.accum_steps
@@ -1675,10 +1826,13 @@ def train_condor_net_v43(args):
             _outlier_thresh = 5.0 * max(_gl_std_ep, 1e-6)
             if abs(_gl_min) > _outlier_thresh or _gl_max > _outlier_thresh:
                 _gl_iqr = (all_logits.quantile(0.75) - all_logits.quantile(0.25)).item()
+                _worst_b_str = (f"  worst_batch={_worst_batch_idx}"
+                                if _worst_batch_idx >= 0 else "")
                 print(f"  [WARNING] GATE LOGIT OUTLIER epoch {epoch+1}: "
                       f"min={_gl_min:.3f}  max={_gl_max:.3f}  std={_gl_std_ep:.3f}  "
-                      f"IQR={_gl_iqr:.3f}  (extreme logits inflating std — "
+                      f"IQR={_gl_iqr:.3f}{_worst_b_str}  (extreme logits inflating std — "
                       f"lambda_std={ls:.4f} may understate routing diversity)")
+            writer.add_scalar('epoch/diversity_alpha', alpha_sched, epoch)
 
         # ── 6. CHECKPOINT ───────────────────────────────────────────────
         epoch_ts = datetime.now().strftime("%m%d%Y_%H%M%S")
@@ -1818,6 +1972,15 @@ def train_condor_net_v43(args):
     print(f"Reports: reports/")
     print(f"A/B Matrices: models/A_matrices/")
     print(f"{'='*60}")
+
+    # Global worst gate logit summary (Run 7)
+    print(f"\n--- Worst Gate Logit (across full training) ---")
+    print(f"  Min logit: {worst_logit_value:.6f}")
+    if worst_logit_epoch is not None:
+        print(f"  Occurred:  epoch {worst_logit_epoch}, batch {worst_logit_batch}")
+    else:
+        print("  (no gate logits recorded — gate_temperature may not be active)")
+    print(f"------------------------------------------------")
 
     # Clean exit
     writer.close()
