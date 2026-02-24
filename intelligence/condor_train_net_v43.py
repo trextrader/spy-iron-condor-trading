@@ -1517,10 +1517,13 @@ def parse_args_v43():
                    help='Enable intra-epoch early stopping (default: OFF). '
                         'When disabled, patience operates at epoch boundaries only.')
 
-    # === Checkpointing ===
+    # === Checkpointing / Output ===
     p.add_argument('--output', type=str, default='models/condornet_v43_best.pth')
     p.add_argument('--checkpoint-dir', type=str, default='models/ckpts/')
     p.add_argument('--keep-ckpts', type=int, default=3)
+    p.add_argument('--report-dir', type=str, default='reports',
+                   help='Directory for epoch JSON reports and EPOCH_Comparison files. '
+                        'Created if it does not exist. Default: reports/')
 
     # === Resume & crash recovery (F7.8, F7.9) ===
     p.add_argument('--resume', type=str, default='',
@@ -2185,7 +2188,7 @@ def train_condor_net_v43(args):
         # Update is_best flag on the interp report now that best_epoch is set
         interp_report["summary"]["is_best"] = (epoch + 1 == best_epoch)
 
-        reports_dir = Path("reports")
+        reports_dir = Path(args.report_dir)
         reports_dir.mkdir(parents=True, exist_ok=True)
         interp_path = reports_dir / f"Epoch{epoch+1}_{CN_VERSION}_{DS_VERSION}_{epoch_ts}.json"
         with open(interp_path, 'w') as f:
