@@ -4,7 +4,7 @@
   "description": "9-component loss weights for CondorNet v4.3. Loaded by condor_train_net_v43.py at startup.",
   "initial": {
     "strategy_ce":  1.0,
-    "pop_bce":      0.8,
+    "pop_bce":      1.0,
     "ev_mse":       0.5,
     "risk_mse":     0.5,
     "size_mse":     0.4,
@@ -17,14 +17,14 @@
     "type": "linear",
     "note": "Weights ramp linearly from initial value to end_weight between start_epoch and end_epoch. All other weights remain constant.",
     "schedules": {
-      "pop_bce":   {"start_epoch": 0,  "end_epoch": 10, "end_weight": 1.2},
+      "pop_bce":   {"start_epoch": 0,  "end_epoch": 1,  "end_weight": 1.0},
       "ev_mse":    {"start_epoch": 5,  "end_epoch": 20, "end_weight": 0.8},
       "fuzzy_var": {"start_epoch": 10, "end_epoch": 30, "end_weight": 0.05}
     }
   },
   "component_notes": {
     "strategy_ce":  "Cross-entropy over 10 strategy classes (9 real + abstain). Constant weight — strategy selection is always critical.",
-    "pop_bce":      "Binary cross-entropy for PoP calibration. Ramps up to 1.2 to emphasize probability accuracy early.",
+    "pop_bce":      "Binary cross-entropy for PoP calibration. Constant 1.0 — pop_bce plateaus early (~0.613), annealing above 1.0 just inflates val loss and biases best-epoch selection.",
     "ev_mse":       "MSE for Expected Value. Delayed ramp allows model to stabilize before EV supervision intensifies.",
     "risk_mse":     "MSE for VaR + CVaR + max_loss combined. Constant — risk boundary enforcement never relaxes.",
     "size_mse":     "MSE for fuzzy position size output (0-1). Constant.",
