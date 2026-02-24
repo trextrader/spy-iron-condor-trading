@@ -150,7 +150,13 @@ def compute_alpha(epoch: int, total_epochs: int,
     """
     Linear α ramp: 0 → alpha_max over first warmup_frac fraction of epochs.
     Constant at alpha_max thereafter.
+
+    Special case: warmup_frac=0.0 returns alpha_max immediately (no ramp,
+    full strength from epoch 0 / batch 0).  Without this guard, max(1, 0)=1
+    would cause epoch 0 to still ramp from zero, defeating --logit-warmup-frac 0.0.
     """
+    if warmup_frac <= 0.0:
+        return alpha_max
     warmup_epochs = max(1, int(total_epochs * warmup_frac))
     if epoch >= warmup_epochs:
         return alpha_max
