@@ -1410,6 +1410,9 @@ def parse_args_v43():
                         '1.0 forces middle 50%% to spread ≥1 logit unit.')
     p.add_argument('--logit-eps', type=float, default=1e-4,
                    help='Run 8: ε for logit clamping in _logit_safe (default 1e-4).')
+    p.add_argument('--logit-warmup-frac', type=float, default=0.0,
+                   help='Run 9: fraction of epochs for logit-space α warmup ramp. '
+                        '0.0 = full α from epoch 1 (no warmup). Default: 0.0.')
 
     # === Training ===
     p.add_argument('--epochs', type=int, default=50)
@@ -1606,9 +1609,10 @@ def train_condor_net_v43(args):
     print(f"  Lookback: {args.lookback} | Accum Steps: {args.accum_steps}")
     print(f"  Grad Clip: {args.grad_clip} | Patience: {args.patience}")
     print(f"  Gate τ init: {args.gate_temp} | λ-hinge α: {args.diversity_alpha} (std_target: {args.diversity_std_target})")
+    _lwf_e = max(1, int(args.epochs * args.logit_warmup_frac)) if args.logit_warmup_frac > 0 else 0
     print(f"  Z-var floor: α={args.logit_var_alpha} var_target={args.logit_var_target} | "
           f"IQR floor: α={args.logit_iqr_alpha} iqr_target={args.logit_iqr_target} "
-          f"(ramp: {max(1,int(args.epochs*0.10))} epochs)")
+          f"(warmup: {_lwf_e} epochs{' [immediate full-α]' if args.logit_warmup_frac == 0.0 else ''})")
     print(f"  Output: {args.output}")
     print(f"{'='*60}\n")
 
@@ -1637,12 +1641,12 @@ def train_condor_net_v43(args):
         alpha_z_sched = compute_alpha(
             epoch, args.epochs,
             alpha_max=args.logit_var_alpha,
-            warmup_frac=0.10,
+            warmup_frac=args.logit_warmup_frac,
         )
         alpha_iqr_sched = compute_alpha(
             epoch, args.epochs,
             alpha_max=args.logit_iqr_alpha,
-            warmup_frac=0.10,
+            warmup_frac=args.logit_warmup_frac,
         )
 
         epoch_loss = 0.0
@@ -1656,6 +1660,11 @@ def train_condor_net_v43(args):
         # Per-epoch worst-batch tracker (reported in outlier warning)
         _worst_batch_idx = -1
         _worst_batch_abs = 0.0
+        # Tier 1: per-epoch worst z-space batch (min IQR / min var across all batches)
+        _worst_batch_ziqr = float('inf')
+        _worst_batch_ziqr_idx = -1
+        _worst_batch_zvar = float('inf')
+        _worst_batch_zvar_idx = -1
 
         max_batches = 5 if args.dry_run else n_train_batches
         pbar = tqdm(enumerate(train_loader), total=max_batches,
@@ -1759,6 +1768,17 @@ def train_condor_net_v43(args):
                     worst_logit_value = _bl_min
                     worst_logit_epoch = epoch + 1
                     worst_logit_batch = batch_idx
+                # Tier 1: per-epoch z-space worst-batch tracking (gate_logit ≈ logit(λ))
+                _bl_flat = _bl.view(-1)
+                if _bl_flat.numel() >= 4:
+                    _bz_iqr = (_bl_flat.quantile(0.75) - _bl_flat.quantile(0.25)).item()
+                    _bz_var = _bl_flat.var(unbiased=False).item()
+                    if _bz_iqr < _worst_batch_ziqr:
+                        _worst_batch_ziqr = _bz_iqr
+                        _worst_batch_ziqr_idx = batch_idx
+                    if _bz_var < _worst_batch_zvar:
+                        _worst_batch_zvar = _bz_var
+                        _worst_batch_zvar_idx = batch_idx
 
             # Gradient accumulation scaling (F7.12)
             scaled_loss = loss / args.accum_steps
@@ -1969,6 +1989,20 @@ def train_condor_net_v43(args):
             writer.add_scalar('epoch/z_std',  _z_std_ep,  epoch)
             writer.add_scalar('epoch/z_var',  _z_var_ep,  epoch)
             writer.add_scalar('epoch/z_iqr',  _z_iqr_ep,  epoch)
+            # Tier 1: worst-batch z-space report
+            if _worst_batch_ziqr < float('inf'):
+                print(f"  Z worst-batch: z_IQR_min={_worst_batch_ziqr:.4f} "
+                      f"(batch {_worst_batch_ziqr_idx})  "
+                      f"z_var_min={_worst_batch_zvar:.4f} "
+                      f"(batch {_worst_batch_zvar_idx})")
+            # Tier 1: clamp hit-rate (fraction of λ hitting the ε boundary)
+            with torch.no_grad():
+                _lf = all_lambda.view(-1)
+                _n_lf = max(_lf.numel(), 1)
+                _n_low  = (_lf <= args.logit_eps).sum().item()
+                _n_high = (_lf >= 1.0 - args.logit_eps).sum().item()
+            print(f"  Clamp hits  : λ≤ε {100.*_n_low/_n_lf:.2f}%  "
+                  f"λ≥1-ε {100.*_n_high/_n_lf:.2f}%  (ε={args.logit_eps})")
 
         # ── 6. CHECKPOINT ───────────────────────────────────────────────
         epoch_ts = datetime.now().strftime("%m%d%Y_%H%M%S")
