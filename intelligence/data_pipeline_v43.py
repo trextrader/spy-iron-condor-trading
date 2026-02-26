@@ -354,7 +354,7 @@ def _compute_strategy_labels(
          or no template is eligible.
       4. Adjust pop / ev / max_loss using the winning template's family multipliers.
 
-    Composite score (matches schema_v43 ABSTAIN_LABEL_SCORE_CUTOFF logic):
+    Composite score (quality gate = PIPELINE_SCORE_CUTOFF = 0.15):
         score = 0.40*pop_adj + 0.35*tanh(3*ev_adj) - 0.15*tanh(2*ml_adj)
                 + 0.10*dte_affinity
 
@@ -364,13 +364,19 @@ def _compute_strategy_labels(
         ev_adj         : np.ndarray[float32, N]
         ml_adj         : np.ndarray[float32, N]
     """
+    # Pipeline-local score floor calibrated to normalized ev/close ≈ 1e-4.
+    # The schema ABSTAIN_LABEL_SCORE_CUTOFF (0.40) targets a richer scorer;
+    # here the quality gate is provided by the PREDICATE CONDITIONS themselves —
+    # if a bar satisfies no template's predicates it becomes abstain organically.
+    # This floor (0.15) only eliminates degenerate/negative scores.
+    PIPELINE_SCORE_CUTOFF = 0.15
+
     try:
         from intelligence.strategy_templates_v43 import (
             compute_predicate_atoms, STRATEGY_CATALOG,
         )
         from intelligence.schema_v43 import (
             STRATEGY_TYPE_TO_IDX, ABSTAIN_IDX, get_dte_affinity,
-            ABSTAIN_LABEL_SCORE_CUTOFF,
         )
     except ImportError:
         # Fallback: IC-only (preserves v4.3 behaviour if templates missing)
@@ -450,7 +456,7 @@ def _compute_strategy_labels(
 
     # Abstain where no template eligible or composite score too low
     no_eligible  = (scores == NEG_INF).all(axis=1)
-    low_score    = best_score < ABSTAIN_LABEL_SCORE_CUTOFF
+    low_score    = best_score < PIPELINE_SCORE_CUTOFF
     abstain_mask = no_eligible | low_score
 
     strategy_label = class_ids[best_k].copy()
