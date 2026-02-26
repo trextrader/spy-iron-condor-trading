@@ -504,14 +504,23 @@ def _bsm_pop_ic(sigma_annual: np.ndarray, T: float, target_delta: float) -> np.n
 
 def compute_multitask_labels(
     df: pd.DataFrame,
-    fwd_bars:        int   = 5,
-    target_delta:    float = 0.15,
-    dte_days:        float = 1.0,
-    spread_atr_mult: float = 2.0,
-    credit_fraction: float = 0.35,
+    fwd_bars:        int            = 5,
+    target_delta:    float          = 0.15,
+    dte_days:        float          = 1.0,
+    spread_atr_mult: float          = 2.0,
+    credit_fraction: float          = 0.35,
+    options_path:    Optional[str]  = None,
 ) -> pd.DataFrame:
     """
     Compute all multi-task training labels for M5 bars.
+
+    Parameters
+    ----------
+    options_path : path to the options CSV (options_YYYY_v43.csv).
+        When provided, steps 3+4 are overridden with real market IC economics
+        (delta-based PoP, actual bid/ask credit, real max-loss) for every
+        bar whose date appears in the options file.  Bars with no matching
+        date fall back to the BSM / ATR-based values.
 
     Labels added / updated:
       target_spot    -> 5-bar fwd log return x 100 (replaces raw SPY price)
@@ -554,6 +563,52 @@ def compute_multitask_labels(
 
     df["max_loss"] = (max_loss / (close + EPS)).astype(np.float32)
     df["ev"]       = ((pop * credit - (1.0 - pop) * max_loss) / (close + EPS)).astype(np.float32)
+
+    # ?? 4b. Override with real market IC economics if options_path provided ???
+    if options_path is not None:
+        try:
+            from intelligence.options_features_v43 import build_options_daily_summary  # noqa
+            opt_sum = build_options_daily_summary(str(options_path), verbose=True)
+
+            # Build date-string series aligned to df rows
+            ts_col = "timestamp" if "timestamp" in df.columns else df.columns[0]
+            bar_dates = pd.to_datetime(df[ts_col], errors="coerce").dt.strftime("%Y-%m-%d")
+
+            # Map per-day real values onto every bar of that day
+            pop_real    = bar_dates.map(opt_sum["ic_pop_real"]).values.astype(np.float64)
+            credit_real = bar_dates.map(opt_sum["ic_credit_raw"]).values.astype(np.float64)
+            ml_real     = bar_dates.map(opt_sum["ic_max_loss_raw"]).values.astype(np.float64)
+
+            real_mask = np.isfinite(pop_real) & np.isfinite(credit_real) & np.isfinite(ml_real)
+            n_real    = int(real_mask.sum())
+
+            if n_real > 0:
+                pop_arr   = df["pop"].values.astype(np.float64)
+                ml_arr    = df["max_loss"].values.astype(np.float64)
+                ev_arr    = df["ev"].values.astype(np.float64)
+
+                pop_arr[real_mask] = pop_real[real_mask]
+                ml_arr[real_mask]  = ml_real[real_mask] / (close[real_mask] + EPS)
+                ev_arr[real_mask]  = (
+                    pop_real[real_mask] * credit_real[real_mask]
+                    - (1.0 - pop_real[real_mask]) * ml_real[real_mask]
+                ) / (close[real_mask] + EPS)
+
+                df["pop"]      = pop_arr.astype(np.float32)
+                df["max_loss"] = ml_arr.astype(np.float32)
+                df["ev"]       = ev_arr.astype(np.float32)
+
+                print(f"  [OPT] Real options economics applied to "
+                      f"{n_real:,}/{len(df):,} bars ({n_real/len(df)*100:.1f}%)")
+                print(f"  [OPT] pop   mean={pop_arr[real_mask].mean():.4f}  "
+                      f"std={pop_arr[real_mask].std():.4f}")
+                print(f"  [OPT] ev    mean={ev_arr[real_mask].mean():.6f}  "
+                      f"std={ev_arr[real_mask].std():.6f}")
+            else:
+                print("  [OPT] WARN: No bar dates matched options data -- using BSM fallback")
+
+        except Exception as _opt_exc:
+            print(f"  [OPT] WARN: options load failed ({_opt_exc}) -- using BSM fallback")
 
     # ?? 5. VaR & CVaR (lognormal IC payoff at 5th percentile) ????????????
     sigma_T      = sigma_annual * np.sqrt(T)
@@ -680,6 +735,10 @@ def main() -> None:
                    help="Short strike delta for IC PoP (default 0.15)")
     p.add_argument("--dte",          type=float, default=1.0,
                    help="Days to expiry assumption for IC labels (default 1.0 = 0-DTE)")
+    p.add_argument("--options-path", type=str, default=None,
+                   help="Path to options CSV (e.g. data/Datasetv4/v43/options_2025_v43.csv). "
+                        "When provided, pop/ev/max_loss are derived from real market "
+                        "bid/ask/delta data instead of BSM/ATR proxies.")
     args = p.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -697,6 +756,7 @@ def main() -> None:
         "fwd_bars":      args.fwd_bars,
         "target_delta":  args.target_delta,
         "dte_days":      args.dte,
+        "options_path":  args.options_path,   # None → BSM fallback
     }
 
     for tf_name, (filename, compute_labels) in tf_files.items():
