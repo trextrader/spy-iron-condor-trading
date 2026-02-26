@@ -1,0 +1,364 @@
+/**
+ * CondorNet™ v4.3 → v5.0 — Transition Architecture (Implementation Plan v1.1)
+ * Hierarchical + Chronological + Cross-referenced to plan numbering
+ *
+ * Render:  dot -Tsvg condornet_v43_to_v50_transition.dot -o condornet_v43_to_v50_transition.svg
+ *          dot -Tpdf condornet_v43_to_v50_transition.dot -o condornet_v43_to_v50_transition.pdf
+ *
+ * Color legend (matches v4.3 style):
+ *   #E3F2FD / #1565C0  — Foundation lock & diagnostics
+ *   #E8F5E9 / #2E7D32  — Outcome labeling + datasets
+ *   #FFE0B2 / #E65100  — Reversal / pivot ground truth baseline (Bridge G)
+ *   #E8EAF6 / #283593  — Policy / closed-loop intelligence
+ *   #FCE4EC / #880E4F  — Distribution / quantiles / abstain / calibration
+ *   #E0F2F1 / #00695C  — Training + validation gates + benchmark suite
+ *   #FFFDE7 / #F57F17  — Demo → Live readiness + controls
+ *
+ * Layout: Two-column portrait (8.5×11). Left col = phases ①–⑤, Right col = phases ⑥–⑩.
+ * Two-column enforcement: invisible wrapper clusters force side-by-side placement.
+ * Cross-column edge uses constraint=false to prevent right column from being pulled down.
+ */
+
+digraph CondorNetV43_to_V50 {
+    rankdir=TB;
+    compound=true;
+    fontname="Helvetica Neue";
+    fontsize=10;
+    graph [pad=0.35, ranksep=0.55, nodesep=0.38,
+           size="7.4,10!", ratio="fill",
+           page="8.5,11"];
+    node  [fontname="Helvetica Neue", fontsize=9, style="filled,rounded",
+           fillcolor=white, shape=box, margin="0.12,0.07"];
+    edge  [fontname="Helvetica Neue", fontsize=8, arrowsize=0.70];
+
+    // =========================================================================
+    // LEFT COLUMN — invisible wrapper forces side-by-side with right column
+    // =========================================================================
+    subgraph cluster_COL_LEFT {
+        label=""; style=invis;
+
+        // =====================================================================
+        // ⓪ ANCHOR — EXISTING V4.3 ORGANISM
+        // =====================================================================
+        subgraph cluster_anchor {
+            label=<<B>⓪ BASELINE ANCHOR</B>>;
+            style=filled; fillcolor="#EDE7F6"; color="#4527A0"; penwidth=2;
+
+            v43_anchor [label=<<B>CondorNet™ v4.3</B><BR ALIGN="LEFT"/>
+Stable organism (frozen baseline)<BR ALIGN="LEFT"/>
+Reference architecture: condornet_v43_architecture.dot<BR ALIGN="LEFT"/>
+Training sweet-spot config + artifacts preserved>,
+                       fillcolor="#D1C4E9", align=left];
+        }
+
+        // =====================================================================
+        // ① v4.3.1 — FOUNDATION LOCK
+        // =====================================================================
+        subgraph cluster_431 {
+            label=<<B>① v4.3.1 — FOUNDATION LOCK</B>>;
+            style=filled; fillcolor="#E3F2FD"; color="#1565C0"; penwidth=2;
+
+            v431_11 [label=<<B>1.1 Freeze Stable Core</B><BR ALIGN="LEFT"/>
+1.1.1 Tag + freeze (v43-stable)<BR ALIGN="LEFT"/>
+1.1.2 Export canonical artifacts (/models/v43_baseline/)>,
+                     fillcolor="#BBDEFB", align=left];
+
+            v431_12 [label=<<B>1.2 Telemetry &amp; Diagnostics Hardening</B><BR ALIGN="LEFT"/>
+1.2.1 DiagnosticsRecorder (unified)<BR ALIGN="LEFT"/>
+1.2.2 v5.0 health checks (must-pass)>,
+                     fillcolor="#90CAF9", align=left];
+
+            gate_431 [shape=diamond, label=<<B>GATE 1</B><BR/>Reproducible baseline<BR/>Health checks pass>,
+                      fillcolor="#E1F5FE"];
+        }
+
+        // =====================================================================
+        // ② v4.3.2 — BRIDGE A: OUTCOME-GROUNDED LABELING
+        // =====================================================================
+        subgraph cluster_432 {
+            label=<<B>② v4.3.2 — BRIDGE A: OUTCOME-GROUNDED LABELING</B>>;
+            style=filled; fillcolor="#E8F5E9"; color="#2E7D32"; penwidth=2;
+
+            v432_21 [label=<<B>2.1 SimExit Engine</B><BR ALIGN="LEFT"/>
+Tradeable prices (bid/ask + slippage)<BR ALIGN="LEFT"/>
+Fees/commissions, quote staleness<BR ALIGN="LEFT"/>
+Assignment/exercise + dividends (SPY)>,
+                     fillcolor="#C8E6C9", align=left];
+
+            v432_22 [label=<<B>2.2 Outcome Label Generation</B><BR ALIGN="LEFT"/>
+2.2.1 Define strategy set K (0–9)<BR ALIGN="LEFT"/>
+2.2.2 Compute PnL trajectories for all k<BR ALIGN="LEFT"/>
+2.2.3 Compute risk objective J_t^k>,
+                     fillcolor="#A5D6A7", align=left];
+
+            v432_23 [label=<<B>2.3 Replace Heuristic Labels</B><BR ALIGN="LEFT"/>
+strategy_label_v5 = argmax_k J_t^k<BR ALIGN="LEFT"/>
+abstain_v5 via τ_abstain threshold<BR ALIGN="LEFT"/>
+schema_v5.py + loader update>,
+                     fillcolor="#81C784", align=left];
+
+            gate_432 [shape=diamond, label=<<B>GATE 2</B><BR/>No leakage (split-safe)<BR/>Val improves w/o instability>,
+                      fillcolor="#DCEDC8"];
+        }
+
+        // =====================================================================
+        // ③ v4.3.3 — BRIDGE G: REVERSAL / PIVOT GROUND TRUTH BASELINE
+        // =====================================================================
+        subgraph cluster_433G {
+            label=<<B>③ v4.3.3 — BRIDGE G: REVERSAL / PIVOT GROUND TRUTH</B>>;
+            style=filled; fillcolor="#FFE0B2"; color="#E65100"; penwidth=2;
+
+            v433G_31 [label=<<B>3G.1 Reversal Ground Truth Labels</B><BR ALIGN="LEFT"/>
+Outcome-linked reversal definition<BR ALIGN="LEFT"/>
+Horizon H, threshold κ, ATR-normalized<BR ALIGN="LEFT"/>
+y_rev ∈ {strong_high, strong_low, none}>,
+                     fillcolor="#FFCC80", align=left];
+
+            v433G_32 [label=<<B>3G.2 Reversal Prediction Head</B><BR ALIGN="LEFT"/>
+Predict p̂(y_rev(t+δ) | s_t)<BR ALIGN="LEFT"/>
+Cross-entropy + calibration metrics>,
+                     fillcolor="#FFB74D", align=left];
+
+            v433G_33 [label=<<B>3G.3 Risk Gate Integration</B><BR ALIGN="LEFT"/>
+AllowShortGamma(t) = 1[p̂_rev(t) &lt; τ_rev]<BR ALIGN="LEFT"/>
+Stops "enter right before turn">,
+                     fillcolor="#FFA726", align=left];
+
+            gate_433G [shape=diamond, label=<<B>GATE 3</B><BR/>DD reduced / fewer "bad turns"<BR/>No Sharpe collapse>,
+                       fillcolor="#FFE0B2"];
+        }
+
+        // =====================================================================
+        // ④ v4.4 — BRIDGE B: POSITION-AWARE CLOSED-LOOP POLICY
+        // =====================================================================
+        subgraph cluster_44 {
+            label=<<B>④ v4.4 — BRIDGE B: POSITION-AWARE CLOSED-LOOP POLICY</B>>;
+            style=filled; fillcolor="#E8EAF6"; color="#283593"; penwidth=2;
+
+            v44_41 [label=<<B>3.1 Extend State</B><BR ALIGN="LEFT"/>
+Position vector p_t (Greeks, DTE, PnL, margin)<BR ALIGN="LEFT"/>
+Execution vector e_t (spread, slippage, liquidity)<BR ALIGN="LEFT"/>
+s_t = (x_t, p_t, e_t)>,
+                   fillcolor="#C5CAE9", align=left];
+
+            v44_42 [label=<<B>3.2 Expert Actions</B><BR ALIGN="LEFT"/>
+Action space: enter / hold / exit (+ adjust)<BR ALIGN="LEFT"/>
+ExitPolicy_rules → expert labels a*_t<BR ALIGN="LEFT"/>
+action_label_v5 dataset column>,
+                   fillcolor="#9FA8DA", align=left];
+
+            v44_43 [label=<<B>3.3 Policy Head + Multi-task Loss</B><BR ALIGN="LEFT"/>
+π_θ(s_t) → a_t (behavior cloning)<BR ALIGN="LEFT"/>
+Loss = strategy + policy + risk + reversal + regs<BR ALIGN="LEFT"/>
+Freeze-core then fine-tune full net>,
+                   fillcolor="#7986CB", align=left];
+
+            gate_44 [shape=diamond, label=<<B>GATE 4</B><BR/>Exit imitation matches rules<BR/>Stability gates pass>,
+                     fillcolor="#E8EAF6"];
+        }
+
+        // =====================================================================
+        // ⑤ v4.5 — BRIDGE C: RETURNS DISTRIBUTION MODELING (QUANTILES)
+        // =====================================================================
+        subgraph cluster_45 {
+            label=<<B>⑤ v4.5 — BRIDGE C: RETURNS DISTRIBUTION MODELING</B>>;
+            style=filled; fillcolor="#FCE4EC"; color="#880E4F"; penwidth=2;
+
+            v45_51 [label=<<B>4.1 Quantile Head</B><BR ALIGN="LEFT"/>
+q_β(t,k), β ∈ {0.05, 0.50, 0.95}<BR ALIGN="LEFT"/>
+Pinball loss; strategy-conditioned outputs>,
+                   fillcolor="#F8BBD9", align=left];
+
+            v45_52 [label=<<B>4.2 Quantile Decision Engine</B><BR ALIGN="LEFT"/>
+k*(t) = argmax_k q0.50 / (|q0.05| + ε)<BR ALIGN="LEFT"/>
+Compare vs class-based baseline>,
+                   fillcolor="#F48FB1", align=left];
+
+            gate_45 [shape=diamond, label=<<B>GATE 5</B><BR/>CVaR/DD improve vs baseline<BR/>No instability regressions>,
+                     fillcolor="#FCE4EC"];
+        }
+
+        // Left column vertical flow
+        v43_anchor -> v431_11;
+        v431_11    -> v431_12;
+        v431_12    -> gate_431;
+
+        gate_431   -> v432_21;
+        v432_21    -> v432_22;
+        v432_22    -> v432_23;
+        v432_23    -> gate_432;
+
+        gate_432   -> v433G_31;
+        v433G_31   -> v433G_32;
+        v433G_32   -> v433G_33;
+        v433G_33   -> gate_433G;
+
+        gate_433G  -> v44_41;
+        v44_41     -> v44_42;
+        v44_42     -> v44_43;
+        v44_43     -> gate_44;
+
+        gate_44    -> v45_51;
+        v45_51     -> v45_52;
+        v45_52     -> gate_45;
+
+    } // end cluster_COL_LEFT
+
+
+    // =========================================================================
+    // RIGHT COLUMN — invisible wrapper forces side-by-side with left column
+    // =========================================================================
+    subgraph cluster_COL_RIGHT {
+        label=""; style=invis;
+
+        // =====================================================================
+        // ⑥ v4.6 — BRIDGE D: SELF-SUPERVISED WORLD MODELING
+        // =====================================================================
+        subgraph cluster_46 {
+            label=<<B>⑥ v4.6 — BRIDGE D: SELF-SUPERVISED WORLD MODELING</B>>;
+            style=filled; fillcolor="#E0F2F1"; color="#00695C"; penwidth=2;
+
+            v46_61 [label=<<B>5.1 Next-step / Masked Prediction</B><BR ALIGN="LEFT"/>
+Predict x̂(t+Δ) from s_t<BR ALIGN="LEFT"/>
+L_mask = E[||x(t+Δ) − x̂(t+Δ)||_1]>,
+                   fillcolor="#B2DFDB", align=left];
+
+            v46_62 [label=<<B>5.2 Realized vs Implied Vol Head</B><BR ALIGN="LEFT"/>
+RV = sqrt(∑ r²) over horizon H<BR ALIGN="LEFT"/>
+Learn IV→RV mapping; improve regime understanding>,
+                   fillcolor="#80CBC4", align=left];
+
+            gate_46 [shape=diamond, label=<<B>GATE 6</B><BR/>Representation improves or holds<BR/>No training destabilization>,
+                     fillcolor="#E0F2F1"];
+        }
+
+        // =====================================================================
+        // ⑦ v4.7 — BRIDGE E: PRINCIPLED UNCERTAINTY + ABSTAIN
+        // =====================================================================
+        subgraph cluster_47 {
+            label=<<B>⑦ v4.7 — BRIDGE E: PRINCIPLED UNCERTAINTY + ABSTAIN</B>>;
+            style=filled; fillcolor="#FCE4EC"; color="#880E4F"; penwidth=2;
+
+            v47_71 [label=<<B>6.1 Quantile-Based Abstain</B><BR ALIGN="LEFT"/>
+Trade(t) = 1[ max_k q0.50 &gt; η  AND  min_k q0.05 &gt; −ξ ]<BR ALIGN="LEFT"/>
+Optional learned abstain logit aligned to rule>,
+                   fillcolor="#F06292", align=left];
+
+            v47_72 [label=<<B>6.2 Calibration &amp; Reliability</B><BR ALIGN="LEFT"/>
+Reliability diagrams, PIT histograms<BR ALIGN="LEFT"/>
+Post-hoc calibration (isotonic) only if needed>,
+                   fillcolor="#EC407A", align=left];
+
+            gate_47 [shape=diamond, label=<<B>GATE 7</B><BR/>Abstain reduces tail loss<BR/>Opportunity not destroyed>,
+                     fillcolor="#FCE4EC"];
+        }
+
+        // =====================================================================
+        // ⑧ v4.8 — INTEGRATION & VALIDATION
+        // =====================================================================
+        subgraph cluster_48 {
+            label=<<B>⑧ v4.8 — INTEGRATION &amp; VALIDATION</B>>;
+            style=filled; fillcolor="#E0F2F1"; color="#00695C"; penwidth=2;
+
+            v48_81 [label=<<B>7.1 Incremental Integration</B><BR ALIGN="LEFT"/>
+Phase 1: Outcome labels (A)<BR ALIGN="LEFT"/>
+Phase 2: Reversal baseline (G)<BR ALIGN="LEFT"/>
+Phase 3: Policy head (B)<BR ALIGN="LEFT"/>
+Phase 4: Quantiles (C)<BR ALIGN="LEFT"/>
+Phase 5: World model (D)<BR ALIGN="LEFT"/>
+Phase 6: Abstain (E)>,
+                   fillcolor="#B2DFDB", align=left];
+
+            v48_82 [label=<<B>7.2 Benchmark Suite</B><BR ALIGN="LEFT"/>
+Sharpe, DD, CVaR, turnover, abstain rate<BR ALIGN="LEFT"/>
+Predicate stability, spectral stats, calibration<BR ALIGN="LEFT"/>
+Fixed splits + fixed seeds>,
+                   fillcolor="#80CBC4", align=left];
+
+            gate_48 [shape=diamond, label=<<B>GATE 8</B><BR/>Controlled experiments pass<BR/>Promotion only by metrics>,
+                     fillcolor="#E0F2F1"];
+        }
+
+        // =====================================================================
+        // ⑨ v4.9 — ENGINEERING ROADMAP & DEMO PIPELINE
+        // =====================================================================
+        subgraph cluster_49 {
+            label=<<B>⑨ v4.9 — ENGINEERING ROADMAP &amp; DEMO PIPELINE</B>>;
+            style=filled; fillcolor="#FFFDE7"; color="#F57F17"; penwidth=2;
+
+            v49_91 [label=<<B>8.1 Repo Structure v5</B><BR ALIGN="LEFT"/>
+schema_v5.py, train_v5.py<BR ALIGN="LEFT"/>
+labeling_v5/ simexit + labelgen<BR ALIGN="LEFT"/>
+policy_v5/ decision_engine<BR ALIGN="LEFT"/>
+world_model_v5/ heads>,
+                   fillcolor="#FFF9C4", align=left];
+
+            v49_92 [label=<<B>8.2 Micro-Iteration Cadence</B><BR ALIGN="LEFT"/>
+Implement 1–2 tasks → small run → log results<BR ALIGN="LEFT"/>
+Isolated, reversible changes>,
+                   fillcolor="#FFF176", align=left];
+
+            v49_93 [label=<<B>8.3 Demo Pipeline Hardening</B><BR ALIGN="LEFT"/>
+L1 Feature parity harness (1:1 inputs)<BR ALIGN="LEFT"/>
+L2 I/O contract tests (pytests)<BR ALIGN="LEFT"/>
+L3 Decision traceability (full audit log)<BR ALIGN="LEFT"/>
+L4 Kill / Pause / Flatten controls<BR ALIGN="LEFT"/>
+L5 Demo soak testing (2+ weeks)>,
+                   fillcolor="#FFD740", align=left];
+
+            gate_49 [shape=diamond, label=<<B>GATE 9</B><BR/>Demo stable + traceable<BR/>Risk limits never violated>,
+                     fillcolor="#FFFDE7"];
+        }
+
+        // =====================================================================
+        // ⑩ v5.0 — LIVE CAPITAL READY
+        // =====================================================================
+        subgraph cluster_50 {
+            label=<<B>⑩ v5.0 — LIVE CAPITAL READY</B>>;
+            style=filled; fillcolor="#FFF3E0"; color="#E65100"; penwidth=2;
+
+            v50 [shape=doubleoctagon,
+                 label=<<B>CondorNet™ v5.0</B><BR ALIGN="LEFT"/>
+Closed-loop policy (entry / hold / exit)<BR ALIGN="LEFT"/>
+Outcome-grounded labels + reversal gating<BR ALIGN="LEFT"/>
+Quantile distribution + principled abstain<BR ALIGN="LEFT"/>
+World-model auxiliary intelligence<BR ALIGN="LEFT"/>
+Live audit + kill switch + compliance limits>,
+                 fillcolor="#FFB300", fontname="Helvetica Neue", fontsize=10, margin="0.15,0.10"];
+        }
+
+        // Right column vertical flow
+        v46_61 -> v46_62;
+        v46_62 -> gate_46;
+
+        gate_46 -> v47_71;
+        v47_71  -> v47_72;
+        v47_72  -> gate_47;
+
+        gate_47 -> v48_81;
+        v48_81  -> v48_82;
+        v48_82  -> gate_48;
+
+        gate_48 -> v49_91;
+        v49_91  -> v49_92;
+        v49_92  -> v49_93;
+        v49_93  -> gate_49;
+
+        // Final transition — emphasized
+        edge [color="#E65100", penwidth=2.5];
+        gate_49 -> v50;
+
+    } // end cluster_COL_RIGHT
+
+
+    // =========================================================================
+    // COLUMN TRANSITION ARROW
+    // constraint=false: arrow is drawn but does NOT affect rank calculation,
+    // preventing the right column from being pulled below the left column.
+    // =========================================================================
+    edge [color="#283593", penwidth=2.0, style=dashed,
+          label="  ⑤→⑥  ", fontcolor="#283593", fontsize=8];
+    gate_45 -> v46_61 [constraint=false,
+                        ltail=cluster_45, lhead=cluster_46];
+
+}
