@@ -336,6 +336,148 @@ def compute_etl_features(df: pd.DataFrame, tf_name: str = "m5") -> pd.DataFrame:
 # B) MULTI-TASK LABEL COMPUTATION  (M5 only)
 # =============================================================================
 
+# ---------------------------------------------------------------------------
+# B0) Multi-strategy label helper — called from compute_multitask_labels()
+# ---------------------------------------------------------------------------
+
+def _compute_strategy_labels(
+    df: pd.DataFrame,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Assign the best-fit strategy label per bar using the full strategy catalog.
+
+    Reads pop / ev / max_loss from df (already normalized by close).
+    For each bar:
+      1. Evaluate eligibility mask for every template in STRATEGY_CATALOG.
+      2. Compute a composite score per eligible template.
+      3. Select the template with the highest score; abstain if score < cutoff
+         or no template is eligible.
+      4. Adjust pop / ev / max_loss using the winning template's family multipliers.
+
+    Composite score (matches schema_v43 ABSTAIN_LABEL_SCORE_CUTOFF logic):
+        score = 0.40*pop_adj + 0.35*tanh(3*ev_adj) - 0.15*tanh(2*ml_adj)
+                + 0.10*dte_affinity
+
+    Returns:
+        strategy_label : np.ndarray[int8,  N]
+        pop_adj        : np.ndarray[float32, N]
+        ev_adj         : np.ndarray[float32, N]
+        ml_adj         : np.ndarray[float32, N]
+    """
+    try:
+        from intelligence.strategy_templates_v43 import (
+            compute_predicate_atoms, STRATEGY_CATALOG,
+        )
+        from intelligence.schema_v43 import (
+            STRATEGY_TYPE_TO_IDX, ABSTAIN_IDX, get_dte_affinity,
+            ABSTAIN_LABEL_SCORE_CUTOFF,
+        )
+    except ImportError:
+        # Fallback: IC-only (preserves v4.3 behaviour if templates missing)
+        import warnings
+        warnings.warn(
+            "[LBL] strategy_templates_v43 not found — falling back to IC-only labels",
+            RuntimeWarning,
+        )
+        N = len(df)
+        ic_mask = np.ones(N, dtype=bool)
+        if "adx_adaptive"  in df.columns:
+            ic_mask &= df["adx_adaptive"].fillna(50).values < 25.0
+        if "breakout_score" in df.columns:
+            ic_mask &= df["breakout_score"].fillna(0).values == 0
+        if "rsi_dyn" in df.columns:
+            rsi = df["rsi_dyn"].fillna(50).values
+            ic_mask &= (rsi >= 35.0) & (rsi <= 65.0)
+        lbl = np.full(N, 9, dtype=np.int8)   # 9 = abstain
+        lbl[ic_mask] = 7                      # 7 = iron_condor
+        pop = df["pop"].values.astype(np.float32)
+        ev  = df["ev"].values.astype(np.float32)
+        ml  = df["max_loss"].values.astype(np.float32)
+        return lbl, pop, ev, ml
+
+    N      = len(df)
+    catalog = STRATEGY_CATALOG
+    K       = len(catalog)
+
+    # Pre-read base economics (already normalised by close)
+    base_pop = df["pop"].values.astype(np.float64)
+    base_ev  = df["ev"].values.astype(np.float64)
+    base_ml  = df["max_loss"].values.astype(np.float64)
+
+    # Map template → integer class index (for output array)
+    class_ids = np.array(
+        [STRATEGY_TYPE_TO_IDX.get(t.v43_class, ABSTAIN_IDX) for t in catalog],
+        dtype=np.int8,
+    )
+
+    # DTE affinity scalar per template (constant for this pipeline call)
+    # Pipeline default: dte_days=1.0 → DTE bucket "0-2"
+    dte_aff = np.array(
+        [get_dte_affinity(t.v43_class, 1) for t in catalog],
+        dtype=np.float64,
+    )
+
+    # Predicate atoms (one vectorized pass over entire df)
+    atoms = compute_predicate_atoms(df)
+
+    # Build [N, K] score matrix
+    NEG_INF = -1e9
+    scores  = np.full((N, K), NEG_INF, dtype=np.float64)
+
+    for k, template in enumerate(catalog):
+        mask = template.get_eligibility_mask(atoms)   # bool[N]
+        if not mask.any():
+            continue
+
+        # Adjusted economics for this template
+        pop_k = np.clip(
+            base_pop * template.pop_scale + template.pop_offset, 0.01, 0.99
+        )
+        ev_k  = base_ev * template.ev_scale
+        ml_k  = base_ml * template.max_loss_scale
+
+        score = (
+            0.40 * pop_k
+            + 0.35 * np.tanh(3.0 * ev_k)
+            - 0.15 * np.tanh(2.0 * ml_k)
+            + 0.10 * dte_aff[k]
+        )
+        scores[mask, k] = score[mask]
+
+    # Best template per bar
+    best_k     = np.argmax(scores, axis=1)        # [N]
+    best_score = scores[np.arange(N), best_k]     # [N]
+
+    # Abstain where no template eligible or composite score too low
+    no_eligible  = (scores == NEG_INF).all(axis=1)
+    low_score    = best_score < ABSTAIN_LABEL_SCORE_CUTOFF
+    abstain_mask = no_eligible | low_score
+
+    strategy_label = class_ids[best_k].copy()
+    strategy_label[abstain_mask] = np.int8(ABSTAIN_IDX)
+
+    # Build adjusted pop/ev/max_loss arrays using the winning template
+    pop_out = base_pop.copy()
+    ev_out  = base_ev.copy()
+    ml_out  = base_ml.copy()
+
+    for k, template in enumerate(catalog):
+        win = (best_k == k) & ~abstain_mask
+        if not win.any():
+            continue
+        pop_out[win] = np.clip(
+            base_pop[win] * template.pop_scale + template.pop_offset, 0.01, 0.99
+        )
+        ev_out[win]  = base_ev[win]  * template.ev_scale
+        ml_out[win]  = base_ml[win]  * template.max_loss_scale
+
+    return (
+        strategy_label.astype(np.int8),
+        pop_out.astype(np.float32),
+        ev_out.astype(np.float32),
+        ml_out.astype(np.float32),
+    )
+
 def _bsm_pop_ic(sigma_annual: np.ndarray, T: float, target_delta: float) -> np.ndarray:
     """
     Black-Scholes Probability of Profit for a symmetric zero-DTE iron condor.
@@ -423,28 +565,27 @@ def compute_multitask_labels(
     df["var_95"]  = var_95.astype(np.float32)
     df["cvar_95"] = (var_95 * 1.3).astype(np.float32)
 
-    # ?? 6. Rule-based strategy_label ??????????????????????????????????????
-    # Iron condor (7): low-trend, neutral-RSI, non-extreme Bollinger
-    ic_mask = np.ones(N, dtype=bool)
-    if "adx_adaptive"  in df.columns:
-        ic_mask &= df["adx_adaptive"].fillna(50).values < 25.0
-    if "breakout_score" in df.columns:
-        ic_mask &= df["breakout_score"].fillna(0).values == 0
-    if "rsi_dyn" in df.columns:
-        rsi = df["rsi_dyn"].fillna(50).values
-        ic_mask &= (rsi >= 35.0) & (rsi <= 65.0)
-    if "bb_percentile" in df.columns:
-        bbp = df["bb_percentile"].fillna(50).values
-        ic_mask &= (bbp >= 20.0) & (bbp <= 80.0)
-
-    strategy_label = np.full(N, ABSTAIN_IDX, dtype=np.int8)
-    strategy_label[ic_mask] = IRON_CONDOR_IDX
+    # ?? 6. Multi-strategy label (replaces IC-only heuristic) ??????????????
+    strategy_label, pop_adj, ev_adj, ml_adj = _compute_strategy_labels(df)
     df["strategy_label"] = strategy_label.astype(np.int8)
+    df["pop"]      = pop_adj.astype(np.float32)
+    df["ev"]       = ev_adj.astype(np.float32)
+    df["max_loss"] = ml_adj.astype(np.float32)
+    # var_95 / cvar_95 are risk-environment measures; kept at IC-baseline values.
 
     # ?? Diagnostics ???????????????????????????????????????????????????????
-    ic_pct = ic_mask.mean() * 100.0
-    print(f"  [LBL] strategy_label: {ic_pct:.1f}% iron_condor / {100-ic_pct:.1f}% abstain")
-    print(f"  [LBL] pop   -- mean={pop.mean():.4f}  std={pop.std():.4f}")
+    from collections import Counter
+    label_counts = Counter(strategy_label.tolist())
+    try:
+        from intelligence.schema_v43 import IDX_TO_STRATEGY_TYPE
+    except ImportError:
+        IDX_TO_STRATEGY_TYPE = {}
+    print(f"  [LBL] strategy_label distribution ({N} bars):")
+    for idx in sorted(label_counts):
+        name = IDX_TO_STRATEGY_TYPE.get(idx, f"class_{idx}")
+        pct  = label_counts[idx] / N * 100.0
+        print(f"         {idx}: {name:20s}  {label_counts[idx]:5d} ({pct:5.1f}%)")
+    print(f"  [LBL] pop   -- mean={df['pop'].mean():.4f}  std={df['pop'].std():.4f}")
     print(f"  [LBL] ev    -- mean={df['ev'].mean():.6f}  std={df['ev'].std():.6f}")
     print(f"  [LBL] target_spot (log ret x100) -- "
           f"mean={log_ret_fwd.mean():.4f}  std={log_ret_fwd.std():.4f}")
