@@ -26,7 +26,10 @@ digraph CondorNetV43_to_V50 {
     fontsize=10;
     graph [pad=0.35, ranksep=0.55, nodesep=0.38,
            size="7.4,10!", ratio="fill",
-           page="8.5,11"];
+           page="8.5,11",
+           label="© 2026 by Quantor-MTFuzz™",
+           labelloc="b", labeljust="l",
+           fontsize=8, fontcolor="#757575"];
     node  [fontname="Helvetica Neue", fontsize=9, style="filled,rounded",
            fillcolor=white, shape=box, margin="0.12,0.07"];
     edge  [fontname="Helvetica Neue", fontsize=8, arrowsize=0.70];
