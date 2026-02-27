@@ -311,7 +311,7 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         notes="Tighter than IC; higher max profit but narrower range.",
         pop_scale=0.85, ev_scale=0.95, max_loss_scale=1.10,
         pred=lambda a: (
-            a["ivr_high"] & a["consol_vhigh"] & a["adx_weak"]
+            a["ivr_high"] & a["consol_vhigh"]
             & a["rsi_neutral"] & a["regime_stable"] & a["friction_ok"]
         ),
     ))
@@ -323,7 +323,7 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         notes="ATM short vol; max premium; uncapped tails.",
         pop_scale=0.78, ev_scale=1.12, max_loss_scale=1.20,
         pred=lambda a: (
-            a["ivr_high"] & a["consol_vhigh"] & a["adx_weak"]
+            a["ivr_high"] & (a["consol_high"] | a["consol_vhigh"])
             & a["gap_low"] & a["friction_ok"]
         ),
     ))
@@ -335,7 +335,7 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         notes="OTM short vol; wider profit zone than straddle.",
         pop_scale=0.85, ev_scale=1.05, max_loss_scale=1.15,
         pred=lambda a: (
-            a["ivr_high"] & a["consol_high"] & a["adx_weak"]
+            a["ivr_high"] & a["consol_high"]
             & a["no_breakout"] & a["friction_ok"]
         ),
     ))
@@ -441,7 +441,7 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         notes="ITM straddle-like; high premium, uncapped risk.",
         pop_scale=0.72, ev_scale=1.25, max_loss_scale=1.30,
         pred=lambda a: (
-            a["consol_high"] & a["ivr_high"] & a["adx_weak"] & a["friction_ok"]
+            a["consol_high"] & a["ivr_high"] & a["friction_ok"]
         ),
     ))
 
@@ -529,10 +529,9 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         pop_scale=-1.0, pop_offset=1.0,
         ev_scale=-0.60, max_loss_scale=0.40,
         pred=lambda a: (
-            # Direction UNKNOWN + vol expanding: straddle beats directional spreads
-            a["bw_expanding"] & a["adx_strong"]
-            & ~a["trend_bull"] & ~a["trend_bear"]   # exclude directional bars
-            & ~a["ivr_high"] & a["friction_ok"]
+            # Long straddle: vol expanding from cheap IV levels
+            a["bw_expanding"] & a["ivr_low"]
+            & a["friction_ok"]
         ),
     ))
 
@@ -544,10 +543,9 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         pop_scale=-1.0, pop_offset=1.0,
         ev_scale=-0.55, max_loss_scale=0.30,
         pred=lambda a: (
-            # bw_expanding + breakout, but no clear trend direction
-            a["bw_expanding"] & a["breakout_any"]
-            & ~a["trend_bull"] & ~a["trend_bear"]   # exclude directional bars
-            & ~a["ivr_high"] & a["friction_ok"]
+            # Long strangle: vol expanding + breakout, IV not already expensive
+            a["bw_expanding"] & ~a["ivr_high"]
+            & a["breakout_any"] & a["friction_ok"]
         ),
     ))
 
@@ -751,7 +749,7 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         pop_scale=0.72,  # > 0.60 of long_call_condor → wins on consol_vhigh bars
         ev_scale=-0.20, max_loss_scale=0.20,
         pred=lambda a: (
-            a["ivr_low"] & a["adx_weak"] & a["consol_vhigh"]
+            ~a["ivr_high"] & a["adx_weak"] & a["consol_vhigh"]
             & a["rsi_neutral"] & a["friction_ok"]
         ),
     ))
@@ -763,7 +761,7 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         notes="Put-side long butterfly; cheap pinning play.",
         pop_scale=0.60, ev_scale=-0.20, max_loss_scale=0.20,
         pred=lambda a: (
-            a["ivr_low"] & a["adx_weak"] & a["consol_vhigh"]
+            ~a["ivr_high"] & a["adx_weak"] & a["consol_vhigh"]
             & a["rsi_neutral"] & a["friction_ok"]
         ),
     ))

@@ -429,9 +429,11 @@ def _compute_strategy_labels(
     # Build [N, K] score matrix
     NEG_INF = -1e9
     scores  = np.full((N, K), NEG_INF, dtype=np.float64)
+    eligible_counts = np.zeros(K, dtype=np.int64)  # diagnostic: bars per template
 
     for k, template in enumerate(catalog):
         mask = template.get_eligibility_mask(atoms)   # bool[N]
+        eligible_counts[k] = int(mask.sum())
         if not mask.any():
             continue
 
@@ -449,6 +451,18 @@ def _compute_strategy_labels(
             + 0.10 * dte_aff[k]
         )
         scores[mask, k] = score[mask]
+
+    # Diagnostic: per-template eligibility fire rate
+    print(f"  [LBL] Template eligibility ({K} templates, {N} bars):")
+    for k, template in enumerate(catalog):
+        n_elig = eligible_counts[k]
+        if n_elig > 0:
+            pct = n_elig / N * 100.0
+            print(f"         {template.template_id:35s} -> {template.v43_class:20s}  "
+                  f"{n_elig:5d} ({pct:5.1f}%)")
+    n_zero = int((eligible_counts == 0).sum())
+    if n_zero > 0:
+        print(f"         ({n_zero} templates with 0 eligible bars omitted)")
 
     # Best template per bar
     best_k     = np.argmax(scores, axis=1)        # [N]
