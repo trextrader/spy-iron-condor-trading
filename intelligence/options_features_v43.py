@@ -156,11 +156,11 @@ def build_options_daily_summary(
     if verbose:
         print(f"\n[OPT] Loading {options_path.name} ...")
 
-    opts = pd.read_csv(
-        str(options_path),
-        parse_dates=["timestamp", "expiration"],
-        low_memory=False,
-    )
+    opts = pd.read_csv(str(options_path), low_memory=False)
+
+    # Explicit datetime conversion (pandas 2.x dropped implicit parse_dates)
+    opts["timestamp"]  = pd.to_datetime(opts["timestamp"],  errors="coerce")
+    opts["expiration"] = pd.to_datetime(opts["expiration"], errors="coerce")
 
     if verbose:
         n_dates = opts["timestamp"].dt.date.nunique()

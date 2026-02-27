@@ -462,14 +462,19 @@ the training label is set to abstain (is_ideal = abstain).
 # Rows: strategy type. Cols: DTE bucket.
 # Values ∈ [0, 1]: prior probability that this strategy is appropriate at this DTE.
 DTE_AFFINITY: Dict[str, Dict[str, float]] = {
+    # Calibrated for 0-DTE SPY strategies (the primary use-case).
+    # "0-2" values reflect how natural each strategy is at very short DTE.
+    # iron_condor is SPY's most-traded 0-DTE income structure → 0.80 (was 0.20).
+    # bull/bear spreads are solid defined-risk directional plays at 0-DTE → 0.65 (was 0.30).
+    # butterfly_call is tighter than IC but viable at 0-DTE → 0.55 (was 0.20).
     "single_call":      {"0-2": 0.9, "3-7": 0.7, "8-21": 0.3, "22+": 0.1},
     "single_put":       {"0-2": 0.9, "3-7": 0.7, "8-21": 0.3, "22+": 0.1},
-    "bull_call_spread": {"0-2": 0.3, "3-7": 0.7, "8-21": 0.9, "22+": 0.5},
-    "bear_put_spread":  {"0-2": 0.3, "3-7": 0.7, "8-21": 0.9, "22+": 0.5},
+    "bull_call_spread": {"0-2": 0.6, "3-7": 0.7, "8-21": 0.9, "22+": 0.5},
+    "bear_put_spread":  {"0-2": 0.6, "3-7": 0.7, "8-21": 0.9, "22+": 0.5},
     "straddle":         {"0-2": 0.8, "3-7": 0.5, "8-21": 0.3, "22+": 0.1},
     "strangle":         {"0-2": 0.7, "3-7": 0.5, "8-21": 0.4, "22+": 0.2},
-    "butterfly_call":   {"0-2": 0.2, "3-7": 0.6, "8-21": 0.8, "22+": 0.7},
-    "iron_condor":      {"0-2": 0.2, "3-7": 0.5, "8-21": 0.9, "22+": 1.0},
+    "butterfly_call":   {"0-2": 0.5, "3-7": 0.6, "8-21": 0.8, "22+": 0.7},
+    "iron_condor":      {"0-2": 0.8, "3-7": 0.8, "8-21": 0.9, "22+": 1.0},
     "custom_multi_leg": {"0-2": 0.5, "3-7": 0.7, "8-21": 0.7, "22+": 0.5},
     "abstain":          {"0-2": 0.0, "3-7": 0.0, "8-21": 0.0, "22+": 0.0},
 }
