@@ -698,7 +698,8 @@ def load_full_audit_data(args, feature_names: List[str], max_samples: int = 3000
         
     # Get M5 dates for options merging
     df_m5 = pd.read_csv(args.data, usecols=['timestamp'])
-        
+    m5_dates = df_m5['timestamp'].str.slice(0, 10).values
+
     labels_dict = {'dummy': labels_m5} # Labels are unused in the audit runner
         
     dataset = V43Dataset(
@@ -774,7 +775,7 @@ class CondorRunner:
                 if i < s_logits.shape[-1]:
                     res[f'strategy_{st}'] = s_logits[..., i]
                     
-        p_high = getattr(out, 'pivot_high_logits', None)
+        p_high = getattr(out, 'pivot_high_probs', None)
         if p_high is not None:
             for i, h in enumerate(self.pivot_horizons):
                 if i < p_high.shape[-1]:
