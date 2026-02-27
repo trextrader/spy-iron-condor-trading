@@ -95,11 +95,13 @@ def load_condornet_v43(ckpt_path: str) -> Tuple[CondorNetV43, dict]:
     print(f"  [AUDIT] Config: d_joint={config.get('d_joint')}, "
           f"d_chain={config.get('d_chain')}, n_strategy={config.get('n_strategy_types')}")
 
-    # build_condornet_v43 expects keyword args, not a dict positional arg.
-    # Filter to only the args it accepts, map checkpoint key names if needed.
-    import inspect
-    _valid_keys = set(inspect.signature(build_condornet_v43).parameters.keys())
-    build_cfg = {k: v for k, v in config.items() if k in _valid_keys}
+    # build_condornet_v43 expects keyword args (and accepts **kwargs for
+    # CondorNetV43.__init__), so unpack the full config dict.
+    # Strip keys that are not constructor args (e.g. optimizer/scheduler state).
+    _skip = {'optimizer_state_dict', 'scheduler_state_dict', 'model_state_dict',
+             'normalization', 'epoch', 'train_loss', 'val_loss', 'best_val_loss',
+             'version', 'schema_version'}
+    build_cfg = {k: v for k, v in config.items() if k not in _skip}
     model = build_condornet_v43(**build_cfg)
     missing, unexpected = model.load_state_dict(
         ckpt['model_state_dict'], strict=False
