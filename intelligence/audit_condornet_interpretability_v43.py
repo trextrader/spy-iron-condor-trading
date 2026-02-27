@@ -845,25 +845,61 @@ class CondorRunner:
         )
         return self._extract_dict(out), x_m5_req
 
-def analyze_permutation_importance(runner: CondorRunner, X: dict, feature_names: List[str], n_samples: int = 500) -> dict:
+def prescreen_valid_samples(runner: 'CondorRunner', X: dict) -> dict:
+    """
+    Filter the mega-batch down to samples that produce fully-finite model outputs.
+
+    Samples with all-masked options chains (no snapshot for that date) cause
+    softmax(all -inf) = NaN in the chain encoder, which propagates through every
+    analytics function.  Remove those rows once here so every downstream function
+    gets clean inputs without having to guard individually.
+    """
+    print("[AUDIT] Pre-screening samples for finite model outputs...")
+    out_dict = runner.forward(X)
+    n = X['x_m5'].shape[0]
+
+    # Build a per-sample validity mask: True = all outputs finite for that sample
+    valid = torch.ones(n, dtype=torch.bool, device='cpu')
+    for v in out_dict.values():
+        v_cpu = v.detach().cpu()
+        if v_cpu.dim() > 1:
+            valid &= torch.isfinite(v_cpu).all(dim=-1)
+        else:
+            valid &= torch.isfinite(v_cpu)
+
+    n_valid = int(valid.sum().item())
+    print(f"  [AUDIT] Valid samples: {n_valid}/{n} ({100.0*n_valid/n:.1f}%) "
+          f"— dropped {n - n_valid} with NaN/Inf outputs (likely missing chain snapshots)")
+
+    if n_valid == 0:
+        raise RuntimeError("[AUDIT] Zero valid samples after pre-screening — "
+                           "check that options chain dates overlap with M5 dates")
+
+    return {k: v[valid] if isinstance(v, torch.Tensor) else v for k, v in X.items()}
+
+
+def analyze_permutation_importance(runner: 'CondorRunner', X: dict, feature_names: List[str], n_samples: int = 500) -> dict:
     print("[AUDIT] Running Permutation Importance...")
     X_sub = {k: v[-n_samples:] if isinstance(v, torch.Tensor) else v for k, v in X.items()}
     base_out = runner.forward(X_sub)
     importance = {head: np.zeros(len(feature_names)) for head in base_out.keys()}
-    
+
     for feat_idx in tqdm(range(len(feature_names)), desc="Permuting features", leave=False):
         X_perm = {k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in X_sub.items()}
         perm = torch.randperm(X_sub['x_m5'].shape[0])
         X_perm['x_m5'][:, :, feat_idx] = X_perm['x_m5'][perm, :, feat_idx]
-        
+
         perm_out = runner.forward(X_perm)
         for head, base_val in base_out.items():
-            diff = torch.abs(base_val - perm_out[head]).mean().item()
-            importance[head][feat_idx] = diff
-            
+            # nan_to_num guards the rare case where permuted input hits a NaN path
+            diff_tensor = torch.nan_to_num(
+                torch.abs(base_val - perm_out[head]), nan=0.0, posinf=0.0, neginf=0.0
+            )
+            importance[head][feat_idx] = diff_tensor.mean().item()
+
     results = {}
     for head, imps in importance.items():
-        total = np.sum(imps) + 1e-8
+        total = np.nansum(imps) + 1e-8
         imps_norm = imps / total
         top_indices = np.argsort(imps_norm)[::-1]
         results[head] = [
@@ -872,20 +908,25 @@ def analyze_permutation_importance(runner: CondorRunner, X: dict, feature_names:
         ]
     return results
 
-def analyze_gradient_saliency(runner: CondorRunner, X: dict, feature_names: List[str], n_samples: int = 100) -> dict:
+
+def analyze_gradient_saliency(runner: 'CondorRunner', X: dict, feature_names: List[str], n_samples: int = 100) -> dict:
     print("[AUDIT] Running Gradient Saliency...")
     X_sub = {k: v[-n_samples:] if isinstance(v, torch.Tensor) else v for k, v in X.items()}
     out_dict, X_req = runner.forward_with_grad(X_sub)
     saliency = {}
-    
+
     for head in tqdm(out_dict.keys(), desc="Computing gradients", leave=False):
-        head_val = out_dict[head].sum()
+        head_val = torch.nan_to_num(out_dict[head], nan=0.0).sum()
         head_val.backward(retain_graph=True)
-        grads = X_req.grad.abs().mean(dim=0).mean(dim=0)
-        
+
+        if X_req.grad is None:
+            X_req.grad = torch.zeros_like(X_req)
+        grads = torch.nan_to_num(X_req.grad, nan=0.0, posinf=0.0, neginf=0.0)
+        grads = grads.abs().mean(dim=0).mean(dim=0)
+
         total = grads.sum().item() + 1e-8
         grads_norm = grads / total
-        
+
         top_indices = torch.argsort(grads_norm, descending=True)
         saliency[head] = [
             {"feature": feature_names[i], "saliency": float(grads_norm[i].item())}
@@ -1366,7 +1407,10 @@ def main():
             batch_size=args.batch_size
         )
         runner = CondorRunner(model, DEVICE, STRATEGY_TYPES, PIVOT_HORIZONS)
-        
+
+        # Drop samples whose chain snapshot is missing (all-masked attention → NaN outputs)
+        X_mega = prescreen_valid_samples(runner, X_mega)
+
         # Run base permutations and trees
         data_results = {}
         data_results["output_statistics"] = analyze_output_statistics(runner, X_mega)
