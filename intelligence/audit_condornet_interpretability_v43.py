@@ -698,27 +698,6 @@ def load_full_audit_data(args, feature_names: List[str], max_samples: int = 3000
         
     # Get M5 dates for options merging
     df_m5 = pd.read_csv(args.data, usecols=['timestamp'])
-    m5_dates = pd.to_datetime(df_m5['timestamp']).dt.strftime('%Y-%m-%d').values
-        
-    # Truncate to max_samples
-    if len(m5_features) > max_samples:
-        # Calculate exactly how many bars back we are slicing in M5
-        bars_back = max_samples
-        
-        # Determine exact indices for each timeframe by subtracting proportional offsets
-        m5_start = len(m5_features) - bars_back
-        m1_start = max(0, len(m1_features) - (bars_back * 5))
-        m15_start = max(0, len(m15_features) - (bars_back // 3))
-        h1_start = max(0, len(h1_features) - (bars_back // 12))
-        
-        m1_features = m1_features[m1_start:]
-        m5_features = m5_features[m5_start:]
-        m15_features = m15_features[m15_start:]
-        h1_features = h1_features[h1_start:]
-        
-        m5_pivots = m5_pivots[m5_start:]
-        labels_m5 = labels_m5[m5_start:]
-        m5_dates = m5_dates[m5_start:]
         
     labels_dict = {'dummy': labels_m5} # Labels are unused in the audit runner
         
@@ -763,6 +742,13 @@ def load_full_audit_data(args, feature_names: List[str], max_samples: int = 3000
         
     mega_batch['chain'] = full_chain
     mega_batch['chain_mask'] = full_chain_mask
+    
+    # Finally, slice the collated batch to ONLY contain the max_samples window from the end
+    # Doing this here guarantees the exact V43Dataset lengths were preserved during sequence generation
+    if mega_batch['x_m5'].shape[0] > max_samples:
+        for k in mega_batch.keys():
+            mega_batch[k] = mega_batch[k][-max_samples:]
+            
     print(f"[AUDIT] Built mega-batch: x_m5={mega_batch['x_m5'].shape}, options_chain={mega_batch['chain'].shape}")
     
     return mega_batch
