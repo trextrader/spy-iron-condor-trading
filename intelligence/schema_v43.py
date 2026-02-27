@@ -241,8 +241,8 @@ IVR_REVERSAL_BOUNDED: Dict[str, Tuple[float, float]] = {
 # Configuration constants for IVR Reversal Engine (mirror PineScript defaults)
 IVR_REVERSAL_CONFIG: Dict = {
     "ivr_lookback":       252,   # IVR lookback bars (1 year)
-    "ivr_high_threshold": 0.70,  # IVR > 0.70 → high vol regime
-    "ivr_low_threshold":  0.30,  # IVR < 0.30 → low vol regime
+    "ivr_high_threshold": 0.55,  # IVR > 0.55 → high vol regime (was 0.70; proxy never reached 0.70)
+    "ivr_low_threshold":  0.45,  # IVR < 0.45 → low vol regime  (was 0.30; calibrated for fuzzy_reversion_11)
     "ma_length":          20,    # SMA length for price stretch
     "atr_length":         14,    # ATR length for price stretch
     "stretch_k":          2.0,   # Stretch threshold in ATR units

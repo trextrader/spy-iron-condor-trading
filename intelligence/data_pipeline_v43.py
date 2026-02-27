@@ -426,6 +426,13 @@ def _compute_strategy_labels(
     # Predicate atoms (one vectorized pass over entire df)
     atoms = compute_predicate_atoms(df)
 
+    # Diagnostic: IVR zone distribution
+    ivr_h = int(atoms["ivr_high"].sum())
+    ivr_n = int(atoms["ivr_neutral"].sum())
+    ivr_l = int(atoms["ivr_low"].sum())
+    print(f"  [LBL] IVR zone distribution: high={ivr_h} ({ivr_h/N*100:.1f}%)  "
+          f"neutral={ivr_n} ({ivr_n/N*100:.1f}%)  low={ivr_l} ({ivr_l/N*100:.1f}%)")
+
     # Build [N, K] score matrix
     NEG_INF = -1e9
     scores  = np.full((N, K), NEG_INF, dtype=np.float64)
