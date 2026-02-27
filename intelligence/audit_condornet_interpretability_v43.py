@@ -676,33 +676,87 @@ try:
 except ImportError:
     pass
 
-def load_audit_data(csv_path: str, feature_names: List[str], max_samples: int = 3000, seq_len: int = 10) -> torch.Tensor:
-    print(f"[AUDIT] Loading data from {csv_path}...")
-    df = pd.read_csv(csv_path)
+def load_full_audit_data(args, feature_names: List[str], max_samples: int = 3000, seq_len: int = 10, batch_size: int = 256) -> dict:
+    from intelligence.condor_train_net_v43 import _load_tf_csv, _load_options_chain, V43Dataset, v43_collate_fn
+    from torch.utils.data import DataLoader
     
-    # Ensure all features exist, fill missing with 0
-    for f in feature_names:
-        if f not in df.columns:
-            df[f] = 0.0
-            
-    # Impute NaNs for sparse features (e.g. PivotHigh) since sklearn metrics require dense data
-    df[feature_names] = df[feature_names].fillna(0.0)
-            
-    data = df[feature_names].values
-    data = data[-max_samples:] if len(data) > max_samples else data
+    print(f"[AUDIT] Loading M5 data from {args.data}...")
+    m5_features, m5_pivots, labels_m5 = _load_tf_csv(args.data, "m5")
     
-    # Create sequence tensor [B, T, F]
-    N_samples = len(data) - seq_len + 1
-    if N_samples <= 0:
-        raise ValueError("Not enough data for sequence length.")
+    if args.data_m1: m1_features, _, _ = _load_tf_csv(args.data_m1, "m1")
+    else: m1_features = np.zeros_like(m5_features)
         
-    seqs = []
-    for i in range(N_samples):
-        seqs.append(data[i:i+seq_len])
+    if args.data_m15: m15_features, _, _ = _load_tf_csv(args.data_m15, "m15")
+    else: m15_features = np.zeros_like(m5_features)
         
-    X = torch.tensor(np.array(seqs), dtype=torch.float32, device='cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"[AUDIT] Built sequence tensor: {X.shape}")
-    return X
+    if args.data_h1: h1_features, _, _ = _load_tf_csv(args.data_h1, "h1")
+    else: h1_features = np.zeros_like(m5_features)
+        
+    chain_snapshots = {}
+    if args.options:
+        chain_snapshots = _load_options_chain(args.options)
+        
+    # Get M5 dates for options merging
+    df_m5 = pd.read_csv(args.data, usecols=['timestamp'])
+    m5_dates = pd.to_datetime(df_m5['timestamp']).dt.strftime('%Y-%m-%d').values
+        
+    # Truncate to max_samples
+    if len(m5_features) > max_samples:
+        start_idx = len(m5_features) - max_samples
+        m1_features = m1_features[start_idx:]
+        m5_features = m5_features[start_idx:]
+        m15_features = m15_features[start_idx:]
+        h1_features = h1_features[start_idx:]
+        m5_pivots = m5_pivots[start_idx:]
+        labels_m5 = labels_m5[start_idx:]
+        m5_dates = m5_dates[start_idx:]
+        
+    labels_dict = {'dummy': labels_m5} # Labels are unused in the audit runner
+        
+    dataset = V43Dataset(
+        m1_features, m5_features, m15_features, h1_features,
+        m5_pivots, labels_dict, chain_snapshots, m5_dates, seq_len=seq_len
+    )
+    
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, drop_last=False, collate_fn=v43_collate_fn)
+    
+    # We will compute analytics over the *entire dataset* at once by concatenating the batches
+    # into a single mega-batch dict
+    print("[AUDIT] Collating full timeline into V43 memory block...")
+    mega_batch = {
+        'x_m1': [], 'x_m5': [], 'x_m15': [], 'x_h1': [],
+        'chain': [], 'chain_mask': [], 'pivot_mask': [], 'pivot_values': []
+    }
+    
+    for b in loader:
+        for k in mega_batch.keys():
+            mega_batch[k].append(b[k])
+            
+    # Concat along batch dimension (dim=0)
+    for k in ['x_m1', 'x_m5', 'x_m15', 'x_h1', 'pivot_mask', 'pivot_values']:
+        mega_batch[k] = torch.cat(mega_batch[k], dim=0)
+        
+    # Chain sequences might have varying sizes across batches due to right-padding
+    # Re-pad all to the absolute max chain length in the entire mega-batch
+    max_chain_len = max(t.shape[1] for t in mega_batch['chain'])
+    N_total = sum(t.shape[0] for t in mega_batch['chain'])
+    
+    full_chain = torch.zeros(N_total, max_chain_len, mega_batch['chain'][0].shape[2], dtype=torch.float32)
+    full_chain_mask = torch.ones(N_total, max_chain_len, dtype=torch.bool)
+    
+    idx_start = 0
+    for i, (c_batch, m_batch) in enumerate(zip(mega_batch['chain'], mega_batch['chain_mask'])):
+        b_n = c_batch.shape[0]
+        c_len = c_batch.shape[1]
+        full_chain[idx_start:idx_start+b_n, :c_len, :] = c_batch
+        full_chain_mask[idx_start:idx_start+b_n, :c_len] = m_batch
+        idx_start += b_n
+        
+    mega_batch['chain'] = full_chain
+    mega_batch['chain_mask'] = full_chain_mask
+    print(f"[AUDIT] Built mega-batch: x_m5={mega_batch['x_m5'].shape}, options_chain={mega_batch['chain'].shape}")
+    
+    return mega_batch
 
 class CondorRunner:
     """Wrapper to run model forward passes robustly."""
@@ -732,29 +786,46 @@ class CondorRunner:
                     res[f'pivot_h{h}'] = p_high[..., i]
         return res
 
-    def forward(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
+    def forward(self, batch: dict) -> Dict[str, torch.Tensor]:
         self.model.eval()
         with torch.no_grad():
-            x_in = x.to(self.device)
-            out = self.model.forward_compat(x_in)
+            b_in = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+            out = self.model(
+                x_m1=b_in.get('x_m1'),
+                x_m5=b_in.get('x_m5'),
+                x_m15=b_in.get('x_m15'),
+                x_h1=b_in.get('x_h1'),
+                chain=b_in.get('chain'),
+                chain_mask=b_in.get('chain_mask')
+            )
             return self._extract_dict(out)
 
-    def forward_with_grad(self, x: torch.Tensor) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+    def forward_with_grad(self, batch: dict) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
         self.model.eval()
-        x_in = x.to(self.device).requires_grad_(True)
-        out = self.model.forward_compat(x_in)
-        return self._extract_dict(out), x_in
+        b_in = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+        # We only need gradients with respect to the primary timeframe
+        x_m5_req = b_in['x_m5'].clone().detach().requires_grad_(True)
+        
+        out = self.model(
+            x_m1=b_in.get('x_m1'),
+            x_m5=x_m5_req,
+            x_m15=b_in.get('x_m15'),
+            x_h1=b_in.get('x_h1'),
+            chain=b_in.get('chain'),
+            chain_mask=b_in.get('chain_mask')
+        )
+        return self._extract_dict(out), x_m5_req
 
-def analyze_permutation_importance(runner: CondorRunner, X: torch.Tensor, feature_names: List[str], n_samples: int = 500) -> dict:
+def analyze_permutation_importance(runner: CondorRunner, X: dict, feature_names: List[str], n_samples: int = 500) -> dict:
     print("[AUDIT] Running Permutation Importance...")
-    X_sub = X[-n_samples:]
+    X_sub = {k: v[-n_samples:] if isinstance(v, torch.Tensor) else v for k, v in X.items()}
     base_out = runner.forward(X_sub)
     importance = {head: np.zeros(len(feature_names)) for head in base_out.keys()}
     
     for feat_idx in tqdm(range(len(feature_names)), desc="Permuting features", leave=False):
-        X_perm = X_sub.clone()
-        perm = torch.randperm(X_sub.shape[0])
-        X_perm[:, :, feat_idx] = X_perm[perm, :, feat_idx]
+        X_perm = {k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in X_sub.items()}
+        perm = torch.randperm(X_sub['x_m5'].shape[0])
+        X_perm['x_m5'][:, :, feat_idx] = X_perm['x_m5'][perm, :, feat_idx]
         
         perm_out = runner.forward(X_perm)
         for head, base_val in base_out.items():
@@ -772,9 +843,9 @@ def analyze_permutation_importance(runner: CondorRunner, X: torch.Tensor, featur
         ]
     return results
 
-def analyze_gradient_saliency(runner: CondorRunner, X: torch.Tensor, feature_names: List[str], n_samples: int = 100) -> dict:
+def analyze_gradient_saliency(runner: CondorRunner, X: dict, feature_names: List[str], n_samples: int = 100) -> dict:
     print("[AUDIT] Running Gradient Saliency...")
-    X_sub = X[-n_samples:]
+    X_sub = {k: v[-n_samples:] if isinstance(v, torch.Tensor) else v for k, v in X.items()}
     out_dict, X_req = runner.forward_with_grad(X_sub)
     saliency = {}
     
@@ -795,7 +866,7 @@ def analyze_gradient_saliency(runner: CondorRunner, X: torch.Tensor, feature_nam
         
     return saliency
 
-def analyze_output_statistics(runner: CondorRunner, X: torch.Tensor) -> dict:
+def analyze_output_statistics(runner: CondorRunner, X: dict) -> dict:
     print("[AUDIT] Running Output Statistics...")
     out_dict = runner.forward(X)
     stats_dict = {}
@@ -812,10 +883,10 @@ def analyze_output_statistics(runner: CondorRunner, X: torch.Tensor) -> dict:
         }
     return stats_dict
 
-def analyze_surrogate_trees(runner: CondorRunner, X: torch.Tensor, feature_names: List[str]) -> dict:
+def analyze_surrogate_trees(runner: CondorRunner, X: dict, feature_names: List[str]) -> dict:
     print("[AUDIT] Training Surrogate Decision Trees...")
     out_dict = runner.forward(X)
-    X_np = X[:, -1, :].cpu().numpy()
+    X_np = X['x_m5'][:, -1, :].cpu().numpy()
     tree_results = {}
     
     for head, val in tqdm(out_dict.items(), desc="Fitting trees", leave=False):
@@ -825,7 +896,7 @@ def analyze_surrogate_trees(runner: CondorRunner, X: torch.Tensor, feature_names
         
         preds = dt.predict(X_np)
         r2 = r2_score(y_np, preds)
-        rules = export_text(dt, feature_names=feature_names, spacing=2, decimals=3)
+        rules = export_text(dt, feature_names=feature_names, spacing=2, decimals=3, max_depth=100)
         
         tree_results[head] = {
             "fidelity_r2": float(r2),
@@ -833,10 +904,10 @@ def analyze_surrogate_trees(runner: CondorRunner, X: torch.Tensor, feature_names
         }
     return tree_results
 
-def analyze_mutual_information(runner: CondorRunner, X: torch.Tensor, feature_names: List[str]) -> dict:
+def analyze_mutual_information(runner: CondorRunner, X: dict, feature_names: List[str]) -> dict:
     print("[AUDIT] Running Mutual Information...")
     out_dict = runner.forward(X)
-    X_np = X[:, -1, :].cpu().numpy()
+    X_np = X['x_m5'][:, -1, :].cpu().numpy()
     mi_results = {}
     
     heads_to_run = ['pop', 'ev', 'strategy_abstain', 'strategy_iron_condor']
@@ -875,19 +946,28 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 
-def analyze_fisher_information(model: nn.Module, X: torch.Tensor, n_samples: int = 100) -> dict:
+def analyze_fisher_information(model: nn.Module, X: dict, n_samples: int = 100) -> dict:
     print("[AUDIT] Estimating Fisher Information (Parameter Sensitivity)...")
     model.eval()
-    X_sub = X[-n_samples:]
+    X_sub = {k: v[-n_samples:] if isinstance(v, torch.Tensor) else v for k, v in X.items()}
     
     fisher_trace = {}
     for name, param in model.named_parameters():
         if param.requires_grad and 'weight' in name and len(param.shape) >= 2:
             fisher_trace[name] = torch.zeros_like(param)
             
-    for i in tqdm(range(X_sub.shape[0]), desc="Fisher Info", leave=False):
+    # Need to run forward pass on single batch steps
+    for i in tqdm(range(X_sub['x_m5'].shape[0]), desc="Fisher Info", leave=False):
         model.zero_grad()
-        out = model.forward_compat(X_sub[i:i+1].to(next(model.parameters()).device))
+        b_in = {k: v[i:i+1].to(next(model.parameters()).device) if isinstance(v, torch.Tensor) else v for k, v in X_sub.items()}
+        out = model(
+            x_m1=b_in.get('x_m1'),
+            x_m5=b_in.get('x_m5'),
+            x_m15=b_in.get('x_m15'),
+            x_h1=b_in.get('x_h1'),
+            chain=b_in.get('chain'),
+            chain_mask=b_in.get('chain_mask')
+        )
         pseudo_loss = 0
         for k in ['entry_signal', 'pop', 'ev', 'max_loss']:
             if getattr(out, k, None) is not None:
@@ -905,7 +985,7 @@ def analyze_fisher_information(model: nn.Module, X: torch.Tensor, n_samples: int
     sorted_fisher = sorted(results.items(), key=lambda x: x[1], reverse=True)[:5]
     return {"top_sensitive_layers": [{"layer": k, "fisher_trace_mean": v} for k, v in sorted_fisher]}
 
-def analyze_hessian_eigenspectrum(model: nn.Module, X: torch.Tensor, n_samples: int = 50) -> dict:
+def analyze_hessian_eigenspectrum(model: nn.Module, X: dict, n_samples: int = 50) -> dict:
     print("[AUDIT] Estimating Hessian Eigenspectrum...")
     return {
         "curvature_estimate": 0.05,
@@ -913,16 +993,16 @@ def analyze_hessian_eigenspectrum(model: nn.Module, X: torch.Tensor, n_samples: 
         "condition_number_proxy": 250.0
     }
 
-def analyze_shap_approximation(runner, X: torch.Tensor, feature_names: List[str], n_samples: int = 200) -> dict:
+def analyze_shap_approximation(runner, X: dict, feature_names: List[str], n_samples: int = 200) -> dict:
     print("[AUDIT] Running SHAP-style attribution (SmoothGrad approximation)...")
-    X_sub = X[-n_samples:]
-    out_dict, X_req = runner.forward_with_grad(X_sub)
+    X_sub = {k: v[-n_samples:] if isinstance(v, torch.Tensor) else v for k, v in X.items()}
+    out_dict, X_m5_req = runner.forward_with_grad(X_sub)
     shap_attr = {}
     
     for head in tqdm(out_dict.keys(), desc="SHAP approximation", leave=False):
         head_val = out_dict[head].sum()
         head_val.backward(retain_graph=True)
-        attr = (X_req.grad * X_req).abs().mean(dim=0).mean(dim=0)
+        attr = (X_m5_req.grad * X_m5_req).abs().mean(dim=0).mean(dim=0)
         total = attr.sum().item() + 1e-8
         attr_norm = attr / total
         
@@ -931,20 +1011,22 @@ def analyze_shap_approximation(runner, X: torch.Tensor, feature_names: List[str]
             {"feature": feature_names[i], "attribution": float(attr_norm[i].item())}
             for i in top_indices
         ]
-        X_req.grad.zero_()
+        X_m5_req.grad.zero_()
         
     return shap_attr
 
-def analyze_bootstrap_stability(runner, X: torch.Tensor, n_bootstraps: int = 5) -> dict:
+def analyze_bootstrap_stability(runner, X: dict, n_bootstraps: int = 5) -> dict:
     print("[AUDIT] Running Bootstrap Stability Check...")
     stability = {}
-    n = X.shape[0]
+    n = X['x_m5'].shape[0]
     out_base = runner.forward(X)
     
     boot_res = {head: [] for head in out_base.keys()}
     for b in tqdm(range(n_bootstraps), desc="Bootstrapping", leave=False):
         indices = torch.randint(0, n, (n,))
-        out_b = runner.forward(X[indices])
+        # dictionary subset by indices
+        X_boot = {k: v[indices] if isinstance(v, torch.Tensor) else v for k, v in X.items()}
+        out_b = runner.forward(X_boot)
         for head in out_base.keys():
             boot_res[head].append(out_b[head].mean().item())
             
@@ -1126,11 +1208,21 @@ def generate_markdown_report(results: dict, output_path: str):
 def __main__hook(parser):
     """Extend the existing arguments with data capabilities"""
     parser.add_argument("--data", type=str, default="",
-                        help="Path to preprocessed features CSV for full analytics audit")
+                        help="Path to M5 preprocessed features CSV for full analytics audit")
+    parser.add_argument("--data-m1", type=str, default="",
+                        help="Path to M1 features CSV")
+    parser.add_argument("--data-m15", type=str, default="",
+                        help="Path to M15 features CSV")
+    parser.add_argument("--data-h1", type=str, default="",
+                        help="Path to H1 features CSV")
+    parser.add_argument("--options", type=str, default="",
+                        help="Path to Options Chain CSV")
     parser.add_argument("--samples", type=int, default=3000,
                         help="Number of continuous samples to load for analytics")
     parser.add_argument("--seq-len", type=int, default=10,
                         help="Sequence length for recurrent processing")
+    parser.add_argument("--batch-size", type=int, default=256,
+                        help="Batch size for analytics")
     parser.add_argument("--output-dir", type=str, default="",
                         help="Directory to save full audit reports and visualizations")
                         
@@ -1234,22 +1326,28 @@ def main():
         print(f"[AUDIT] Using {len(audit_features)} features to match model d_tf_in={d_tf_in}")
 
         # Load sequence data once
-        X = load_audit_data(args.data, audit_features, args.samples, args.seq_len)
+        X_mega = load_full_audit_data(
+            args, 
+            feature_names=audit_features, 
+            max_samples=args.samples, 
+            seq_len=args.seq_len,
+            batch_size=args.batch_size
+        )
         runner = CondorRunner(model, DEVICE, STRATEGY_TYPES, PIVOT_HORIZONS)
         
         # Run base permutations and trees
         data_results = {}
-        data_results["output_statistics"] = analyze_output_statistics(runner, X)
-        data_results["permutation_importance"] = analyze_permutation_importance(runner, X, audit_features)
-        data_results["gradient_saliency"] = analyze_gradient_saliency(runner, X, audit_features)
-        data_results["mutual_information"] = analyze_mutual_information(runner, X, audit_features)
-        data_results["surrogate_trees"] = analyze_surrogate_trees(runner, X, audit_features)
+        data_results["output_statistics"] = analyze_output_statistics(runner, X_mega)
+        data_results["permutation_importance"] = analyze_permutation_importance(runner, X_mega, audit_features)
+        data_results["gradient_saliency"] = analyze_gradient_saliency(runner, X_mega, audit_features)
+        data_results["mutual_information"] = analyze_mutual_information(runner, X_mega, audit_features)
+        data_results["surrogate_trees"] = analyze_surrogate_trees(runner, X_mega, audit_features)
         
         # Run extended analytics
         data_results = run_extended_analytics(
             runner=runner,
             model=model,
-            X=X,
+            X=X_mega,
             feature_names=_FULL_FEATURE_NAMES,
             data_results=data_results
         )
