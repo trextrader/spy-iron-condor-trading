@@ -162,6 +162,18 @@ def build_options_daily_summary(
     opts["timestamp"]  = pd.to_datetime(opts["timestamp"],  errors="coerce")
     opts["expiration"] = pd.to_datetime(opts["expiration"], errors="coerce")
 
+    # Force numeric columns to float64.  The CSV may mix "400.0" and "915"
+    # (with/without decimal point), causing pandas to infer object dtype for
+    # strike/delta/price columns.  Any comparison (> < ==) between a pandas
+    # Series of object dtype and a scalar then raises:
+    #   TypeError: '>' not supported between instances of 'str' and 'int'
+    _NUMERIC_COLS = ["strike", "delta", "gamma", "theta", "vega", "rho",
+                     "implied_volatility", "last", "mark", "bid", "ask",
+                     "bid_size", "ask_size", "volume", "open_interest"]
+    for _col in _NUMERIC_COLS:
+        if _col in opts.columns:
+            opts[_col] = pd.to_numeric(opts[_col], errors="coerce")
+
     if verbose:
         n_dates = opts["timestamp"].dt.date.nunique()
         print(f"[OPT] Loaded {len(opts):,} rows across {n_dates} unique dates")
