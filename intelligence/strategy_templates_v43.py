@@ -526,7 +526,7 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         "straddle_long", "straddle", LVC,
         (_L("P","LONG",1,0), _L("C","LONG",1,0)),
         notes="Long ATM vol; needs large move; pays theta.",
-        pop_scale=-0.40, pop_offset=0.70,
+        pop_scale=-0.40, pop_offset=0.80,
         ev_scale=-0.60, max_loss_scale=0.40,
         pred=lambda a: (
             # Long straddle: vol expanding from cheap IV levels
@@ -540,7 +540,7 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         "strangle_long", "strangle", LVC,
         (_L("P","LONG",1,0), _L("C","LONG",1,1)),
         notes="Long OTM vol; cheaper than straddle; needs larger move.",
-        pop_scale=-0.40, pop_offset=0.65,
+        pop_scale=-0.40, pop_offset=0.75,
         ev_scale=-0.55, max_loss_scale=0.30,
         pred=lambda a: (
             # Long strangle: vol expanding + breakout, IV not already expensive

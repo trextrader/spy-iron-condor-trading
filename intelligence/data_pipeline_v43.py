@@ -212,9 +212,18 @@ def compute_ivr_reversal_features(df: pd.DataFrame) -> pd.DataFrame:
         ivr = pd.Series(np.full(N, 0.5), index=df.index)
 
     # ?? ivr_zone (ternary) ????????????????????????????????????????????????
+    # —— ivr_zone (ternary) — PERCENTILE-BASED ——————————————————————————
+    # fuzzy_reversion_11 is so concentrated that absolute thresholds
+    # (0.55/0.45) left ivr_high at 0.6%.  Percentile approach guarantees
+    # a ~30/40/30 split regardless of the proxy's actual range.
+    ivr_vals = ivr.values.astype(np.float64)
+    finite_mask = np.isfinite(ivr_vals)
+    p_high = float(np.percentile(ivr_vals[finite_mask], 70))
+    p_low  = float(np.percentile(ivr_vals[finite_mask], 30))
+    print(f"  [ETL] IVR percentile thresholds: low<{p_low:.4f}  high>{p_high:.4f}")
     ivr_zone = np.zeros(N, dtype=np.int8)
-    ivr_zone[ivr.values > cfg["ivr_high_threshold"]] =  1
-    ivr_zone[ivr.values < cfg["ivr_low_threshold"]]  = -1
+    ivr_zone[ivr_vals > p_high] =  1
+    ivr_zone[ivr_vals < p_low]  = -1
     df["ivr_zone"] = ivr_zone
 
     # ?? stretch_zone (ternary) ????????????????????????????????????????????
