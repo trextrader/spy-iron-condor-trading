@@ -1118,7 +1118,7 @@ def plot_comprehensive_visualizations(results: dict, output_dir: str):
         num_feats = len(feats)
         fig_height = max(6, int(num_feats * 0.3))
         plt.figure(figsize=(10, fig_height))
-        sns.barplot(x=vals, y=feats, palette='viridis')
+        sns.barplot(x=vals, y=feats, hue=feats, palette='viridis', legend=False)
         plt.title('Permutation Importance - POP Head')
         plt.tight_layout()
         plt.savefig(os.path.join(output_dir, "importance_pop.png"))
