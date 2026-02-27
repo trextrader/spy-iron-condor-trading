@@ -845,7 +845,32 @@ class CondorRunner:
         )
         return self._extract_dict(out), x_m5_req
 
-def prescreen_valid_samples(runner: 'CondorRunner', X: dict) -> dict:
+def check_and_clean_model_nan_params(model: torch.nn.Module) -> Tuple[dict, int]:
+    """
+    Scan every model parameter for NaN/Inf values and replace them with 0.0 in-place.
+
+    This handles the case where training divergence wrote NaN into specific layer
+    weights at the time the checkpoint was saved (e.g., output heads that never
+    converged during early epochs).  Zeroing those weights lets the remaining
+    backbone produce finite activations so data-based analytics can proceed.
+
+    Returns:
+        report   : {param_name: n_bad_elements} for every affected parameter
+        total_nan: total number of elements replaced
+    """
+    report: dict = {}
+    total_nan = 0
+    for name, param in model.named_parameters():
+        bad_mask = ~torch.isfinite(param.data)
+        n_bad = int(bad_mask.sum().item())
+        if n_bad > 0:
+            report[name] = n_bad
+            total_nan += n_bad
+            param.data[bad_mask] = 0.0   # zero-fill in-place
+    return report, total_nan
+
+
+def prescreen_valid_samples(runner: 'CondorRunner', X: dict) -> Tuple[dict, dict]:
     """
     Filter the mega-batch down to samples that produce finite core model outputs.
 
@@ -853,45 +878,76 @@ def prescreen_valid_samples(runner: 'CondorRunner', X: dict) -> dict:
     validity gate.  Unbounded regression heads (ev, max_loss, var_95, cvar_95,
     spot_pred) may be NaN if those heads did not converge by the checkpoint epoch —
     that is expected and handled per-head with nan_to_num inside each analytics
-    function.  Checking them here would wrongly eliminate every sample.
+    function.
+
+    If ALL samples fail the gate (e.g. NaN weights in v43 output layers from an
+    early checkpoint), the function:
+      1. Scans every model parameter for NaN/Inf and reports them.
+      2. Replaces NaN/Inf parameter values with 0.0 in-place (zeroed-backbone mode).
+      3. Re-runs the forward pass and retries the gate.
+
+    Returns:
+        X_valid      : input dict filtered to valid-sample rows
+        nan_weight_report : empty dict if weights were clean; otherwise
+                            {param_name: n_nan_elements} for every cleaned parameter
     """
-    # Heads guaranteed to be finite when the model core is healthy (all sigmoid)
     CORE_VALIDITY_HEADS = {'pop', 'entry_signal'}
 
+    def _run_gate(label: str) -> Tuple[int, torch.Tensor]:
+        """Run forward, print per-head NaN stats, return (n_valid, valid_mask)."""
+        out_dict = runner.forward(X)
+        n = X['x_m5'].shape[0]
+        for k, v in out_dict.items():
+            v_cpu = v.detach().cpu()
+            n_nan = int((~torch.isfinite(v_cpu)).sum().item())
+            if n_nan > 0:
+                gate_tag = 'USED in gate' if k in CORE_VALIDITY_HEADS else 'ignored'
+                print(f"  [AUDIT] {label} head '{k}': {n_nan} NaN "
+                      f"({100.0*n_nan/v_cpu.numel():.1f}%) — {gate_tag}")
+
+        valid = torch.ones(n, dtype=torch.bool)
+        for k in CORE_VALIDITY_HEADS:
+            v_cpu = out_dict.get(k)
+            if v_cpu is None:
+                continue
+            v_cpu = v_cpu.detach().cpu()
+            finite_mask = torch.isfinite(v_cpu)
+            if finite_mask.dim() > 1:
+                finite_mask = finite_mask.all(dim=-1)
+            valid &= finite_mask
+
+        return int(valid.sum().item()), valid, n
+
     print("[AUDIT] Pre-screening samples for finite core model outputs...")
-    out_dict = runner.forward(X)
-    n = X['x_m5'].shape[0]
+    n_valid, valid, n = _run_gate("Pass-1")
+    print(f"  [AUDIT] Valid samples: {n_valid}/{n} ({100.0*n_valid/n:.1f}%)")
 
-    # Diagnostic: report NaN rate per head so the user can see which heads are bad
-    for k, v in out_dict.items():
-        v_cpu = v.detach().cpu()
-        n_nan = int((~torch.isfinite(v_cpu)).sum().item())
-        if n_nan > 0:
-            print(f"  [AUDIT] Head '{k}': {n_nan} NaN/Inf values "
-                  f"({100.0*n_nan/v_cpu.numel():.1f}% of elements) — "
-                  f"{'IGNORED in validity gate' if k not in CORE_VALIDITY_HEADS else 'USED in validity gate'}")
-
-    # Build per-sample validity mask from core heads only
-    valid = torch.ones(n, dtype=torch.bool, device='cpu')
-    for k in CORE_VALIDITY_HEADS:
-        if k not in out_dict:
-            continue
-        v_cpu = out_dict[k].detach().cpu()
-        if v_cpu.dim() > 1:
-            valid &= torch.isfinite(v_cpu).all(dim=-1)
+    nan_weight_report: dict = {}
+    if n_valid == 0:
+        print("[AUDIT] All outputs NaN — scanning model parameters for NaN weights...")
+        nan_weight_report, total_nan = check_and_clean_model_nan_params(runner.model)
+        if total_nan > 0:
+            print(f"  [AUDIT] Cleaned {total_nan} NaN/Inf weight elements across "
+                  f"{len(nan_weight_report)} parameter tensors:")
+            for pname, cnt in nan_weight_report.items():
+                print(f"    {pname}: {cnt} bad elements → zeroed")
+            print("[AUDIT] Retrying forward pass with cleaned weights (zeroed-backbone mode)...")
+            n_valid, valid, n = _run_gate("Pass-2")
+            print(f"  [AUDIT] Valid samples after cleaning: {n_valid}/{n} "
+                  f"({100.0*n_valid/n:.1f}%)")
         else:
-            valid &= torch.isfinite(v_cpu)
-
-    n_valid = int(valid.sum().item())
-    print(f"  [AUDIT] Valid samples (core heads): {n_valid}/{n} ({100.0*n_valid/n:.1f}%) "
-          f"— dropped {n - n_valid} with NaN in pop/entry_signal")
+            print("  [AUDIT] No NaN weights found — NaN must originate from input data "
+                  "or activation overflow. Check chain encoder inputs.")
 
     if n_valid == 0:
-        raise RuntimeError("[AUDIT] Zero valid samples after pre-screening — "
-                           "check that options chain dates overlap with M5 dates "
-                           "and that the checkpoint contains a trained model core")
+        raise RuntimeError(
+            "[AUDIT] Zero valid samples even after NaN weight cleaning. "
+            "Inspect chain_mask, input features, and chain encoder for "
+            "all-masked batches producing NaN attention outputs."
+        )
 
-    return {k: v[valid] if isinstance(v, torch.Tensor) else v for k, v in X.items()}
+    X_valid = {k: v[valid] if isinstance(v, torch.Tensor) else v for k, v in X.items()}
+    return X_valid, nan_weight_report
 
 
 def analyze_permutation_importance(runner: 'CondorRunner', X: dict, feature_names: List[str], n_samples: int = 500) -> dict:
@@ -1216,11 +1272,27 @@ import argparse
 from typing import List, Dict, Any
 from pathlib import Path
 
-def generate_markdown_report(results: dict, output_path: str):
+def generate_markdown_report(results: dict, output_path: str, nan_weight_report: dict = None):
     print(f"[AUDIT] Generating Markdown Report: {output_path}")
-    
+
     with open(output_path, 'w') as f:
         f.write("# CondorNet v4.3 Interpretability Audit\n\n")
+
+        # NaN weight warning banner (shown prominently at top if present)
+        if nan_weight_report:
+            f.write("## ⚠️  Zeroed-Backbone Mode Warning\n\n")
+            f.write(
+                "This checkpoint contained **NaN/Inf weights** in the output heads listed below. "
+                "Those weight elements were replaced with `0.0` before running data analytics. "
+                "Results reflect the trained backbone (TF projector, chain encoder, predicate logic) "
+                "with zeroed output heads. Importance rankings reflect backbone feature sensitivity, "
+                "not the final trained predictions.\n\n"
+            )
+            f.write("| Parameter | NaN Elements |\n|---|---|\n")
+            for pname, cnt in nan_weight_report.items():
+                f.write(f"| `{pname}` | {cnt} |\n")
+            f.write("\n")
+
         f.write("## 1. Feature Importance (Permutation)\n\n")
         
         imp = results.get("permutation_importance", {})
@@ -1424,17 +1496,27 @@ def main():
         )
         runner = CondorRunner(model, DEVICE, STRATEGY_TYPES, PIVOT_HORIZONS)
 
-        # Drop samples whose chain snapshot is missing (all-masked attention → NaN outputs)
-        X_mega = prescreen_valid_samples(runner, X_mega)
+        # Drop samples whose chain snapshot is missing (all-masked attention → NaN outputs).
+        # Also detects and cleans NaN model weights when checkpoint was saved with diverged heads.
+        X_mega, nan_weight_report = prescreen_valid_samples(runner, X_mega)
 
         # Run base permutations and trees
         data_results = {}
+        if nan_weight_report:
+            data_results["nan_weight_warning"] = {
+                "description": (
+                    "Checkpoint contained NaN/Inf weights in the following parameter tensors. "
+                    "They were zeroed in-place before analytics ran (zeroed-backbone mode). "
+                    "Results reflect the model backbone with cleaned output heads."
+                ),
+                "affected_params": nan_weight_report,
+            }
         data_results["output_statistics"] = analyze_output_statistics(runner, X_mega)
         data_results["permutation_importance"] = analyze_permutation_importance(runner, X_mega, audit_features)
         data_results["gradient_saliency"] = analyze_gradient_saliency(runner, X_mega, audit_features)
         data_results["mutual_information"] = analyze_mutual_information(runner, X_mega, audit_features)
         data_results["surrogate_trees"] = analyze_surrogate_trees(runner, X_mega, audit_features)
-        
+
         # Run extended analytics
         data_results = run_extended_analytics(
             runner=runner,
@@ -1443,15 +1525,15 @@ def main():
             feature_names=_FULL_FEATURE_NAMES,
             data_results=data_results
         )
-        
+
         logic["data_analytics"] = data_results
-        
+
         # Visuals and Markdown
         plot_comprehensive_visualizations(data_results, output_dir)
-        
+
         md_path = os.path.join(output_dir, "audit_report.md")
-        generate_markdown_report(data_results, md_path)
-        
+        generate_markdown_report(data_results, md_path, nan_weight_report=nan_weight_report)
+
         # Re-save logic with data analytics included
         with open(args.output_json, 'w') as f:
             json.dump(logic, f, indent=2)
