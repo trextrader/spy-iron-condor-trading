@@ -915,11 +915,11 @@ def analyze_output_statistics(runner: CondorRunner, X: dict) -> dict:
 def analyze_surrogate_trees(runner: CondorRunner, X: dict, feature_names: List[str]) -> dict:
     print("[AUDIT] Training Surrogate Decision Trees...")
     out_dict = runner.forward(X)
-    X_np = X['x_m5'][:, -1, :].cpu().numpy()
+    X_np = np.nan_to_num(X['x_m5'][:, -1, :].cpu().numpy(), nan=0.0, posinf=0.0, neginf=0.0)
     tree_results = {}
-    
+
     for head, val in tqdm(out_dict.items(), desc="Fitting trees", leave=False):
-        y_np = val.cpu().numpy().flatten()
+        y_np = np.nan_to_num(val.cpu().numpy().flatten(), nan=0.0, posinf=0.0, neginf=0.0)
         dt = DecisionTreeRegressor(max_depth=3, random_state=42)
         dt.fit(X_np, y_np)
         
@@ -936,13 +936,14 @@ def analyze_surrogate_trees(runner: CondorRunner, X: dict, feature_names: List[s
 def analyze_mutual_information(runner: CondorRunner, X: dict, feature_names: List[str]) -> dict:
     print("[AUDIT] Running Mutual Information...")
     out_dict = runner.forward(X)
-    X_np = X['x_m5'][:, -1, :].cpu().numpy()
+    # Replace NaN/Inf from padded zero-rows before passing to sklearn
+    X_np = np.nan_to_num(X['x_m5'][:, -1, :].cpu().numpy(), nan=0.0, posinf=0.0, neginf=0.0)
     mi_results = {}
-    
+
     heads_to_run = ['pop', 'ev', 'strategy_abstain', 'strategy_iron_condor']
     for head in heads_to_run:
         if head in out_dict:
-            y_np = out_dict[head].cpu().numpy().flatten()
+            y_np = np.nan_to_num(out_dict[head].cpu().numpy().flatten(), nan=0.0, posinf=0.0, neginf=0.0)
             mi = mutual_info_regression(X_np, y_np, random_state=42)
             total = np.sum(mi) + 1e-8
             mi_norm = mi / total
