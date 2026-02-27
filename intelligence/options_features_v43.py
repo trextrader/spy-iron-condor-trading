@@ -166,13 +166,17 @@ def build_options_daily_summary(
         n_dates = opts["timestamp"].dt.date.nunique()
         print(f"[OPT] Loaded {len(opts):,} rows across {n_dates} unique dates")
 
-    # Compute DTE for each row
+    # Compute DTE for each row using vectorised timedelta64 arithmetic.
+    # .apply(lambda x: x.days) on an object-dtype Series produces mixed
+    # int/None types that cause sort_values to fail with a TypeError.
+    # (opts["expiration"] - opts["timestamp"]) produces timedelta64[ns]
+    # and .dt.days gives a clean int64 Series (NaT -> NaN / skipped).
+    opts["_dte"]  = (opts["expiration"] - opts["timestamp"]).dt.days
     opts["_date"] = opts["timestamp"].dt.date
     opts["_exp"]  = opts["expiration"].dt.date
-    opts["_dte"]  = (opts["_exp"] - opts["_date"]).apply(lambda x: x.days)
 
     # Keep only near-term expirations (0-DTE up to dte_max)
-    near = opts[(opts["_dte"] >= 0) & (opts["_dte"] <= dte_max)].copy()
+    near = opts[opts["_dte"].between(0, dte_max, inclusive="both")].copy()
     if verbose:
         print(f"[OPT] {len(near):,} rows with DTE 0-{dte_max} "
               f"across {near['_date'].nunique()} dates")

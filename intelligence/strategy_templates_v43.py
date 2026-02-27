@@ -298,7 +298,7 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         pop_scale=1.00, ev_scale=1.00, max_loss_scale=1.00,
         pred=lambda a: (
             (a["ivr_high"] | a["ivr_neutral"])
-            & a["consol_high"] & a["adx_weak"]
+            & (a["consol_high"] | a["adx_weak"])   # OR: range-bound by either measure
             & a["rsi_neutral"] & a["bb_neutral"]
             & a["no_breakout"]  & a["friction_ok"]
         ),
