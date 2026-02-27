@@ -726,6 +726,22 @@ class CondorLossV43(nn.Module):
             robust_loss = robust_loss + F.smooth_l1_loss(outputs.max_loss, ml_target)
         components['robust'] = robust_loss
 
+        # === 10. MTF Consensus Consistency ===
+        # When all TFs strongly agree (high consensus_strength), entry_signal should
+        # be confident. This shapes the MTFConsensusGate to learn that agreement
+        # is a reliable entry signal.
+        #
+        # Loss: cs × (1 − entry_signal)  — penalizes low entry when consensus is high.
+        # Weight 0.05 keeps it a soft hint rather than a hard constraint.
+        if outputs.consensus_strength is not None:
+            cs = outputs.consensus_strength.squeeze(-1)   # [B] ∈ [0,1]
+            es = outputs.entry_signal.squeeze(-1).clamp(1e-7, 1 - 1e-7)   # [B]
+            with torch.amp.autocast(device_type=device.type, enabled=False):
+                consistency_loss = (cs.float() * (1.0 - es.float())).mean()
+            components['consensus_consistency'] = consistency_loss
+        else:
+            components['consensus_consistency'] = torch.tensor(0.0, device=device)
+
         # === Total Loss (weighted sum with annealing) ===
         total_loss = torch.tensor(0.0, device=device)
         for name, value in components.items():
@@ -1740,7 +1756,23 @@ def train_condor_net_v43(args):
     if args.resume and os.path.isfile(args.resume):
         print(f"\n[RESUME] Loading checkpoint: {args.resume}")
         ckpt = torch.load(args.resume, map_location=device, weights_only=False)
-        model.load_state_dict(ckpt['model_state_dict'])
+        # Use strict=False to allow loading checkpoints from older model versions
+        # (e.g., before consensus_gate / chain_stats_proj were added).
+        # New parameters initialize from their __init__ defaults (consensus_gate
+        # zero-init → neutral gate; chain_stats_proj zero-init → no chain stat effect).
+        missing, unexpected = [], []
+        try:
+            incompatible = model.load_state_dict(ckpt['model_state_dict'], strict=False)
+            missing    = list(incompatible.missing_keys)
+            unexpected = list(incompatible.unexpected_keys)
+        except RuntimeError as e:
+            print(f"  [RESUME] WARNING: load_state_dict failed ({e}). Starting fresh.")
+        if missing:
+            print(f"  [RESUME] New parameters (zero/default init): {missing[:10]}"
+                  f"{'...' if len(missing) > 10 else ''}")
+        if unexpected:
+            print(f"  [RESUME] Stale keys ignored: {unexpected[:10]}"
+                  f"{'...' if len(unexpected) > 10 else ''}")
         if 'optimizer_state_dict' in ckpt:
             optimizer.load_state_dict(ckpt['optimizer_state_dict'])
         if 'scheduler_state_dict' in ckpt:

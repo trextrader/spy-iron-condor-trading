@@ -73,6 +73,17 @@ from intelligence.schema_v43 import (
 )
 
 # =============================================================================
+# MTF CONSENSUS FEATURE INDICES (resolved once at import time)
+# These indices are into TF_FEATURE_NAMES (52-feature schema).
+# Using .index() ensures correctness if the schema list is ever reordered.
+# =============================================================================
+
+_PSAR_TREND_IDX      = TF_FEATURE_NAMES.index("psar_trend")      # ternary {-1,0,1}
+_BREAKOUT_SCORE_IDX  = TF_FEATURE_NAMES.index("breakout_score")  # ternary {-1,0,1}
+_PRESSURE_UP_IDX     = TF_FEATURE_NAMES.index("pressure_up")     # fuzzy  [0,1]
+_PRESSURE_DOWN_IDX   = TF_FEATURE_NAMES.index("pressure_down")   # fuzzy  [0,1]
+
+# =============================================================================
 # TYPED OUTPUT DATACLASS
 # =============================================================================
 
@@ -108,6 +119,9 @@ class CondorNetOutput:
     # v42 compatibility outputs (filled by condornet_master_step inside core)
     final_gate:        Optional[torch.Tensor] = None   # [B, T] — existing gate output
     diagnostics:       Optional[Dict]         = None   # Full v42 diagnostic dict
+
+    # MTF consensus outputs
+    consensus_strength: Optional[torch.Tensor] = None  # [B, 1] ∈ [0,1] — diagnostic
 
     # Selected strategy (argmax at inference)
     @property
@@ -384,6 +398,79 @@ class OptionsChainEncoder(nn.Module):
 
         skew = (put_iv - call_iv).unsqueeze(-1)   # [B, 1]
         return skew
+
+    def aggregate_stats(
+        self,
+        chain_grid:  torch.Tensor,               # [B, N_contracts, 10]
+        chain_mask:  Optional[torch.Tensor],     # [B, N_contracts] True=padded
+    ) -> torch.Tensor:
+        """
+        Extract 5 aggregate statistics from the raw chain grid.
+
+        These are passed as explicit features to the joint representation so
+        the v42 predicate logic can discover chain-level inequalities
+        (e.g., mean_iv > 0.25 → prefer iron condor; delta_skew < -0.1 → bearish bias).
+
+        Stats:
+            [0] mean_iv          — average IV across unmasked contracts
+            [1] delta_skew       — mean(call_delta) + mean(put_delta)  (puts are negative)
+                                   positive = call bias; negative = put skew (crash fear)
+            [2] term_slope       — IV(short DTE ≤7d) - IV(long DTE >7d)
+                                   positive = inverted term structure (fear/event driven)
+            [3] oi_concentration — std of oi_norm (high = OI concentrated at few strikes)
+            [4] otm_ratio        — fraction of contracts with |moneyness| > 0.1
+
+        Returns: [B, 5] clipped to [-3, 3]
+        """
+        B, N, _ = chain_grid.shape
+        device, dtype = chain_grid.device, chain_grid.dtype
+
+        if chain_mask is not None:
+            valid = (~chain_mask).to(dtype)          # [B, N]  1=valid
+        else:
+            valid = torch.ones(B, N, device=device, dtype=dtype)
+        valid_n = valid.sum(dim=1, keepdim=True).clamp(min=1.0)  # [B, 1]
+
+        # Feature columns: [moneyness, days_to_exp, iv, delta, gamma, theta, vega, bid, ask, oi_norm]
+        iv_v    = chain_grid[:, :, 2]   # [B, N]
+        delta_v = chain_grid[:, :, 3]
+        dte_v   = chain_grid[:, :, 1]
+        oi_v    = chain_grid[:, :, 9]
+        mon_v   = chain_grid[:, :, 0]
+
+        # [0] mean_iv
+        mean_iv = (iv_v * valid).sum(dim=1) / valid_n.squeeze(1)
+
+        # [1] delta_skew: (mean call delta) + (mean put delta)
+        call_m = (delta_v > 0.05).to(dtype) * valid
+        put_m  = (delta_v < -0.05).to(dtype) * valid
+        call_n = call_m.sum(dim=1).clamp(min=1.0)
+        put_n  = put_m.sum(dim=1).clamp(min=1.0)
+        delta_skew = (
+            (delta_v * call_m).sum(dim=1) / call_n
+            + (delta_v * put_m).sum(dim=1) / put_n
+        )
+
+        # [2] term_slope: IV(≤7d) - IV(>7d)
+        short_m = (dte_v <= 7).to(dtype) * valid
+        long_m  = (dte_v >  7).to(dtype) * valid
+        short_n = short_m.sum(dim=1).clamp(min=1.0)
+        long_n  = long_m.sum(dim=1).clamp(min=1.0)
+        term_slope = (
+            (iv_v * short_m).sum(dim=1) / short_n
+            - (iv_v * long_m).sum(dim=1) / long_n
+        )
+
+        # [3] OI concentration (std)
+        oi_mean = (oi_v * valid).sum(dim=1) / valid_n.squeeze(1)
+        oi_sq   = ((oi_v - oi_mean.unsqueeze(1)) ** 2) * valid
+        oi_std  = (oi_sq.sum(dim=1) / valid_n.squeeze(1)).sqrt()
+
+        # [4] OTM ratio
+        otm_ratio = ((mon_v.abs() > 0.1).to(dtype) * valid).sum(dim=1) / valid_n.squeeze(1)
+
+        stats = torch.stack([mean_iv, delta_skew, term_slope, oi_std, otm_ratio], dim=1)
+        return stats.clamp(-3.0, 3.0)   # [B, 5]
 
     def forward(
         self,
@@ -744,6 +831,100 @@ class PositionSizeHead(nn.Module):
 
 
 # =============================================================================
+# PART 8b: MTF CONSENSUS GATE
+# =============================================================================
+
+class MTFConsensusGate(nn.Module):
+    """
+    Multi-timeframe consensus gate — baked-in entry conviction modifier.
+
+    Philosophy (innate model property):
+      - M1  = primary entry timeframe (highest resolution)
+      - M5  = entry confirmation (5-bar context)
+      - M15 = intermediate signal strength
+      - H1  = highest TF macro regime
+
+    Agreement semantics:
+      4/4 TFs agree on direction → gate → 1.0  (max position size override)
+      3/4 agree                  → gate ≈ 0.75 (strong signal)
+      2/4 agree                  → gate ≈ 0.50 (moderate — strengthen signal)
+      0-1/4 agree                → gate ≈ 0.25 (weak/no consensus)
+
+    entry_signal is scaled as:  entry_signal × (0.5 + 0.5 × gate)
+      → gate=0 → 50% of raw entry_signal (never fully suppressed)
+      → gate=1 → 100% of raw entry_signal (full conviction)
+
+    Inputs: psar_trend ∈ {-1,0,1} and breakout_score ∈ {-1,0,1} from each TF
+    at the last timestep.  The gate MLP learns which agreement patterns
+    (both TFs agree, only PSAR agrees, etc.) are most predictive.
+    """
+
+    def __init__(
+        self,
+        psar_trend_idx:     int = _PSAR_TREND_IDX,
+        breakout_score_idx: int = _BREAKOUT_SCORE_IDX,
+        dropout:            float = 0.1,
+    ):
+        super().__init__()
+        self.psar_trend_idx     = psar_trend_idx
+        self.breakout_score_idx = breakout_score_idx
+
+        # 8-input gate MLP: [m1_psar, m5_psar, m15_psar, h1_psar,
+        #                     m1_bo,   m5_bo,   m15_bo,   h1_bo]
+        # Zero-initialize final linear so gate output starts at sigmoid(0)=0.5
+        # → entry_signal × (0.5 + 0.5 × 0.5) = 0.75  (neutral warmup)
+        self.gate_mlp = nn.Sequential(
+            nn.Linear(8, 32),
+            nn.Tanh(),
+            nn.Dropout(dropout),
+            nn.Linear(32, 1),
+            nn.Sigmoid(),
+        )
+        nn.init.zeros_(self.gate_mlp[-2].weight)
+        nn.init.zeros_(self.gate_mlp[-2].bias)
+
+    def forward(
+        self,
+        x_m1:  torch.Tensor,   # [B, T, d_tf_in]
+        x_m5:  torch.Tensor,
+        x_m15: torch.Tensor,
+        x_h1:  torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Returns:
+            gate:               [B, 1] ∈ [0,1] — learned consensus gate
+            consensus_strength: [B, 1] ∈ [0,1] — hard count diagnostic (no grad)
+        """
+        def _last(x: torch.Tensor, idx: int) -> torch.Tensor:
+            return x[:, -1, idx:idx+1]   # [B, 1]
+
+        psar_m1  = _last(x_m1,  self.psar_trend_idx)
+        psar_m5  = _last(x_m5,  self.psar_trend_idx)
+        psar_m15 = _last(x_m15, self.psar_trend_idx)
+        psar_h1  = _last(x_h1,  self.psar_trend_idx)
+
+        bo_m1  = _last(x_m1,  self.breakout_score_idx)
+        bo_m5  = _last(x_m5,  self.breakout_score_idx)
+        bo_m15 = _last(x_m15, self.breakout_score_idx)
+        bo_h1  = _last(x_h1,  self.breakout_score_idx)
+
+        consensus_input = torch.cat(
+            [psar_m1, psar_m5, psar_m15, psar_h1,
+             bo_m1,   bo_m5,   bo_m15,   bo_h1], dim=1
+        )   # [B, 8]
+
+        gate = self.gate_mlp(consensus_input)   # [B, 1]
+
+        # Hard agreement count — for diagnostics/loss only (no gradient)
+        with torch.no_grad():
+            psar_sum = (psar_m1 + psar_m5 + psar_m15 + psar_h1).abs()   # 0–4
+            bo_sum   = (bo_m1 + bo_m5 + bo_m15 + bo_h1).abs()           # 0–4
+            consensus_strength = (psar_sum + bo_sum) / 8.0               # [0, 1]
+
+        return gate, consensus_strength
+
+
+# =============================================================================
 # PART 9: CONDORNET V43 — UNIFIED MODEL
 # =============================================================================
 
@@ -870,6 +1051,21 @@ class CondorNetV43(nn.Module):
         # Projector to adapt d_tf_joint → v42 expected d_input
         self.core_input_proj = nn.Linear(d_tf_joint, self.condor_core.d_input)
 
+        # ── MTF CONSENSUS GATE (innate MTF agreement → entry conviction) ────
+        self.consensus_gate = MTFConsensusGate(
+            psar_trend_idx=_PSAR_TREND_IDX,
+            breakout_score_idx=_BREAKOUT_SCORE_IDX,
+            dropout=dropout,
+        )
+
+        # ── CHAIN AGGREGATE STATS PROJECTION ────────────────────────────────
+        # Projects 5 aggregate chain statistics (mean IV, delta skew, term slope,
+        # OI concentration, OTM ratio) into the joint representation space.
+        # Zero-initialized — no effect at training start, learns from data.
+        # Enables the v42 predicate logic to reason about chain-level conditions.
+        self.chain_stats_proj = nn.Linear(5, d_joint, bias=False)
+        nn.init.zeros_(self.chain_stats_proj.weight)
+
         if verbose:
             total = sum(p.numel() for p in self.parameters())
             print(f"[CondorNetV43] Initialized | params={total:,} | schema={SCHEMA_VERSION}")
@@ -919,6 +1115,10 @@ class CondorNetV43(nn.Module):
 
         # ── Step 3: Options Chain Encoding ──────────────────────────────────
         chain_embed, chain_diag = self.chain_encoder(chain, chain_mask)   # [B, 128]
+        # Extract 5 aggregate chain statistics for explicit predicate discovery.
+        # These are computed from raw chain data BEFORE the transformer to expose
+        # interpretable chain-level signals (mean IV, delta skew, term structure).
+        chain_stats = self.chain_encoder.aggregate_stats(chain, chain_mask)   # [B, 5]
 
         # ── Step 4: Joint Fusion ─────────────────────────────────────────────
         joint = self.joint_fusion(tf_fused, chain_embed)   # [B, T, 384]
@@ -958,6 +1158,12 @@ class CondorNetV43(nn.Module):
         # Use last timestep of joint representation
         joint_last = joint[:, -1, :]   # [B, 384]
 
+        # Enrich joint_last with aggregate chain statistics.
+        # chain_stats_proj is zero-initialized → no impact at training start.
+        # Gradually learns to route chain-level signals (IV regime, skew, OI)
+        # into the output heads and v42 predicate logic.
+        joint_last = joint_last + self.chain_stats_proj(chain_stats)   # [B, 384]
+
         # ── Step 7: Output Heads ─────────────────────────────────────────────
         strategy_logits, leg_params, entry_signal = self.strategy_head(joint_last)
 
@@ -970,6 +1176,13 @@ class CondorNetV43(nn.Module):
         # core_out is float32 (v42 forces .float()); cast to match AMP dtype.
         strategy_logits = strategy_logits + core_out.to(dtype=strategy_logits.dtype)
 
+        # ── Step 8: MTF Consensus Gate ───────────────────────────────────────
+        # Apply multi-timeframe agreement gate to entry_signal.
+        # gate is zero-initialized → entry_signal = entry_signal × 0.75 initially.
+        # Model learns to push gate toward 1.0 when all TFs agree.
+        consensus_gate_val, consensus_strength = self.consensus_gate(x_m1, x_m5, x_m15, x_h1)
+        entry_signal = entry_signal * (0.5 + 0.5 * consensus_gate_val)
+
         pop, ev, max_loss, var_95, cvar_95        = self.risk_head(joint_last)
         pivot_high_probs, pivot_low_probs, pivot_strength = self.pivot_pred_head(joint_last)
         position_size = self.size_head(pop.detach(), joint_last, self.pop_sizing_weight)
@@ -979,27 +1192,31 @@ class CondorNetV43(nn.Module):
         if return_diagnostics:
             diags = {
                 **core_diag,
-                "chain_diag":    chain_diag,
-                "contrib_norms": contrib_norms,
-                "pivot_horizons": PivotPredictionHead.PIVOT_HORIZONS,
+                "chain_diag":       chain_diag,
+                "contrib_norms":    contrib_norms,
+                "pivot_horizons":   PivotPredictionHead.PIVOT_HORIZONS,
+                "consensus_gate":   float(consensus_gate_val.mean()),
+                "consensus_strength": float(consensus_strength.mean()),
+                "chain_stats_mean": chain_stats.mean(dim=0).tolist(),
             }
 
         return CondorNetOutput(
-            strategy_logits  = strategy_logits,
-            leg_params       = leg_params,
-            entry_signal     = entry_signal,
-            pop              = pop,
-            ev               = ev,
-            max_loss         = max_loss,
-            var_95           = var_95,
-            cvar_95          = cvar_95,
-            pivot_high_probs = pivot_high_probs,
-            pivot_low_probs  = pivot_low_probs,
-            pivot_strength   = pivot_strength,
-            position_size    = position_size,
-            spot_pred        = spot_pred,
-            final_gate       = core_diag.get("final_gate"),
-            diagnostics      = diags,
+            strategy_logits   = strategy_logits,
+            leg_params        = leg_params,
+            entry_signal      = entry_signal,
+            pop               = pop,
+            ev                = ev,
+            max_loss          = max_loss,
+            var_95            = var_95,
+            cvar_95           = cvar_95,
+            pivot_high_probs  = pivot_high_probs,
+            pivot_low_probs   = pivot_low_probs,
+            pivot_strength    = pivot_strength,
+            position_size     = position_size,
+            spot_pred         = spot_pred,
+            final_gate        = core_diag.get("final_gate"),
+            diagnostics       = diags,
+            consensus_strength = consensus_strength,
         )
 
     def forward_compat(
