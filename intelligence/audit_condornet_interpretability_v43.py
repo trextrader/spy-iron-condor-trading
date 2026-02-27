@@ -1217,7 +1217,7 @@ def main():
     # 7. Data-based Analytics
     if args.data:
         print("\n[AUDIT] Starting Data-based Analytics...")
-        from intelligence.schema_v43 import STRATEGY_TYPES, PIVOT_HORIZONS
+        from intelligence.schema_v43 import STRATEGY_TYPES
         
         output_dir = args.output_dir or str(Path(args.output_json).parent / "v43_audit")
         os.makedirs(output_dir, exist_ok=True)
