@@ -1222,17 +1222,23 @@ def main():
         output_dir = args.output_dir or str(Path(args.output_json).parent / "v43_audit")
         os.makedirs(output_dir, exist_ok=True)
         
+        # Dynamically fit the feature size the model expects
+        # Model config dict contains d_tf_in
+        d_tf_in = meta.get("config", {}).get("d_tf_in", len(_FULL_FEATURE_NAMES))
+        audit_features = _FULL_FEATURE_NAMES[:d_tf_in]
+        print(f"[AUDIT] Using {len(audit_features)} features to match model d_tf_in={d_tf_in}")
+
         # Load sequence data once
-        X = load_audit_data(args.data, _FULL_FEATURE_NAMES, args.samples, args.seq_len)
+        X = load_audit_data(args.data, audit_features, args.samples, args.seq_len)
         runner = CondorRunner(model, DEVICE, STRATEGY_TYPES, PIVOT_HORIZONS)
         
         # Run base permutations and trees
         data_results = {}
         data_results["output_statistics"] = analyze_output_statistics(runner, X)
-        data_results["permutation_importance"] = analyze_permutation_importance(runner, X, _FULL_FEATURE_NAMES)
-        data_results["gradient_saliency"] = analyze_gradient_saliency(runner, X, _FULL_FEATURE_NAMES)
-        data_results["mutual_information"] = analyze_mutual_information(runner, X, _FULL_FEATURE_NAMES)
-        data_results["surrogate_trees"] = analyze_surrogate_trees(runner, X, _FULL_FEATURE_NAMES)
+        data_results["permutation_importance"] = analyze_permutation_importance(runner, X, audit_features)
+        data_results["gradient_saliency"] = analyze_gradient_saliency(runner, X, audit_features)
+        data_results["mutual_information"] = analyze_mutual_information(runner, X, audit_features)
+        data_results["surrogate_trees"] = analyze_surrogate_trees(runner, X, audit_features)
         
         # Run extended analytics
         data_results = run_extended_analytics(
