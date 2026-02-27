@@ -52,8 +52,22 @@ from intelligence.schema_v43 import (
     STRATEGY_TYPES,
     N_STRATEGY_TYPES,
     TF_FEATURE_NAMES,
+    FRICTION_FEATURE_NAMES,
+    TOD_FEATURE_NAMES,
+    REGIME_PERSISTENCE_FEATURE,
+    IVR_REVERSAL_FEATURE_NAMES,
     N_PIVOT_FEATURES,
     CHAIN_GRID_CONFIG,
+)
+
+# Full 64-entry feature name list matching the training script's _FULL_FEATURE_NAMES.
+# 52 base TF + 5 friction gates + 2 ToD + 1 regime persistence + 4 IVR reversal.
+_FULL_FEATURE_NAMES: list = (
+    TF_FEATURE_NAMES
+    + FRICTION_FEATURE_NAMES
+    + TOD_FEATURE_NAMES
+    + [REGIME_PERSISTENCE_FEATURE]
+    + IVR_REVERSAL_FEATURE_NAMES[:4]
 )
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -153,7 +167,7 @@ def extract_learned_logic_v43(
       predicates, super_set, strategy_head, risk_head, pivot_head, fuzzy_gates
     """
     if feature_names is None:
-        feature_names = TF_FEATURE_NAMES
+        feature_names = _FULL_FEATURE_NAMES
 
     logic: dict = {
         "predicates": {},
@@ -346,7 +360,8 @@ def extract_learned_logic_v43(
         tfp = model.tf_projector
         contrib: dict = {}
         for tf_name in ['m1', 'm5', 'm15', 'h1']:
-            proj = getattr(tfp, f'{tf_name}_proj', None)
+            # MultiTFProjector stores projectors as proj_m1, proj_m5, proj_m15, proj_h1
+            proj = getattr(tfp, f'proj_{tf_name}', None)
             if proj is not None:
                 first_l = next(
                     (m for m in proj.modules()
@@ -381,15 +396,23 @@ def extract_learned_logic_v43(
     # ── 8. B_matrix stability ──────────────────────────────────────────────
     try:
         b_theta = getattr(backbone, 'B_theta', None)
-        if b_theta is not None and hasattr(b_theta, 'weight'):
+        if b_theta is not None:
             with torch.no_grad():
-                B = b_theta.weight.cpu().float().numpy()
-            logic["b_matrix"] = {
-                "shape": list(B.shape),
-                "frobenius_norm": float(np.linalg.norm(B, 'fro')),
-                "column_norms_max": float(np.linalg.norm(B, axis=0).max()),
-                "column_norms_mean": float(np.linalg.norm(B, axis=0).mean()),
-            }
+                # BlockMatrixB stores B_h, B_v, B_m, B_r sub-linears;
+                # full_matrix() concatenates them into [d_x, d_control].
+                if hasattr(b_theta, 'full_matrix'):
+                    B = b_theta.full_matrix().cpu().float().numpy()
+                elif hasattr(b_theta, 'weight'):
+                    B = b_theta.weight.cpu().float().numpy()
+                else:
+                    B = None
+            if B is not None:
+                logic["b_matrix"] = {
+                    "shape": list(B.shape),
+                    "frobenius_norm": float(np.linalg.norm(B, 'fro')),
+                    "column_norms_max": float(np.linalg.norm(B, axis=0).max()),
+                    "column_norms_mean": float(np.linalg.norm(B, axis=0).mean()),
+                }
     except Exception as e:
         logic["b_matrix"] = {"error": str(e)}
 
@@ -542,15 +565,23 @@ def export_matrices_to_csv(model: CondorNetV43, output_dir: str = "reports") -> 
     except Exception as e:
         print(f"[AUDIT] A_matrix export failed: {e}")
 
+    # B_matrix — BlockMatrixB has no .weight; use full_matrix() which
+    # concatenates B_h, B_v, B_m, B_r weight rows into [d_x, d_control].
     backbone = getattr(model, 'condor_core', getattr(model, 'backbone', model))
     try:
         b_theta = getattr(backbone, 'B_theta', None)
-        if b_theta is not None and hasattr(b_theta, 'weight'):
+        if b_theta is not None:
             with torch.no_grad():
-                B = b_theta.weight.cpu().float().numpy()
-            b_path = output_dir_path / "audit_B_matrix.csv"
-            np.savetxt(str(b_path), B, delimiter=',', fmt='%.8f')
-            print(f"[AUDIT] B_matrix saved: {b_path}")
+                if hasattr(b_theta, 'full_matrix'):
+                    B = b_theta.full_matrix().cpu().float().numpy()
+                elif hasattr(b_theta, 'weight'):
+                    B = b_theta.weight.cpu().float().numpy()
+                else:
+                    B = None
+            if B is not None:
+                b_path = output_dir_path / "audit_B_matrix.csv"
+                np.savetxt(str(b_path), B, delimiter=',', fmt='%.8f')
+                print(f"[AUDIT] B_matrix saved: {b_path}  shape={B.shape}")
     except Exception as e:
         print(f"[AUDIT] B_matrix export failed: {e}")
 

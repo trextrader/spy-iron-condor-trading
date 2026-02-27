@@ -1242,7 +1242,8 @@ def _extract_logic_v43(model: nn.Module) -> dict:
         tfp = model.tf_projector
         contrib: dict = {}
         for tf_name in ['m1', 'm5', 'm15', 'h1']:
-            proj = getattr(tfp, f'{tf_name}_proj', None)
+            # MultiTFProjector stores projectors as proj_m1, proj_m5, proj_m15, proj_h1
+            proj = getattr(tfp, f'proj_{tf_name}', None)
             if proj is not None:
                 first = next(
                     (m for m in proj.modules() if hasattr(m, 'weight')), None
@@ -1251,7 +1252,11 @@ def _extract_logic_v43(model: nn.Module) -> dict:
                     contrib[tf_name] = float(
                         np.linalg.norm(first.weight.detach().cpu().numpy(), 'fro')
                     )
-        logic["fuzzy_gates"]["tf_projector_frobenius"] = contrib
+        if contrib:
+            logic["fuzzy_gates"]["tf_projector_frobenius"] = contrib
+            logic["fuzzy_gates"]["tf_ranked"] = sorted(
+                contrib, key=contrib.get, reverse=True
+            )
 
     return logic
 
@@ -1281,23 +1286,34 @@ def export_matrices_csv(model: nn.Module, output_dir: Path, epoch: int) -> dict:
         result["a_matrix"] = {"error": str(e)}
         print(f"  -> A_matrix export failed: {e}")
 
-    # B_matrix (if accessible — try backbone.B_theta.weight)
+    # B_matrix — BlockMatrixB has no .weight; use full_matrix() which
+    # concatenates B_h, B_v, B_m, B_r weight rows into [d_x, d_control].
     backbone = getattr(model, 'condor_core', getattr(model, 'backbone', model))
     try:
         b_theta = getattr(backbone, 'B_theta', None)
-        if b_theta is not None and hasattr(b_theta, 'weight'):
+        if b_theta is not None:
             with torch.no_grad():
-                B = b_theta.weight.cpu().float().numpy()
-            b_path = output_dir / f"Epoch{epoch}_B_Matrix.csv"
-            np.savetxt(str(b_path), B, delimiter=',', fmt='%.8f')
-            result["b_matrix"] = {
-                "shape": list(B.shape),
-                "frobenius_norm": float(np.linalg.norm(B, 'fro')),
-            }
-            print(f"  -> B_matrix: {b_path.name} "
-                  f"(frob={result['b_matrix']['frobenius_norm']:.4f})")
+                if hasattr(b_theta, 'full_matrix'):
+                    B = b_theta.full_matrix().cpu().float().numpy()
+                elif hasattr(b_theta, 'weight'):
+                    B = b_theta.weight.cpu().float().numpy()
+                else:
+                    B = None
+            if B is not None:
+                b_path = output_dir / f"Epoch{epoch}_B_Matrix.csv"
+                np.savetxt(str(b_path), B, delimiter=',', fmt='%.8f')
+                result["b_matrix"] = {
+                    "shape": list(B.shape),
+                    "frobenius_norm": float(np.linalg.norm(B, 'fro')),
+                    "column_norms_max": float(np.linalg.norm(B, axis=0).max()),
+                    "column_norms_mean": float(np.linalg.norm(B, axis=0).mean()),
+                }
+                print(f"  -> B_matrix: {b_path.name} "
+                      f"shape={B.shape} "
+                      f"(frob={result['b_matrix']['frobenius_norm']:.4f})")
     except Exception as e:
         result["b_matrix"] = {"error": str(e)}
+        print(f"  -> B_matrix export failed: {e}")
 
     return result
 
