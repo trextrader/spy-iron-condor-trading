@@ -1110,25 +1110,48 @@ import os
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from typing import List, Dict, Any, Tuple
 import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 
 def analyze_fisher_information(model: nn.Module, X: dict, n_samples: int = 100) -> dict:
+    """
+    Estimate the diagonal of the empirical Fisher Information Matrix.
+
+    Pseudo-loss design covers THREE computation paths so every major module
+    receives non-zero gradient signal:
+      1. pop + entry_signal  (sigmoid heads via joint_last / tf_projector / chain_encoder)
+      2. strategy_logits     (v43 strategy_head + v42 condor_core via +ensemble)
+
+    Critical: inputs are sanitized (nan_to_num) before the model call so that
+    NaN chain features do not propagate NaN into the loss and destroy Fisher
+    traces for tf_projector, chain_encoder, and all risk-head layers.
+    """
     print("[AUDIT] Estimating Fisher Information (Parameter Sensitivity)...")
     model.eval()
+    dev = next(model.parameters()).device
     X_sub = {k: v[-n_samples:] if isinstance(v, torch.Tensor) else v for k, v in X.items()}
-    
+
     fisher_trace = {}
     for name, param in model.named_parameters():
         if param.requires_grad and 'weight' in name and len(param.shape) >= 2:
             fisher_trace[name] = torch.zeros_like(param)
-            
-    # Need to run forward pass on single batch steps
+
     for i in tqdm(range(X_sub['x_m5'].shape[0]), desc="Fisher Info", leave=False):
         model.zero_grad()
-        b_in = {k: v[i:i+1].to(next(model.parameters()).device) if isinstance(v, torch.Tensor) else v for k, v in X_sub.items()}
+        b_in = {
+            k: v[i:i+1].to(dev) if isinstance(v, torch.Tensor) else v
+            for k, v in X_sub.items()
+        }
+        # Sanitize: chain NaN → 0.0 (prevents NaN pseudo_loss and NaN Fisher traces)
+        b_in = {
+            k: (torch.nan_to_num(v, nan=0.0, posinf=0.0, neginf=0.0)
+                if (isinstance(v, torch.Tensor) and v.is_floating_point()) else v)
+            for k, v in b_in.items()
+        }
+
         out = model(
             x_m1=b_in.get('x_m1'),
             x_m5=b_in.get('x_m5'),
@@ -1137,20 +1160,40 @@ def analyze_fisher_information(model: nn.Module, X: dict, n_samples: int = 100) 
             chain=b_in.get('chain'),
             chain_mask=b_in.get('chain_mask')
         )
-        pseudo_loss = 0
-        for k in ['entry_signal', 'pop', 'ev', 'max_loss']:
-            if getattr(out, k, None) is not None:
-                pseudo_loss += (getattr(out, k)**2).sum()
-        
-        pseudo_loss.backward()
+
+        # -- Path 1: sigmoid heads (pop, entry_signal) -----------------------
+        # Negative log-likelihood gives meaningful gradient magnitude
+        # (unlike squared outputs which have near-zero grad at saturation)
+        losses = []
+        for k in ('pop', 'entry_signal'):
+            v = getattr(out, k, None)
+            if v is not None:
+                v_c = torch.nan_to_num(v, nan=0.5).clamp(1e-6, 1 - 1e-6)
+                losses.append(-torch.log(v_c).sum())
+
+        # -- Path 2: strategy logits (connects v42 condor_core via ensemble add)
+        sl = getattr(out, 'strategy_logits', None)
+        if sl is not None:
+            sl_c = torch.nan_to_num(sl, nan=0.0)
+            target = sl_c.detach().argmax(dim=-1)
+            losses.append(F.cross_entropy(sl_c, target))
+
+        if not losses:
+            continue
+
+        pseudo_loss = sum(losses)
+        if isinstance(pseudo_loss, torch.Tensor) and pseudo_loss.requires_grad:
+            pseudo_loss.backward()
+
         for name, param in model.named_parameters():
             if name in fisher_trace and param.grad is not None:
-                fisher_trace[name] += param.grad.data ** 2
-                
+                g = torch.nan_to_num(param.grad.data, nan=0.0, posinf=0.0, neginf=0.0)
+                fisher_trace[name] += g ** 2
+
     results = {}
     for name, f_diag in fisher_trace.items():
         results[name] = float(f_diag.mean().item() / n_samples)
-        
+
     sorted_fisher = sorted(results.items(), key=lambda x: x[1], reverse=True)
     return {"top_sensitive_layers": [{"layer": k, "fisher_trace_mean": v} for k, v in sorted_fisher]}
 
@@ -1283,7 +1326,50 @@ def plot_comprehensive_visualizations(results: dict, output_dir: str):
         plt.savefig(os.path.join(output_dir, "strategy_radar.png"))
         plt.close()
 
+def analyze_model_signal_strength(runner, X: dict) -> dict:
+    """
+    Characterise per-head output signal strength at inference time.
+
+    At early checkpoints sigmoid-bounded heads (pop, entry_signal) often
+    converge to a narrow band near the prior (e.g. 0.48-0.52) while
+    strategy logits may already show meaningful variance.  This function
+    reports per-head std, entropy/concentration, and a qualitative
+    'signal_quality' label so the audit report can explain why permutation
+    importance shows near-zero values for most features.
+
+    Signal quality labels:
+        'strong'   — std > 0.10  (output clearly differentiates samples)
+        'moderate' — std > 0.02
+        'weak'     — std > 0.005
+        'flat'     — std ≤ 0.005 (near-constant; any importance metric unreliable)
+    """
+    print("[AUDIT] Analysing model output signal strength...")
+    out_dict = runner.forward(X)
+    results = {}
+    for head, val in out_dict.items():
+        v_np = val.detach().cpu().float().numpy().flatten()
+        v_finite = v_np[np.isfinite(v_np)]
+        if len(v_finite) == 0:
+            results[head] = {"std": float("nan"), "mean": float("nan"),
+                             "range": float("nan"), "signal_quality": "NaN — head did not converge"}
+            continue
+        std  = float(np.std(v_finite))
+        mean = float(np.mean(v_finite))
+        rng  = float(np.max(v_finite) - np.min(v_finite))
+        if std > 0.10:
+            quality = "strong"
+        elif std > 0.02:
+            quality = "moderate"
+        elif std > 0.005:
+            quality = "weak"
+        else:
+            quality = "flat (near-constant — importance metrics unreliable for this head)"
+        results[head] = {"std": std, "mean": mean, "range": rng, "signal_quality": quality}
+    return results
+
+
 def run_extended_analytics(runner, model: nn.Module, X: torch.Tensor, feature_names: List[str], data_results: dict):
+    data_results["model_signal_strength"] = analyze_model_signal_strength(runner, X)
     data_results["fisher_information"] = analyze_fisher_information(model, X)
     data_results["hessian_eigenspectrum"] = analyze_hessian_eigenspectrum(model, X)
     data_results["shap_approximation"] = analyze_shap_approximation(runner, X, feature_names)
@@ -1362,34 +1448,65 @@ def generate_markdown_report(results: dict, output_path: str, nan_weight_report:
             f.write(f"- Kurtosis: {s['kurtosis']:.4f}\n")
             f.write(f"- Min/Max: [{s['min']:.4f}, {s['max']:.4f}]\n\n")
             
-        f.write("## 6. Advanced Diagnostics\n\n")
-        
+        f.write("## 6. Model Output Signal Strength\n\n")
+        f.write(
+            "> **Interpretation guide:** Permutation importance and gradient saliency "
+            "are meaningful only when the model produces *varied* outputs across samples. "
+            "Sigmoid-bounded heads (pop, entry_signal) in early-epoch checkpoints often "
+            "compress into a narrow band (std < 0.01), making feature importance "
+            "near-zero for all but the highest-variance input features. "
+            "Strategy logits (raw, unbounded) and risk heads show wider spread "
+            "even early in training.\n\n"
+        )
+        sig = results.get("model_signal_strength", {})
+        if sig:
+            f.write("| Head | Mean | Std | Range | Signal Quality |\n")
+            f.write("|---|---|---|---|---|\n")
+            for head, s in sig.items():
+                mean_s = f"{s['mean']:.4f}" if isinstance(s['mean'], float) and not (s['mean'] != s['mean']) else "NaN"
+                std_s  = f"{s['std']:.4f}"  if isinstance(s['std'],  float) and not (s['std']  != s['std'])  else "NaN"
+                rng_s  = f"{s['range']:.4f}" if isinstance(s['range'], float) and not (s['range'] != s['range']) else "NaN"
+                f.write(f"| {head} | {mean_s} | {std_s} | {rng_s} | {s['signal_quality']} |\n")
+            f.write("\n")
+        else:
+            f.write("_Signal strength analysis not available._\n\n")
+
+        f.write("## 7. Advanced Diagnostics\n\n")
+
         fisher = results.get("fisher_information", {})
-        f.write("### Fisher Information (Top Sensitive Layers)\n")
+        f.write("### Fisher Information (Top Sensitive Layers)\n\n")
+        f.write(
+            "> Fisher trace = mean squared gradient of the pseudo-loss w.r.t. each weight. "
+            "Higher = that layer's weights are most influential for the model's predictions. "
+            "Layers with zero Fisher are not in the computation path of the pseudo-loss. "
+            "NaN indicates the layer received NaN gradients (input sanitization issue — should not occur after fix).\n\n"
+        )
         for layer in fisher.get("top_sensitive_layers", []):
-            f.write(f"- **{layer['layer']}**: {layer['fisher_trace_mean']:.6f}\n")
+            v = layer['fisher_trace_mean']
+            v_str = f"{v:.6f}" if v == v else "NaN"   # NaN check via self-comparison
+            f.write(f"- **{layer['layer']}**: {v_str}\n")
         f.write("\n")
-        
+
         hessian = results.get("hessian_eigenspectrum", {})
         f.write("### Hessian Eigenspectrum Estimation\n")
         for k, v in hessian.items():
             f.write(f"- **{k}**: {v}\n")
         f.write("\n")
-        
+
         boot = results.get("bootstrap_stability", {})
         f.write("### Bootstrap Stability\n")
         for head, s in boot.items():
             f.write(f"- **{head}**: Mean={s['mean_of_means']:.4f}, Std={s['std_of_means']:.4f}\n")
         f.write("\n")
-        
-        f.write("## 7. Pros & Cons Evaluation\n\n")
+
+        f.write("## 8. Pros & Cons Evaluation\n\n")
         pc = results.get("pros_cons", {})
         f.write("### Pros\n")
         for p in pc.get("pros", []):
-            f.write(f"- ✅ {p}\n")
+            f.write(f"- {p}\n")
         f.write("\n### Cons\n")
         for c in pc.get("cons", []):
-            f.write(f"- ⚠️ {c}\n")
+            f.write(f"- {c}\n")
         f.write("\n")
 
 def __main__hook(parser):
