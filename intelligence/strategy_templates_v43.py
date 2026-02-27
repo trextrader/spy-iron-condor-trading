@@ -540,7 +540,7 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         "strangle_long", "strangle", LVC,
         (_L("P","LONG",1,0), _L("C","LONG",1,1)),
         notes="Long OTM vol; cheaper than straddle; needs larger move.",
-        pop_scale=-0.40, pop_offset=0.75,
+        pop_scale=-0.40, pop_offset=0.90,
         ev_scale=-0.55, max_loss_scale=0.30,
         pred=lambda a: (
             # Long strangle: vol expanding + breakout, IV not already expensive
