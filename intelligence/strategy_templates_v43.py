@@ -297,8 +297,8 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         notes="Neutral credit; wider profit zone.",
         pop_scale=1.00, ev_scale=1.00, max_loss_scale=1.00,
         pred=lambda a: (
-            (a["ivr_high"] | a["ivr_neutral"])
-            & (a["consol_high"] | a["adx_weak"])   # OR: range-bound by either measure
+            a["ivr_neutral"]                        # IC owns neutral-IV zone only
+            & (a["consol_high"] | a["adx_weak"])    # range-bound by either measure
             & a["rsi_neutral"] & a["bb_neutral"]
             & a["no_breakout"]  & a["friction_ok"]
         ),
@@ -529,7 +529,9 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         pop_scale=-1.0, pop_offset=1.0,
         ev_scale=-0.60, max_loss_scale=0.40,
         pred=lambda a: (
-            a["bw_expanding"] & (a["breakout_any"] | a["adx_strong"])
+            # Direction UNKNOWN + vol expanding: straddle beats directional spreads
+            a["bw_expanding"] & a["adx_strong"]
+            & ~a["trend_bull"] & ~a["trend_bear"]   # exclude directional bars
             & ~a["ivr_high"] & a["friction_ok"]
         ),
     ))
@@ -542,7 +544,9 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         pop_scale=-1.0, pop_offset=1.0,
         ev_scale=-0.55, max_loss_scale=0.30,
         pred=lambda a: (
+            # bw_expanding + breakout, but no clear trend direction
             a["bw_expanding"] & a["breakout_any"]
+            & ~a["trend_bull"] & ~a["trend_bear"]   # exclude directional bars
             & ~a["ivr_high"] & a["friction_ok"]
         ),
     ))
@@ -744,7 +748,8 @@ def build_strategy_catalog() -> List[StrategyTemplate]:
         "long_call_butterfly", "butterfly_call", DDR,
         (_L("C","LONG",1,0), _L("C","SHORT",2,1), _L("C","LONG",1,2)),
         notes="Neutral cheap debit; profits from pinning at body strike.",
-        pop_scale=0.60, ev_scale=-0.20, max_loss_scale=0.20,
+        pop_scale=0.72,  # > 0.60 of long_call_condor → wins on consol_vhigh bars
+        ev_scale=-0.20, max_loss_scale=0.20,
         pred=lambda a: (
             a["ivr_low"] & a["adx_weak"] & a["consol_vhigh"]
             & a["rsi_neutral"] & a["friction_ok"]
