@@ -847,33 +847,49 @@ class CondorRunner:
 
 def prescreen_valid_samples(runner: 'CondorRunner', X: dict) -> dict:
     """
-    Filter the mega-batch down to samples that produce fully-finite model outputs.
+    Filter the mega-batch down to samples that produce finite core model outputs.
 
-    Samples with all-masked options chains (no snapshot for that date) cause
-    softmax(all -inf) = NaN in the chain encoder, which propagates through every
-    analytics function.  Remove those rows once here so every downstream function
-    gets clean inputs without having to guard individually.
+    Only the sigmoid-bounded core heads (pop, entry_signal) are used for the
+    validity gate.  Unbounded regression heads (ev, max_loss, var_95, cvar_95,
+    spot_pred) may be NaN if those heads did not converge by the checkpoint epoch —
+    that is expected and handled per-head with nan_to_num inside each analytics
+    function.  Checking them here would wrongly eliminate every sample.
     """
-    print("[AUDIT] Pre-screening samples for finite model outputs...")
+    # Heads guaranteed to be finite when the model core is healthy (all sigmoid)
+    CORE_VALIDITY_HEADS = {'pop', 'entry_signal'}
+
+    print("[AUDIT] Pre-screening samples for finite core model outputs...")
     out_dict = runner.forward(X)
     n = X['x_m5'].shape[0]
 
-    # Build a per-sample validity mask: True = all outputs finite for that sample
-    valid = torch.ones(n, dtype=torch.bool, device='cpu')
-    for v in out_dict.values():
+    # Diagnostic: report NaN rate per head so the user can see which heads are bad
+    for k, v in out_dict.items():
         v_cpu = v.detach().cpu()
+        n_nan = int((~torch.isfinite(v_cpu)).sum().item())
+        if n_nan > 0:
+            print(f"  [AUDIT] Head '{k}': {n_nan} NaN/Inf values "
+                  f"({100.0*n_nan/v_cpu.numel():.1f}% of elements) — "
+                  f"{'IGNORED in validity gate' if k not in CORE_VALIDITY_HEADS else 'USED in validity gate'}")
+
+    # Build per-sample validity mask from core heads only
+    valid = torch.ones(n, dtype=torch.bool, device='cpu')
+    for k in CORE_VALIDITY_HEADS:
+        if k not in out_dict:
+            continue
+        v_cpu = out_dict[k].detach().cpu()
         if v_cpu.dim() > 1:
             valid &= torch.isfinite(v_cpu).all(dim=-1)
         else:
             valid &= torch.isfinite(v_cpu)
 
     n_valid = int(valid.sum().item())
-    print(f"  [AUDIT] Valid samples: {n_valid}/{n} ({100.0*n_valid/n:.1f}%) "
-          f"— dropped {n - n_valid} with NaN/Inf outputs (likely missing chain snapshots)")
+    print(f"  [AUDIT] Valid samples (core heads): {n_valid}/{n} ({100.0*n_valid/n:.1f}%) "
+          f"— dropped {n - n_valid} with NaN in pop/entry_signal")
 
     if n_valid == 0:
         raise RuntimeError("[AUDIT] Zero valid samples after pre-screening — "
-                           "check that options chain dates overlap with M5 dates")
+                           "check that options chain dates overlap with M5 dates "
+                           "and that the checkpoint contains a trained model core")
 
     return {k: v[valid] if isinstance(v, torch.Tensor) else v for k, v in X.items()}
 
