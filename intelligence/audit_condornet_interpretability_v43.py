@@ -702,14 +702,23 @@ def load_full_audit_data(args, feature_names: List[str], max_samples: int = 3000
         
     # Truncate to max_samples
     if len(m5_features) > max_samples:
-        start_idx = len(m5_features) - max_samples
-        m1_features = m1_features[start_idx:]
-        m5_features = m5_features[start_idx:]
-        m15_features = m15_features[start_idx:]
-        h1_features = h1_features[start_idx:]
-        m5_pivots = m5_pivots[start_idx:]
-        labels_m5 = labels_m5[start_idx:]
-        m5_dates = m5_dates[start_idx:]
+        # Calculate exactly how many bars back we are slicing in M5
+        bars_back = max_samples
+        
+        # Determine exact indices for each timeframe by subtracting proportional offsets
+        m5_start = len(m5_features) - bars_back
+        m1_start = max(0, len(m1_features) - (bars_back * 5))
+        m15_start = max(0, len(m15_features) - (bars_back // 3))
+        h1_start = max(0, len(h1_features) - (bars_back // 12))
+        
+        m1_features = m1_features[m1_start:]
+        m5_features = m5_features[m5_start:]
+        m15_features = m15_features[m15_start:]
+        h1_features = h1_features[h1_start:]
+        
+        m5_pivots = m5_pivots[m5_start:]
+        labels_m5 = labels_m5[m5_start:]
+        m5_dates = m5_dates[m5_start:]
         
     labels_dict = {'dummy': labels_m5} # Labels are unused in the audit runner
         
@@ -836,7 +845,7 @@ def analyze_permutation_importance(runner: CondorRunner, X: dict, feature_names:
     for head, imps in importance.items():
         total = np.sum(imps) + 1e-8
         imps_norm = imps / total
-        top_indices = np.argsort(imps_norm)[-10:][::-1]
+        top_indices = np.argsort(imps_norm)[::-1]
         results[head] = [
             {"feature": feature_names[i], "importance": float(imps_norm[i])}
             for i in top_indices
@@ -857,7 +866,7 @@ def analyze_gradient_saliency(runner: CondorRunner, X: dict, feature_names: List
         total = grads.sum().item() + 1e-8
         grads_norm = grads / total
         
-        top_indices = torch.argsort(grads_norm, descending=True)[:10]
+        top_indices = torch.argsort(grads_norm, descending=True)
         saliency[head] = [
             {"feature": feature_names[i], "saliency": float(grads_norm[i].item())}
             for i in top_indices
@@ -917,7 +926,7 @@ def analyze_mutual_information(runner: CondorRunner, X: dict, feature_names: Lis
             mi = mutual_info_regression(X_np, y_np, random_state=42)
             total = np.sum(mi) + 1e-8
             mi_norm = mi / total
-            top_indices = np.argsort(mi_norm)[-10:][::-1]
+            top_indices = np.argsort(mi_norm)[::-1]
             mi_results[head] = [
                 {"feature": feature_names[i], "mi_score": float(mi_norm[i])}
                 for i in top_indices
@@ -982,7 +991,7 @@ def analyze_fisher_information(model: nn.Module, X: dict, n_samples: int = 100) 
     for name, f_diag in fisher_trace.items():
         results[name] = float(f_diag.mean().item() / n_samples)
         
-    sorted_fisher = sorted(results.items(), key=lambda x: x[1], reverse=True)[:5]
+    sorted_fisher = sorted(results.items(), key=lambda x: x[1], reverse=True)
     return {"top_sensitive_layers": [{"layer": k, "fisher_trace_mean": v} for k, v in sorted_fisher]}
 
 def analyze_hessian_eigenspectrum(model: nn.Module, X: dict, n_samples: int = 50) -> dict:
@@ -1006,7 +1015,7 @@ def analyze_shap_approximation(runner, X: dict, feature_names: List[str], n_samp
         total = attr.sum().item() + 1e-8
         attr_norm = attr / total
         
-        top_indices = torch.argsort(attr_norm, descending=True)[:10]
+        top_indices = torch.argsort(attr_norm, descending=True)
         shap_attr[head] = [
             {"feature": feature_names[i], "attribution": float(attr_norm[i].item())}
             for i in top_indices
@@ -1085,7 +1094,9 @@ def plot_comprehensive_visualizations(results: dict, output_dir: str):
     if 'pop' in imp:
         feats = [x["feature"] for x in imp['pop']]
         vals = [x["importance"] for x in imp['pop']]
-        plt.figure(figsize=(10, 6))
+        num_feats = len(feats)
+        fig_height = max(6, int(num_feats * 0.3))
+        plt.figure(figsize=(10, fig_height))
         sns.barplot(x=vals, y=feats, palette='viridis')
         plt.title('Permutation Importance - POP Head')
         plt.tight_layout()
