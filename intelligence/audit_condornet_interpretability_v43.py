@@ -920,6 +920,8 @@ def analyze_shap_approximation(runner, X: torch.Tensor, feature_names: List[str]
     shap_attr = {}
     
     for head in tqdm(out_dict.keys(), desc="SHAP approximation", leave=False):
+        head_val = out_dict[head].sum()
+        head_val.backward(retain_graph=True)
         attr = (X_req.grad * X_req).abs().mean(dim=0).mean(dim=0)
         total = attr.sum().item() + 1e-8
         attr_norm = attr / total
