@@ -815,10 +815,29 @@ class CondorRunner:
                     res[f'pivot_h{h}'] = p_high[..., i]
         return res
 
+    @staticmethod
+    def _sanitize_inputs(b_in: dict) -> dict:
+        """
+        Replace NaN/Inf in all float tensors with 0.0 before they reach the model.
+
+        The options chain grid can contain NaN in days_to_exp (from malformed/missing
+        expiration dates — pd.to_datetime NaT → NaN after dt.days without fillna).
+        Even one NaN contract per snapshot poisons the full transformer attention
+        output via softmax propagation, making every head NaN for every sample.
+        Sanitizing here is the correct place: the model expects finite inputs.
+        """
+        out = {}
+        for k, v in b_in.items():
+            if isinstance(v, torch.Tensor) and v.is_floating_point():
+                v = torch.nan_to_num(v, nan=0.0, posinf=0.0, neginf=0.0)
+            out[k] = v
+        return out
+
     def forward(self, batch: dict) -> Dict[str, torch.Tensor]:
         self.model.eval()
         with torch.no_grad():
             b_in = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+            b_in = self._sanitize_inputs(b_in)
             out = self.model(
                 x_m1=b_in.get('x_m1'),
                 x_m5=b_in.get('x_m5'),
@@ -832,9 +851,10 @@ class CondorRunner:
     def forward_with_grad(self, batch: dict) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
         self.model.eval()
         b_in = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+        b_in = self._sanitize_inputs(b_in)
         # We only need gradients with respect to the primary timeframe
         x_m5_req = b_in['x_m5'].clone().detach().requires_grad_(True)
-        
+
         out = self.model(
             x_m1=b_in.get('x_m1'),
             x_m5=x_m5_req,
@@ -847,26 +867,32 @@ class CondorRunner:
 
 def check_and_clean_model_nan_params(model: torch.nn.Module) -> Tuple[dict, int]:
     """
-    Scan every model parameter for NaN/Inf values and replace them with 0.0 in-place.
+    Scan every model parameter AND registered buffer for NaN/Inf values and
+    replace them with 0.0 in-place.
 
-    This handles the case where training divergence wrote NaN into specific layer
-    weights at the time the checkpoint was saved (e.g., output heads that never
-    converged during early epochs).  Zeroing those weights lets the remaining
-    backbone produce finite activations so data-based analytics can proceed.
-
-    Returns:
-        report   : {param_name: n_bad_elements} for every affected parameter
-        total_nan: total number of elements replaced
+    Covers both trainable weights (named_parameters) and non-trainable buffers
+    (named_buffers) such as BatchNorm running stats or any tensor registered via
+    register_buffer().  Returns report and total count of replaced elements.
     """
     report: dict = {}
     total_nan = 0
-    for name, param in model.named_parameters():
-        bad_mask = ~torch.isfinite(param.data)
+
+    def _scan(name: str, tensor: torch.Tensor):
+        nonlocal total_nan
+        if not tensor.is_floating_point():
+            return
+        bad_mask = ~torch.isfinite(tensor.data)
         n_bad = int(bad_mask.sum().item())
         if n_bad > 0:
             report[name] = n_bad
             total_nan += n_bad
-            param.data[bad_mask] = 0.0   # zero-fill in-place
+            tensor.data[bad_mask] = 0.0
+
+    for name, param in model.named_parameters():
+        _scan(name, param)
+    for name, buf in model.named_buffers():
+        _scan(f"[buf] {name}", buf)
+
     return report, total_nan
 
 
