@@ -685,6 +685,9 @@ def load_audit_data(csv_path: str, feature_names: List[str], max_samples: int = 
         if f not in df.columns:
             df[f] = 0.0
             
+    # Impute NaNs for sparse features (e.g. PivotHigh) since sklearn metrics require dense data
+    df[feature_names] = df[feature_names].fillna(0.0)
+            
     data = df[feature_names].values
     data = data[-max_samples:] if len(data) > max_samples else data
     
