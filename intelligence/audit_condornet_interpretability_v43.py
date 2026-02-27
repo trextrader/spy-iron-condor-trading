@@ -676,9 +676,41 @@ try:
 except ImportError:
     pass
 
+def _audit_collate_fn(batch, seq_len: int):
+    """
+    Like v43_collate_fn but pads variable-length TF sequence tensors to seq_len
+    before stacking. This handles sparse H1/M15 windows at the dataset boundary
+    where fewer than seq_len bars exist.
+    """
+    import torch
+    from torch.utils.data.dataloader import default_collate
+
+    _seq_keys = {'x_m1', 'x_m5', 'x_m15', 'x_h1', 'pivot_values', 'pivot_mask'}
+
+    def _pad(t: torch.Tensor, target: int) -> torch.Tensor:
+        if t.shape[0] >= target:
+            return t[:target]
+        pad_shape = (target - t.shape[0],) + t.shape[1:]
+        pad = torch.zeros(pad_shape, dtype=t.dtype)
+        return torch.cat([pad, t], dim=0)
+
+    padded_batch = []
+    for item in batch:
+        new_item = {}
+        for k, v in item.items():
+            if k in _seq_keys and isinstance(v, torch.Tensor) and v.dim() >= 2:
+                new_item[k] = _pad(v, seq_len)
+            else:
+                new_item[k] = v
+        padded_batch.append(new_item)
+
+    return default_collate(padded_batch)
+
+
 def load_full_audit_data(args, feature_names: List[str], max_samples: int = 3000, seq_len: int = 10, batch_size: int = 256) -> dict:
-    from intelligence.condor_train_net_v43 import _load_tf_csv, _load_options_chain, V43Dataset, v43_collate_fn
+    from intelligence.condor_train_net_v43 import _load_tf_csv, _load_options_chain, V43Dataset
     from torch.utils.data import DataLoader
+    from functools import partial
     
     print(f"[AUDIT] Loading M5 data from {args.data}...")
     m5_features, m5_pivots, labels_m5 = _load_tf_csv(args.data, "m5")
@@ -707,7 +739,8 @@ def load_full_audit_data(args, feature_names: List[str], max_samples: int = 3000
         m5_pivots, labels_dict, chain_snapshots, m5_dates, seq_len=seq_len
     )
     
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, drop_last=False, collate_fn=v43_collate_fn)
+    collate = partial(_audit_collate_fn, seq_len=seq_len)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, drop_last=False, collate_fn=collate)
     
     # We will compute analytics over the *entire dataset* at once by concatenating the batches
     # into a single mega-batch dict
