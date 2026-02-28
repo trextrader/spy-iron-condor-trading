@@ -2216,6 +2216,7 @@ def train_condor_net_v43(args):
             annealed_info.append(f"{name}={w:.3f}")
         anneal_str = f" | Annealed: {', '.join(annealed_info)}" if annealed_info else ""
 
+        val_train_gap = avg_val_loss - avg_train_loss  # signed: +ve = val > train (normal)
         print(f"Epoch {epoch+1:3d} | Train: {avg_train_loss:.4f} | "
               f"Val: {avg_val_loss:.4f} | gap: {val_train_gap:+.4f} | "
               f"LR: {scheduler.get_last_lr()[0]:.2e}"
@@ -2369,7 +2370,7 @@ def train_condor_net_v43(args):
         # Correct criterion: strictly lower validation loss.
         # Note: val > train is normal once dropout/augmentation are active;
         # it does NOT indicate overfitting. Patience counter is the real guard.
-        val_train_gap = avg_val_loss - avg_train_loss  # signed: positive = val > train (normal)
+        # val_train_gap already computed above before epoch summary print.
 
         is_new_best = False
         if best_val_loss == float('inf'):
