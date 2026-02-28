@@ -127,6 +127,7 @@ def print_report(epochs):
     print(f"\n{'Ep':>4}  {'Train':>8}  {'Val':>8}  {'ΔVal':>8}  {'Best':>5}")
     print("-" * 42)
     prev_val = None
+    best_epochs = []   # (epoch, val_loss) for each new best
     for ep in sorted_eps:
         d = epochs[ep]
         train = d.get("train_loss", float("nan"))
@@ -135,8 +136,32 @@ def print_report(epochs):
         flag  = " <-- BEST" if val < best_val else ""
         if val < best_val:
             best_val = val
+            best_epochs.append((ep, val))
         print(f"  {ep:3d}  {train:8.4f}  {val:8.4f}  {delta:+8.4f}  {flag}")
         prev_val = val
+
+    # ── Best-epoch cadence table ────────────────────────────────────────────
+    print()
+    print("=" * 72)
+    print("  IMPROVEMENT CADENCE — epochs waited between each new best")
+    print("=" * 72)
+    print(f"  {'Best#':>5}  {'Epoch':>6}  {'Val':>8}  {'Wait':>6}  {'ΔVal':>9}  bar")
+    print("-" * 55)
+    for i, (ep, val) in enumerate(best_epochs):
+        wait  = ep - best_epochs[i-1][0] if i > 0 else 0
+        dval  = val - best_epochs[i-1][1] if i > 0 else 0.0
+        bar   = "█" * min(wait, 20)
+        print(f"  {i+1:5d}  {ep:6d}  {val:8.4f}  {wait:6d}  {dval:+9.4f}  {bar}")
+    # Trailing drought: epochs after last best to end of log
+    last_ep   = sorted_eps[-1]
+    last_best = best_epochs[-1][0] if best_epochs else 0
+    drought   = last_ep - last_best
+    print("-" * 55)
+    print(f"  {'END':>5}  {last_ep:6d}  {'':8}  {drought:6d}  {'no improvement':>9}  "
+          f"{'█' * min(drought, 20)}  ← final drought")
+    print(f"\n  Total best epochs : {len(best_epochs)}")
+    print(f"  Max wait for best : {max(e-best_epochs[i-1][0] for i,(e,_) in enumerate(best_epochs) if i>0) if len(best_epochs)>1 else 0} epochs")
+    print(f"  Final drought     : {drought} epochs (patience consumed: {drought}/20)")
 
     # ── [EPOCH COMPONENTS] data (full, from patch) ─────────────────────────
     has_epoch_comps = any(epochs[ep].get("epoch_components") for ep in sorted_eps)
