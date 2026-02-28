@@ -31,20 +31,21 @@
 
 ---
 
-## Phase 2 — SimExit Labeling Engine (TODO)
+## Phase 2 — SimExit Labeling Engine (IMPLEMENTED — awaiting Lightning AI test)
 
 Replaces the `df["exit_signal"] = 0.0` placeholder with real optimal-exit labels
 computed from historical trade trajectories.
 
-- [ ] Implement `compute_simexit_labels(df, ...)` in `data_pipeline_v43.py`
-      For every historical entry T_0, at each future bar T:
-        - Compute `V_exit(T)` = realized PnL if exiting now
-        - Compute `V_hold(T)` = max future value before expiry
-        - Label: `exit_signal[T] = 1.0 if V_exit(T) >= V_hold(T) - epsilon else 0.0`
-- [ ] Replace the placeholder block in `compute_multitask_labels()` with `compute_simexit_labels()`
-- [ ] Add `--epsilon` CLI arg to `data_pipeline_v43.py` (default 0.02 = 2% tolerance)
-- [ ] Validate label distribution: expect ~15-30% exit=1 bars (not all-zero, not majority)
-- [ ] Re-run ETL pipeline to regenerate CSVs with real exit labels
+- [x] Added `_bsm_call_vec`, `_bsm_put_vec`, `_ic_value_scalar`, `_ic_value_vec` BSM helpers
+- [x] Implemented `compute_simexit_labels()` in `data_pipeline_v43.py`
+      Per-day simulation: entry at first bar, V_exit vs V_hold oracle comparison
+- [x] Replaced placeholder block with real `compute_simexit_labels()` call
+- [x] Added `--simexit-epsilon` CLI arg (default 0.02) wired through `label_kwargs`
+- [x] Added `simexit_epsilon` param to `compute_multitask_labels()` signature
+- [x] Updated test script with Phase 2 tests (BSM helpers, label shape/range/distribution)
+- [ ] Run `python test_exit_scaffold.py` on Lightning AI — verify ALL TESTS PASSED
+- [ ] Re-run ETL pipeline: `python intelligence/data_pipeline_v43.py --force --simexit-epsilon 0.02`
+- [ ] Validate label distribution in pipeline output (expect ~20-40% exit=1)
 - [ ] Retrain CondorNet v4.3 with real exit supervision
 
 ---

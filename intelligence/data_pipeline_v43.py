@@ -533,6 +533,218 @@ def _bsm_pop_ic(sigma_annual: np.ndarray, T: float, target_delta: float) -> np.n
     return np.clip(pop, 0.01, 0.99)
 
 
+# =============================================================================
+# BSM HELPERS — used by SimExit labeling engine
+# =============================================================================
+
+def _bsm_call_vec(
+    S_arr: np.ndarray, K: float,
+    T_arr: np.ndarray, sig_arr: np.ndarray,
+) -> np.ndarray:
+    """
+    Vectorized Black-Scholes call price (r=0, no dividends).
+    K is a scalar strike; S_arr, T_arr, sig_arr are parallel arrays.
+    Returns intrinsic max(S-K, 0) where T or sigma are invalid/zero.
+    """
+    result = np.maximum(S_arr - K, 0.0).astype(np.float64)
+    valid  = (T_arr > EPS) & (sig_arr > EPS) & (S_arr > EPS) & (K > EPS)
+    if not valid.any():
+        return result
+    Sv = S_arr[valid];  Tv = T_arr[valid];  sv = sig_arr[valid]
+    sqrtT = np.sqrt(Tv)
+    d1 = (np.log(Sv / K) + 0.5 * sv ** 2 * Tv) / (sv * sqrtT)
+    d2 = d1 - sv * sqrtT
+    result[valid] = Sv * norm.cdf(d1) - K * norm.cdf(d2)
+    return result
+
+
+def _bsm_put_vec(
+    S_arr: np.ndarray, K: float,
+    T_arr: np.ndarray, sig_arr: np.ndarray,
+) -> np.ndarray:
+    """Put price via put-call parity (r=0): P = C - S + K."""
+    return _bsm_call_vec(S_arr, K, T_arr, sig_arr) - S_arr + K
+
+
+def _ic_value_scalar(
+    S: float, K_sc: float, K_lc: float,
+    K_sp: float, K_lp: float, T: float, sig: float,
+) -> float:
+    """
+    Iron condor value (credit received at entry / debit to close), scalar.
+    call spread = C(K_sc) - C(K_lc);  put spread = P(K_sp) - P(K_lp).
+    Returns 0.0 for degenerate / expiry inputs.
+    """
+    if T <= EPS or sig <= EPS or S <= EPS:
+        # At expiry: intrinsic only
+        cs = max(S - K_sc, 0.0) - max(S - K_lc, 0.0)
+        ps = max(K_sp - S, 0.0) - max(K_lp - S, 0.0)
+        return max(cs + ps, 0.0)
+    sqrtT = np.sqrt(T)
+
+    def _c(K: float) -> float:
+        d1 = (np.log(S / K) + 0.5 * sig ** 2 * T) / (sig * sqrtT)
+        d2 = d1 - sig * sqrtT
+        return max(float(S * norm.cdf(d1) - K * norm.cdf(d2)), max(S - K, 0.0))
+
+    def _p(K: float) -> float:
+        return _c(K) - S + K  # put-call parity
+
+    return max((_c(K_sc) - _c(K_lc)) + (_p(K_sp) - _p(K_lp)), 0.0)
+
+
+def _ic_value_vec(
+    S_arr: np.ndarray, K_sc: float, K_lc: float,
+    K_sp: float, K_lp: float,
+    T_arr: np.ndarray, sig_arr: np.ndarray,
+) -> np.ndarray:
+    """Iron condor value vectorized over per-bar S / T / sigma arrays."""
+    call_spread = (
+        _bsm_call_vec(S_arr, K_sc, T_arr, sig_arr)
+        - _bsm_call_vec(S_arr, K_lc, T_arr, sig_arr)
+    )
+    put_spread = (
+        _bsm_put_vec(S_arr, K_sp, T_arr, sig_arr)
+        - _bsm_put_vec(S_arr, K_lp, T_arr, sig_arr)
+    )
+    return np.maximum(call_spread + put_spread, 0.0)
+
+
+# =============================================================================
+# SIMEXIT LABELING ENGINE  (framework Section VI)
+# =============================================================================
+
+def compute_simexit_labels(
+    df:              pd.DataFrame,
+    target_delta:    float = 0.15,
+    spread_atr_mult: float = 2.0,
+    epsilon:         float = 0.02,
+    dte_days:        float = 1.0,
+) -> np.ndarray:
+    """
+    SimExit oracle labeling for CondorNet exit head supervision.
+
+    For each trading day, simulates a 0-DTE iron condor entered at the
+    first bar (day open).  At every subsequent bar T within the session:
+
+        V_exit(T) = (credit - debit(T)) / credit       normalised PnL ∈ (-∞, 1]
+        V_hold(T) = max{ V_exit(T') : T' >= T, same day }  oracle max remaining
+
+        exit_signal[T] = 1.0  if V_exit(T) >= V_hold(T) - epsilon
+                       = 0.0  otherwise
+
+    This teaches "Option B: Improve on Hard Rules" (framework Section VII):
+    the model learns when closing early beats holding to expiry, within a
+    tolerance band so near-optimal exits are also rewarded.
+
+    Parameters
+    ----------
+    target_delta    : short strike delta (default 0.15)
+    spread_atr_mult : wing width = ATR14 * mult (default 2.0)
+    epsilon         : exit tolerance — 0.02 = within 2% of oracle max
+                      higher → more bars labeled exit (looser label)
+                      lower  → only near-optimal exits (stricter label)
+    dte_days        : assumed DTE at entry (default 1.0 = 0-DTE)
+
+    Returns
+    -------
+    exit_labels : np.ndarray[float32, N]  — 0.0 or 1.0 per M5 bar
+    """
+    N          = len(df)
+    exit_labels = np.zeros(N, dtype=np.float32)
+
+    # ── Timestamp → date groups ───────────────────────────────────────────────
+    ts       = pd.to_datetime(df["timestamp"])
+    date_arr = ts.dt.date.values   # object array of Python date instances
+
+    # ── Annualised vol proxy ──────────────────────────────────────────────────
+    if "vol_ewma" in df.columns:
+        sigma_annual = (
+            df["vol_ewma"].fillna(0.005).values.astype(np.float64) * np.sqrt(252)
+        ).clip(0.01, 5.0)
+    elif "atr_pct" in df.columns:
+        sigma_annual = (
+            df["atr_pct"].fillna(0.005).values.astype(np.float64) * np.sqrt(252)
+        ).clip(0.01, 5.0)
+    else:
+        sigma_annual = np.full(N, 0.20)
+
+    close  = df["close"].values.astype(np.float64)
+    atr14  = _compute_atr(df, 14).values.astype(np.float64)
+
+    z_delta = float(norm.ppf(1.0 - target_delta))   # ~1.036 for delta=0.15
+    T_total = dte_days / 252.0                        # full session in years
+
+    # ── Group bars by date (preserve chronological order) ────────────────────
+    seen_dates: dict = {}
+    for i, d in enumerate(date_arr):
+        if d not in seen_dates:
+            seen_dates[d] = []
+        seen_dates[d].append(i)
+
+    days_ok = days_skip = 0
+
+    for date, idx_list in seen_dates.items():
+        idx = np.array(idx_list, dtype=np.intp)
+        n   = len(idx)
+        if n < 3:                                     # too few bars to label
+            days_skip += 1
+            continue
+
+        # ── Entry parameters (first bar of day) ──────────────────────────────
+        i0   = idx[0]
+        S0   = close[i0]
+        sig0 = sigma_annual[i0]
+        atr0 = atr14[i0]
+
+        if (S0 <= EPS or sig0 <= EPS
+                or not np.isfinite(S0) or not np.isfinite(sig0)):
+            days_skip += 1
+            continue
+
+        # ── Strike computation (symmetric, delta-targeted) ───────────────────
+        sig_T0 = sig0 * np.sqrt(T_total)
+        K_sc   = S0 * np.exp( z_delta * sig_T0)          # short call
+        K_sp   = S0 * np.exp(-z_delta * sig_T0)          # short put
+        w      = max(atr0 * spread_atr_mult, S0 * 0.003) # min wing = 0.3% of spot
+        K_lc   = K_sc + w                                 # long call  (wider OTM)
+        K_lp   = max(K_sp - w, S0 * 0.10)                # long put   (floor 10% spot)
+
+        # ── Credit received at entry ──────────────────────────────────────────
+        credit = _ic_value_scalar(S0, K_sc, K_lc, K_sp, K_lp, T_total, sig0)
+        if credit < EPS:
+            days_skip += 1
+            continue
+
+        # ── Per-bar time remaining (linear decay: T_total → 0) ───────────────
+        bar_pos = np.arange(n, dtype=np.float64)
+        T_rem   = T_total * np.maximum(n - 1 - bar_pos, 0.0) / max(n - 1, 1)
+
+        # ── Mark-to-market IC debit at each bar (vectorised BSM) ─────────────
+        S_t   = close[idx]
+        sig_t = sigma_annual[idx]
+        debit = _ic_value_vec(S_t, K_sc, K_lc, K_sp, K_lp, T_rem, sig_t)
+
+        # ── Normalised PnL: V_exit ∈ (-∞, 1] ────────────────────────────────
+        v_exit = np.clip((credit - debit) / credit, -10.0, 1.0)
+
+        # ── Oracle V_hold[j] = max(v_exit[j:]) ───────────────────────────────
+        v_hold = np.maximum.accumulate(v_exit[::-1])[::-1]
+
+        # ── Label: exit is optimal within epsilon tolerance ───────────────────
+        exit_labels[idx] = (v_exit >= v_hold - epsilon).astype(np.float32)
+        days_ok += 1
+
+    # ── Diagnostics ──────────────────────────────────────────────────────────
+    n_exit = int(exit_labels.sum())
+    frac   = n_exit / max(N, 1)
+    print(f"  [SimExit] Days ok={days_ok}  skipped={days_skip}")
+    print(f"  [SimExit] exit=1: {n_exit:,} / {N:,} bars  ({frac*100:.1f}%)"
+          f"  epsilon={epsilon:.3f}  delta={target_delta:.2f}"
+          f"  wing_mult={spread_atr_mult:.1f}")
+    return exit_labels
+
+
 def compute_multitask_labels(
     df: pd.DataFrame,
     fwd_bars:        int            = 5,
@@ -541,6 +753,7 @@ def compute_multitask_labels(
     spread_atr_mult: float          = 2.0,
     credit_fraction: float          = 0.35,
     options_path:    Optional[str]  = None,
+    simexit_epsilon: float          = 0.02,
 ) -> pd.DataFrame:
     """
     Compute all multi-task training labels for M5 bars.
@@ -665,12 +878,15 @@ def compute_multitask_labels(
     df["max_loss"] = ml_adj.astype(np.float32)
     # var_95 / cvar_95 are risk-environment measures; kept at IC-baseline values.
 
-    # ?? 7. SimExit label placeholder (col 8) ?????????????????????????????????????
-    # Initialized to 0.0 (hold) across all bars.
-    # Replace with SimExit labeling engine output before production training:
-    #   V_exit(T) >= V_hold(T) - epsilon  →  exit_signal = 1.0  (exit now)
-    #   otherwise                         →  exit_signal = 0.0  (hold)
-    df["exit_signal"] = np.float32(0.0)
+    # ?? 7. SimExit labels (col 8) — oracle V_exit vs V_hold comparison ??????????
+    print(f"  [SimExit] Computing oracle exit labels (epsilon={simexit_epsilon:.3f})...")
+    df["exit_signal"] = compute_simexit_labels(
+        df,
+        target_delta    = target_delta,
+        spread_atr_mult = spread_atr_mult,
+        epsilon         = simexit_epsilon,
+        dte_days        = dte_days,
+    )
 
     # ?? Diagnostics ???????????????????????????????????????????????????????
     from collections import Counter
@@ -777,6 +993,10 @@ def main() -> None:
                    help="Path to options CSV (e.g. data/Datasetv4/v43/options_2025_v43.csv). "
                         "When provided, pop/ev/max_loss are derived from real market "
                         "bid/ask/delta data instead of BSM/ATR proxies.")
+    p.add_argument("--simexit-epsilon", type=float, default=0.02,
+                   help="SimExit tolerance: bar labeled exit=1 if V_exit >= V_hold - epsilon. "
+                        "0.02 = within 2%% of oracle max (default). "
+                        "Higher → more exit=1 bars (looser). Lower → stricter.")
     args = p.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -791,10 +1011,11 @@ def main() -> None:
     }
 
     label_kwargs = {
-        "fwd_bars":      args.fwd_bars,
-        "target_delta":  args.target_delta,
-        "dte_days":      args.dte,
-        "options_path":  args.options_path,   # None → BSM fallback
+        "fwd_bars":        args.fwd_bars,
+        "target_delta":    args.target_delta,
+        "dte_days":        args.dte,
+        "options_path":    args.options_path,     # None → BSM fallback
+        "simexit_epsilon": args.simexit_epsilon,  # V_exit >= V_hold - epsilon → exit=1
     }
 
     for tf_name, (filename, compute_labels) in tf_files.items():
