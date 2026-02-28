@@ -46,7 +46,8 @@ computed from historical trade trajectories.
 - [x] Run `python test_exit_scaffold.py` on Lightning AI — ALL TESTS PASSED ✓
 - [x] Re-run ETL pipeline: `python intelligence/data_pipeline_v43.py --force --simexit-epsilon 0.02`
 - [x] Validate label distribution in pipeline output — 7,220 / 18,494 bars (39.0%) ✓
-- [ ] Retrain CondorNet v4.3 with real exit supervision
+- [x] Retrain CondorNet v4.3 with real exit supervision
+      Best epoch 41 | val=1.7748 | exit_bce=0.5690 (drop: 0.1099 from zero-init) ✓
 
 ---
 
