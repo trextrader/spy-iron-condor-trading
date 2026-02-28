@@ -82,7 +82,7 @@ class CapitalConstraintEngine:
         """
         if B_peak <= 0:
             return False
-        return (B_peak - B_t) / B_peak > self.d_max
+        return (B_peak - B_t) / B_peak >= self.d_max
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -142,8 +142,8 @@ class HardExitRules:
             return HardExitResult(True, "hard_delta_violation")
 
         # 3. Capital Emergency Exit  (framework Section IV.5)
-        #    Trigger when total equity drawdown from peak exceeds threshold
-        if B_peak > 0 and (B_peak - B_t) / B_peak > self.max_drawdown_pct:
+        #    Trigger when total equity drawdown from peak meets or exceeds threshold
+        if B_peak > 0 and (B_peak - B_t) / B_peak >= self.max_drawdown_pct:
             return HardExitResult(True, "hard_capital_emergency")
 
         # 4. Pivot Containment Hard Stop  (framework Section V.2)
