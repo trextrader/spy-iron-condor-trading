@@ -4,7 +4,7 @@
 
 ---
 
-## Phase 1 — Exit Head Scaffold (DONE — local, untested)
+## Phase 1 — Exit Head Scaffold (COMPLETE ✓ — Lightning AI 2026-02-27)
 
 - [x] `condor_brain_net_v43.py` — Add `ExitHead` class (PART 8b)
 - [x] `condor_brain_net_v43.py` — Add `exit_signal: torch.Tensor` to `CondorNetOutput` dataclass
@@ -31,7 +31,7 @@
 
 ---
 
-## Phase 2 — SimExit Labeling Engine (IMPLEMENTED — awaiting Lightning AI test)
+## Phase 2 — SimExit Labeling Engine (COMPLETE ✓ — Lightning AI 2026-02-27)
 
 Replaces the `df["exit_signal"] = 0.0` placeholder with real optimal-exit labels
 computed from historical trade trajectories.
@@ -43,9 +43,9 @@ computed from historical trade trajectories.
 - [x] Added `--simexit-epsilon` CLI arg (default 0.02) wired through `label_kwargs`
 - [x] Added `simexit_epsilon` param to `compute_multitask_labels()` signature
 - [x] Updated test script with Phase 2 tests (BSM helpers, label shape/range/distribution)
-- [ ] Run `python test_exit_scaffold.py` on Lightning AI — verify ALL TESTS PASSED
-- [ ] Re-run ETL pipeline: `python intelligence/data_pipeline_v43.py --force --simexit-epsilon 0.02`
-- [ ] Validate label distribution in pipeline output (expect ~20-40% exit=1)
+- [x] Run `python test_exit_scaffold.py` on Lightning AI — ALL TESTS PASSED ✓
+- [x] Re-run ETL pipeline: `python intelligence/data_pipeline_v43.py --force --simexit-epsilon 0.02`
+- [x] Validate label distribution in pipeline output — 7,220 / 18,494 bars (39.0%) ✓
 - [ ] Retrain CondorNet v4.3 with real exit supervision
 
 ---
@@ -114,7 +114,8 @@ Exit if:
 
 ## Notes
 
-- Phase 1 changes are **local only** — not committed or pushed
-- `ExitHead` is zero-initialized → starts at neutral p=0.5; has no effect until Phase 2 labels are real
+- All Phase 1 + Phase 2 changes committed and pushed to `main`
+- `ExitHead` is zero-initialized → starts at neutral p=0.5; learns real timing after Phase 2 retraining
 - Checkpoint resume uses `strict=False` — old checkpoints load cleanly, `exit_head.*` inits to zero
+- M5 CSV: 91 columns, 39% exit=1 (7,220 / 18,494 bars, 238 days, epsilon=0.02)
 - Framework document: `docs/Entries with Exits and Cognitive Holds Predictive Analytic Folds.pdf`
