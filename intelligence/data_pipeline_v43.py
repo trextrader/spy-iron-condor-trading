@@ -94,6 +94,7 @@ PIPELINE_LABEL_NAMES: List[str] = [
     "max_loss",
     "var_95",
     "cvar_95",
+    "exit_signal",   # SimExit label: 0.0 placeholder (replaced by SimExit engine later)
 ]
 
 # Trading session constants
@@ -663,6 +664,13 @@ def compute_multitask_labels(
     df["ev"]       = ev_adj.astype(np.float32)
     df["max_loss"] = ml_adj.astype(np.float32)
     # var_95 / cvar_95 are risk-environment measures; kept at IC-baseline values.
+
+    # ?? 7. SimExit label placeholder (col 8) ?????????????????????????????????????
+    # Initialized to 0.0 (hold) across all bars.
+    # Replace with SimExit labeling engine output before production training:
+    #   V_exit(T) >= V_hold(T) - epsilon  →  exit_signal = 1.0  (exit now)
+    #   otherwise                         →  exit_signal = 0.0  (hold)
+    df["exit_signal"] = np.float32(0.0)
 
     # ?? Diagnostics ???????????????????????????????????????????????????????
     from collections import Counter

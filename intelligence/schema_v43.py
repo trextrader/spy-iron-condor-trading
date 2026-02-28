@@ -273,9 +273,10 @@ TF_LABEL_NAMES: List[str] = [
     "max_loss",           # col 5: max loss / close
     "var_95",             # col 6: 95% VaR / close
     "cvar_95",            # col 7: 95% CVaR / close
+    "exit_signal",        # col 8: SimExit label ∈ [0,1] (0.0 placeholder; upgraded by SimExit engine)
 ]
 """Training targets. Excluded from model input.
-Columns 0-1 present in raw CSVs. Columns 2-7 added by data_pipeline_v43.py.
+Columns 0-1 present in raw CSVs. Columns 2-8 added by data_pipeline_v43.py.
 _load_tf_csv fills missing columns with 0 — safe for incremental updates."""
 
 # Sparse features — NaN is semantically meaningful, NEVER impute

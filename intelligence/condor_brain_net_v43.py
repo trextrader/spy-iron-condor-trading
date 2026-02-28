@@ -97,6 +97,7 @@ class CondorNetOutput:
     strategy_logits:   torch.Tensor          # [B, 10] — softmax over 10 strategy types
     leg_params:        torch.Tensor          # [B, 4, 5] — per-leg: (moneyness_offset, expiry_bucket, long_short, qty, delta_target)
     entry_signal:      torch.Tensor          # [B, 1] — binary entry confidence ∈ [0,1]
+    exit_signal:       torch.Tensor          # [B, 1] — exit probability ∈ [0,1] (SimExit head)
 
     # Risk metric outputs
     pop:               torch.Tensor          # [B, 1] — PoP ∈ [0,1]
@@ -138,6 +139,7 @@ class CondorNetOutput:
         return {
             "strategy_logits":  self.strategy_logits.detach().cpu().tolist(),
             "entry_signal":     self.entry_signal.detach().cpu().tolist(),
+            "exit_signal":      self.exit_signal.detach().cpu().tolist(),
             "pop":              self.pop.detach().cpu().tolist(),
             "ev":               self.ev.detach().cpu().tolist(),
             "max_loss":         self.max_loss.detach().cpu().tolist(),
@@ -925,6 +927,46 @@ class MTFConsensusGate(nn.Module):
 
 
 # =============================================================================
+# PART 8b: EXIT HEAD — SimExit Decision Module
+# =============================================================================
+
+class ExitHead(nn.Module):
+    """
+    Exit decision head for closed-loop portfolio control.
+
+    Outputs a per-bar exit probability p_exit ∈ [0,1] from the joint
+    representation.  Initially trained on SimExit placeholder labels (0.0);
+    later supervised by the SimExit labeling engine that compares
+    V_exit(t) vs V_hold(t) along each historical trade trajectory.
+
+    Production exit stack (Section X of framework):
+        Exit if: HardExit ∨ (p_exit > 0.70 ∧ NOT in Protected Hold Zone)
+
+    Architecture: single linear → sigmoid  (no hidden layer).
+    Kept minimal so gradient flows cleanly to ETD-1 memory
+    (joint_last ← joint ← TF fusion ← ETD-1 state).
+    """
+
+    def __init__(self, d_joint: int = 384):
+        super().__init__()
+        # Zero-initialize weight → sigmoid(0) = 0.5 at training start (neutral prior)
+        self.exit_head = nn.Linear(d_joint, 1)
+        nn.init.zeros_(self.exit_head.weight)
+        nn.init.zeros_(self.exit_head.bias)
+
+    def forward(self, joint_repr: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            joint_repr: [B, d_joint] — last-step joint representation
+
+        Returns:
+            exit_prob: [B, 1] ∈ [0,1] — probability that exiting NOW is
+                       preferable to holding through expiry
+        """
+        return torch.sigmoid(self.exit_head(joint_repr))
+
+
+# =============================================================================
 # PART 9: CONDORNET V43 — UNIFIED MODEL
 # =============================================================================
 
@@ -1032,6 +1074,11 @@ class CondorNetV43(nn.Module):
             nn.GELU(),
             nn.Linear(64, 1),
         )
+
+        # Exit decision head (SimExit framework — Section XII)
+        # Zero-initialized → neutral prior (p_exit=0.5) at training start.
+        # Supervised by exit_signal labels from data_pipeline_v43.py.
+        self.exit_head = ExitHead(d_joint)
 
         # ── v42 CORE ENGINE ─────────────────────────────────────────────────
         # The v42 CondorNet processes the fused TF representation for predicate
@@ -1187,6 +1234,7 @@ class CondorNetV43(nn.Module):
         pivot_high_probs, pivot_low_probs, pivot_strength = self.pivot_pred_head(joint_last)
         position_size = self.size_head(pop.detach(), joint_last, self.pop_sizing_weight)
         spot_pred     = self.spot_head(joint_last)
+        exit_signal   = self.exit_head(joint_last)   # [B, 1] ∈ [0,1]
 
         diags = None
         if return_diagnostics:
@@ -1214,6 +1262,7 @@ class CondorNetV43(nn.Module):
             pivot_strength    = pivot_strength,
             position_size     = position_size,
             spot_pred         = spot_pred,
+            exit_signal       = exit_signal,
             final_gate        = core_diag.get("final_gate"),
             diagnostics       = diags,
             consensus_strength = consensus_strength,
@@ -1335,6 +1384,7 @@ if __name__ == "__main__":
     print(f"  pivot_low_probs:   {out.pivot_low_probs.shape}")
     print(f"  position_size:     {out.position_size.shape}  mean={out.position_size.mean():.3f}")
     print(f"  spot_pred:         {out.spot_pred.shape}")
+    print(f"  exit_signal:       {out.exit_signal.shape}  mean={out.exit_signal.mean():.3f}")
 
     # Test abstain mask
     abstain = out.abstain_mask

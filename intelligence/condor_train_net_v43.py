@@ -588,18 +588,20 @@ def get_annealed_weight(
 
 class CondorLossV43(nn.Module):
     """
-    9-component composite loss for CondorNet v4.3.
+    11-component composite loss for CondorNet v4.3.
 
     Components:
-        1. strategy_ce:  Cross-entropy over 10 strategy classes
-        2. pop_bce:      Binary cross-entropy for PoP calibration
-        3. ev_mse:       MSE for Expected Value prediction
-        4. risk_mse:     MSE for VaR + CVaR + max_loss combined
-        5. size_mse:     MSE for fuzzy position size output
+        1.  strategy_ce:           Cross-entropy over 10 strategy classes
+        2.  pop_bce:               Binary cross-entropy for PoP calibration
+        3.  ev_mse:                MSE for Expected Value prediction
+        4.  risk_mse:              MSE for VaR + CVaR + max_loss combined
+        5.  size_mse:              MSE for fuzzy position size output
         6. spot_mse:     MSE for target spot price (auxiliary)
         7. fuzzy_var:    Variance penalty on gate outputs
-        8. pattern_ent:  Entropy regularizer on predicate activations
-        9. robust:       Huber loss for outlier-robust EV/risk
+        8.  pattern_ent:           Entropy regularizer on predicate activations
+        9.  robust:                Huber loss for outlier-robust EV/risk
+        10. consensus_consistency: MTF gate shaping (entry_signal vs agreement)
+        11. exit_bce:              Binary CE for SimExit head (0.0 placeholder → SimExit engine)
 
     Supports linear weight annealing per configs/loss_weights_v43.json.
     """
@@ -741,6 +743,20 @@ class CondorLossV43(nn.Module):
             components['consensus_consistency'] = consistency_loss
         else:
             components['consensus_consistency'] = torch.tensor(0.0, device=device)
+
+        # === 11. Exit BCE (SimExit head) ===
+        # Binary cross-entropy against exit_signal label (0=hold, 1=exit).
+        # Placeholder labels are 0.0; loss is structurally 0 until the
+        # SimExit labeling engine populates non-zero targets.
+        # Mirror pop_bce pattern: autocast disabled, .float() + clamp.
+        if 'exit_signal' in labels and outputs.exit_signal is not None:
+            exit_target = labels['exit_signal'].unsqueeze(-1) if labels['exit_signal'].dim() == 1 else labels['exit_signal']
+            with torch.amp.autocast(device_type=device.type, enabled=False):
+                components['exit_bce'] = F.binary_cross_entropy(
+                    outputs.exit_signal.float().clamp(1e-7, 1 - 1e-7), exit_target.float()
+                )
+        else:
+            components['exit_bce'] = torch.tensor(0.0, device=device)
 
         # === Total Loss (weighted sum with annealing) ===
         total_loss = torch.tensor(0.0, device=device)
@@ -971,7 +987,7 @@ def build_dataloaders_v43(args) -> Tuple:
     }
     # Risk labels: only added when data_pipeline_v43.py has been run
     for col_idx, name in ((3, 'pop'), (4, 'ev'), (5, 'max_loss'),
-                          (6, 'var_95'), (7, 'cvar_95')):
+                          (6, 'var_95'), (7, 'cvar_95'), (8, 'exit_signal')):
         v = _col(m5_lbl, col_idx)
         if v is not None:
             labels[name] = v

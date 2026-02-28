@@ -12,7 +12,8 @@
     "fuzzy_var":             0.2,
     "pattern_ent":           0.1,
     "robust":                0.2,
-    "consensus_consistency": 0.05
+    "consensus_consistency": 0.05,
+    "exit_bce":              0.5
   },
   "annealing": {
     "type": "linear",
@@ -34,6 +35,7 @@
     "fuzzy_var":             "Variance penalty on fuzzy gate outputs. Decays to near-zero as model stabilizes.",
     "pattern_ent":           "Entropy regularizer on predicate pattern activations. Low constant weight.",
     "robust":                "Huber loss component for outlier robustness in EV/risk predictions.",
-    "consensus_consistency": "MTF consensus gate shaping: pushes entry_signal up when psar_trend+breakout_score agree across M1/M5/M15/H1. Ramps from 0.05 to 0.10 between epoch 5-25."
+    "consensus_consistency": "MTF consensus gate shaping: pushes entry_signal up when psar_trend+breakout_score agree across M1/M5/M15/H1. Ramps from 0.05 to 0.10 between epoch 5-25.",
+    "exit_bce":              "Binary CE for SimExit head. Placeholder labels (0.0) produce near-constant loss until SimExit labeling engine populates real exit_signal targets. Weight 0.5 keeps it from dominating while scaffold is inactive."
   }
 }
