@@ -1368,7 +1368,7 @@ def extract_epoch_interpretability_v43(
             "timestamp": datetime.now().isoformat(),
             "train_loss": float(train_loss),
             "val_loss": float(val_loss),
-            "val_train_gap": float(abs(val_loss - train_loss)),
+            "val_train_gap": float(val_loss - train_loss),
             "is_best": is_best,
             "parameters": n_params,
             "architecture": {
@@ -2162,7 +2162,8 @@ def train_condor_net_v43(args):
         anneal_str = f" | Annealed: {', '.join(annealed_info)}" if annealed_info else ""
 
         print(f"Epoch {epoch+1:3d} | Train: {avg_train_loss:.4f} | "
-              f"Val: {avg_val_loss:.4f} | LR: {scheduler.get_last_lr()[0]:.2e}"
+              f"Val: {avg_val_loss:.4f} | gap: {val_train_gap:+.4f} | "
+              f"LR: {scheduler.get_last_lr()[0]:.2e}"
               f"{anneal_str}")
         _comp_avg_str = "  ".join(
             f"{k}={v / max(1, epoch_batches_run):.4f}"
@@ -2311,10 +2312,9 @@ def train_condor_net_v43(args):
         # saving genuinely better checkpoints (Run 4 epoch 7 val=1.8488
         # was rejected; only epoch 2 val=2.099 was saved).
         # Correct criterion: strictly lower validation loss.
-        # Overfitting tag is diagnostic only — never a save blocker.
-        val_train_gap = abs(avg_val_loss - avg_train_loss)
-        is_overfit = avg_val_loss > avg_train_loss
-        overfit_tag = " [overfit]" if is_overfit else ""
+        # Note: val > train is normal once dropout/augmentation are active;
+        # it does NOT indicate overfitting. Patience counter is the real guard.
+        val_train_gap = avg_val_loss - avg_train_loss  # signed: positive = val > train (normal)
 
         is_new_best = False
         if best_val_loss == float('inf'):
@@ -2337,11 +2337,11 @@ def train_condor_net_v43(args):
             best_data = dict(ckpt_data)
             best_data['best_val_loss'] = best_val_loss
             if atomic_save(best_data, args.output):
-                print(f"  -> NEW BEST MODEL (Epoch {epoch+1}){overfit_tag}: {reason}")
+                print(f"  -> NEW BEST MODEL (Epoch {epoch+1}): {reason}")
                 print(f"     Saved: {args.output}")
         else:
             patience_counter += 1
-            print(f"  -> Epoch {epoch+1}{overfit_tag}: {reason}")
+            print(f"  -> Epoch {epoch+1}: {reason}")
 
         # ── EPOCH ANALYTICS (interpretability + A/B matrices + comparison) ──
         interp_report = extract_epoch_interpretability_v43(
