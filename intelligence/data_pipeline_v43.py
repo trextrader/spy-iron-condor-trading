@@ -610,6 +610,43 @@ def _ic_value_vec(
     return np.maximum(call_spread + put_spread, 0.0)
 
 
+# BSM Greek helpers (shared by SimExit and PosState engines)
+
+def _bsm_delta_call_vec(
+    S_arr: np.ndarray, K: float,
+    T_arr: np.ndarray, sig_arr: np.ndarray,
+) -> np.ndarray:
+    """BSM call delta = N(d1).  Put delta = call_delta - 1."""
+    T_arr   = np.maximum(T_arr,   EPS)
+    sig_arr = np.maximum(sig_arr, EPS)
+    d1 = (np.log(S_arr / K) + 0.5 * sig_arr ** 2 * T_arr) / (sig_arr * np.sqrt(T_arr))
+    return norm.cdf(d1)
+
+
+def _bsm_gamma_vec(
+    S_arr: np.ndarray, K: float,
+    T_arr: np.ndarray, sig_arr: np.ndarray,
+) -> np.ndarray:
+    """BSM gamma = n(d1) / (S * σ * √T).  Same for calls and puts."""
+    T_arr   = np.maximum(T_arr,   EPS)
+    sig_arr = np.maximum(sig_arr, EPS)
+    d1 = (np.log(S_arr / K) + 0.5 * sig_arr ** 2 * T_arr) / (sig_arr * np.sqrt(T_arr))
+    return norm.pdf(d1) / (S_arr * sig_arr * np.sqrt(T_arr))
+
+
+def _bsm_theta_call_vec(
+    S_arr: np.ndarray, K: float,
+    T_arr: np.ndarray, sig_arr: np.ndarray,
+) -> np.ndarray:
+    """BSM call theta per year = -(S * σ * n(d1)) / (2 * √T).
+    Negative value: as time passes option loses value for the holder.
+    For IC seller, short legs contribute positive theta (income)."""
+    T_arr   = np.maximum(T_arr,   EPS)
+    sig_arr = np.maximum(sig_arr, EPS)
+    d1 = (np.log(S_arr / K) + 0.5 * sig_arr ** 2 * T_arr) / (sig_arr * np.sqrt(T_arr))
+    return -(S_arr * sig_arr * norm.pdf(d1)) / (2.0 * np.sqrt(T_arr))
+
+
 # =============================================================================
 # SIMEXIT LABELING ENGINE  (framework Section VI)
 # =============================================================================
@@ -745,6 +782,169 @@ def compute_simexit_labels(
     return exit_labels
 
 
+# =============================================================================
+# POSITION STATE ENGINE  (framework Phase 3 — Section III / Section IX)
+# =============================================================================
+
+def compute_posstate_features(
+    df:              pd.DataFrame,
+    target_delta:    float = 0.15,
+    spread_atr_mult: float = 2.0,
+    dte_days:        float = 1.0,
+) -> np.ndarray:
+    """
+    Simulate per-bar position state for a 0-DTE IC entered at the first bar
+    of each trading day.  Returns 11 features per bar (framework Section III):
+
+        ps_pnl_pct        V_exit[t] = (credit - debit[t]) / credit
+        ps_credit_norm    IC entry credit / spot close (fraction of spot)
+        ps_bars_held      t / (n_bars - 1) normalised position age [0, 1]
+        ps_dte_frac       fraction of DTE remaining [0, 1]
+        ps_delta_exp      net IC delta (BSM) — ≈0 at entry, drifts with price
+        ps_gamma_exp      net IC gamma (BSM) — negative (short gamma)
+        ps_theta_pos      net IC theta per bar (BSM) — positive for IC seller
+        ps_iv_change      (vol[t] - vol[0]) / vol[0], IV change since entry
+        ps_high_water     running max of pnl_pct (best value seen so far)
+        ps_mae            1 - running min of pnl_pct (max adverse excursion)
+        ps_unrealized_norm credit_per_point * pnl_pct / close (dollar proxy)
+
+    When the day has fewer than 3 bars (skipped), all 11 features are 0.
+    Feature 0 (ps_pnl_pct) can be negative for large adverse moves.
+
+    Returns
+    -------
+    pos_state : np.ndarray[float32, (N, 11)]
+    """
+    from intelligence.schema_v43 import POS_STATE_NAMES, N_POS_STATE
+
+    N = len(df)
+    pos_state = np.zeros((N, N_POS_STATE), dtype=np.float32)
+
+    ts       = pd.to_datetime(df["timestamp"])
+    date_arr = ts.dt.date.values
+
+    if "vol_ewma" in df.columns:
+        sigma_annual = (
+            df["vol_ewma"].fillna(0.005).values.astype(np.float64) * np.sqrt(252)
+        ).clip(0.01, 5.0)
+    elif "atr_pct" in df.columns:
+        sigma_annual = (
+            df["atr_pct"].fillna(0.005).values.astype(np.float64) * np.sqrt(252)
+        ).clip(0.01, 5.0)
+    else:
+        sigma_annual = np.full(N, 0.20)
+
+    close = df["close"].values.astype(np.float64)
+    atr14 = _compute_atr(df, 14).values.astype(np.float64)
+
+    z_delta = float(norm.ppf(1.0 - target_delta))
+    T_total = dte_days / 252.0
+
+    # Group bars by date
+    seen_dates: dict = {}
+    for i, d in enumerate(date_arr):
+        if d not in seen_dates:
+            seen_dates[d] = []
+        seen_dates[d].append(i)
+
+    for date, idx_list in seen_dates.items():
+        idx = np.array(idx_list, dtype=np.intp)
+        n   = len(idx)
+        if n < 3:
+            continue  # leave zeros
+
+        i0    = idx[0]
+        S0    = close[i0]
+        sig0  = sigma_annual[i0]
+        atr0  = max(atr14[i0], S0 * 0.001)
+
+        # Strike selection (same as SimExit engine)
+        half_width = spread_atr_mult * atr0
+        K_sc = S0 + z_delta * sig0 * np.sqrt(T_total) * S0
+        K_lc = K_sc + half_width
+        K_sp = S0 - z_delta * sig0 * np.sqrt(T_total) * S0
+        K_lp = K_sp - half_width
+
+        if K_sc <= S0 or K_sp >= S0 or K_lp <= 0:
+            continue
+
+        # Entry credit (normalized: credit per point / S0)
+        credit = _ic_value_scalar(S0, K_sc, K_lc, K_sp, K_lp, T_total, sig0)
+        if credit < EPS:
+            continue
+        credit_norm = credit / S0  # fraction of spot
+
+        # Per-bar arrays
+        S_bars   = close[idx].astype(np.float64)
+        sig_bars = sigma_annual[idx]
+        # Time remaining decreases bar by bar
+        T_bars = np.maximum(T_total * (1.0 - np.arange(n) / n), EPS)
+
+        # Debit to close position at each bar
+        debit_bars = _ic_value_vec(S_bars, K_sc, K_lc, K_sp, K_lp, T_bars, sig_bars)
+        pnl_pct    = (credit - debit_bars) / credit   # ∈ (-∞, 1]
+
+        # BSM Greeks at each bar — net IC position
+        # IC = sell K_sc call + buy K_lc call + sell K_sp put + buy K_lp put
+        # Net delta = -Δ_call(sc) + Δ_call(lc) - Δ_put(sp) + Δ_put(lp)
+        #           = -Δ_call(sc) + Δ_call(lc) - (Δ_call(sp)-1) + (Δ_call(lp)-1)
+        #           = -Δ_call(sc) + Δ_call(lc) - Δ_call(sp) + Δ_call(lp)
+        d_sc = _bsm_delta_call_vec(S_bars, K_sc, T_bars, sig_bars)
+        d_lc = _bsm_delta_call_vec(S_bars, K_lc, T_bars, sig_bars)
+        d_sp = _bsm_delta_call_vec(S_bars, K_sp, T_bars, sig_bars)
+        d_lp = _bsm_delta_call_vec(S_bars, K_lp, T_bars, sig_bars)
+        net_delta = -d_sc + d_lc - d_sp + d_lp   # ≈0 at entry, bounded [−1, 1]
+
+        # Net gamma: IC seller is short gamma on short legs, long on long legs
+        g_sc = _bsm_gamma_vec(S_bars, K_sc, T_bars, sig_bars)
+        g_lc = _bsm_gamma_vec(S_bars, K_lc, T_bars, sig_bars)
+        g_sp = _bsm_gamma_vec(S_bars, K_sp, T_bars, sig_bars)
+        g_lp = _bsm_gamma_vec(S_bars, K_lp, T_bars, sig_bars)
+        net_gamma = -g_sc + g_lc - g_sp + g_lp    # negative (short gamma)
+
+        # Net theta: IC seller collects on short legs, pays on long legs
+        # theta_call < 0 (option loses value with time for holder)
+        # sell = we gain → -theta_sell; buy = we pay → theta_buy
+        th_sc = _bsm_theta_call_vec(S_bars, K_sc, T_bars, sig_bars)
+        th_lc = _bsm_theta_call_vec(S_bars, K_lc, T_bars, sig_bars)
+        th_sp = _bsm_theta_call_vec(S_bars, K_sp, T_bars, sig_bars)
+        th_lp = _bsm_theta_call_vec(S_bars, K_lp, T_bars, sig_bars)
+        net_theta_annual = -th_sc + th_lc - th_sp + th_lp  # positive for IC seller
+        net_theta_per_bar = net_theta_annual / (252.0 * 78.0)  # per 5-min bar
+
+        # IV change since entry
+        iv_change = np.where(sig0 > EPS, (sig_bars - sig0) / sig0, 0.0)
+
+        # Running max / min for HWM and MAE
+        high_water = np.maximum.accumulate(pnl_pct)
+        mae        = 1.0 - np.minimum.accumulate(pnl_pct)   # 0 at entry, grows with loss
+
+        # Normalized position age and DTE
+        bars_held = np.arange(n) / max(n - 1, 1)         # [0, 1]
+        dte_frac  = 1.0 - bars_held                        # [1, 0]
+
+        # Dollar proxy: credit × pnl_pct / close (dimensionless)
+        unrealized_norm = (credit * pnl_pct) / np.maximum(S_bars, EPS)
+
+        # Stack into output
+        block = np.column_stack([
+            pnl_pct.astype(np.float32),           # 0: ps_pnl_pct
+            np.full(n, credit_norm, np.float32),  # 1: ps_credit_norm
+            bars_held.astype(np.float32),          # 2: ps_bars_held
+            dte_frac.astype(np.float32),           # 3: ps_dte_frac
+            net_delta.astype(np.float32),          # 4: ps_delta_exp
+            net_gamma.astype(np.float32),          # 5: ps_gamma_exp
+            net_theta_per_bar.astype(np.float32),  # 6: ps_theta_pos
+            iv_change.astype(np.float32),          # 7: ps_iv_change
+            high_water.astype(np.float32),         # 8: ps_high_water
+            mae.astype(np.float32),                # 9: ps_mae
+            unrealized_norm.astype(np.float32),    # 10: ps_unrealized_norm
+        ])
+        pos_state[idx] = block
+
+    return pos_state
+
+
 def compute_multitask_labels(
     df: pd.DataFrame,
     fwd_bars:        int            = 5,
@@ -754,6 +954,7 @@ def compute_multitask_labels(
     credit_fraction: float          = 0.35,
     options_path:    Optional[str]  = None,
     simexit_epsilon: float          = 0.02,
+    skip_posstate:   bool           = False,
 ) -> pd.DataFrame:
     """
     Compute all multi-task training labels for M5 bars.
@@ -888,6 +1089,21 @@ def compute_multitask_labels(
         dte_days        = dte_days,
     )
 
+    # ?? 8. Position State Vector (Phase 3 — M5 only) ???????????????????
+    if not skip_posstate:
+        print(f"  [PosState] Computing position state features (11 cols)...")
+        from intelligence.schema_v43 import POS_STATE_NAMES
+        ps_arr = compute_posstate_features(
+            df,
+            target_delta    = target_delta,
+            spread_atr_mult = spread_atr_mult,
+            dte_days        = dte_days,
+        )
+        for j, col in enumerate(POS_STATE_NAMES):
+            df[col] = ps_arr[:, j]
+        n_active = int((ps_arr[:, 0] != 0.0).sum())
+        print(f"    -> {n_active:,} active-position bars ({n_active / len(df) * 100:.1f}%)")
+
     # ?? Diagnostics ???????????????????????????????????????????????????????
     from collections import Counter
     label_counts = Counter(strategy_label.tolist())
@@ -997,6 +1213,9 @@ def main() -> None:
                    help="SimExit tolerance: bar labeled exit=1 if V_exit >= V_hold - epsilon. "
                         "0.02 = within 2%% of oracle max (default). "
                         "Higher → more exit=1 bars (looser). Lower → stricter.")
+    p.add_argument("--no-posstate", action="store_true",
+                   help="Skip Position State Vector computation (Phase 3 — 11 ps_* columns). "
+                        "Use for quick label-only runs when pos_state is not yet needed.")
     args = p.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -1016,6 +1235,7 @@ def main() -> None:
         "dte_days":        args.dte,
         "options_path":    args.options_path,     # None → BSM fallback
         "simexit_epsilon": args.simexit_epsilon,  # V_exit >= V_hold - epsilon → exit=1
+        "skip_posstate":   args.no_posstate,      # Phase 3: skip ps_* columns (default: compute)
     }
 
     for tf_name, (filename, compute_labels) in tf_files.items():

@@ -967,6 +967,43 @@ class ExitHead(nn.Module):
 
 
 # =============================================================================
+# PART 8c: POSITION STATE PROJECTOR — ETD-1 memory enrichment (Phase 3)
+# =============================================================================
+
+class PosStateProjector(nn.Module):
+    """
+    Projects the 11-feature Position State Vector into tf_fused space [B, T, d_tf_joint].
+
+    Injected additively into tf_fused BEFORE core_input_proj and joint_fusion,
+    enriching both the ETD-1 u_t control input and output heads with live
+    trade state information (framework Section IX).
+
+    Zero-initialized → no effect when pos_state=zeros (idle bars or feature absent).
+    The model must learn nonzero weights before pos_state influences predictions.
+
+    Architecture: Linear(11 → d_tf_joint) → Tanh
+    Tanh bounds the additive delta to (-1, +1), preventing runaway magnitudes
+    from extreme pos_state values (e.g. very negative pnl_pct).
+    """
+
+    def __init__(self, n_pos_state: int = 11, d_tf_joint: int = 256):
+        super().__init__()
+        self.proj = nn.Linear(n_pos_state, d_tf_joint)
+        nn.init.zeros_(self.proj.weight)
+        nn.init.zeros_(self.proj.bias)
+        self.act = nn.Tanh()
+
+    def forward(self, pos_state: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            pos_state: [B, T, 11] — position state vector (zeros = idle / no position)
+        Returns:
+            delta: [B, T, d_tf_joint] — additive adjustment to tf_fused
+        """
+        return self.act(self.proj(pos_state))
+
+
+# =============================================================================
 # PART 9: CONDORNET V43 — UNIFIED MODEL
 # =============================================================================
 
@@ -1080,6 +1117,11 @@ class CondorNetV43(nn.Module):
         # Supervised by exit_signal labels from data_pipeline_v43.py.
         self.exit_head = ExitHead(d_joint)
 
+        # Position state projector (Phase 3 — framework Section IX)
+        # Zero-initialized → no effect when pos_state=zeros (idle bars).
+        # Enriches tf_fused [B, T, 256] with live IC trade state (11 features).
+        self.pos_state_proj = PosStateProjector(11, d_tf_joint)
+
         # ── v42 CORE ENGINE ─────────────────────────────────────────────────
         # The v42 CondorNet processes the fused TF representation for predicate
         # logic, set combinatorics, and ETD-1 state dynamics.
@@ -1128,6 +1170,7 @@ class CondorNetV43(nn.Module):
         chain_mask:      Optional[torch.Tensor] = None,   # [B, N_contracts] True=padded
         pivot_features:  Optional[torch.Tensor] = None,   # [B, T, 13] actual values (NaN→0)
         pivot_mask:      Optional[torch.Tensor] = None,   # [B, T, 13] bool — True=NaN
+        pos_state:       Optional[torch.Tensor] = None,   # [B, T, 11] position state (Phase 3)
         return_diagnostics: bool = False,
     ) -> CondorNetOutput:
         """
@@ -1159,6 +1202,14 @@ class CondorNetV43(nn.Module):
             pivot_embed = torch.zeros(B, T, self.pivot_proj.d_out, device=x_m1.device, dtype=x_m1.dtype)
 
         tf_fused = self.tf_fusion(tf_joint, pivot_embed)   # [B, T, 256]
+
+        # ── Step 2b: Position State Enrichment (Phase 3) ─────────────────────
+        # Additively injects live IC trade state into tf_fused before it flows
+        # into core_input_proj (ETD-1 u_t) and joint_fusion (output heads).
+        # Zero-init → tf_fused unchanged until model learns nonzero weights.
+        # pos_state=None (or zeros) → no gradient, no effect.
+        if pos_state is not None:
+            tf_fused = tf_fused + self.pos_state_proj(pos_state)
 
         # ── Step 3: Options Chain Encoding ──────────────────────────────────
         chain_embed, chain_diag = self.chain_encoder(chain, chain_mask)   # [B, 128]

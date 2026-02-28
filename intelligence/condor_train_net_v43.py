@@ -94,6 +94,8 @@ from intelligence.schema_v43 import (
     TOD_FEATURE_NAMES,
     REGIME_PERSISTENCE_FEATURE,
     IVR_REVERSAL_FEATURE_NAMES,
+    POS_STATE_NAMES,
+    N_POS_STATE,
 )
 
 # Full 64-feature name list in the exact order they are concatenated into the
@@ -418,27 +420,29 @@ class V43Dataset(torch.utils.data.Dataset):
     Multi-timeframe + options chain dataset for CondorNet v4.3.
 
     Each sample returns:
-        x_m1:    [T, d_tf]    M1 features
-        x_m5:    [T, d_tf]    M5 features (canonical TF)
-        x_m15:   [T, d_tf]    M15 features
-        x_h1:    [T, d_tf]    H1 features
-        chain:   [N, 10]      Options chain grid (variable N per sample)
-        chain_mask: [N]       Bool — True=padded
-        pivot_m5: [T, 13]     Pivot mask for M5 (True=NaN)
-        targets:  dict        Training targets (strategy_label, pop, ev, etc.)
+        x_m1:      [T, d_tf]    M1 features
+        x_m5:      [T, d_tf]    M5 features (canonical TF)
+        x_m15:     [T, d_tf]    M15 features
+        x_h1:      [T, d_tf]    H1 features
+        chain:     [N, 10]      Options chain grid (variable N per sample)
+        chain_mask:[N]          Bool — True=padded
+        pivot_m5:  [T, 13]      Pivot mask for M5 (True=NaN)
+        pos_state: [T, 11]      Position state vector (Phase 3; zeros when absent)
+        targets:   dict         Training targets (strategy_label, pop, ev, etc.)
     """
 
     def __init__(
         self,
-        m1_features: np.ndarray,    # [N_total, d_tf]
-        m5_features: np.ndarray,    # [N_total, d_tf]
-        m15_features: np.ndarray,   # [N_total, d_tf]
-        h1_features: np.ndarray,    # [N_total, d_tf]
-        m5_pivots: np.ndarray,      # [N_total, 13] — NaN-bearing pivot features
-        labels: dict,               # {name: np.ndarray[N_total, ...]}
-        chain_snapshots: dict,      # {date_str: np.ndarray[N_contracts, 10]}
-        m5_dates: np.ndarray,       # [N_total] date strings for matching options
-        seq_len: int = 64,
+        m1_features:   np.ndarray,           # [N_total, d_tf]
+        m5_features:   np.ndarray,           # [N_total, d_tf]
+        m15_features:  np.ndarray,           # [N_total, d_tf]
+        h1_features:   np.ndarray,           # [N_total, d_tf]
+        m5_pivots:     np.ndarray,           # [N_total, 13] — NaN-bearing pivot features
+        labels:        dict,                  # {name: np.ndarray[N_total, ...]}
+        chain_snapshots: dict,               # {date_str: np.ndarray[N_contracts, 10]}
+        m5_dates:      np.ndarray,           # [N_total] date strings for matching options
+        seq_len:       int = 64,
+        m5_pos_state:  Optional[np.ndarray] = None,  # [N_total, 11] Phase 3 (None → zeros)
     ):
         self.m1 = m1_features
         self.m5 = m5_features
@@ -449,6 +453,7 @@ class V43Dataset(torch.utils.data.Dataset):
         self.chain_snapshots = chain_snapshots
         self.m5_dates = m5_dates
         self.seq_len = seq_len
+        self.pos_state = m5_pos_state   # None if Phase 3 not yet computed
         self.N = len(m5_features)
 
     def __len__(self):
@@ -486,6 +491,12 @@ class V43Dataset(torch.utils.data.Dataset):
         for key, arr in self.labels.items():
             target_labels[key] = torch.tensor(arr[target_idx], dtype=torch.float32)
 
+        # Position state [T, 11] — zeros when Phase 3 not yet computed
+        if self.pos_state is not None:
+            pos_state = torch.tensor(self.pos_state[s:e], dtype=torch.float32)
+        else:
+            pos_state = torch.zeros(self.seq_len, N_POS_STATE, dtype=torch.float32)
+
         return {
             'x_m1': x_m1,
             'x_m5': x_m5,
@@ -495,6 +506,7 @@ class V43Dataset(torch.utils.data.Dataset):
             'chain_mask': chain_mask,
             'pivot_mask': pivot_mask,
             'pivot_values': pivot_values,
+            'pos_state': pos_state,
             'labels': target_labels,
         }
 
@@ -521,6 +533,7 @@ def v43_collate_fn(batch: list) -> dict:
     x_h1 = torch.stack([b['x_h1'] for b in batch])
     pivot_mask = torch.stack([b['pivot_mask'] for b in batch])
     pivot_values = torch.stack([b['pivot_values'] for b in batch])
+    pos_state = torch.stack([b['pos_state'] for b in batch])
 
     # Pad chain grids to max N in batch
     chain_lengths = [b['chain'].shape[0] for b in batch]
@@ -550,6 +563,7 @@ def v43_collate_fn(batch: list) -> dict:
         'chain_mask': chain_masks,
         'pivot_mask': pivot_mask,
         'pivot_values': pivot_values,
+        'pos_state': pos_state,
         'labels': labels,
     }
 
@@ -816,6 +830,25 @@ def _load_tf_csv(path: str, tf_name: str) -> Tuple[np.ndarray, np.ndarray, np.nd
     return features, pivots, label_arrays
 
 
+def _load_pos_state(path: str) -> Optional[np.ndarray]:
+    """
+    Load Position State Vector columns (Phase 3) from the M5 CSV.
+
+    Returns:
+        np.ndarray[float32, (N, 11)] if all 11 ps_* columns are present, else None.
+    """
+    try:
+        ps_set = set(POS_STATE_NAMES)
+        df = pd.read_csv(path, usecols=lambda c: c in ps_set, low_memory=False)
+    except Exception as exc:
+        print(f"  [DATA] PosState load failed ({exc}) — Phase 3 disabled")
+        return None
+    present = [c for c in POS_STATE_NAMES if c in df.columns]
+    if len(present) < N_POS_STATE:
+        return None
+    return df[POS_STATE_NAMES].fillna(0.0).values.astype(np.float32)
+
+
 def _load_options_chain(path: str, max_contracts: int = 120) -> dict:
     """
     Load options chain CSV and build per-timestamp snapshots.
@@ -1004,7 +1037,18 @@ def build_dataloaders_v43(args) -> Tuple:
     if chain_path.exists():
         chain_snapshots = _load_options_chain(str(chain_path), CHAIN_GRID_CONFIG['max_contracts'])
 
+    # Load Position State Vector (Phase 3 — 11 ps_* columns from M5 CSV)
+    m5_pos_state_full = _load_pos_state(str(data_dir / args.m5_file))
+    if m5_pos_state_full is not None:
+        m5_pos_state_full = m5_pos_state_full[:canon_len]
+        print(f"  [DATA] Position state (Phase 3): {m5_pos_state_full.shape} loaded ✓")
+    else:
+        print("  [DATA] Position state absent — re-run data_pipeline_v43.py --force to generate Phase 3 columns")
+
     # Split: train=70%, val=15%, test=15% (temporal, not shuffled)
+    ps_train = m5_pos_state_full[:split_train]          if m5_pos_state_full is not None else None
+    ps_val   = m5_pos_state_full[split_train:split_val] if m5_pos_state_full is not None else None
+
     train_ds = V43Dataset(
         m1_feat[:split_train], m5_feat[:split_train],
         m15_feat[:split_train], h1_feat[:split_train],
@@ -1013,6 +1057,7 @@ def build_dataloaders_v43(args) -> Tuple:
         chain_snapshots,
         m5_dates[:split_train],
         seq_len=args.lookback,
+        m5_pos_state=ps_train,
     )
     val_ds = V43Dataset(
         m1_feat[split_train:split_val], m5_feat[split_train:split_val],
@@ -1022,6 +1067,7 @@ def build_dataloaders_v43(args) -> Tuple:
         chain_snapshots,
         m5_dates[split_train:split_val],
         seq_len=args.lookback,
+        m5_pos_state=ps_val,
     )
 
     print(f"  [DATA] Train: {len(train_ds)} sequences | Val: {len(val_ds)} sequences")
@@ -1621,6 +1667,11 @@ def parse_args_v43():
     p.add_argument('--accum-steps', type=int, default=4,
                    help='Gradient accumulation steps (F7.12)')
     p.add_argument('--patience', type=int, default=10, help='Early stopping patience')
+    p.add_argument('--min-delta', type=float, default=0.0,
+                   help='Minimum improvement required to reset patience counter. '
+                        '0.0 = any improvement (default, compatible with old runs). '
+                        '0.001 = recommended to ignore micro-gains and fire patience at '
+                        'true convergence (~epoch 40-46 on typical runs).')
     p.add_argument('--grad-clip', type=float, default=1.0)
 
     # === Convergence ===
@@ -1908,6 +1959,7 @@ def train_condor_net_v43(args):
             chain_mask = batch['chain_mask'].to(device)
             piv_mask = batch['pivot_mask'].to(device)
             piv_vals = batch['pivot_values'].to(device)
+            pos_state_batch = batch['pos_state'].to(device)
             labels = {k: v.to(device) for k, v in batch['labels'].items()}
 
             # ── 1. FORWARD + LOSS (inside autocast) ─────────────────
@@ -1921,6 +1973,7 @@ def train_condor_net_v43(args):
                     x_m1=x_m1, x_m5=x_m5, x_m15=x_m15, x_h1=x_h1,
                     chain=chain, chain_mask=chain_mask,
                     pivot_features=piv_vals, pivot_mask=piv_mask,
+                    pos_state=pos_state_batch,
                 )
                 # ── 2. LOSS ─────────────────────────────────────────
                 loss, components = criterion(outputs, labels)
@@ -2131,6 +2184,7 @@ def train_condor_net_v43(args):
                 chain_mask = batch['chain_mask'].to(device)
                 piv_mask = batch['pivot_mask'].to(device)
                 piv_vals = batch['pivot_values'].to(device)
+                pos_state_batch = batch['pos_state'].to(device)
                 labels = {k: v.to(device) for k, v in batch['labels'].items()}
 
                 with torch.amp.autocast(device_type=device.type, dtype=amp_dtype,
@@ -2139,6 +2193,7 @@ def train_condor_net_v43(args):
                         x_m1=x_m1, x_m5=x_m5, x_m15=x_m15, x_h1=x_h1,
                         chain=chain, chain_mask=chain_mask,
                         pivot_features=piv_vals, pivot_mask=piv_mask,
+                        pos_state=pos_state_batch,
                     )
                     loss, _ = criterion(outputs, labels)
 
@@ -2320,11 +2375,11 @@ def train_condor_net_v43(args):
         if best_val_loss == float('inf'):
             is_new_best = True
             reason = "First epoch"
-        elif avg_val_loss < best_val_loss:
+        elif avg_val_loss < best_val_loss - args.min_delta:
             is_new_best = True
-            reason = f"Better val ({avg_val_loss:.4f} < {best_val_loss:.4f})"
+            reason = f"Better val ({avg_val_loss:.4f} < {best_val_loss:.4f} - {args.min_delta})"
         else:
-            reason = f"Val not better ({avg_val_loss:.4f} >= {best_val_loss:.4f}), best remains Epoch {best_epoch}"
+            reason = f"Val not better ({avg_val_loss:.4f} >= {best_val_loss:.4f} - {args.min_delta}), best remains Epoch {best_epoch}"
 
         if is_new_best:
             best_val_loss = avg_val_loss

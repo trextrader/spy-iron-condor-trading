@@ -51,18 +51,30 @@ computed from historical trade trajectories.
 
 ---
 
-## Phase 3 — Position State Vector (TODO)
+## Phase 3 — Position State Vector (COMPLETE ✓ — 2026-02-28)
 
 Feed real trade state into ETD-1 memory (`u_t` enrichment per framework Section IX).
 
-- [ ] Define `PositionStateVector` (11 features per framework Section III):
-      `[PnL%, UnrealizedPnL$, CreditReceived, BarsHeld, DTERemaining,
-        DeltaExposure, GammaExposure, ThetaDecay, IVChangeSinceEntry,
-        HighWaterMark, MaxAdverseExcursion]`
-- [ ] Add position state features to dataset: new input block `pos_state: [B, T, 11]`
-- [ ] Extend `CondorNetV43` forward to accept `pos_state` and concat to `u_t` before ETD-1
-- [ ] When idle: `pos_state = zeros` (no open position)
-- [ ] Retrain with position state enriched inputs
+- [x] Define `PositionStateVector` (11 features — `POS_STATE_NAMES` / `N_POS_STATE` in `schema_v43.py`):
+      `[ps_pnl_pct, ps_credit_norm, ps_bars_held, ps_dte_frac, ps_delta_exp,
+        ps_gamma_exp, ps_theta_pos, ps_iv_change, ps_high_water, ps_mae, ps_unrealized_norm]`
+- [x] `data_pipeline_v43.py` — Added BSM Greek helpers (`_bsm_delta_call_vec`, `_bsm_gamma_vec`, `_bsm_theta_call_vec`)
+- [x] `data_pipeline_v43.py` — Implemented `compute_posstate_features()`: per-day IC simulation, 11 features per bar
+- [x] `data_pipeline_v43.py` — Wired call into `compute_multitask_labels()` (step 8) after simexit
+- [x] `data_pipeline_v43.py` — Added `--no-posstate` CLI arg; `skip_posstate` param in `compute_multitask_labels()`
+- [x] `condor_brain_net_v43.py` — Added `PosStateProjector` class (PART 8c): Linear(11→256)→Tanh, zero-init
+- [x] `condor_brain_net_v43.py` — Added `self.pos_state_proj = PosStateProjector(11, d_tf_joint)` in `__init__`
+- [x] `condor_brain_net_v43.py` — Added `pos_state: Optional[Tensor] = None` to `forward()` signature
+- [x] `condor_brain_net_v43.py` — Injection: `tf_fused += pos_state_proj(pos_state)` (Step 2b, after pivot fusion)
+- [x] `condor_train_net_v43.py` — Added `_load_pos_state()` helper; loads 11 ps_* cols from M5 CSV
+- [x] `condor_train_net_v43.py` — `V43Dataset`: added `m5_pos_state` param; `__getitem__` returns `pos_state [T,11]`
+- [x] `condor_train_net_v43.py` — `v43_collate_fn`: stacks `pos_state` → `[B, T, 11]`
+- [x] `condor_train_net_v43.py` — `build_dataloaders_v43`: loads pos_state, slices train/val, passes to dataset
+- [x] `condor_train_net_v43.py` — Training + validation forward calls pass `pos_state=pos_state_batch`
+- [x] `condor_train_net_v43.py` — Added `--min-delta` arg (default 0.0); patience uses `val < best - min_delta`
+- [ ] Re-run ETL pipeline: `python intelligence/data_pipeline_v43.py --force --simexit-epsilon 0.02`
+- [ ] Validate 11 ps_* columns present in m5_dataset_v43_final.csv
+- [ ] Retrain CondorNet v4.3 with position state enriched inputs
 
 ---
 

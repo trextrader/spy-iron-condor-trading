@@ -279,6 +279,24 @@ TF_LABEL_NAMES: List[str] = [
 Columns 0-1 present in raw CSVs. Columns 2-8 added by data_pipeline_v43.py.
 _load_tf_csv fills missing columns with 0 — safe for incremental updates."""
 
+# Position State Vector feature names (Phase 3 — M5 only, per-bar simulation)
+# Stored as additional columns in m5_dataset_v43_final.csv by data_pipeline_v43.py.
+# Loaded separately from TF features; passed as pos_state: [B, T, 11] to model.
+POS_STATE_NAMES: List[str] = [
+    "ps_pnl_pct",        # [−∞, 1]: V_exit[t] = (credit − debit[t]) / credit
+    "ps_credit_norm",    # [0, ~0.05]: IC entry credit / spot close at entry
+    "ps_bars_held",      # [0, 1]: t / (n_bars − 1), normalized position age
+    "ps_dte_frac",       # [0, 1]: fraction of DTE remaining = 1 − bars_held
+    "ps_delta_exp",      # [−1, 1]: net IC delta (≈0 at entry, drifts with price)
+    "ps_gamma_exp",      # [−0.1, 0]: net IC gamma (negative = short gamma)
+    "ps_theta_pos",      # [0, ~0.1]: net IC theta per bar (positive for IC seller)
+    "ps_iv_change",      # [−1, 1]: (vol[t] − vol[0]) / vol[0], IV since entry
+    "ps_high_water",     # [−∞, 1]: running max of pnl_pct (best value so far)
+    "ps_mae",            # [0, ∞]: 1 − running min of pnl_pct (max adverse excursion)
+    "ps_unrealized_norm",# [~−0.1, ~0.05]: credit_per_point × pnl_pct / close
+]
+N_POS_STATE: int = len(POS_STATE_NAMES)  # 11
+
 # Sparse features — NaN is semantically meaningful, NEVER impute
 TF_SPARSE_FEATURES: Set[str] = set(TF_PIVOT_FEATURES) | IVR_REVERSAL_SPARSE
 """NaN in these columns means 'no event occurred'. Do not fill with 0 or mean."""
