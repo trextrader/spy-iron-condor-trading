@@ -2164,6 +2164,11 @@ def train_condor_net_v43(args):
         print(f"Epoch {epoch+1:3d} | Train: {avg_train_loss:.4f} | "
               f"Val: {avg_val_loss:.4f} | LR: {scheduler.get_last_lr()[0]:.2e}"
               f"{anneal_str}")
+        _comp_avg_str = "  ".join(
+            f"{k}={v / max(1, epoch_batches_run):.4f}"
+            for k, v in epoch_components.items()
+        )
+        print(f"  [EPOCH COMPONENTS] {_comp_avg_str}")
 
         # ── Hierarchical Gate Diagnostics ────────────────────────────────────
         if not _gate_logit_buf:
