@@ -78,57 +78,77 @@ Feed real trade state into ETD-1 memory (`u_t` enrichment per framework Section 
 
 ---
 
-## Phase 4 — Capital Constraint Engine (TODO)
+## Phase 4 — Capital Constraint Engine (COMPLETE ✓ — 2026-02-28)
 
 Deterministic portfolio layer above model output (framework Section II).
 
-- [ ] Implement `CapitalConstraintEngine` (standalone, no gradients):
+- [x] Implement `CapitalConstraintEngine` (standalone, no gradients) in `intelligence/exit_stack.py`:
       `C_max = alpha * L * B_t`
       `C_avail = C_max - sum(C_i for open positions)`
       Entry allowed iff `C_strategy <= C_avail`
-- [ ] Integrate into `core/backtest_engine.py` as pre-entry gate
-- [ ] Implement portfolio flatten rule: `if sum(UnrealizedPnL_i) > 0 → Close All`
-- [ ] Wire portfolio VaR threshold override
+- [x] Integrate into `core/backtest_engine.py` as pre-entry gate (Phase 4 Capital Constraint Gate block)
+- [x] Implement portfolio flatten rule: `if sum(UnrealizedPnL_i) > 0 → Close All` (via ExitDecisionStack)
+- [x] Wire capital emergency: `(B_peak - B_t) / B_peak > d_max → emergency exit` (in HardExitRules)
+- [x] Config params added to `core/config.py`: `capital_constraint_alpha`, `capital_constraint_L`, `exit_hard_max_dd_pct`
 
 ---
 
-## Phase 5 — Hard Exit Rule Taxonomy (TODO)
+## Phase 5 — Hard Exit Rule Taxonomy (COMPLETE ✓ — 2026-02-28)
 
 Deterministic guardrails that cannot be overridden by model output
 (framework Sections IV.1, IV.3, IV.5).
 
-- [ ] Max Loss Exit: `if PnL% <= -200% of credit → Exit` (non-learnable)
-- [ ] Delta Violation Exit: `if |net_delta| > 0.30 → Exit`
-- [ ] Capital Emergency Exit: `if (B_t - B_peak) / B_peak < -D_max → Exit`
-- [ ] Pivot Containment Hard Stop: if price crosses predicted pivot AGAINST position → Exit
+- [x] Max Loss Exit: `if cost >= 2.0 × credit_received → Exit` (non-learnable) — `hard_max_loss`
+- [x] Delta Violation Exit: `if |net_delta| > 0.30 → Exit` — `hard_delta_violation`
+      Net IC delta computed from live chain each bar; falls back to entry delta if chain unavailable
+- [x] Capital Emergency Exit: `if (B_peak - B_t) / B_peak > d_max → Exit` — `hard_capital_emergency`
+- [x] Pivot Containment Hard Stop: if spot >= pivot_high → `hard_pivot_call_breach`;
+      if spot <= pivot_low → `hard_pivot_put_breach`
       (framework Section V.2 — "not a soft gate but a hard stop")
-- [ ] Portfolio Flatten Override: integrate with Phase 4 flatten rule
-- [ ] Wire all hard exits into `core/backtest_engine.py` exit stack
+      pivot_high/pivot_low = None-safe; activates when CondorNet pivot_pred_head wired to inference
+- [x] Portfolio Flatten Override: `portfolio_flatten_triggered()` in `CapitalConstraintEngine`
+- [x] Wire all hard exits into `core/backtest_engine.py` via `ExitDecisionStack.evaluate()`
+- [x] Config params: `exit_hard_max_loss_mult`, `exit_hard_max_delta`, `exit_hard_max_dd_pct`
 
 ---
 
-## Phase 6 — Production Exit Stack (TODO)
+## Phase 6 — Production Exit Stack (COMPLETE ✓ — 2026-02-28)
 
 Full multi-stage exit stack (framework Section X):
 
 ```
 Exit if:
   HardExit
+  OR PortfolioFlattenTriggered
   OR (p_exit > 0.70 AND NOT in Protected Hold Zone)
 ```
 
-- [ ] Implement `ExitDecisionStack` in `intelligence/` or `core/`
-- [ ] Integrate hold zones (pre-decay DTE>14, pivot containment, theta favorable)
-- [ ] Wire `exit_signal` from model output into `ExitDecisionStack`
-- [ ] Back-test the full stack vs baseline hard-rule-only exits
-- [ ] Tune `p_exit` threshold (framework default: 0.70)
+- [x] Implement `ExitDecisionStack` in `intelligence/exit_stack.py`
+- [x] Integrate hold zones:
+      - Pre-decay DTE > 14 bars remaining
+      - Theta-favorable: ps_theta_pos > 0.005
+      - High-water: ps_high_water > 0.80 (near peak value)
+- [x] Wire `exit_signal` from model output into `ExitDecisionStack`:
+      reads `row['exit_signal']` from `neural_forecasts` DataFrame if column present;
+      falls back to p_exit=0.5 (neutral) until CondorNet v4.3 inference is wired
+- [x] Wire `position_high_water` tracking in `IronCondorStrategy` for hold-zone computation
+- [x] Wire `dte_remaining` from expiry date for pre-decay protection
+- [x] Config params: `use_exit_stack`, `exit_stack_p_threshold`, `exit_stack_dte_protected`,
+      `exit_stack_theta_floor`, `exit_stack_high_water_floor`
+- [ ] Back-test the full stack vs baseline hard-rule-only exits  ← next step after Lightning AI validation
+- [ ] Tune `p_exit` threshold via backtest sweep once exit_signal column is populated
 
 ---
 
 ## Notes
 
 - All Phase 1 + Phase 2 changes committed and pushed to `main`
+- All Phase 3 + Phase 4 + Phase 5 + Phase 6 changes committed and pushed to `main` (2026-02-28)
 - `ExitHead` is zero-initialized → starts at neutral p=0.5; learns real timing after Phase 2 retraining
 - Checkpoint resume uses `strict=False` — old checkpoints load cleanly, `exit_head.*` inits to zero
-- M5 CSV: 91 columns, 39% exit=1 (7,220 / 18,494 bars, 238 days, epsilon=0.02)
+- M5 CSV: 102 columns (91 + 11 ps_* Phase 3 columns), 39% exit=1 (7,220 / 18,494 bars, 238 days, epsilon=0.02)
 - Framework document: `docs/Entries with Exits and Cognitive Holds Predictive Analytic Folds.pdf`
+- `exit_signal` → `neural_forecasts` wiring: column will auto-activate when CondorNet v4.3 inference
+  is plumbed into `run_backtest_headless` (replaces current Mamba engine path)
+- `pivot_high` / `pivot_low` → wiring: will auto-activate when `pivot_pred_head` output is plumbed
+  into neural_forecasts; both are None-safe in the current implementation

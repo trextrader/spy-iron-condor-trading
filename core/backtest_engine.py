@@ -32,6 +32,9 @@ from intelligence.fuzzy_engine import (
     calculate_atr_stop_multiplier
 )
 from intelligence.execution.cost_model import estimate_entry_cost
+from intelligence.exit_stack import (
+    CapitalConstraintEngine, HardExitRules, ExitDecisionStack
+)
 from qtmf.models import TradeIntent
 from qtmf.facade import benchmark_and_size
 
@@ -272,7 +275,27 @@ class IronCondorStrategy(bt.Strategy):
         
         # Risk Manager (Stage 3)
         self.risk_manager = RiskManager(self.s_cfg)
-        
+
+        # Exit Stack (Phases 4–6)
+        _alpha   = getattr(self.s_cfg, 'capital_constraint_alpha', 0.15)
+        _L       = getattr(self.s_cfg, 'capital_constraint_L', 1.0)
+        _dd_pct  = getattr(self.s_cfg, 'exit_hard_max_dd_pct', 0.20)
+        self.capital_engine = CapitalConstraintEngine(alpha=_alpha, L=_L, d_max=_dd_pct)
+        self.exit_stack = ExitDecisionStack(
+            p_exit_threshold    = getattr(self.s_cfg, 'exit_stack_p_threshold', 0.70),
+            dte_protected_min   = getattr(self.s_cfg, 'exit_stack_dte_protected', 14),
+            theta_hold_floor    = getattr(self.s_cfg, 'exit_stack_theta_floor', 0.005),
+            high_water_hold_floor = getattr(self.s_cfg, 'exit_stack_high_water_floor', 0.80),
+            hard_rules = HardExitRules(
+                max_loss_credit_mult = getattr(self.s_cfg, 'exit_hard_max_loss_mult', 2.0),
+                max_net_delta        = getattr(self.s_cfg, 'exit_hard_max_delta', 0.30),
+                max_drawdown_pct     = _dd_pct,
+            ),
+            capital_engine = self.capital_engine,
+        )
+        # Tracks running high-water pnl_pct for the current open position
+        self.position_high_water = 0.0
+
         # Mamba is handled via cached self.neural_forecasts now
 
     def close_position(self, reason, cost, dt, pnl):
@@ -298,6 +321,7 @@ class IronCondorStrategy(bt.Strategy):
 
         self.active_position = None
         self.current_unrealized_pnl = 0.0
+        self.position_high_water = 0.0   # Reset high-water on close
 
     def next(self):
         dt_now = self.datas[0].datetime.datetime(0)
@@ -404,7 +428,7 @@ class IronCondorStrategy(bt.Strategy):
             legs = self.active_position.legs
             short_exp = legs.short_call.expiration
             if hasattr(short_exp, 'date'): short_exp = short_exp.date()
-            
+
             if date_now >= short_exp:
                 spot = self.data.close[0]
                 call_val = max(0, spot - legs.short_call.strike) - max(0, spot - legs.long_call.strike)
@@ -416,22 +440,85 @@ class IronCondorStrategy(bt.Strategy):
 
             current_prices = {q.symbol: q.mid for q in quote_chain}
             syms = [legs.short_call.symbol, legs.long_call.symbol, legs.short_put.symbol, legs.long_put.symbol]
-            
+
             if all(s in current_prices for s in syms):
                 cost = (current_prices[legs.short_call.symbol] + current_prices[legs.short_put.symbol]) - \
                        (current_prices[legs.long_call.symbol] + current_prices[legs.long_put.symbol])
                 unrealized_pnl = (self.active_position.credit_received - cost) * self.active_position.quantity * 100
                 self.current_unrealized_pnl = unrealized_pnl
-                
+
+                # ── Update position high-water mark for hold-zone logic ──────
+                credit_total = self.active_position.credit_received * self.active_position.quantity * 100
+                pnl_pct = unrealized_pnl / credit_total if credit_total > 0 else 0.0
+                self.position_high_water = max(self.position_high_water, pnl_pct)
+
+                # ── Compute current net IC delta from chain (fall back to entry) ─
+                current_deltas = {q.symbol: q.delta for q in quote_chain}
+                if all(s in current_deltas for s in syms):
+                    d_sc = current_deltas[legs.short_call.symbol]
+                    d_lc = current_deltas[legs.long_call.symbol]
+                    d_sp = current_deltas[legs.short_put.symbol]
+                    d_lp = current_deltas[legs.long_put.symbol]
+                    net_delta = -d_sc + d_lc - d_sp + d_lp
+                else:
+                    net_delta = (-legs.short_call.delta + legs.long_call.delta
+                                 - legs.short_put.delta + legs.long_put.delta)
+
+                # ── Soft exit rules (profit take / stop loss / max hold) ─────
                 exit_reason = None
                 target = (self.active_position.credit_received * self.active_position.quantity * 100 * self.s_cfg.profit_take_pct)
-                if unrealized_pnl >= target: exit_reason = "profit_take"
-                elif cost >= (self.active_position.credit_received * (1 + self.s_cfg.loss_close_multiple)): exit_reason = "stop_loss"
-                elif (dt_now.replace(tzinfo=None) - self.active_position.open_time.replace(tzinfo=None)).days >= self.s_cfg.max_hold_days: exit_reason = "max_hold"
-                
+                if unrealized_pnl >= target:
+                    exit_reason = "profit_take"
+                elif cost >= (self.active_position.credit_received * (1 + self.s_cfg.loss_close_multiple)):
+                    exit_reason = "stop_loss"
+                elif (dt_now.replace(tzinfo=None) - self.active_position.open_time.replace(tzinfo=None)).days >= self.s_cfg.max_hold_days:
+                    exit_reason = "max_hold"
+
                 if exit_reason:
                     self.close_position(exit_reason, cost, dt_now, unrealized_pnl)
                     return
+
+                # ── Production Exit Stack (Phases 4–6) ──────────────────────
+                if getattr(self.s_cfg, 'use_exit_stack', True):
+                    # DTE remaining (calendar days)
+                    dte_remaining = (short_exp - date_now).days if hasattr(short_exp, 'year') else 0
+
+                    # Neural p_exit: read exit_signal from cached forecasts when available
+                    p_exit = 0.5
+                    if self.neural_forecasts is not None and not self.neural_forecasts.empty:
+                        idx = len(self) - 1
+                        if 0 <= idx < len(self.neural_forecasts):
+                            row = self.neural_forecasts.iloc[idx]
+                            if 'exit_signal' in row.index:
+                                p_exit = float(row['exit_signal'])
+
+                    exit_decision = self.exit_stack.evaluate(
+                        credit_received       = self.active_position.credit_received,
+                        current_cost          = cost,
+                        net_delta             = net_delta,
+                        B_t                   = total_equity,
+                        B_peak                = self.peak,
+                        p_exit                = p_exit,
+                        dte_remaining         = dte_remaining,
+                        ps_theta_pos          = 0.0,    # populated when CondorNet inference wired
+                        ps_high_water         = self.position_high_water,
+                        spot                  = self.data.close[0],
+                        pivot_high            = None,   # populated when pivot predictions wired
+                        pivot_low             = None,
+                        short_call_strike     = legs.short_call.strike,
+                        short_put_strike      = legs.short_put.strike,
+                        all_unrealized_pnls   = [unrealized_pnl],
+                    )
+
+                    if exit_decision.should_exit:
+                        if self.verbose:
+                            src = exit_decision.source.upper()
+                            print(f"  [ExitStack:{src}] {exit_decision.reason} | "
+                                  f"p_exit={p_exit:.3f} | delta={net_delta:.3f} | "
+                                  f"hw={self.position_high_water:.3f} | dte={dte_remaining} at {dt_now}")
+                        self.close_position(exit_decision.reason, cost, dt_now, unrealized_pnl)
+                        return
+
             return
 
         self.bars_since_trade += 1
@@ -518,6 +605,19 @@ class IronCondorStrategy(bt.Strategy):
             if self.verbose: print(f"  [EntryFail] Sizing resulted in quantity <= 0 ({quantity}) at {dt_now}")
             return
         
+        # === Phase 4: Capital Constraint Gate ===
+        if getattr(self.s_cfg, 'use_exit_stack', True):
+            cash_base_cce = self.r_cfg.backtest_cash if self.r_cfg else 100000.0
+            B_t_entry = cash_base_cce + self.pnl
+            # Margin requirement for Iron Condor = wing_width * quantity * 100
+            C_strategy = width * quantity * 100
+            if not self.capital_engine.entry_allowed(B_t_entry, [], C_strategy):
+                C_avail = self.capital_engine.available_capital(B_t_entry, [])
+                if self.verbose:
+                    print(f"  [EntryFail] CapitalConstraint: C_strategy=${C_strategy:.0f} > "
+                          f"C_avail=${C_avail:.0f} (alpha={self.capital_engine.alpha}) at {dt_now}")
+                return
+
         # === Stage 3: Risk Management Gate ===
         cash_base = self.r_cfg.backtest_cash if self.r_cfg else 100000.0
         risk_approved, risk_reason = self.risk_manager.check_new_trade(legs=condor, quantity=quantity, current_equity=cash_base + self.pnl)

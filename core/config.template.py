@@ -169,6 +169,24 @@ class StrategyConfig:
     mamba_d_model: int = 64
     fuzzy_weight_neural: float = 0.20
 
+    # === Exit Stack (Phases 4–6) ===
+    use_exit_stack: bool = True                  # Enable production exit stack (Phases 4–6)
+
+    # Phase 4 — Capital Constraint Engine
+    capital_constraint_alpha: float = 0.15       # Max portfolio allocation fraction (C_max = alpha*L*B_t)
+    capital_constraint_L: float = 1.0            # Leverage factor (1.0 = no leverage)
+
+    # Phase 5 — Hard Exit Rules
+    exit_hard_max_loss_mult: float = 2.0         # Max Loss Exit: cost >= N × credit → exit
+    exit_hard_max_delta: float = 0.30            # Delta Violation: |net_IC_delta| > threshold → exit
+    exit_hard_max_dd_pct: float = 0.20           # Capital Emergency: drawdown > fraction → exit
+
+    # Phase 6 — Production Exit Stack
+    exit_stack_p_threshold: float = 0.70         # Neural p_exit threshold (framework default)
+    exit_stack_dte_protected: int = 14           # DTE remaining (bars) for pre-decay hold zone
+    exit_stack_theta_floor: float = 0.005        # Min theta for theta-favorable hold zone
+    exit_stack_high_water_floor: float = 0.80    # High-water pnl_pct for high-water hold zone
+
     # === Position Sizing Guardrails ===
     min_total_qty_for_iron_condor: int = 2
 
