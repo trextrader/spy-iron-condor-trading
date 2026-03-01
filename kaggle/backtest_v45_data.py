@@ -543,6 +543,88 @@ def run_v43_batch_inference(
 
 
 # =============================================================================
+# Public API — normalize_v43_chain
+# =============================================================================
+
+def normalize_v43_chain(chain_df: pd.DataFrame, spot: float,
+                        min_spread_ratio: float = 0.02) -> pd.DataFrame:
+    """
+    Normalize v43 options chain column names so synthesize_chain_prices +
+    find_best_legs work without modification.
+
+    v43 CSV (options_2025_v43.csv) columns:
+        contract_id, type (call/put), implied_volatility, expiration,
+        bid, bid_size, ask, ask_size, mark, delta, gamma, theta, vega,
+        volume, open_interest, in_the_money
+
+    Expected downstream:
+        option_symbol, call_put (C/P), iv, te (DTE days), underlying_price,
+        mid, close (legacy compat), spread_ratio
+
+    Since v43 chain is already BSM-priced (bid/ask/mark from SyntheticOptionsEngine),
+    no re-synthesis is needed — we just provide the correct column names so
+    synthesize_chain_prices can run idempotently if called again inside find_best_legs.
+    """
+    if chain_df is None or chain_df.empty:
+        return chain_df
+
+    df = chain_df.copy()
+
+    # option_symbol ← contract_id
+    if 'contract_id' in df.columns and 'option_symbol' not in df.columns:
+        df['option_symbol'] = df['contract_id']
+
+    # call_put ← type  ('call' → 'C', 'put' → 'P')
+    if 'type' in df.columns and 'call_put' not in df.columns:
+        df['call_put'] = df['type'].str.lower().map({'call': 'C', 'put': 'P'}).fillna('C')
+
+    # iv ← implied_volatility
+    if 'implied_volatility' in df.columns and 'iv' not in df.columns:
+        df['iv'] = df['implied_volatility'].astype(float)
+
+    # underlying_price ← spot  (used by synthesize_chain_prices BSM formula)
+    df['underlying_price'] = float(spot)
+
+    # te (DTE in calendar days) ← expiration − bar_date
+    if 'te' not in df.columns and 'expiration' in df.columns:
+        try:
+            exp_dates = pd.to_datetime(df['expiration'])
+            if 'timestamp' in df.columns:
+                bar_date = pd.to_datetime(df['timestamp'].iloc[0]).normalize()
+            else:
+                bar_date = pd.Timestamp.now().normalize()
+            df['te'] = (exp_dates - bar_date).dt.days.clip(lower=0).astype(float)
+        except Exception:
+            df['te'] = 0.0
+
+    # mid ← mark  (already BSM-priced; fallback to (bid+ask)/2)
+    if 'mid' not in df.columns:
+        if 'mark' in df.columns:
+            df['mid'] = df['mark'].clip(lower=0.01)
+        elif 'bid' in df.columns and 'ask' in df.columns:
+            df['mid'] = ((df['bid'] + df['ask']) / 2.0).clip(lower=0.01)
+        else:
+            df['mid'] = 0.10
+
+    # close ← mid  (legacy compat: build_condor reads chain['close'])
+    if 'close' not in df.columns:
+        df['close'] = df['mid']
+
+    # spread_ratio ← computed from bid/ask  (used by validate_leg_liquidity)
+    if 'spread_ratio' not in df.columns:
+        if 'bid' in df.columns and 'ask' in df.columns:
+            mid_safe = df['mid'].clip(lower=0.01)
+            spread   = (df['ask'] - df['bid']).clip(lower=0.0)
+            df['spread_ratio'] = (spread / mid_safe).clip(
+                lower=min_spread_ratio, upper=2.0
+            )
+        else:
+            df['spread_ratio'] = min_spread_ratio
+
+    return df
+
+
+# =============================================================================
 # Public API — load_v43_model
 # =============================================================================
 

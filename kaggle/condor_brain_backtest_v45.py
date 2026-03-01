@@ -78,7 +78,7 @@ from intelligence.rule_engine.executor import RuleExecutionEngine
 try:
     from kaggle.backtest_v45_data import (
         load_multi_tf_bundle, run_v43_batch_inference, load_v43_model,
-        MultiTFDataBundle,
+        normalize_v43_chain, MultiTFDataBundle,
     )
     HAS_V43_DATA = True
 except ImportError as _v43_import_err:
@@ -1516,8 +1516,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              chain_slice = df.iloc[s:e]
 
          # 3. Build Marks (Transient) - PHASE 5.2 FIX: Separate bid/ask/mid
-         # Synthesize bid/ask from close + spread_ratio
-         chain_with_prices = synthesize_chain_prices(chain_slice)
+         # v43 bundle: normalize column names (already BSM-priced, no re-synthesis needed)
+         # Legacy path: synthesize bid/ask from close + spread_ratio
+         if bundle is not None:
+             chain_with_prices = normalize_v43_chain(chain_slice, spot)
+         else:
+             chain_with_prices = synthesize_chain_prices(chain_slice)
 
          marks_mid = dict(zip(chain_with_prices['option_symbol'], chain_with_prices['mid']))
          marks_bid = dict(zip(chain_with_prices['option_symbol'], chain_with_prices['bid']))
