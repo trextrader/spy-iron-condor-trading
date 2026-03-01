@@ -1036,7 +1036,8 @@ def estimate_condor_pnl(spot, short_call, long_call, short_put, long_put, credit
     
     return net_pnl
 
-def find_best_legs(chain_df, spot, call_off, put_off, width, validate_greeks=True):
+def find_best_legs(chain_df, spot, call_off, put_off, width, validate_greeks=True,
+                   max_leg_spread=0.15):
     """
     Search the 100-row options chain for the 4 legs matching model suggestions.
 
@@ -1045,12 +1046,31 @@ def find_best_legs(chain_df, spot, call_off, put_off, width, validate_greeks=Tru
     - Validates liquidity (volume, OI, spread)
     - Optionally validates Greeks (delta targeting)
     - Returns None if atomicity cannot be guaranteed
+
+    Phase 5.6 Fix:
+    - Pre-filters chain by bid-ask spread ratio before delta selection, so the
+      best-delta candidate is always a liquid strike (avoids BrokenSpreadDetector
+      rejection downstream and handles bad synthetic data with ask >> bid).
+    - Validates spread direction after leg selection: rejects inverted structures
+      where the long wing has higher abs-delta than the short (impossible in real
+      BSM, indicates bad data in the options CSV).
     """
     if chain_df.empty:
         return None
 
     # Synthesize bid/ask prices
     chain_df = synthesize_chain_prices(chain_df)
+
+    # --- Phase 5.6: Pre-filter by spread quality ---
+    # Removes strikes where (ask-bid)/ask > max_leg_spread (same formula as
+    # BrokenSpreadDetector) so delta selection only considers liquid strikes.
+    # This also eliminates bad-data rows where ask is many multiples of bid.
+    if 'bid' in chain_df.columns and 'ask' in chain_df.columns:
+        _ask_safe = chain_df['ask'].clip(lower=0.001)
+        _spread_ratio = (chain_df['ask'] - chain_df['bid']) / _ask_safe
+        chain_df = chain_df[_spread_ratio <= max_leg_spread].copy()
+        if chain_df.empty:
+            return None
 
     # Suggested strikes
     s_call_target = spot + (call_off * spot * 0.01)
@@ -1105,6 +1125,24 @@ def find_best_legs(chain_df, spot, call_off, put_off, width, validate_greeks=Tru
 
     l_call = long_call_row['strike'].values[0]
     l_put = long_put_row['strike'].values[0]
+
+    # --- Phase 5.6: Inverted-spread guard ---
+    # In a valid IC the long wing must be further OTM than the short, meaning
+    # |long_delta| < |short_delta|.  When the options CSV has corrupted Greeks
+    # (e.g. a further-OTM call with higher delta than the short call), the
+    # spread is structurally inverted and will always produce negative credit.
+    # Reject early rather than letting it reach the credit-check gate.
+    if validate_greeks and 'delta' in chain_df.columns:
+        _sc_d = short_call_row['delta'].values[0] if not short_call_row.empty else None
+        _lc_d = long_call_row['delta'].values[0]  if not long_call_row.empty  else None
+        _sp_d = short_put_row['delta'].values[0]  if not short_put_row.empty  else None
+        _lp_d = long_put_row['delta'].values[0]   if not long_put_row.empty   else None
+        if _sc_d is not None and _lc_d is not None:
+            if abs(_lc_d) >= abs(_sc_d):   # long call should be further OTM
+                return None
+        if _sp_d is not None and _lp_d is not None:
+            if abs(_lp_d) >= abs(_sp_d):   # long put should be further OTM
+                return None
 
     # --- PHASE 5.2: Liquidity Validation ---
     legs_data = [
