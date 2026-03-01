@@ -1453,7 +1453,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             'outcome': {
                 'win':              bool(pnl > 0),
                 'loss':             bool(pnl < 0),
-                'neutral':          pnl == 0,
+                'neutral':          bool(pnl == 0),
                 'r_multiple_final': _r,
                 'pnl':              round(float(pnl), 4),
             },
