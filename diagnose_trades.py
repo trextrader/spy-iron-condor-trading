@@ -13,6 +13,9 @@ import os
 import csv
 import collections
 
+SEP  = "=" * 65
+SEP2 = "-" * 65
+
 # ── locate trades.csv ─────────────────────────────────────────────────────────
 CANDIDATES = [
     "reports/trades.csv",
@@ -33,9 +36,9 @@ if path is None or not os.path.exists(path):
     print("Usage: python diagnose_trades.py <path/to/trades.csv>")
     sys.exit(1)
 
-print(f"\n{'='*65}")
+print(f"\n{SEP}")
 print(f"  BACKTEST TRADE DIAGNOSTIC  |  {path}")
-print(f"{'='*65}\n")
+print(f"{SEP}\n")
 
 rows = list(csv.DictReader(open(path, encoding="utf-8")))
 print(f"Total rows in CSV: {len(rows)}")
@@ -60,7 +63,7 @@ if unclosed:
     print(f"    Trade IDs: {sorted(unclosed)}")
 
 # ── PnL by exit reason ────────────────────────────────────────────────────────
-by_reason = collections.defaultdict(lambda: {"count": 0, "wins": 0, "losses": 0, "total": 0.0, "pnls": []})
+by_reason = collections.defaultdict(lambda: {"count": 0, "wins": 0, "losses": 0, "total": 0.0})
 for r in closes:
     reason = r.get("reason") or "UNKNOWN"
     try:
@@ -69,15 +72,14 @@ for r in closes:
         pnl = 0.0
     by_reason[reason]["count"]  += 1
     by_reason[reason]["total"]  += pnl
-    by_reason[reason]["pnls"].append(pnl)
     if pnl > 0:
         by_reason[reason]["wins"] += 1
     elif pnl < 0:
         by_reason[reason]["losses"] += 1
 
-print(f"\n{'─'*65}")
+print(f"\n{SEP2}")
 print(f"  EXIT REASON BREAKDOWN")
-print(f"{'─'*65}")
+print(f"{SEP2}")
 hdr = f"  {'Reason':<22} {'N':>4} {'W':>4} {'L':>4} {'Total PnL':>12} {'Avg PnL':>9} {'Win%':>6}"
 print(hdr)
 print(f"  {'-'*60}")
@@ -88,19 +90,18 @@ for reason, d in sorted(by_reason.items(), key=lambda x: x[1]["total"]):
     print(f"  {reason:<22} {d['count']:>4} {d['wins']:>4} {d['losses']:>4} {d['total']:>12,.2f} {avg:>9,.2f} {winp:>5.1f}%")
     grand += d["total"]
 
-print(f"  {'─'*60}")
+print(f"  {'-'*60}")
 print(f"  {'TOTAL':<22} {len(closes):>4} {'':>4} {'':>4} {grand:>12,.2f}")
 
 # ── PER_TRADE_STOP deep-dive ──────────────────────────────────────────────────
 pts = [r for r in closes if r.get("reason") == "PER_TRADE_STOP"]
 if pts:
-    print(f"\n{'─'*65}")
+    print(f"\n{SEP2}")
     print(f"  PER_TRADE_STOP deep-dive  ({len(pts)} trades)")
-    print(f"{'─'*65}")
-    # Match to OPEN record to get entry_credit + max_loss
+    print(f"{SEP2}")
     open_map = {r["trade_id"]: r for r in opens}
-    print(f"  {'TradeID':<12} {'Credit':>8} {'MaxLoss':>9} {'PnL':>9} {'PnL/ML':>7} {'Held?':>8}")
-    print(f"  {'-'*58}")
+    print(f"  {'TradeID':<12} {'Credit':>8} {'MaxLoss':>9} {'PnL':>9} {'PnL/ML':>7}  Entry -> Exit")
+    print(f"  {'-'*62}")
     for r in sorted(pts, key=lambda x: float(x.get("pnl") or 0)):
         tid    = r["trade_id"]
         pnl    = float(r.get("pnl") or 0)
@@ -110,7 +111,7 @@ if pts:
         ratio  = pnl / ml if ml else 0
         entry  = o.get("dt", "?")[:16]
         exit_  = (r.get("exit_dt") or "?")[:16]
-        print(f"  {tid:<12} {credit:>8.4f} {ml:>9,.0f} {pnl:>9,.2f} {ratio:>6.1%}  {entry} → {exit_}")
+        print(f"  {tid:<12} {credit:>8.4f} {ml:>9,.0f} {pnl:>9,.2f} {ratio:>6.1%}  {entry} -> {exit_}")
 
     avg_loss = sum(float(r.get("pnl") or 0) for r in pts) / len(pts)
     print(f"\n  Average PER_TRADE_STOP loss: ${avg_loss:,.2f}")
@@ -118,9 +119,9 @@ if pts:
 # ── EXPIRED deep-dive ─────────────────────────────────────────────────────────
 expired = [r for r in closes if r.get("reason") == "EXPIRED"]
 if expired:
-    print(f"\n{'─'*65}")
+    print(f"\n{SEP2}")
     print(f"  EXPIRED trades deep-dive  ({len(expired)} trades)")
-    print(f"{'─'*65}")
+    print(f"{SEP2}")
     open_map = {r["trade_id"]: r for r in opens}
     print(f"  {'TradeID':<12} {'Credit':>8} {'MaxLoss':>9} {'PnL':>9} {'PnL/ML':>7}")
     print(f"  {'-'*52}")
@@ -136,7 +137,7 @@ if expired:
     print(f"\n  Average EXPIRED loss: ${avg_loss:,.2f}")
 
 # ── equity curve summary ──────────────────────────────────────────────────────
-ec_path = os.path.join(os.path.dirname(path), "equity_curve.csv")
+ec_path = os.path.join(os.path.dirname(os.path.abspath(path)), "equity_curve.csv")
 if os.path.exists(ec_path):
     ec_rows  = list(csv.DictReader(open(ec_path, encoding="utf-8")))
     equities = []
@@ -146,19 +147,21 @@ if os.path.exists(ec_path):
         except Exception:
             pass
     if equities:
-        peak  = max(equities)
-        trough= min(equities)
-        final = equities[-1]
-        start = equities[0]
-        dd    = (peak - trough) / peak * 100 if peak > 0 else 0
-        print(f"\n{'─'*65}")
+        peak   = max(equities)
+        trough = min(equities)
+        final  = equities[-1]
+        start  = equities[0]
+        dd     = (peak - trough) / peak * 100 if peak > 0 else 0
+        print(f"\n{SEP2}")
         print(f"  EQUITY CURVE SUMMARY")
-        print(f"{'─'*65}")
-        print(f"  Start : ${start:>12,.2f}")
-        print(f"  Peak  : ${peak:>12,.2f}")
-        print(f"  Trough: ${trough:>12,.2f}")
-        print(f"  Final : ${final:>12,.2f}")
-        print(f"  Max DD: {dd:.1f}%  (peak→trough)")
-        print(f"  Net   : ${final - start:>+12,.2f}  ({(final/start-1)*100:+.1f}%)")
+        print(f"{SEP2}")
+        print(f"  Start :  ${start:>12,.2f}")
+        print(f"  Peak  :  ${peak:>12,.2f}")
+        print(f"  Trough:  ${trough:>12,.2f}")
+        print(f"  Final :  ${final:>12,.2f}")
+        print(f"  Max DD:  {dd:.1f}%  (peak->trough)")
+        print(f"  Net   :  ${final - start:>+12,.2f}  ({(final/start-1)*100:+.1f}%)")
+else:
+    print(f"\n  (equity_curve.csv not found at {ec_path})")
 
-print(f"\n{'='*65}\n")
+print(f"\n{SEP}\n")
