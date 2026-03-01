@@ -143,7 +143,7 @@ def _load_tf_csv(csv_path: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.
 
     # Close prices for spot simulation
     close = pd.to_numeric(df.get('close', pd.Series(np.zeros(len(df)))),
-                          errors='coerce').fillna(method='ffill').values.astype(np.float32)
+                          errors='coerce').ffill().values.astype(np.float32)
 
     return timestamps, feat, piv, close
 

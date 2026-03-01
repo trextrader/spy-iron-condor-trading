@@ -1427,8 +1427,14 @@ class CondorNet(nn.Module):
             
             # Definitive numerical verification (one-time per instantiation)
             if not hasattr(self, '_printed_phi1_diff'):
-                diff = torch.max(torch.abs(phi1 - F_k)).item()
-                print(f"\n  [MATH BUG HUNT] max_abs(phi1 - F_k) = {diff:.8f}")
+                diff       = torch.max(torch.abs(phi1 - F_k)).item()
+                scale_phi1 = torch.max(torch.abs(phi1)).item()
+                scale_F_k  = torch.max(torch.abs(F_k)).item()
+                max_rel    = diff / max(1e-12, scale_phi1)
+                print(f"\n  [MATH BUG HUNT] max_abs(phi1 - F_k) = {diff:.8f}"
+                      f" | max_abs(phi1) = {scale_phi1:.8f}"
+                      f" | max_abs(F_k) = {scale_F_k:.8f}"
+                      f" | max_rel = {max_rel:.6f}")
                 self._printed_phi1_diff = True
 
             # Capture CDE spectral diagnostics

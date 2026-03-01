@@ -1468,7 +1468,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             'missing_chain_cols':  0,
             'gate_fail_entry':     0,
             'gate_fail_pop':       0,
-            'gate_fail_conf':      0,
+            'gate_fail_ic':        0,
             'legs_none':           0,
             'atomicity_fail':      0,
             'credit_fail':         0,
@@ -1705,13 +1705,13 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              _sidx = int(v43_outputs['strategy_idx'][pol_idx])
              # Gate booleans (direct thresholds)
              entry_gate_pass = (_es > V43_ENTRY_THRESHOLD)
-             pop_gate_pass   = (_pop > PROB_ENTRY_MIN)
-             conf_gate_pass  = ((not _abt) and (_sidx == V43_IC_STRATEGY_IDX))
+             pop_gate_pass   = (_pop > V43_POP_THRESHOLD)
+             ic_gate_pass    = ((not _abt) and (_sidx == V43_IC_STRATEGY_IDX))
              # Synthetic pol for _entry_audit_log compatibility (display only)
              pol = np.zeros(10, dtype=np.float32)
              pol[8] = np.log(max(_es, 1e-9) / max(1.0 - _es, 1e-9))         # entry logit
              pol[4] = np.log(max(_pop, 1e-9) / max(1.0 - _pop, 1e-9))       # pop logit
-             pol[7] = 10.0 if conf_gate_pass else -10.0
+             pol[7] = 10.0 if ic_gate_pass else -10.0
              pol[0] = V43_DEFAULT_CALL_OFF / 5.0    # reverse of decode: call_off = pol[0]*5
              pol[1] = V43_DEFAULT_PUT_OFF  / 5.0
              pol[2] = V43_DEFAULT_WIDTH    / 10.0
@@ -1723,7 +1723,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              conf_prob        = float(_sigmoid(pol[7]))
              entry_gate_pass  = (entry_logit > 0.0)
              pop_gate_pass    = (pop_prob > PROB_ENTRY_MIN)
-             conf_gate_pass   = (conf_prob > CONF_ENTRY_MIN)
+             ic_gate_pass     = (conf_prob > CONF_ENTRY_MIN)
 
          # (A) Policy vector sanity — all values must be finite
          if not np.all(np.isfinite(pol)):
@@ -1744,9 +1744,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  run_backtest._entry_dbg['gate_fail_pop'] += 1
                  _entry_audit_log(i, ts, spot, pol, 'SKIP', f'gate_pop_fail')
 
-             elif not conf_gate_pass:
-                 run_backtest._entry_dbg['gate_fail_conf'] += 1
-                 _entry_audit_log(i, ts, spot, pol, 'SKIP', f'gate_conf_fail')
+             elif not ic_gate_pass:
+                 run_backtest._entry_dbg['gate_fail_ic'] += 1
+                 _entry_audit_log(i, ts, spot, pol, 'SKIP', 'gate_ic_fail')
 
              else:
                  # (D) Chain integrity — required columns must be present
@@ -2005,7 +2005,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         print(f"  {'missing_chain_cols':<28s}: {d['missing_chain_cols']:>8,}")
         print(f"  {'gate_fail_entry_logit':<28s}: {d['gate_fail_entry']:>8,}  ({d['gate_fail_entry']/bars*100:.1f}%)")
         print(f"  {'gate_fail_pop':<28s}: {d['gate_fail_pop']:>8,}  ({d['gate_fail_pop']/bars*100:.1f}%)")
-        print(f"  {'gate_fail_conf':<28s}: {d['gate_fail_conf']:>8,}  ({d['gate_fail_conf']/bars*100:.1f}%)")
+        print(f"  {'gate_fail_ic(abstain/non-IC)':<28s}: {d['gate_fail_ic']:>8,}  ({d['gate_fail_ic']/bars*100:.1f}%)")
         print(f"  {'collateral_oob':<28s}: {d['collateral_oob']:>8,}")
         print(f"  {'legs_none':<28s}: {d['legs_none']:>8,}")
         print(f"  {'atomicity_fail':<28s}: {d['atomicity_fail']:>8,}")
