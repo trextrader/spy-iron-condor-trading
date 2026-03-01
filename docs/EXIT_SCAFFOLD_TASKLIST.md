@@ -73,8 +73,18 @@ Feed real trade state into ETD-1 memory (`u_t` enrichment per framework Section 
 - [x] `condor_train_net_v43.py` — Training + validation forward calls pass `pos_state=pos_state_batch`
 - [x] `condor_train_net_v43.py` — Added `--min-delta` arg (default 0.0); patience uses `val < best - min_delta`
 - [ ] Re-run ETL pipeline: `python intelligence/data_pipeline_v43.py --force --simexit-epsilon 0.02`
-- [ ] Validate 11 ps_* columns present in m5_dataset_v43_final.csv
-- [ ] Retrain CondorNet v4.3 with position state enriched inputs
+- [ ] Validate 11 ps_* columns present: `python test_phase3_etl.py` → ALL TESTS PASSED
+- [ ] Retrain CondorNet v4.3 with position state enriched inputs:
+      ```
+      python intelligence/condor_train_net_v43.py \
+          --epochs 60 --batch-size 64 --lookback 64 \
+          --lr 1e-4 --patience 10 --min-delta 0.001 \
+          --gate-temp 3.0 \
+          --logit-var-alpha 0.1  --logit-var-target 2.0 \
+          --logit-iqr-alpha 0.08 --logit-iqr-target 1.0 \
+          --logit-mad-alpha 0.05 --logit-mad-target 0.9 \
+          --resume models/condornet_v43_best.pth
+      ```
 
 ---
 
