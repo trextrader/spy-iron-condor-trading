@@ -2133,23 +2133,26 @@ def main():
                 print(f"✅ Found Data: {p}")
                 break
     
-    if not use_data_path:
+    if not use_data_path and not args.use_v43:
         print("❌ CRITICAL: No data found. Please upload `mamba_institutional_1m.csv`.")
         return
 
     # 1. Load Data & Compute Features
-    df = load_data_and_features(use_data_path, rows=args.limit)
-    if df is None or df.empty:
-        print("❌ Data load failed.")
-        return
-
-    feature_cols = FEATURE_COLS_V22
-    print(f"Feature Columns ({len(feature_cols)}): {feature_cols[:5]} ...")
+    if not args.use_v43:
+        df = load_data_and_features(use_data_path, rows=args.limit)
+        if df is None or df.empty:
+            print("❌ Data load failed.")
+            return
+        feature_cols = FEATURE_COLS_V22
+        print(f"Feature Columns ({len(feature_cols)}): {feature_cols[:5]} ...")
+    else:
+        df = pd.DataFrame()
+        feature_cols = FEATURE_COLS_V22
 
     # 2. Rule Engine
     rule_signals = None
     ruleset = None
-    if args.ruleset or os.path.exists(RULESET_PATH):
+    if not args.use_v43 and (args.ruleset or os.path.exists(RULESET_PATH)):
         r_path = args.ruleset if args.ruleset else RULESET_PATH
         df, rule_signals, ruleset = run_rule_engine(df, r_path)
 
@@ -2158,7 +2161,7 @@ def main():
     model_path = args.model if args.model else MODEL_PATH
     norm_stats = {}
     
-    if not args.rules_only:
+    if not args.use_v43 and not args.rules_only:
         if not os.path.exists(model_path):
             # Try variations
             if os.path.exists(f"spy-iron-condor-trading/{model_path}"):
