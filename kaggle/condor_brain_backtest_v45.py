@@ -73,6 +73,18 @@ from intelligence.features.dynamic_features import (
 )
 from intelligence.rule_engine.dsl_parser import RuleDSLParser
 from intelligence.rule_engine.executor import RuleExecutionEngine
+
+# ── Phase 7: CondorNet v4.3 multi-TF data layer ───────────────────────────
+try:
+    from kaggle.backtest_v45_data import (
+        load_multi_tf_bundle, run_v43_batch_inference, load_v43_model,
+        MultiTFDataBundle,
+    )
+    HAS_V43_DATA = True
+except ImportError as _v43_import_err:
+    HAS_V43_DATA = False
+    _V43_IMPORT_ERR = str(_v43_import_err)
+
 try:
     from torch.utils.tensorboard import SummaryWriter # Added for TB support
 except ImportError:
@@ -195,6 +207,21 @@ MIN_CREDIT_WIDTH_RATIO    = 0.05        # Credit must be >= 5% of spread width
 # Audit / halt config
 AUDIT_ENTRY_HALT_ON_INCONSISTENCY = True   # Halt sim + dump audit if sizing anomaly
 AUDIT_MAX_CREDIT_SAMPLES          = 20     # Keep first N low-credit samples for debug
+
+# =============================================================================
+# CONDORNET V4.3 INFERENCE CONFIG (Phase 7 — Multi-TF data layer)
+# =============================================================================
+V43_ENTRY_THRESHOLD   = 0.55   # entry_signal threshold (sigmoid [0,1] space)
+V43_POP_THRESHOLD     = 0.50   # pop threshold (already in [0,1])
+V43_IC_STRATEGY_IDX   = 7      # iron_condor index in 10-way strategy_logits head
+V43_SEQ_LEN           = 64     # inference lookback window (matches training)
+V43_BATCH_SIZE        = 32     # GPU inference batch size
+# Default IC structural params for v43 mode
+# Model controls WHEN to trade; config controls HOW (overridden by Phase 2 grid)
+V43_DEFAULT_CALL_OFF  = 1.5    # % OTM for short call
+V43_DEFAULT_PUT_OFF   = 1.5    # % OTM for short put
+V43_DEFAULT_WIDTH     = 5.0    # spread width (strike points)
+V43_DEFAULT_DTE       = 21.0   # days to expiry
 
 def _sha256_file(path):
     if not path or not os.path.exists(path):
@@ -1237,7 +1264,8 @@ def build_ts_ranges(df, time_col='dt'):
 
 
 def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None,
-                 use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None):
+                 use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None,
+                 v43_outputs=None, bundle=None):
 
     # ==========================================================================
     # PHASE 5.5: Initialize Execution Reality Engine
@@ -1255,122 +1283,123 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         print("[Phase 5.5] WARNING: ExecutionRealityEngine requested but not available. Using simple model.")
 
     # 1. PREPARE DATA (M1-Centric)
-    print("Sorting and Indexing Data...")
-    time_col = 'dt' if 'dt' in df.columns else 'timestamp'
-    df = df.sort_values(time_col).reset_index(drop=True)
-    
-    # Build O(1) Chain Index
-    ts_ranges = build_ts_ranges(df, time_col)
-    
-    # Build Spot Bars (1 row per minute)
-    # Correctness: Use FIRST row for OHLCV (or explicit spot cols if robust)
-    spot_bars = df.drop_duplicates(subset=[time_col]).sort_values(time_col).reset_index(drop=True)
-    
-    if limit:
-        spot_bars = spot_bars.iloc[:limit+256] # approx buffer
-        print(f"Limiting to {len(spot_bars)} bars.")
+    # ── Phase 7: build spot_bars / chain lookup from bundle or legacy df ─────
+    if bundle is not None:
+        # V4.3 bundle — M5-clocked simulation
+        print("[Phase 7] Building spot_bars from MultiTFDataBundle (M5 clock)...")
+        time_col = 'dt'
+        _n_v43 = bundle.n_bars if not limit else min(bundle.n_bars, limit + V43_SEQ_LEN)
+        spot_bars = pd.DataFrame({
+            time_col: pd.to_datetime(bundle.m5_timestamps[:_n_v43]),
+            'close':  bundle.m5_spot[:_n_v43].astype(np.float64),
+        })
+        spot_timestamps = bundle.m5_timestamps[:_n_v43]
+        ts_ranges = None   # Not used in v43 mode — chain looked up via date
+        print(f"  spot_bars: {len(spot_bars):,} M5 bars")
+    else:
+        # Legacy M1 data
+        print("Sorting and Indexing Data...")
+        time_col = 'dt' if 'dt' in df.columns else 'timestamp'
+        df = df.sort_values(time_col).reset_index(drop=True)
+        # Build O(1) Chain Index
+        ts_ranges = build_ts_ranges(df, time_col)
+        # Build Spot Bars (1 row per minute)
+        spot_bars = df.drop_duplicates(subset=[time_col]).sort_values(time_col).reset_index(drop=True)
+        if limit:
+            spot_bars = spot_bars.iloc[:limit+256]
+            print(f"Limiting to {len(spot_bars)} bars.")
 
     # 2. PRE-COMPUTE MODEL OUTPUTS
-    # We need features for every unique bar.
-    # We'll re-extract features from spot_bars to ensure alignment.
-    print("Preparing Features...")
-    # Fill missing columns in spot_bars if any (usually duplicates of option row 0)
-    missing_cols = [c for c in feature_cols if c not in spot_bars.columns]
-    if missing_cols:
-         # Attempt to merge from first occurrence in df? No, spot_bars IS first occurrence.
-         # Just fill defaults if missing.
-         for c in missing_cols: spot_bars[c] = 0.0
-         
-    X_np = spot_bars[feature_cols].values.astype(np.float32)
-    X_np = np.where(np.isfinite(X_np), X_np, 0.0) # Simple sanitize
-    
-    # Normalize
-    if norm_stats:
-        mu = np.array(norm_stats['median']).reshape(-1)
-        mad = np.array(norm_stats['mad']).reshape(-1)
-        # Handle shape mismatch if any
-        if len(mu) != X_np.shape[1]: 
-             # fallback
-             mu = np.median(X_np, axis=0)
-             mad = np.median(np.abs(X_np - mu), axis=0)
-    else:
-        mu = np.median(X_np, axis=0)
-        mad = np.median(np.abs(X_np - mu), axis=0)
-    
-    mad = np.maximum(mad, 1e-6)
-    X_norm = (X_np - mu) / (1.4826 * mad)
-    X_norm = np.clip(X_norm, -10.0, 10.0)
-    
-    # Batch Inference
-    print("Running Batched Inference...")
-    SEQ_LEN = 256
-    BATCH_SIZE = 128
     num_bars = len(spot_bars)
-    all_policy = []
-    
-    X_tensor = torch.tensor(X_norm, device=device)
-    
-    for b_start in tqdm(range(SEQ_LEN, num_bars, BATCH_SIZE), desc="Inference"):
-        b_end = min(b_start + BATCH_SIZE, num_bars)
-        batch_seqs = []
-        valid_indices = []
-        
-        for i in range(b_start, b_end):
-            # Sequence: [i-SEQ_LEN : i]
-            # Warning: checks bounds
-            batch_seqs.append(X_tensor[i-SEQ_LEN : i])
-            valid_indices.append(i)
-            
-        if not batch_seqs: continue
-            
-        batch_input = torch.stack(batch_seqs).float().to(DEVICE)
-        with torch.no_grad():
-            # Model returns tuple, 0-index is policy
-            out = model(batch_input)[0].cpu().numpy()
-            all_policy.append(out)
-            
-    # Concatenate all batches
-    if all_policy:
-        policy_matrix = np.concatenate(all_policy, axis=0)
-    else:
-        policy_matrix = np.zeros((0, 10))
-    
-    # DEBUG: Diagnostic on Model Outputs
-    print(f"\n[DEBUG] Policy Matrix Shape: {policy_matrix.shape}")
-    entry_logits = policy_matrix[:, 8]
-    entry_probs = 1.0 / (1.0 + np.exp(-entry_logits))
-    print(f"[DEBUG] Entry Prob Stats: Min={entry_probs.min():.4f}, Max={entry_probs.max():.4f}, Mean={entry_probs.mean():.4f}")
-    print(f"[DEBUG] > 0.40 count: {(entry_probs > 0.40).sum()}")
-    print(f"[DEBUG] > 0.50 count: {(entry_probs > 0.50).sum()}")
-    
-    # DEBUG: Additional diagnostics for other gate conditions
-    pop_raw = policy_matrix[:, 4]
-    pop_probs = 1.0 / (1.0 + np.exp(-pop_raw))
-    conf_raw = policy_matrix[:, 7]
-    conf_probs = 1.0 / (1.0 + np.exp(-conf_raw))
-    
-    print(f"[DEBUG] POP (pol[4]) Stats: Min={pop_probs.min():.4f}, Max={pop_probs.max():.4f}, Mean={pop_probs.mean():.4f}")
-    print(f"[DEBUG] POP > 0.40 count: {(pop_probs > 0.40).sum()}")
-    print(f"[DEBUG] Conf (pol[7]) Stats: Min={conf_probs.min():.4f}, Max={conf_probs.max():.4f}, Mean={conf_probs.mean():.4f}")
-    print(f"[DEBUG] Conf > 0.35 count: {(conf_probs > 0.35).sum()}")
-    
-    # Combined gate check
-    combined_pass = (entry_logits > 0.0) & (pop_probs > 0.40) & (conf_probs > 0.35)
-    print(f"[DEBUG] ALL GATES PASS count: {combined_pass.sum()}")
 
-        
-    # Map back to bar index: policy_matrix[k] corresponds to spot_bars.iloc[SEQ_LEN + k]
-    
+    if v43_outputs is not None:
+        # ── Phase 7 path: use pre-computed CondorNet v4.3 outputs ─────────────
+        policy_matrix = None
+        SEQ_LEN = V43_SEQ_LEN
+        print(f"[Phase 7] Using pre-computed v4.3 inference outputs "
+              f"({num_bars:,} M5 bars, seq_len={SEQ_LEN}).")
+        n_v43 = len(v43_outputs['entry_signal'])
+        n_entry_pass = int((v43_outputs['entry_signal'][SEQ_LEN:n_v43] > V43_ENTRY_THRESHOLD).sum())
+        n_pop_pass   = int((v43_outputs['pop'][SEQ_LEN:n_v43] > V43_POP_THRESHOLD).sum())
+        n_ic         = int((v43_outputs['strategy_idx'][SEQ_LEN:n_v43] == V43_IC_STRATEGY_IDX).sum())
+        n_active     = int((~v43_outputs['abstain'][SEQ_LEN:n_v43]).sum())
+        print(f"  v43 gate preview (bars {SEQ_LEN}..{n_v43}): "
+              f"entry>{V43_ENTRY_THRESHOLD}={n_entry_pass:,} | "
+              f"pop>{V43_POP_THRESHOLD}={n_pop_pass:,} | "
+              f"IC_strategy={n_ic:,} | non-abstain={n_active:,}")
+    else:
+        # ── Legacy path: CondorBrain v2.2 batch inference ─────────────────────
+        print("Preparing Features...")
+        missing_cols = [c for c in feature_cols if c not in spot_bars.columns]
+        if missing_cols:
+            for c in missing_cols: spot_bars[c] = 0.0
+
+        X_np = spot_bars[feature_cols].values.astype(np.float32)
+        X_np = np.where(np.isfinite(X_np), X_np, 0.0)
+
+        if norm_stats:
+            mu = np.array(norm_stats['median']).reshape(-1)
+            mad = np.array(norm_stats['mad']).reshape(-1)
+            if len(mu) != X_np.shape[1]:
+                mu = np.median(X_np, axis=0)
+                mad = np.median(np.abs(X_np - mu), axis=0)
+        else:
+            mu = np.median(X_np, axis=0)
+            mad = np.median(np.abs(X_np - mu), axis=0)
+
+        mad = np.maximum(mad, 1e-6)
+        X_norm = (X_np - mu) / (1.4826 * mad)
+        X_norm = np.clip(X_norm, -10.0, 10.0)
+
+        print("Running Batched Inference...")
+        SEQ_LEN = 256
+        BATCH_SIZE = 128
+        all_policy = []
+        X_tensor = torch.tensor(X_norm, device=device)
+
+        for b_start in tqdm(range(SEQ_LEN, num_bars, BATCH_SIZE), desc="Inference"):
+            b_end = min(b_start + BATCH_SIZE, num_bars)
+            batch_seqs = []
+            for i in range(b_start, b_end):
+                batch_seqs.append(X_tensor[i-SEQ_LEN : i])
+            if not batch_seqs: continue
+            batch_input = torch.stack(batch_seqs).float().to(DEVICE)
+            with torch.no_grad():
+                out = model(batch_input)[0].cpu().numpy()
+                all_policy.append(out)
+
+        if all_policy:
+            policy_matrix = np.concatenate(all_policy, axis=0)
+        else:
+            policy_matrix = np.zeros((0, 10))
+
+        print(f"\n[DEBUG] Policy Matrix Shape: {policy_matrix.shape}")
+        entry_logits = policy_matrix[:, 8]
+        entry_probs = 1.0 / (1.0 + np.exp(-entry_logits))
+        print(f"[DEBUG] Entry Prob Stats: Min={entry_probs.min():.4f}, Max={entry_probs.max():.4f}, Mean={entry_probs.mean():.4f}")
+        print(f"[DEBUG] > 0.40 count: {(entry_probs > 0.40).sum()}")
+        print(f"[DEBUG] > 0.50 count: {(entry_probs > 0.50).sum()}")
+        pop_raw  = policy_matrix[:, 4]
+        pop_probs  = 1.0 / (1.0 + np.exp(-pop_raw))
+        conf_raw = policy_matrix[:, 7]
+        conf_probs = 1.0 / (1.0 + np.exp(-conf_raw))
+        print(f"[DEBUG] POP (pol[4]) Stats: Min={pop_probs.min():.4f}, Max={pop_probs.max():.4f}, Mean={pop_probs.mean():.4f}")
+        print(f"[DEBUG] POP > 0.40 count: {(pop_probs > 0.40).sum()}")
+        print(f"[DEBUG] Conf (pol[7]) Stats: Min={conf_probs.min():.4f}, Max={conf_probs.max():.4f}, Mean={conf_probs.mean():.4f}")
+        print(f"[DEBUG] Conf > 0.35 count: {(conf_probs > 0.35).sum()}")
+        combined_pass = (entry_logits > 0.0) & (pop_probs > 0.40) & (conf_probs > 0.35)
+        print(f"[DEBUG] ALL GATES PASS count: {combined_pass.sum()}")
+
     # 3. SIMULATION LOOP
-    print("Starting M1 Simulation Loop...")
-    
+    print("Starting Simulation Loop...")
+
     equity = STARTING_EQUITY
     starting_equity = equity
-    open_trades = [] # List of Trade objects
+    open_trades = []   # List of Trade objects
     closed_trades = [] # List of dicts
-    equity_curve = [] # List of dicts
+    equity_curve = []  # List of dicts
 
-    # Warmup
+    # Warmup: skip first SEQ_LEN bars (no model output)
     sim_start_idx = SEQ_LEN
 
     # ── Inline helpers ────────────────────────────────────────────────────────
@@ -1451,24 +1480,40 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     if not hasattr(run_backtest, '_credit_samples'):
         run_backtest._credit_samples = []
     
-    # Pre-extract spot timestamps as numpy array to ensure type match with ts_ranges (built from .values)
-    spot_timestamps = spot_bars[time_col].values
-    
+    # Pre-extract spot timestamps as numpy array to ensure type match
+    if bundle is not None:
+        spot_timestamps = bundle.m5_timestamps
+    else:
+        spot_timestamps = spot_bars[time_col].values
+
     for i in tqdm(range(sim_start_idx, num_bars), desc="Simulating"):
-         # Adjust index for policy
-         pol_idx = i - SEQ_LEN
-         if pol_idx >= len(policy_matrix): break
-         
+         # ── Policy index: v43 uses bar index directly; legacy uses offset ────
+         if v43_outputs is not None:
+             pol_idx = i   # v43_outputs[i] is already full-bar indexed
+         else:
+             pol_idx = i - SEQ_LEN
+             if pol_idx >= len(policy_matrix): break
+
          # 1. Get Bar Data
          ts = spot_timestamps[i]
-         spot = float(spot_bars['close'].iloc[i])
-         
-         # 2. Get Option Chain (O(1))
-         s, e = ts_ranges.get(ts, (None, None))
-         if s is None: 
-             continue # No chain this minute?
-             
-         chain_slice = df.iloc[s:e]
+         if bundle is not None:
+             spot = float(bundle.m5_spot[i])
+         else:
+             spot = float(spot_bars['close'].iloc[i])
+
+         # 2. Get Option Chain
+         if bundle is not None:
+             # Phase 7: look up by date string
+             date_str = str(bundle.m5_dates[i])
+             chain_slice = bundle.chain_df_by_date.get(date_str, pd.DataFrame())
+             if chain_slice.empty:
+                 continue
+         else:
+             # Legacy: O(1) ts_ranges lookup
+             s, e = ts_ranges.get(ts, (None, None))
+             if s is None:
+                 continue
+             chain_slice = df.iloc[s:e]
 
          # 3. Build Marks (Transient) - PHASE 5.2 FIX: Separate bid/ask/mid
          # Synthesize bid/ask from close + spread_ratio
@@ -1650,35 +1695,58 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
          # =====================================================================
 
          run_backtest._entry_dbg['bars_seen'] += 1
-         pol = policy_matrix[pol_idx]
+
+         # ── Build synthetic pol for _entry_audit_log + decode ─────────────
+         if v43_outputs is not None:
+             # Phase 7: named outputs → synthetic pol array
+             _es   = float(v43_outputs['entry_signal'][pol_idx])
+             _pop  = float(v43_outputs['pop'][pol_idx])
+             _abt  = bool(v43_outputs['abstain'][pol_idx])
+             _sidx = int(v43_outputs['strategy_idx'][pol_idx])
+             # Gate booleans (direct thresholds)
+             entry_gate_pass = (_es > V43_ENTRY_THRESHOLD)
+             pop_gate_pass   = (_pop > PROB_ENTRY_MIN)
+             conf_gate_pass  = ((not _abt) and (_sidx == V43_IC_STRATEGY_IDX))
+             # Synthetic pol for _entry_audit_log compatibility (display only)
+             pol = np.zeros(10, dtype=np.float32)
+             pol[8] = np.log(max(_es, 1e-9) / max(1.0 - _es, 1e-9))         # entry logit
+             pol[4] = np.log(max(_pop, 1e-9) / max(1.0 - _pop, 1e-9))       # pop logit
+             pol[7] = 10.0 if conf_gate_pass else -10.0
+             pol[0] = V43_DEFAULT_CALL_OFF / 5.0    # reverse of decode: call_off = pol[0]*5
+             pol[1] = V43_DEFAULT_PUT_OFF  / 5.0
+             pol[2] = V43_DEFAULT_WIDTH    / 10.0
+             pol[3] = V43_DEFAULT_DTE      / 45.0
+         else:
+             pol = policy_matrix[pol_idx]
+             entry_logit      = float(pol[8])
+             pop_prob         = float(_sigmoid(pol[4]))
+             conf_prob        = float(_sigmoid(pol[7]))
+             entry_gate_pass  = (entry_logit > 0.0)
+             pop_gate_pass    = (pop_prob > PROB_ENTRY_MIN)
+             conf_gate_pass   = (conf_prob > CONF_ENTRY_MIN)
 
          # (A) Policy vector sanity — all values must be finite
          if not np.all(np.isfinite(pol)):
              run_backtest._entry_dbg['policy_nan_block'] += 1
              _entry_audit_log(i, ts, spot, pol, 'SKIP', 'policy_nan')
          else:
-             # Decode gates from policy vector
-             entry_logit = float(pol[8])
-             pop_prob    = float(_sigmoid(pol[4]))
-             conf_prob   = float(_sigmoid(pol[7]))
-
              # (B) Cooldown spacing between entries
              if (i - run_backtest._last_entry_bar) < MIN_BARS_BETWEEN_TRADES:
                  run_backtest._entry_dbg['cooldown_block'] += 1
                  # No audit log — too noisy; counted only
 
              # (C) Neural gate checks — each gate tracked separately
-             elif not (entry_logit > 0.0):
+             elif not entry_gate_pass:
                  run_backtest._entry_dbg['gate_fail_entry'] += 1
-                 _entry_audit_log(i, ts, spot, pol, 'SKIP', 'gate_entry_logit_<=0')
+                 _entry_audit_log(i, ts, spot, pol, 'SKIP', 'gate_entry_fail')
 
-             elif not (pop_prob > PROB_ENTRY_MIN):
+             elif not pop_gate_pass:
                  run_backtest._entry_dbg['gate_fail_pop'] += 1
-                 _entry_audit_log(i, ts, spot, pol, 'SKIP', f'gate_pop_{pop_prob:.3f}_<={PROB_ENTRY_MIN}')
+                 _entry_audit_log(i, ts, spot, pol, 'SKIP', f'gate_pop_fail')
 
-             elif not (conf_prob > CONF_ENTRY_MIN):
+             elif not conf_gate_pass:
                  run_backtest._entry_dbg['gate_fail_conf'] += 1
-                 _entry_audit_log(i, ts, spot, pol, 'SKIP', f'gate_conf_{conf_prob:.3f}_<={CONF_ENTRY_MIN}')
+                 _entry_audit_log(i, ts, spot, pol, 'SKIP', f'gate_conf_fail')
 
              else:
                  # (D) Chain integrity — required columns must be present
@@ -1690,6 +1758,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
                  else:
                      # (E) Decode and clamp model parameters
+                     # pol[0..3] are set correctly for both v43 (defaults) and legacy (model output)
                      call_off = float(np.clip(pol[0] * 5.0,  0.5, 20.0))
                      put_off  = float(np.clip(pol[1] * 5.0,  0.5, 20.0))
                      width    = float(np.clip(pol[2] * 10.0, 1.0, 50.0))
@@ -1997,6 +2066,16 @@ def main():
     parser.add_argument("--exec-aggression", type=float, default=0.5, help="Queue aggression 0-1 (default: 0.5)")
     parser.add_argument("--exec-seed", type=int, default=42, help="Seed for execution reality RNG (default: 42)")
 
+    # Phase 7: CondorNet v4.3 multi-TF data layer
+    parser.add_argument("--use-v43", action="store_true", default=False,
+                        help="Use CondorNet v4.3 multi-TF inference instead of CondorBrain v2.2")
+    parser.add_argument("--v43-model", type=str, default=None,
+                        help="Path to CondorNet v4.3 checkpoint (.pth). Default: models/condornet_v43_best.pth")
+    parser.add_argument("--v43-data-dir", type=str, default="data/Datasetv4/v43",
+                        help="Directory containing v4.3 multi-TF dataset CSVs (default: data/Datasetv4/v43)")
+    parser.add_argument("--v43-seq-len", type=int, default=V43_SEQ_LEN,
+                        help=f"Inference sequence length for CondorNet v4.3 (default: {V43_SEQ_LEN})")
+
     args = parser.parse_args()
 
     # --- GPU CHECK ---
@@ -2163,6 +2242,30 @@ def main():
                 norm_stats["median"] = checkpoint["median"]
                 norm_stats["mad"] = checkpoint["mad"]
 
+    # ── Phase 7: CondorNet v4.3 multi-TF inference (if --use-v43) ─────────────
+    v43_outputs = None
+    bundle_v43  = None
+    if args.use_v43:
+        if not HAS_V43_DATA:
+            print(f"❌ --use-v43 requires backtest_v45_data.py. Import error: {_V43_IMPORT_ERR}")
+            return
+        v43_ckpt = args.v43_model or "models/condornet_v43_best.pth"
+        print(f"\n[Phase 7] Loading CondorNet v4.3 checkpoint: {v43_ckpt}")
+        v43_model_obj = load_v43_model(v43_ckpt, DEVICE, verbose=True)
+        print(f"[Phase 7] Loading multi-TF bundle from: {args.v43_data_dir}")
+        bundle_v43 = load_multi_tf_bundle(data_dir=args.v43_data_dir, verbose=True)
+        print(f"[Phase 7] Running batch inference ({bundle_v43.n_bars:,} M5 bars, seq_len={args.v43_seq_len})...")
+        v43_outputs = run_v43_batch_inference(
+            bundle_v43, v43_model_obj, DEVICE,
+            seq_len=args.v43_seq_len, batch_size=V43_BATCH_SIZE, verbose=True,
+        )
+        print(f"[Phase 7] Done. Non-abstain: {(~v43_outputs['abstain']).sum():,} | "
+              f"IC (idx={V43_IC_STRATEGY_IDX}): {(v43_outputs['strategy_idx']==V43_IC_STRATEGY_IDX).sum():,} | "
+              f"entry>{V43_ENTRY_THRESHOLD}: {(v43_outputs['entry_signal']>V43_ENTRY_THRESHOLD).sum():,}")
+        # In v43 mode, df / model are not used (pass None-safe values)
+        if df is None or df.empty:
+            df = pd.DataFrame()   # run_backtest handles None df when bundle provided
+
     # 4. Backtest
     generate_contract_snapshot(
         os.path.join(REPORTS_DIR, "..", "audit", "contract_snapshot.json"),
@@ -2185,7 +2288,9 @@ def main():
         use_fuzzy_sizing=args.use_fuzzy_sizing,
         use_trade_rules=args.use_trade_rules,
         use_diffusion=args.use_diffusion,
-        limit=args.limit
+        limit=args.limit,
+        v43_outputs=v43_outputs,
+        bundle=bundle_v43,
     )
     
     # 5. Report
