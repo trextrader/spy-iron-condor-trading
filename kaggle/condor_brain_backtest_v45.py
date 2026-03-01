@@ -1363,6 +1363,81 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     elif EXEC_REALITY_ENABLED and not HAS_EXECUTION_REALITY:
         print("[Phase 5.5] WARNING: ExecutionRealityEngine requested but not available. Using simple model.")
 
+    # ── Decision Trace Logger ─────────────────────────────────────────────────
+    # Writes decision_trace.jsonl for the attribution pipeline.  Each ENTRY
+    # record captures the model scores at open time; each EVAL record captures
+    # the realised outcome so generate_attribution_csv can compute win-rates and
+    # R-multiples per factor.
+    trace_logger = None
+    if HAS_TRACE_LOGGER:
+        import hashlib as _hl, subprocess as _sp, uuid as _uu
+        _run_id     = _uu.uuid4().hex[:8]
+        _model_id   = os.path.basename(model_path) if model_path else "condor_v43"
+        try:
+            _mh = _hl.sha256()
+            with open(model_path, 'rb') as _mf:
+                for _chunk in iter(lambda: _mf.read(1 << 20), b''):
+                    _mh.update(_chunk)
+            _model_hash = _mh.hexdigest()[:16]
+        except Exception:
+            _model_hash = "unknown"
+        try:
+            _commit = _sp.check_output(
+                ['git', 'rev-parse', '--short', 'HEAD'], stderr=_sp.DEVNULL
+            ).decode().strip()
+        except Exception:
+            _commit = "unknown"
+        _cfg = TraceConfig(
+            output_path    = DECISION_TRACE_PATH,
+            model_id       = _model_id,
+            model_version  = "v4.3",
+            model_hash     = _model_hash,
+            code_commit    = _commit,
+            run_id         = _run_id,
+            dataset_id     = os.path.basename(data_path) if data_path else "options_2025_v43.csv",
+            dataset_path   = data_path,
+        )
+        trace_logger = DecisionTraceLogger(_cfg)
+        # Clear any stale trace from a previous run
+        if os.path.exists(DECISION_TRACE_PATH):
+            os.remove(DECISION_TRACE_PATH)
+        print(f"[Trace] DecisionTraceLogger initialised → {DECISION_TRACE_PATH}")
+
+    def _trace_close(trade, pnl, reason):
+        """Emit an EVAL record to decision_trace.jsonl on trade close."""
+        if trace_logger is None:
+            return
+        _ml  = abs(float(trade.max_loss)) if trade.max_loss else 1.0
+        _r   = round(float(pnl) / _ml, 4) if _ml > 0 else 0.0
+        _s   = trade.scores or {}
+        trace_logger.append({
+            'decision': {
+                'decision_type': 'EVAL',
+                'trade_id':       trade.trade_id,
+                'scope':          'IC',
+                'exit_reason':    reason,
+            },
+            'decision_factors': {
+                'rules': [],
+                'attribution': [
+                    {'factor_id': k, 'factor_kind': 'FEATURE',
+                     'contribution': float(v) if isinstance(v, (int, float, np.floating)) else 0.0,
+                     'importance': 0.0}
+                    for k, v in _s.items()
+                    if k in ('entry_logit', 'pop_prob', 'conf_prob',
+                              'short_call_delta', 'short_put_delta')
+                ],
+                'fuzzy': {'rules_fired': []},
+            },
+            'outcome': {
+                'win':              bool(pnl > 0),
+                'loss':             bool(pnl < 0),
+                'neutral':          pnl == 0,
+                'r_multiple_final': _r,
+                'pnl':              round(float(pnl), 4),
+            },
+        })
+
     # 1. PREPARE DATA (M1-Centric)
     # ── Phase 7: build spot_bars / chain lookup from bundle or legacy df ─────
     if bundle is not None:
@@ -1681,6 +1756,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      'held_bars': -1,  # TODO
                      'exit_details': exit_details if exit_valid else None
                  })
+                 _trace_close(tr, realized_pnl, "RISK_STOP")
                  continue  # Trade is gone
             
              # Check Profit Target (50% of max profit)
@@ -1710,6 +1786,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                          'reason': "PROFIT_50PCT", 'max_dd': tr.max_dd_pct * 100,
                          'exit_details': exit_details if exit_valid else None
                      })
+                     _trace_close(tr, realized_pnl, "PROFIT_50PCT")
                      continue
              
              # Check Expiration (DTE < 0.1)
@@ -1757,8 +1834,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      'max_dd': tr.max_dd_pct * 100,
                      'exit_details': exit_details if exit_valid else None
                  })
+                 _trace_close(tr, realized_pnl, "EXPIRED")
                  continue
-                 
+
              active_trades.append(tr)
          
          open_trades = active_trades
@@ -2072,6 +2150,34 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                              }
                                          )
                                          open_trades.append(new_trade)
+
+                                         # Decision trace — ENTRY record
+                                         if trace_logger is not None:
+                                             _s = new_trade.scores or {}
+                                             trace_logger.append({
+                                                 'decision': {
+                                                     'decision_type': 'ENTRY',
+                                                     'trade_id':       trade_id,
+                                                     'scope':          'IC',
+                                                 },
+                                                 'decision_factors': {
+                                                     'rules': [],
+                                                     'attribution': [
+                                                         {'factor_id': k, 'factor_kind': 'FEATURE',
+                                                          'contribution': float(v) if isinstance(v, (int, float, np.floating)) else 0.0,
+                                                          'importance': 0.0}
+                                                         for k, v in _s.items()
+                                                         if k in ('entry_logit', 'pop_prob', 'conf_prob',
+                                                                   'short_call_delta', 'short_put_delta')
+                                                     ],
+                                                     'fuzzy': {'rules_fired': []},
+                                                 },
+                                                 'outcome': {
+                                                     'win': False, 'loss': False, 'neutral': True,
+                                                     'r_multiple_final': 0.0,
+                                                 },
+                                             })
+
                                          run_backtest._last_entry_bar = i
                                          run_backtest._entry_dbg['success'] += 1
                                          print(f"\n  ✅ TRADE OPENED [{trade_id}] bar={i} ts={str(ts)[:19]}"
