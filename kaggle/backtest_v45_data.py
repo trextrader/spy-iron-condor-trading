@@ -570,6 +570,16 @@ def normalize_v43_chain(chain_df: pd.DataFrame, spot: float,
 
     df = chain_df.copy()
 
+    # ── Coerce all numeric columns first (CSV loads may give object dtype) ──
+    _numeric_cols = [
+        'strike', 'last', 'mark', 'bid', 'bid_size', 'ask', 'ask_size',
+        'volume', 'open_interest', 'implied_volatility',
+        'delta', 'gamma', 'theta', 'vega', 'rho',
+    ]
+    for _col in _numeric_cols:
+        if _col in df.columns:
+            df[_col] = pd.to_numeric(df[_col], errors='coerce').fillna(0.0)
+
     # option_symbol ← contract_id
     if 'contract_id' in df.columns and 'option_symbol' not in df.columns:
         df['option_symbol'] = df['contract_id']
@@ -580,7 +590,7 @@ def normalize_v43_chain(chain_df: pd.DataFrame, spot: float,
 
     # iv ← implied_volatility
     if 'implied_volatility' in df.columns and 'iv' not in df.columns:
-        df['iv'] = df['implied_volatility'].astype(float)
+        df['iv'] = df['implied_volatility']
 
     # underlying_price ← spot  (used by synthesize_chain_prices BSM formula)
     df['underlying_price'] = float(spot)
@@ -606,7 +616,7 @@ def normalize_v43_chain(chain_df: pd.DataFrame, spot: float,
         else:
             df['mid'] = 0.10
 
-    # close ← mid  (legacy compat: build_condor reads chain['close'])
+    # close ← mid  (legacy compat: find_best_legs reads chain['close'])
     if 'close' not in df.columns:
         df['close'] = df['mid']
 
