@@ -1407,16 +1407,36 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         """Emit an EVAL record to decision_trace.jsonl on trade close."""
         if trace_logger is None:
             return
+        from datetime import timedelta as _td
         _ml  = abs(float(trade.max_loss)) if trade.max_loss else 1.0
         _r   = round(float(pnl) / _ml, 4) if _ml > 0 else 0.0
         _s   = trade.scores or {}
+        _sc  = trade.legs.get('short_call', 0) if trade.legs else 0
+        try:
+            _exp = str(pd.Timestamp(trade.entry_dt).date()
+                       + _td(days=int(trade.dte_entry or 0)))
+        except Exception:
+            _exp = "unknown"
         trace_logger.append({
+            'event_id': str(uuid.uuid4()),
+            'instrument': {
+                'symbol': 'SPY', 'venue': 'CBOE', 'asset_class': 'OPTIONS',
+                'contract': {'expiry': _exp, 'right': 'IC',
+                             'strike': float(_sc), 'multiplier': IC_MULTIPLIER},
+            },
             'decision': {
                 'decision_type': 'EVAL',
-                'trade_id':       trade.trade_id,
-                'scope':          'IC',
-                'exit_reason':    reason,
+                'decision_id':   str(uuid.uuid4()),
+                'trade_id':      trade.trade_id,
+                'scope':         'EXIT',
+                'intent':        'iron_condor_exit',
+                'timeframe':     'M5',
+                'horizon_bars':  0,
+                'exit_reason':   reason,
             },
+            'state':  {},
+            'inputs': {},
+            'action': {'exit_reason': reason},
             'decision_factors': {
                 'rules': [],
                 'attribution': [
@@ -2153,12 +2173,47 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
                                          # Decision trace — ENTRY record
                                          if trace_logger is not None:
-                                             _s = new_trade.scores or {}
+                                             from datetime import timedelta as _td
+                                             _s   = new_trade.scores or {}
+                                             _sc  = legs.get('short_call', 0)
+                                             try:
+                                                 _exp = str(pd.Timestamp(ts).date()
+                                                            + _td(days=int(dte or 0)))
+                                             except Exception:
+                                                 _exp = "unknown"
                                              trace_logger.append({
+                                                 'event_id': str(uuid.uuid4()),
+                                                 'instrument': {
+                                                     'symbol': 'SPY', 'venue': 'CBOE',
+                                                     'asset_class': 'OPTIONS',
+                                                     'contract': {
+                                                         'expiry': _exp, 'right': 'IC',
+                                                         'strike': float(_sc),
+                                                         'multiplier': IC_MULTIPLIER,
+                                                     },
+                                                 },
                                                  'decision': {
                                                      'decision_type': 'ENTRY',
-                                                     'trade_id':       trade_id,
-                                                     'scope':          'IC',
+                                                     'decision_id':   str(uuid.uuid4()),
+                                                     'trade_id':      trade_id,
+                                                     'scope':         'ENTRY',
+                                                     'intent':        'iron_condor_entry',
+                                                     'timeframe':     'M5',
+                                                     'horizon_bars':  int(dte * 78),
+                                                 },
+                                                 'state':  {},
+                                                 'inputs': {
+                                                     'spot':      round(spot, 4),
+                                                     'call_off':  round(call_off, 4),
+                                                     'put_off':   round(put_off, 4),
+                                                     'width':     round(spread_width, 4),
+                                                 },
+                                                 'action': {
+                                                     'short_call': legs.get('short_call'),
+                                                     'long_call':  legs.get('long_call'),
+                                                     'short_put':  legs.get('short_put'),
+                                                     'long_put':   legs.get('long_put'),
+                                                     'credit':     round(net_credit_val, 4),
                                                  },
                                                  'decision_factors': {
                                                      'rules': [],
