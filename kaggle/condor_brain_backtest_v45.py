@@ -130,6 +130,7 @@ BAR_TRACE_PATH = os.path.join(REPORTS_DIR, "bar_trace.jsonl")
 IC_CREDIT_PER_SPREAD = 1.50  # $1.50 credit per spread (typical)
 IC_CONTRACTS = 10  # Number of contracts per trade
 IC_MULTIPLIER = 100  # Options multiplier
+IC_STOP_LOSS_MULT = 2.0      # Close when loss ≥ 2× credit (standard IC management rule)
 RULE_FEATURES = ["rule_long_consensus", "rule_short_consensus", "rule_exit_consensus", "rule_block_any"]
 
 # =============================================================================
@@ -1224,7 +1225,7 @@ def find_best_legs(chain_df, spot, call_off, put_off, width, validate_greeks=Tru
         'long_put_symbol': long_put_row['option_symbol'].values[0],
         'long_put_delta': long_put_row['delta'].values[0] if 'delta' in long_put_row.columns else None,
 
-        'width': abs(l_call - s_call),
+        'width': max(abs(l_call - s_call), abs(s_put - l_put)),  # wider of the two spreads
         'min_fill_prob': min_fill_prob,
         'liquidity_issues': liquidity_issues
     }
@@ -1739,6 +1740,37 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      print(f"   DTE at entry: {tr.dte_entry}")
                  run_backtest._mark_debug_count += 1
              
+             # Per-trade stop: close when loss >= IC_STOP_LOSS_MULT × credit collected.
+             # Standard IC management rule (2× credit = 200% of max profit).
+             # This prevents a single position from losing more than 2× its premium
+             # even if the portfolio-level 5% stop hasn't fired yet.
+             _per_trade_stop = -(tr.net_credit * IC_STOP_LOSS_MULT * tr.qty * IC_MULTIPLIER)
+             if tr.unrealized_pnl < _per_trade_stop:
+                 if exec_engine and market_state:
+                     exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
+                         tr.legs, marks_bid, marks_ask, marks_mid, exec_engine, market_state
+                     )
+                 else:
+                     exit_debit, exit_valid, exit_details = calculate_exit_fill(
+                         tr.legs, marks_bid, marks_ask, marks_mid
+                     )
+                 realized_pnl = ((tr.net_credit - exit_debit) * tr.qty * IC_MULTIPLIER
+                                 if exit_valid
+                                 else getattr(tr, 'unrealized_pnl_real', tr.unrealized_pnl))
+                 tr.exit_dt = ts
+                 tr.exit_reason = "PER_TRADE_STOP"
+                 tr.realized_pnl = realized_pnl
+                 tr.is_closed = True
+                 equity += tr.realized_pnl
+                 closed_trades.append({
+                     'trade_id': tr.trade_id, 'entry_dt': tr.entry_dt, 'exit_dt': ts,
+                     'pnl': tr.realized_pnl, 'pnl_pct': tr.pnl_pct * 100,
+                     'reason': "PER_TRADE_STOP", 'max_dd': tr.max_dd_pct * 100,
+                     'exit_details': exit_details if exit_valid else None
+                 })
+                 _trace_close(tr, realized_pnl, "PER_TRADE_STOP")
+                 continue
+
              # Check Risk Stop (5%) - PHASE 5.2/5.5 FIX: Use realistic exit cost
              if tr.should_risk_close(equity):
                  # PHASE 5.5: Use ExecutionRealityEngine if available
