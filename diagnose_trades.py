@@ -18,6 +18,7 @@ SEP2 = "-" * 65
 
 # ── locate trades.csv ─────────────────────────────────────────────────────────
 CANDIDATES = [
+    "reports/trades_v2.csv",
     "reports/trades.csv",
     "reports/run18_Backtest/trades.csv",
 ]
