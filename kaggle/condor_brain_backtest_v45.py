@@ -1739,6 +1739,10 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              pol[1] = V43_DEFAULT_PUT_OFF  / 5.0
              pol[2] = V43_DEFAULT_WIDTH    / 10.0
              pol[3] = V43_DEFAULT_DTE      / 45.0
+             # Scalar aliases used downstream when trade is opened
+             entry_logit = float(pol[8])
+             pop_prob    = float(_pop)
+             conf_prob   = float(_sigmoid(pol[7]))
          else:
              pol = policy_matrix[pol_idx]
              entry_logit      = float(pol[8])
