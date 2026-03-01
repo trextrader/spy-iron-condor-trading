@@ -216,6 +216,11 @@ AUDIT_MAX_CREDIT_SAMPLES          = 20     # Keep first N low-credit samples for
 V43_ENTRY_THRESHOLD   = 0.55   # entry_signal threshold (sigmoid [0,1] space)
 V43_POP_THRESHOLD     = 0.50   # pop threshold (already in [0,1])
 V43_IC_STRATEGY_IDX   = 7      # iron_condor index in 10-way strategy_logits head
+V43_STRATEGY_NAMES    = [      # matches IDX_TO_STRATEGY_TYPE in schema_v43.py
+    "single_call", "single_put", "bull_call_spread", "bear_put_spread",
+    "straddle", "strangle", "butterfly_call", "iron_condor",
+    "custom_multi_leg", "abstain",
+]
 V43_SEQ_LEN           = 64     # inference lookback window (matches training)
 V43_BATCH_SIZE        = 32     # GPU inference batch size
 # Default IC structural params for v43 mode
@@ -1572,6 +1577,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
     equity = STARTING_EQUITY
     starting_equity = equity
+    peak_equity = equity          # rolling high-water mark for drawdown display
     open_trades = []   # List of Trade objects
     closed_trades = [] # List of dicts
     equity_curve = []  # List of dicts
@@ -2267,13 +2273,32 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
                                          run_backtest._last_entry_bar = i
                                          run_backtest._entry_dbg['success'] += 1
-                                         print(f"\n  ✅ TRADE OPENED [{trade_id}] bar={i} ts={str(ts)[:19]}"
-                                               f"\n     spot={spot:.2f} | credit=${net_credit_val:.4f}/contract"
-                                               f" | qty={filled_qty} | margin=${trade_margin:.0f}"
-                                               f"\n     SC={legs.get('short_call')} LC={legs.get('long_call')}"
-                                               f" SP={legs.get('short_put')} LP={legs.get('long_put')}"
-                                               f"\n     entry={_es:.3f} pop={_pop:.3f} strategy_idx={_sidx if v43_outputs else '?'}"
-                                               f" deployed_after=${currently_deployed_exact+trade_margin:.0f}")
+                                         # Rolling stats panel
+                                         _close_recs = [r for r in closed_trades if r.get('action') != 'OPEN' and r.get('reason')]
+                                         _n_wins     = sum(1 for r in _close_recs if float(r.get('pnl') or 0) > 0)
+                                         _n_losses   = sum(1 for r in _close_recs if float(r.get('pnl') or 0) < 0)
+                                         _cur_eq     = equity + sum(t.unrealized_pnl for t in open_trades)
+                                         _dd_pct     = (_cur_eq - peak_equity) / peak_equity * 100 if peak_equity > 0 else 0.0
+                                         _strat_name = V43_STRATEGY_NAMES[_sidx] if v43_outputs and 0 <= _sidx < len(V43_STRATEGY_NAMES) else "?"
+                                         print(
+                                             f"\n  {'='*56}"
+                                             f"\n  TRADE OPENED  [{trade_id}]  bar={i}  {str(ts)[:19]}"
+                                             f"\n  {'='*56}"
+                                             f"\n  Strategy  : {_strat_name} (idx={_sidx if v43_outputs else '?'})"
+                                             f"\n  Legs      : SC={legs.get('short_call')} / LC={legs.get('long_call')}"
+                                             f"  |  SP={legs.get('short_put')} / LP={legs.get('long_put')}"
+                                             f"\n  Credit    : ${net_credit_val:.4f}/contract  qty={filled_qty}"
+                                             f"  margin=${trade_margin:.0f}  DTE={dte:.0f}"
+                                             f"\n  Spot      : {spot:.2f}"
+                                             f"  entry_sig={_es:.3f}  pop={_pop:.3f}"
+                                             f"\n  {'-'*56}"
+                                             f"\n  Balance   : ${_cur_eq:>12,.2f}"
+                                             f"  (deployed ${currently_deployed_exact+trade_margin:,.0f} / ${live_max_deploy:,.0f})"
+                                             f"\n  Wins/Loss : {_n_wins}W / {_n_losses}L"
+                                             f"  (closed={len(_close_recs)}, open={len(open_trades)+1})"
+                                             f"\n  Max DD    : {_dd_pct:.2f}%  (vs peak ${peak_equity:,.0f})"
+                                             f"\n  {'='*56}"
+                                         )
 
                                          # OPEN event row (state-action trajectory export)
                                          closed_trades.append({
@@ -2316,9 +2341,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
          
          # 6. Record Equity Curve
          unrealized = sum(t.unrealized_pnl for t in open_trades)
+         _total_equity = equity + unrealized
+         if _total_equity > peak_equity:
+             peak_equity = _total_equity
          equity_curve.append({
              'dt': ts,
-             'equity': equity + unrealized,
+             'equity': _total_equity,
              'cash': equity,
              'open_pnl': unrealized,
              'open_count': len(open_trades)
