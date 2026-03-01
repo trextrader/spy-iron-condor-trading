@@ -1037,7 +1037,7 @@ def estimate_condor_pnl(spot, short_call, long_call, short_put, long_put, credit
     return net_pnl
 
 def find_best_legs(chain_df, spot, call_off, put_off, width, validate_greeks=True,
-                   max_leg_spread=0.15):
+                   max_leg_spread=0.15, target_dte=V43_DEFAULT_DTE):
     """
     Search the 100-row options chain for the 4 legs matching model suggestions.
 
@@ -1054,6 +1054,15 @@ def find_best_legs(chain_df, spot, call_off, put_off, width, validate_greeks=Tru
     - Validates spread direction after leg selection: rejects inverted structures
       where the long wing has higher abs-delta than the short (impossible in real
       BSM, indicates bad data in the options CSV).
+
+    Phase 5.7 Fix:
+    - Filters chain to a single expiration closest to target_dte (default 21 days)
+      before any leg selection.  The options CSV contains options from 23-day to
+      1073-day DTE all mixed in each date; without this filter, SC can be selected
+      from one expiry and LC from a completely different expiry, producing inverted
+      deltas and negative credit.
+    - NaN-safe inverted-delta guard: uses pd.isna() so NaN deltas correctly trigger
+      rejection rather than silently bypassing the check.
     """
     if chain_df.empty:
         return None
@@ -1071,6 +1080,21 @@ def find_best_legs(chain_df, spot, call_off, put_off, width, validate_greeks=Tru
         chain_df = chain_df[_spread_ratio <= max_leg_spread].copy()
         if chain_df.empty:
             return None
+
+    # --- Phase 5.7: Single-expiration DTE filter ---
+    # The options CSV mixes expirations from 23-day to 1073-day DTE in each
+    # date's chain.  Pin all 4 legs to the single expiration whose DTE is
+    # closest to target_dte (default V43_DEFAULT_DTE = 21 days).  This prevents
+    # SC from being selected from a short-dated expiry and LC from a much
+    # longer-dated expiry, which always produces inverted delta ordering and
+    # negative credit.
+    if 'te' in chain_df.columns:
+        _unique_te = chain_df['te'].dropna().unique()
+        if len(_unique_te) > 0:
+            _best_te = float(_unique_te[np.argmin(np.abs(_unique_te - target_dte))])
+            chain_df = chain_df[np.abs(chain_df['te'] - _best_te) < 1.0].copy()
+            if chain_df.empty:
+                return None
 
     # Suggested strikes
     s_call_target = spot + (call_off * spot * 0.01)
@@ -1137,10 +1161,10 @@ def find_best_legs(chain_df, spot, call_off, put_off, width, validate_greeks=Tru
         _lc_d = long_call_row['delta'].values[0]  if not long_call_row.empty  else None
         _sp_d = short_put_row['delta'].values[0]  if not short_put_row.empty  else None
         _lp_d = long_put_row['delta'].values[0]   if not long_put_row.empty   else None
-        if _sc_d is not None and _lc_d is not None:
+        if _sc_d is not None and not pd.isna(_sc_d) and _lc_d is not None and not pd.isna(_lc_d):
             if abs(_lc_d) >= abs(_sc_d):   # long call should be further OTM
                 return None
-        if _sp_d is not None and _lp_d is not None:
+        if _sp_d is not None and not pd.isna(_sp_d) and _lp_d is not None and not pd.isna(_lp_d):
             if abs(_lp_d) >= abs(_sp_d):   # long put should be further OTM
                 return None
 
