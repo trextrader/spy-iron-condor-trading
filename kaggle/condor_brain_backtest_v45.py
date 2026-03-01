@@ -520,10 +520,28 @@ def synthesize_bid_ask(row):
     """
     Synthesize bid/ask from BSM theoretical price and spread_ratio.
 
-    CRITICAL FIX: The 'close' column is the underlying SPY bar price, NOT 
-    the option price. We must compute the option price from BSM using the 
+    CRITICAL FIX: The 'close' column is the underlying SPY bar price, NOT
+    the option price. We must compute the option price from BSM using the
     available greeks data (iv, strike, underlying_price, te, call_put).
+
+    v43 FIX: If the row already has valid pre-computed bid/ask (e.g. from
+    SyntheticOptionsEngine in options_2025_v43.csv), use them directly.
+    BSM re-synthesis creates an artificial ask floor (max 0.02) that inflates
+    the spread_ratio to ~50% for cheap options, triggering BrokenSpreadDetector.
     """
+    _existing_bid = float(row.get('bid', 0.0) or 0.0)
+    _existing_ask = float(row.get('ask', 0.0) or 0.0)
+    if _existing_bid > 0 and _existing_ask >= _existing_bid:
+        _mid = float(row.get('mid', (_existing_bid + _existing_ask) / 2.0) or (_existing_bid + _existing_ask) / 2.0)
+        _spread = _existing_ask - _existing_bid
+        return {
+            'bid': _existing_bid,
+            'ask': _existing_ask,
+            'mid': max(_mid, 0.01),
+            'spread': _spread,
+            'spread_ratio': _spread / max(_existing_ask, 0.01)
+        }
+
     # Get option parameters
     S = row.get('underlying_price', row.get('close', 0.0))
     K = row.get('strike', 0.0)
@@ -1839,6 +1857,11 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
                              if not is_atomic:
                                  run_backtest._entry_dbg['atomicity_fail'] += 1
+                                 _reason = (fill_details.get('reason')
+                                            or fill_details.get('rejection', {}).get('reason', '?'))
+                                 if run_backtest._entry_dbg['atomicity_fail'] <= 3:
+                                     print(f"  [ATOMICITY FAIL #{run_backtest._entry_dbg['atomicity_fail']}] "
+                                           f"bar={i} ts={ts} reason={_reason} details={fill_details}")
                                  _entry_audit_log(i, ts, spot, pol, 'SKIP',
                                      f'atomicity_fail:{fill_details.get("reason","?")}',
                                      extra={'fill_details': {k: round(float(v), 4)
