@@ -161,7 +161,8 @@ EXEC_ATOMICITY_STRICT = True     # Require all 4 legs to have valid quotes
 EXEC_REALITY_ENABLED = True       # Use ExecutionRealityEngine for fills
 EXEC_REALITY_SEED = 42            # Seed for deterministic execution
 EXEC_REALITY_LATENCY_MS = 100.0   # Mean latency in ms
-EXEC_REALITY_AGGRESSION = 0.5     # Queue aggression (0=passive, 1=aggressive)
+EXEC_REALITY_AGGRESSION = 1.0     # Queue aggression: 1.0 = guaranteed fill (market orders, SPY options are extremely liquid)
+                                  # 0.5 produced fill_prob=10%/leg → 0.01% for all 4 legs → 100% atomicity fail
 EXEC_REALITY_LOG_DIAGNOSTICS = True  # Log detailed execution diagnostics
 
 # Trace + outcome labeling config
@@ -1283,7 +1284,7 @@ def build_ts_ranges(df, time_col='dt'):
 
 def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None,
                  use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None,
-                 v43_outputs=None, bundle=None):
+                 v43_outputs=None, bundle=None, verbose_sim=False):
 
     # ==========================================================================
     # PHASE 5.5: Initialize Execution Reality Engine
@@ -1747,6 +1748,14 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              pop_gate_pass    = (pop_prob > PROB_ENTRY_MIN)
              ic_gate_pass     = (conf_prob > CONF_ENTRY_MIN)
 
+         # ── Verbose per-bar logging (v43 mode) ───────────────────────────────
+         if v43_outputs is not None and verbose_sim:
+             _v_entry = f"entry={'✓' if entry_gate_pass else '✗'}({_es:.3f}>{V43_ENTRY_THRESHOLD})"
+             _v_pop   = f"pop={'✓' if pop_gate_pass else '✗'}({_pop:.3f}>{V43_POP_THRESHOLD})"
+             _v_ic    = f"IC={'✓' if ic_gate_pass else '✗'}(abt={_abt},sidx={_sidx})"
+             _v_open  = len(open_trades)
+             print(f"[{i:>5}] {str(ts)[:19]} spot={spot:>8.2f}  {_v_entry}  {_v_pop}  {_v_ic}  open={_v_open}")
+
          # (A) Policy vector sanity — all values must be finite
          if not np.all(np.isfinite(pol)):
              run_backtest._entry_dbg['policy_nan_block'] += 1
@@ -1832,6 +1841,16 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
                      else:
                          # (G) Leg construction
+                         if verbose_sim:
+                             _chain_n = len(chain_with_prices)
+                             _chain_calls = (chain_with_prices.get('call_put', chain_with_prices.get('type', pd.Series())).str.upper().str.startswith('C')).sum() if _chain_n > 0 else 0
+                             _valid_d = chain_with_prices[(chain_with_prices['delta'].abs() >= 0.10) & (chain_with_prices['delta'].abs() <= 0.25)] if 'delta' in chain_with_prices.columns else pd.DataFrame()
+                             print(f"\n  ─── ENTRY ATTEMPT bar={i} ts={str(ts)[:19]} spot={spot:.2f} ───")
+                             print(f"  (G) Chain: {_chain_n} rows | valid-delta[0.10-0.25]: {len(_valid_d)} | call_off={call_off:.2f}% put_off={put_off:.2f}% width={width:.2f}")
+                             if len(_valid_d) > 0:
+                                 _vd = _valid_d[['strike','call_put','delta','bid','ask','te']].sort_values('delta', key=abs).head(6) if all(c in _valid_d.columns for c in ['strike','call_put','delta','bid','ask','te']) else _valid_d.head(6)
+                                 print(f"  Best delta candidates:\n{_vd.to_string(index=False)}")
+
                          legs = find_best_legs(
                              chain_with_prices, spot, call_off, put_off, width,
                              validate_greeks=True
@@ -1839,12 +1858,29 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
                          if legs is None:
                              run_backtest._entry_dbg['legs_none'] += 1
+                             if verbose_sim:
+                                 print(f"  ✗ SKIP legs_none — no valid 4-leg structure found")
                              _entry_audit_log(i, ts, spot, pol, 'SKIP',
                                  f'legs_none:call_off={call_off:.2f}%_put_off={put_off:.2f}%_width={width:.2f}',
                                  extra={'call_off': call_off, 'put_off': put_off, 'width': width,
                                         'chain_rows': len(chain_with_prices)})
 
                          else:
+                             if verbose_sim:
+                                 print(f"  (G) Legs selected:")
+                                 print(f"      SC={legs.get('short_call')} δ={legs.get('short_call_delta','?'):.3f} bid={legs.get('short_call_bid','?'):.3f}"
+                                       if isinstance(legs.get('short_call_delta'), float) else
+                                       f"      SC={legs.get('short_call')} δ=? bid={legs.get('short_call_bid','?')}")
+                                 print(f"      LC={legs.get('long_call')}  δ={legs.get('long_call_delta','?'):.3f} ask={legs.get('long_call_ask','?'):.3f}"
+                                       if isinstance(legs.get('long_call_delta'), float) else
+                                       f"      LC={legs.get('long_call')}  δ=? ask={legs.get('long_call_ask','?')}")
+                                 print(f"      SP={legs.get('short_put')} δ={legs.get('short_put_delta','?'):.3f} bid={legs.get('short_put_bid','?'):.3f}"
+                                       if isinstance(legs.get('short_put_delta'), float) else
+                                       f"      SP={legs.get('short_put')} δ=? bid={legs.get('short_put_bid','?')}")
+                                 print(f"      LP={legs.get('long_put')}  δ={legs.get('long_put_delta','?'):.3f} ask={legs.get('long_put_ask','?'):.3f}"
+                                       if isinstance(legs.get('long_put_delta'), float) else
+                                       f"      LP={legs.get('long_put')}  δ=? ask={legs.get('long_put_ask','?')}")
+
                              # (H) Execution fill
                              if exec_engine and market_state:
                                  filled_qty, net_credit, is_atomic, fill_details = \
@@ -1859,9 +1895,11 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                  run_backtest._entry_dbg['atomicity_fail'] += 1
                                  _reason = (fill_details.get('reason')
                                             or fill_details.get('rejection', {}).get('reason', '?'))
-                                 if run_backtest._entry_dbg['atomicity_fail'] <= 3:
-                                     print(f"  [ATOMICITY FAIL #{run_backtest._entry_dbg['atomicity_fail']}] "
-                                           f"bar={i} ts={ts} reason={_reason} details={fill_details}")
+                                 if verbose_sim or run_backtest._entry_dbg['atomicity_fail'] <= 3:
+                                     print(f"  ✗ ATOMICITY FAIL #{run_backtest._entry_dbg['atomicity_fail']}"
+                                           f" reason={_reason}")
+                                     if verbose_sim:
+                                         print(f"      fill_details={fill_details}")
                                  _entry_audit_log(i, ts, spot, pol, 'SKIP',
                                      f'atomicity_fail:{fill_details.get("reason","?")}',
                                      extra={'fill_details': {k: round(float(v), 4)
@@ -1874,8 +1912,14 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                  min_credit     = max(0.10, MIN_CREDIT_WIDTH_RATIO * spread_width)
                                  net_credit_val = float(net_credit) if net_credit is not None else 0.0
 
+                                 if verbose_sim:
+                                     print(f"  (I) Fill result: net_credit={net_credit_val:.4f} "
+                                           f"min_req={min_credit:.4f} (max($0.10, 5%×width={spread_width:.2f}))")
+
                                  if not np.isfinite(net_credit_val) or net_credit_val < min_credit:
                                      run_backtest._entry_dbg['credit_fail'] += 1
+                                     if verbose_sim:
+                                         print(f"  ✗ CREDIT FAIL: {net_credit_val:.4f} < min {min_credit:.4f}")
                                      if len(run_backtest._credit_samples) < AUDIT_MAX_CREDIT_SAMPLES:
                                          run_backtest._credit_samples.append({
                                              'ts': str(ts), 'spot': round(spot, 4),
@@ -1964,6 +2008,13 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                          open_trades.append(new_trade)
                                          run_backtest._last_entry_bar = i
                                          run_backtest._entry_dbg['success'] += 1
+                                         print(f"\n  ✅ TRADE OPENED [{trade_id}] bar={i} ts={str(ts)[:19]}"
+                                               f"\n     spot={spot:.2f} | credit=${net_credit_val:.4f}/contract"
+                                               f" | qty={filled_qty} | margin=${trade_margin:.0f}"
+                                               f"\n     SC={legs.get('short_call')} LC={legs.get('long_call')}"
+                                               f" SP={legs.get('short_put')} LP={legs.get('long_put')}"
+                                               f"\n     entry={_es:.3f} pop={_pop:.3f} strategy_idx={_sidx if v43_outputs else '?'}"
+                                               f" deployed_after=${currently_deployed_exact+trade_margin:.0f}")
 
                                          # OPEN event row (state-action trajectory export)
                                          closed_trades.append({
@@ -2086,11 +2137,13 @@ def main():
     parser.add_argument("--use-trade-rules", action="store_true", default=False, help="Enable rule-based entry/exit logic")
     parser.add_argument("--use-diffusion", action="store_true", default=False, help="Enable diffusion-based parameter refinement")
     parser.add_argument("--limit", type=int, default=None, help="Limit the number of bars to simulate")
+    parser.add_argument("--verbose", action="store_true", default=False,
+                        help="Print detailed per-bar output: gate checks, chain state, leg selection, fill details")
 
     # Phase 5.5: Execution Reality Toggles
     parser.add_argument("--no-exec-reality", action="store_true", default=False, help="Disable Phase 5.5 execution reality modeling")
     parser.add_argument("--exec-latency", type=float, default=100.0, help="Mean order latency in ms (default: 100)")
-    parser.add_argument("--exec-aggression", type=float, default=0.5, help="Queue aggression 0-1 (default: 0.5)")
+    parser.add_argument("--exec-aggression", type=float, default=1.0, help="Queue aggression 0-1 (default: 1.0 = market order, guaranteed fill; 0.5 gave 10%% fill prob causing 100%% atomicity fail)")
     parser.add_argument("--exec-seed", type=int, default=42, help="Seed for execution reality RNG (default: 42)")
 
     # Phase 7: CondorNet v4.3 multi-TF data layer
@@ -2323,6 +2376,7 @@ def main():
         limit=args.limit,
         v43_outputs=v43_outputs,
         bundle=bundle_v43,
+        verbose_sim=getattr(args, 'verbose', False),
     )
     
     # 5. Report
