@@ -397,6 +397,7 @@ def run_v43_batch_inference(
     seq_len:    int   = 64,
     batch_size: int   = 32,
     verbose:    bool  = True,
+    max_bars:   int   = 0,          # 0 = all bars; >0 = limit for fast debug runs
 ) -> Dict[str, np.ndarray]:
     """
     Run CondorNet v4.3 batch inference over all M5 bars.
@@ -421,7 +422,7 @@ def run_v43_batch_inference(
     except ImportError:
         _tqdm = lambda x, **kw: x  # noqa
 
-    N = bundle.n_bars
+    N = bundle.n_bars if max_bars <= 0 else min(bundle.n_bars, max_bars + seq_len)
     results: Dict[str, np.ndarray] = {
         'entry_signal':   np.full(N, 0.5,  dtype=np.float32),
         'exit_signal':    np.full(N, 0.5,  dtype=np.float32),
