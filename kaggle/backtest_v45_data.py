@@ -550,32 +550,94 @@ def load_v43_model(checkpoint_path: str, device, d_tf_in: int = 0, verbose: bool
     """
     Load CondorNet v4.3 from checkpoint.
 
-    Resolves d_tf_in from schema if not provided.
-    Uses strict=False for checkpoint compatibility across versions.
+    Reconstructs model architecture from the 'config' dict saved inside the
+    checkpoint (written by condor_train_net_v43.py).  Falls back to schema
+    defaults only when the checkpoint has no config key.
+
+    Key-alias remapping mirrors audit_condornet_interpretability_v43.py so
+    both scripts accept the same checkpoint files without size-mismatch errors.
 
     Returns model in eval() mode on device.
     """
+    import inspect
     import torch
-    from intelligence.condor_brain_net_v43 import build_condornet_v43
+    from intelligence.condor_brain_net_v43 import CondorNetV43, build_condornet_v43
+    from intelligence.schema_v43 import (
+        N_PIVOT_FEATURES, CHAIN_GRID_CONFIG, N_STRATEGY_TYPES,
+    )
 
-    _d = d_tf_in if d_tf_in > 0 else N_TF_FEAT
+    # ── Step 1: load raw checkpoint ─────────────────────────────────────────
+    if not (checkpoint_path and os.path.exists(checkpoint_path)):
+        _d = d_tf_in if d_tf_in > 0 else N_TF_FEAT
+        if verbose:
+            print(f"[MODEL] Checkpoint not found: {checkpoint_path} — building defaults (d_tf_in={_d})")
+        model = build_condornet_v43(d_tf_in=_d, verbose=False)
+        model.to(device).eval()
+        return model
+
     if verbose:
-        print(f"[MODEL] Building CondorNet v4.3 (d_tf_in={_d})...")
+        print(f"[MODEL] Loading checkpoint: {checkpoint_path}")
+    state = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
-    model = build_condornet_v43(d_tf_in=_d, verbose=False)
+    # ── Step 2: recover architecture config saved during training ────────────
+    config = dict(state.get('config', {}))
 
-    if checkpoint_path and os.path.exists(checkpoint_path):
+    if config:
+        # Remap legacy / alternate key names to CondorNetV43.__init__ names
+        key_aliases = {
+            'n_pivot_features': 'd_pivot_in',
+            'd_pivot':          'd_pivot_proj',
+            'chain_d_model':    'd_model_chain',
+            'chain_n_heads':    'n_heads_chain',
+            'chain_n_layers':   'n_layers_chain',
+        }
+        # If training saved d_joint but not d_tf_proj, derive d_tf_proj
+        if 'd_joint' in config and 'd_tf_proj' not in config:
+            config['d_tf_proj'] = config['d_joint'] // 4
+        mapped = {key_aliases.get(k, k): v for k, v in config.items()}
+        # Override d_tf_in only when caller explicitly provides it
+        if d_tf_in > 0:
+            mapped['d_tf_in'] = d_tf_in
         if verbose:
-            print(f"[MODEL] Loading checkpoint: {checkpoint_path}")
-        state = torch.load(checkpoint_path, map_location=device)
-        # Handle different checkpoint formats
-        sd = state.get('model_state_dict', state.get('state_dict', state))
-        missing, unexpected = model.load_state_dict(sd, strict=False)
-        if verbose:
-            print(f"  Loaded. Missing keys: {len(missing)} | Unexpected: {len(unexpected)}")
+            print(f"[MODEL] Restoring from checkpoint config — "
+                  f"d_h={mapped.get('d_h')}, d_m={mapped.get('d_m')}, "
+                  f"d_r={mapped.get('d_r')}, n_predicates={mapped.get('n_predicates')}, "
+                  f"n_sets={mapped.get('n_sets')}, n_super_sets={mapped.get('n_super_sets')}, "
+                  f"d_tf_proj={mapped.get('d_tf_proj', 64)}")
     else:
+        # No config key — fall back to schema defaults
+        _d = d_tf_in if d_tf_in > 0 else N_TF_FEAT
+        mapped = {
+            'd_tf_in':           _d,
+            'd_tf_proj':         64,
+            'd_chain':           CHAIN_GRID_CONFIG['d_chain'],
+            'd_pivot_proj':      16,
+            'd_pivot_in':        N_PIVOT_FEATURES,
+            'n_strategy_types':  N_STRATEGY_TYPES,
+            'chain_in_features': CHAIN_GRID_CONFIG['in_features'],
+            'd_model_chain':     CHAIN_GRID_CONFIG['d_model'],
+            'n_heads_chain':     CHAIN_GRID_CONFIG['n_heads'],
+            'n_layers_chain':    CHAIN_GRID_CONFIG['n_layers'],
+        }
         if verbose:
-            print(f"  [WARN] Checkpoint not found: {checkpoint_path} — using random weights")
+            print(f"[MODEL] No 'config' in checkpoint — using schema defaults (d_tf_in={_d})")
+
+    # ── Step 3: filter to only valid CondorNetV43 / build_condornet_v43 params
+    valid_keys = set(inspect.signature(build_condornet_v43).parameters.keys())
+    valid_keys.update(inspect.signature(CondorNetV43.__init__).parameters.keys())
+    valid_keys.discard('self')
+    valid_keys.discard('kwargs')
+    build_cfg = {k: v for k, v in mapped.items() if k in valid_keys}
+
+    if verbose:
+        print(f"[MODEL] Building CondorNet v4.3 (d_tf_in={build_cfg.get('d_tf_in', N_TF_FEAT)})...")
+    model = build_condornet_v43(**build_cfg)
+
+    # ── Step 4: load weights ─────────────────────────────────────────────────
+    sd = state.get('model_state_dict', state.get('state_dict', state))
+    missing, unexpected = model.load_state_dict(sd, strict=False)
+    if verbose:
+        print(f"  Loaded. Missing keys: {len(missing)} | Unexpected: {len(unexpected)}")
 
     model.to(device)
     model.eval()
