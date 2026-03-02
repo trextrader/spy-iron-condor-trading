@@ -574,11 +574,13 @@ _RANK_DELTA = {
 }
 
 
-def select_best_template(strategy_idx: int, bar_df=None):
+def select_best_template(strategy_idx: int, bar_df=None, v43_pop=None, v43_ev=None):
     """
-    Given a model-predicted strategy class index (0-9) and an optional 1-row
-    M5 feature DataFrame (raw un-normalized values), return:
+    Given a model-predicted strategy class index (0-9) and optional context, return:
         (best_template, decision_record)
+
+    v43_pop / v43_ev: model output values for this bar (preferred over bar_df label cols).
+    bar_df: 1-row M5 feature DataFrame (raw un-normalized) for predicate atoms only.
 
     decision_record is a dict capturing every reasoning step:
       - predicted_class, strategy_idx
@@ -647,8 +649,12 @@ def select_best_template(strategy_idx: int, bar_df=None):
         except Exception as _ae:
             decision['atoms'] = {'_error': str(_ae)}
 
-    pop = float(bar_df['pop'].iloc[0]) if (bar_df is not None and 'pop' in bar_df.columns) else 0.5
-    ev  = float(bar_df['ev'].iloc[0])  if (bar_df is not None and 'ev'  in bar_df.columns) else 0.0
+    # Prefer direct v43 model outputs (pop/ev already computed by the model);
+    # bar_df label cols ('pop','ev','max_loss') are training targets, not raw features.
+    pop = v43_pop if v43_pop is not None else (
+          float(bar_df['pop'].iloc[0]) if (bar_df is not None and 'pop' in bar_df.columns) else 0.5)
+    ev  = v43_ev  if v43_ev  is not None else (
+          float(bar_df['ev'].iloc[0])  if (bar_df is not None and 'ev'  in bar_df.columns) else 0.0)
     ml  = float(bar_df['max_loss'].iloc[0]) if (bar_df is not None and 'max_loss' in bar_df.columns) else 0.1
     decision['pop']      = round(pop, 4)
     decision['ev']       = round(ev, 4)
@@ -2532,7 +2538,11 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                      _bar_df = bundle.m5_df_raw.iloc[[i]]
                                  except Exception:
                                      _bar_df = None
-                             _tmpl, _tmpl_decision = select_best_template(_sidx, _bar_df)
+                             _tmpl, _tmpl_decision = select_best_template(
+                                _sidx, _bar_df,
+                                v43_pop=float(v43_outputs['pop'][pol_idx]),
+                                v43_ev=float(v43_outputs['ev'][pol_idx]),
+                            )
 
                              # -- Verbose: full strategy selection story
                              if verbose_sim and _tmpl_decision is not None:
@@ -2847,6 +2857,11 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                          )
 
                                          # OPEN event row (state-action trajectory export)
+                                         _tmpl_id_str = (_tmpl.template_id if _tmpl is not None
+                                                         else legs.get('template_id', 'IC'))
+                                         _strat_cls   = (V43_STRATEGY_NAMES[_sidx]
+                                                         if v43_outputs and 0 <= _sidx < len(V43_STRATEGY_NAMES)
+                                                         else 'IC')
                                          closed_trades.append({
                                              'action':         'OPEN',
                                              'trade_id':       trade_id,
@@ -2868,6 +2883,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                              'deployed_after': round(currently_deployed_exact + trade_margin, 2),
                                              'live_max_deploy':round(live_max_deploy, 2),
                                              'open_positions': len(open_trades),
+                                             'strategy_class': _strat_cls,
+                                             'template_id':    _tmpl_id_str,
                                              'fill_details':   {k: (round(float(v), 4)
                                                                 if isinstance(v, (int, float, np.floating))
                                                                 else v)
@@ -2920,8 +2937,21 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         print(f'  [SIM_END] {tr.trade_id}: MTM PnL=${_fc_pnl:,.2f}')
     open_trades = []
 
-    print(f"Simulation Complete. Final Equity: ${equity:,.2f}")
-    
+    # ── Compute portfolio-level Max Drawdown from equity curve ────────────────
+    _port_max_dd_pct = 0.0
+    if equity_curve:
+        _eq_vals = np.array([e['equity'] for e in equity_curve], dtype=float)
+        _eq_peak = np.maximum.accumulate(_eq_vals)
+        _eq_dd   = np.where(_eq_peak > 0, (_eq_vals - _eq_peak) / _eq_peak * 100.0, 0.0)
+        _port_max_dd_pct = float(_eq_dd.min())   # negative number (drawdown)
+
+    _net_pnl     = equity - STARTING_EQUITY
+    _net_pnl_pct = _net_pnl / STARTING_EQUITY * 100.0
+
+    print(f"Simulation Complete.")
+    print(f"  Final Equity : ${equity:,.2f}  ({_net_pnl_pct:+.2f}%  net PnL=${_net_pnl:+,.2f})")
+    print(f"  Max Drawdown : {_port_max_dd_pct:.2f}%")
+
     # ── V4.5 ENTRY DEBUG SUMMARY ──────────────────────────────────────────────
     if hasattr(run_backtest, '_entry_dbg'):
         d = run_backtest._entry_dbg
@@ -2948,6 +2978,43 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         print(f"\n  Capital: start=${STARTING_EQUITY:,.0f} | leverage={LEVERAGE_FACTOR:.0f}x | "
               f"buying_power=${STARTING_EQUITY*LEVERAGE_FACTOR:,.0f} | "
               f"max_deploy=${MAX_DEPLOY:,.0f}")
+        print("="*80)
+
+    # ── STRATEGY BREAKDOWN ────────────────────────────────────────────────────
+    _open_records = [t for t in closed_trades if t.get('action') == 'OPEN']
+    if _open_records:
+        from collections import Counter
+        _cls_counts  = Counter(t.get('strategy_class', 'IC') for t in _open_records)
+        _tmpl_counts = Counter(t.get('template_id', '?')     for t in _open_records)
+        _total_open  = len(_open_records)
+        print("\n" + "="*80)
+        print("  STRATEGY BREAKDOWN (trades opened)")
+        print("="*80)
+        print(f"  {'Strategy Class':<30s}  {'Count':>6}  {'%':>6}")
+        print(f"  {'-'*30}  {'-'*6}  {'-'*6}")
+        for cls, cnt in sorted(_cls_counts.items(), key=lambda x: -x[1]):
+            print(f"  {cls:<30s}  {cnt:>6}  {cnt/_total_open*100:>5.1f}%")
+        print(f"\n  {'Template ID':<40s}  {'Count':>6}  {'%':>6}")
+        print(f"  {'-'*40}  {'-'*6}  {'-'*6}")
+        for tmpl, cnt in sorted(_tmpl_counts.items(), key=lambda x: -x[1]):
+            print(f"  {tmpl:<40s}  {cnt:>6}  {cnt/_total_open*100:>5.1f}%")
+        print("="*80)
+
+    # ── FINAL PERFORMANCE SUMMARY ─────────────────────────────────────────────
+    _closed_pnl = [t for t in closed_trades if t.get('action') not in ('OPEN',) and 'pnl' in t]
+    if _closed_pnl:
+        _wins  = sum(1 for t in _closed_pnl if float(t.get('pnl', 0)) > 0)
+        _loss  = sum(1 for t in _closed_pnl if float(t.get('pnl', 0)) <= 0)
+        _total_closed = len(_closed_pnl)
+        _gross_pnl = sum(float(t.get('pnl', 0)) for t in _closed_pnl)
+        print("\n" + "="*80)
+        print("  PERFORMANCE SUMMARY")
+        print("="*80)
+        print(f"  Net PnL          : ${_net_pnl:+,.2f}  ({_net_pnl_pct:+.2f}%)")
+        print(f"  Max Drawdown     : {_port_max_dd_pct:.2f}%")
+        print(f"  Closed Positions : {_total_closed}  (wins={_wins}  losses={_loss}  "
+              f"wr={_wins/_total_closed*100:.1f}%)" if _total_closed else "  Closed Positions : 0")
+        print(f"  Gross Realized   : ${_gross_pnl:+,.2f}")
         print("="*80)
 
     # Low-credit samples detail
