@@ -97,14 +97,15 @@ for idx, line in enumerate(lines):
         break
 
 # ── PATCH 4: Gate summary — expiry_past_sim + max_pos_block ──────────────────
+# Anchor on the credit_fail summary line (single-line, safe to insert after)
 for idx, line in enumerate(lines):
-    if "'atomicity_fail'" in line and "entry_dbg" in line and "print" in line:
+    if "'credit_fail'" in line and "d['credit_fail']" in line and "print" in line:
         if not any("expiry_past_sim" in lines[idx + j] for j in range(1, 5)):
             ind = len(line) - len(line.lstrip())
             p = " " * ind
             block = (
-                f"{p}print(f\"  {{'expiry_past_sim':<28s}}: {{d.get('expiry_past_sim', 0):>8,}}  ({{d.get('expiry_past_sim', 0)/bars*100:.1f}}%)\")\n"
-                f"{p}print(f\"  {{'max_pos_block':<28s}}: {{d.get('max_pos_block', 0):>8,}}  ({{d.get('max_pos_block', 0)/bars*100:.1f}}%)\")\n"
+                f"{p}print(\"  \" + \"expiry_past_sim\".ljust(28) + \": \" + str(d.get(\"expiry_past_sim\", 0)).rjust(8) + \"  (\" + f\"{{d.get('expiry_past_sim', 0)/bars*100:.1f}}\" + \"%)\")\n"
+                f"{p}print(\"  \" + \"max_pos_block\".ljust(28) + \": \" + str(d.get(\"max_pos_block\", 0)).rjust(8) + \"  (\" + f\"{{d.get('max_pos_block', 0)/bars*100:.1f}}\" + \"%)\")\n"
             )
             lines.insert(idx + 1, block)
             applied.append(f"P4 gate summary at line {idx+1}")
