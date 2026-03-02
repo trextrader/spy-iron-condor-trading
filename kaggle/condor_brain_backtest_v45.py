@@ -2833,6 +2833,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                              if AUDIT_ENTRY_HALT_ON_INCONSISTENCY:
                                                  raise RuntimeError(audit_msg)
 
+                                         _strat_cls = (V43_STRATEGY_NAMES[_sidx]
+                                                       if v43_outputs and 0 <= _sidx < len(V43_STRATEGY_NAMES)
+                                                       else 'IC')
                                          new_trade = Trade(
                                              trade_id, ts, legs, net_credit_val, max_loss,
                                              dte=dte,
