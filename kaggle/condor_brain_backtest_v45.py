@@ -1352,7 +1352,7 @@ def build_ts_ranges(df, time_col='dt'):
 
 def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None,
                  use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None,
-                 v43_outputs=None, bundle=None, verbose_sim=False):
+                 v43_outputs=None, bundle=None, verbose_sim=False, max_positions=5):
 
     # ==========================================================================
     # PHASE 5.5: Initialize Execution Reality Engine
@@ -1584,6 +1584,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
     # Warmup: skip first SEQ_LEN bars (no model output)
     sim_start_idx = SEQ_LEN
+
+    # Last timestamp in this simulation window — no new position may expire past it
+    sim_end_dt = pd.Timestamp(spot_timestamps[num_bars - 1])
 
     # ── Inline helpers ────────────────────────────────────────────────────────
     def _sigmoid(x): return 1 / (1 + np.exp(-x))
@@ -2424,6 +2427,8 @@ def main():
     parser.add_argument("--use-trade-rules", action="store_true", default=False, help="Enable rule-based entry/exit logic")
     parser.add_argument("--use-diffusion", action="store_true", default=False, help="Enable diffusion-based parameter refinement")
     parser.add_argument("--limit", type=int, default=None, help="Limit the number of bars to simulate")
+    parser.add_argument("--max-positions", type=int, default=5,
+                        help="Max simultaneous open IC positions (default: 5)")
     parser.add_argument("--verbose", action="store_true", default=False,
                         help="Print detailed per-bar output: gate checks, chain state, leg selection, fill details")
 
@@ -2664,6 +2669,7 @@ def main():
         v43_outputs=v43_outputs,
         bundle=bundle_v43,
         verbose_sim=getattr(args, 'verbose', False),
+        max_positions=args.max_positions,
     )
     
     # 5. Report
