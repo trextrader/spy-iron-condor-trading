@@ -217,6 +217,7 @@ DEBUG_SAMPLE_EVERY = 500    # Print debug info every N bars (reduce noise)
 DEBUG_FIRST_N = 20          # Always print first N bars for initial analysis
 DEBUG_LOG_FILE = "debug_inference.log"  # Output file for debug logs
 MIN_BARS_BETWEEN_TRADES = 5
+HOLD_PRINT_INTERVAL = 12   # Print [HOLD] status every N bars per position (~1 hr on M5)
 
 # =============================================================================
 # CAPITAL CONSTRAINT ENGINE — Phase 4 (Portfolio-Level Capital Gating)
@@ -2205,13 +2206,17 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      'exit_details': exit_details if exit_valid else None
                  })
                  _trace_close(tr, realized_pnl, "PER_TRADE_STOP")
-                 if verbose_sim:
-                     _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
-                     print(f"\n  ❌ CLOSED [PER_TRADE_STOP] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
-                           f"\n     credit=${tr.net_credit:.4f}  stop_thresh=${_per_trade_stop:,.2f}"
-                           f"  unrealized=${tr.unrealized_pnl:,.2f}"
-                           f"\n     realized=${realized_pnl:,.2f}  fill_valid={exit_valid}"
-                           f"  held={_dh:.1f}d  equity_after=${equity:,.2f}")
+                 _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
+                 _max_credit = tr.net_credit * tr.qty * IC_MULTIPLIER
+                 _prem_cap   = (realized_pnl / _max_credit * 100) if _max_credit != 0 else 0.0
+                 print(f"\n  ❌ CLOSED [PER_TRADE_STOP] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
+                       f"\n     EARLY EXIT — stopped out at {_dh:.1f}d held / {tr.dte_entry:.0f}d DTE"
+                       f"  ({max(0.0, tr.dte_entry - _dh):.1f}d left on contract)"
+                       f"\n     credit=${tr.net_credit:.4f}/shr  stop_thresh=${_per_trade_stop:,.2f}"
+                       f"  unrealized=${tr.unrealized_pnl:,.2f}"
+                       f"\n     realized=${realized_pnl:,.2f}  premium_captured={_prem_cap:+.1f}%"
+                       f"  fill_valid={exit_valid}  equity_after=${equity:,.2f}")
+                 continue
                  continue
 
              # Check Risk Stop (5%) - PHASE 5.2/5.5 FIX: Use realistic exit cost
@@ -2252,13 +2257,15 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      'exit_details': exit_details if exit_valid else None
                  })
                  _trace_close(tr, realized_pnl, "RISK_STOP")
-                 if verbose_sim:
-                     _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
-                     print(f"\n  🛑 CLOSED [RISK_STOP_5PCT] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
-                           f"\n     unrealized=${tr.unrealized_pnl:,.2f}"
-                           f"  fill_valid={exit_valid}"
-                           f"\n     realized=${realized_pnl:,.2f}  held={_dh:.1f}d"
-                           f"  equity_after=${equity:,.2f}")
+                 _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
+                 _max_credit2 = tr.net_credit * tr.qty * IC_MULTIPLIER
+                 _prem_cap2   = (realized_pnl / _max_credit2 * 100) if _max_credit2 != 0 else 0.0
+                 print(f"\n  🛑 CLOSED [RISK_STOP_5PCT] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
+                       f"\n     EARLY EXIT — portfolio 5%% equity stop at {_dh:.1f}d held / {tr.dte_entry:.0f}d DTE"
+                       f"  ({max(0.0, tr.dte_entry - _dh):.1f}d left on contract)"
+                       f"\n     unrealized=${tr.unrealized_pnl:,.2f}  fill_valid={exit_valid}"
+                       f"\n     realized=${realized_pnl:,.2f}  premium_captured={_prem_cap2:+.1f}%"
+                       f"  equity_after=${equity:,.2f}")
                  continue  # Trade is gone
 
              # Check Profit Target (50% of max profit)
@@ -2289,13 +2296,17 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                          'exit_details': exit_details if exit_valid else None
                      })
                      _trace_close(tr, realized_pnl, "PROFIT_50PCT")
-                     if verbose_sim:
-                         _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
-                         print(f"\n  ✅ CLOSED [PROFIT_50PCT] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
-                               f"\n     credit=${tr.net_credit:.4f}  target=${profit_target:,.2f}"
-                               f"  unrealized=${tr.unrealized_pnl:,.2f}"
-                               f"\n     realized=${realized_pnl:,.2f}  fill_valid={exit_valid}"
-                               f"  held={_dh:.1f}d  equity_after=${equity:,.2f}")
+                     _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
+                     _max_credit3 = tr.net_credit * tr.qty * IC_MULTIPLIER
+                     _prem_cap3   = (realized_pnl / _max_credit3 * 100) if _max_credit3 != 0 else 0.0
+                     print(f"\n  ✅ CLOSED [PROFIT_50PCT] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
+                           f"\n     EARLY EXIT — took 50%% profit at {_dh:.1f}d held / {tr.dte_entry:.0f}d DTE"
+                           f"  ({max(0.0, tr.dte_entry - _dh):.1f}d left on contract)"
+                           f"\n     credit=${tr.net_credit:.4f}/shr  target=${profit_target:,.2f}"
+                           f"  unrealized=${tr.unrealized_pnl:,.2f}"
+                           f"\n     realized=${realized_pnl:,.2f}  premium_captured={_prem_cap3:+.1f}%"
+                           f"  fill_valid={exit_valid}  equity_after=${equity:,.2f}")
+                     continue
                      continue
 
              # Check Expiration (DTE < 0.1)
@@ -2344,21 +2355,51 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      'exit_details': exit_details if exit_valid else None
                  })
                  _trace_close(tr, realized_pnl, "EXPIRED")
-                 if verbose_sim:
-                     print(f"\n  ⏰ CLOSED [EXPIRED] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
-                           f"\n     credit=${tr.net_credit:.4f}  dte_entry={tr.dte_entry:.1f}"
-                           f"  days_held={days_held:.1f}"
-                           f"\n     realized=${realized_pnl:,.2f}  fill_valid={exit_valid}"
-                           f"  equity_after=${equity:,.2f}")
+                 _max_credit4 = tr.net_credit * tr.qty * IC_MULTIPLIER
+                 _prem_cap4   = (realized_pnl / _max_credit4 * 100) if _max_credit4 != 0 else 0.0
+                 print(f"\n  ⏰ CLOSED [EXPIRED] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
+                       f"\n     FULL DTE — held to expiry {days_held:.1f}d / {tr.dte_entry:.0f}d DTE (0d left)"
+                       f"\n     credit=${tr.net_credit:.4f}/shr  dte_entry={tr.dte_entry:.1f}d"
+                       f"  days_held={days_held:.1f}"
+                       f"\n     realized=${realized_pnl:,.2f}  premium_captured={_prem_cap4:+.1f}%"
+                       f"  fill_valid={exit_valid}  equity_after=${equity:,.2f}")
+                 continue
                  continue
 
              active_trades.append(tr)
-             if verbose_sim:
-                 _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
-                 print(f"  [HOLD] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
-                       f"  held={_dh:.1f}d/{tr.dte_entry:.0f}dte"
-                       f"  unrealized=${tr.unrealized_pnl:,.2f}"
-                       f"  spot={spot:.2f}")
+             # Periodic HOLD status (every HOLD_PRINT_INTERVAL bars per position)
+             if not hasattr(tr, '_hold_bar_cnt'): tr._hold_bar_cnt = 0
+             tr._hold_bar_cnt += 1
+             if verbose_sim and (tr._hold_bar_cnt == 1 or tr._hold_bar_cnt % HOLD_PRINT_INTERVAL == 0):
+                 _dh       = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
+                 _dte_rem  = max(0.0, tr.dte_entry - _dh)
+                 _mc_hold  = tr.net_credit * tr.qty * IC_MULTIPLIER
+                 _prem_pct = (_mc_hold and tr.unrealized_pnl / _mc_hold * 100) or 0.0
+                 _stop_thr = -(tr.net_credit * IC_STOP_LOSS_MULT * tr.qty * IC_MULTIPLIER)
+                 _stop_gap = tr.unrealized_pnl - _stop_thr   # positive = room before stop
+                 _tgt_pnl  = _mc_hold * 0.50
+                 _to_tgt   = _tgt_pnl - tr.unrealized_pnl    # positive = room to target
+                 _sc_dist  = ((tr.legs.get('short_call', spot) - spot) / spot * 100
+                              if tr.legs else 0.0)
+                 _sp_dist  = ((spot - tr.legs.get('short_put', spot)) / spot * 100
+                              if tr.legs else 0.0)
+                 _xs_str   = ""
+                 if v43_outputs is not None and i < len(v43_outputs['exit_signal']):
+                     _xs = float(v43_outputs['exit_signal'][i])
+                     _xs_str = f"  exit_sig={_xs:.3f}"
+                 _hold_reasons = []
+                 if _prem_pct < 50.0:  _hold_reasons.append(f"prem_only {_prem_pct:.1f}% (<50%)")
+                 if _dte_rem > 0:      _hold_reasons.append(f"{_dte_rem:.1f}d DTE remaining")
+                 if _stop_gap > 0:     _hold_reasons.append(f"${_stop_gap:,.0f} from stop")
+                 if _to_tgt > 0:       _hold_reasons.append(f"${_to_tgt:,.0f} to profit target")
+                 _hold_why = " | ".join(_hold_reasons) if _hold_reasons else "holding"
+                 print(f"  [HOLD] [{tr.trade_id}] bar={i} {str(ts)[:19]}"
+                       f"  held={_dh:.1f}d/{tr.dte_entry:.0f}dte  dte_rem={_dte_rem:.1f}d\n"
+                       f"    unrealized=${tr.unrealized_pnl:+,.2f}  prem_captured={_prem_pct:+.1f}%"
+                       f"  spot={spot:.2f}\n"
+                       f"    SC_dist={_sc_dist:+.2f}%  SP_dist={_sp_dist:+.2f}%"
+                       f"  stop_gap=${_stop_gap:,.0f}  to_target=${_to_tgt:,.0f}{_xs_str}\n"
+                       f"    WHY HOLDING: {_hold_why}")
          
          open_trades = active_trades
          
