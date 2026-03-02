@@ -547,7 +547,11 @@ def run_v43_batch_inference(
         cmask_t = torch.tensor(cmask_pad, dtype=torch.bool,    device=device)
 
         # ── Forward pass ─────────────────────────────────────────────────────
-        with torch.no_grad():
+        # Use autocast to match training precision (float16 AMP on CUDA).
+        # Falls back to no-op on CPU (autocast enabled=False).
+        _use_amp = (str(device) != 'cpu')
+        with torch.no_grad(), torch.autocast(device_type='cuda' if _use_amp else 'cpu',
+                                              dtype=torch.float16, enabled=_use_amp):
             out = model(
                 x_m1_t, x_m5_t, x_m15_t, x_h1_t,
                 chain=chain_t,
