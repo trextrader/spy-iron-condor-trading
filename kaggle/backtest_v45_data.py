@@ -701,18 +701,44 @@ def load_v43_model(checkpoint_path: str, device, d_tf_in: int = 0, verbose: bool
         N_PIVOT_FEATURES, CHAIN_GRID_CONFIG, N_STRATEGY_TYPES,
     )
 
-    # ── Step 1: load raw checkpoint ─────────────────────────────────────────
+    # ── Step 1: load raw checkpoint (with fallback path search) ─────────────
+    # If the exact path is not found, try common alternate names so the backtest
+    # works even when the checkpoint was saved under a different filename.
+    _resolved_path = checkpoint_path
     if not (checkpoint_path and os.path.exists(checkpoint_path)):
-        _d = d_tf_in if d_tf_in > 0 else N_TF_FEAT
-        if verbose:
-            print(f"[MODEL] Checkpoint not found: {checkpoint_path} — building defaults (d_tf_in={_d})")
-        model = build_condornet_v43(d_tf_in=_d, verbose=False)
-        model.to(device).eval()
-        return model
+        _models_dir = os.path.dirname(checkpoint_path) if checkpoint_path else "models"
+        _fallback_names = [
+            "condor_net_v43.pth",          # default training output (most likely)
+            "condornet_v43_best.pth",       # alternate training default
+            "condor_net_v43_run18.pth",     # underscore variant
+            "condornet_v43_run18.pth",      # no-underscore variant
+        ]
+        _found = None
+        for _name in _fallback_names:
+            _cand = os.path.join(_models_dir, _name)
+            if os.path.exists(_cand):
+                _found = _cand
+                break
+        if _found:
+            if verbose:
+                print(f"[MODEL] Checkpoint not found at '{checkpoint_path}' — "
+                      f"using fallback: {_found}")
+            _resolved_path = _found
+        else:
+            _d = d_tf_in if d_tf_in > 0 else N_TF_FEAT
+            if verbose:
+                print(f"[MODEL] Checkpoint not found: {checkpoint_path} "
+                      f"(tried {len(_fallback_names)} fallback names in '{_models_dir}') "
+                      f"— building defaults (d_tf_in={_d})")
+                print(f"[MODEL] NOTE: Upload a trained checkpoint to '{_models_dir}/' "
+                      f"or run condor_train_net_v43.py to generate one.")
+            model = build_condornet_v43(d_tf_in=_d, verbose=False)
+            model.to(device).eval()
+            return model
 
     if verbose:
-        print(f"[MODEL] Loading checkpoint: {checkpoint_path}")
-    state = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        print(f"[MODEL] Loading checkpoint: {_resolved_path}")
+    state = torch.load(_resolved_path, map_location=device, weights_only=False)
 
     # ── Step 2: recover architecture config saved during training ────────────
     config = dict(state.get('config', {}))

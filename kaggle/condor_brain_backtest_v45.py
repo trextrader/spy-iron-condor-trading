@@ -3435,7 +3435,7 @@ def main():
             _spy_paths = [p for p in sys.path if 'spy' in p.lower() or 'kaggle' in p.lower() or 'condor' in p.lower()]
             print(f"   sys.path (relevant): {_spy_paths}")
             return
-        v43_ckpt = args.v43_model or "models/condor_net_v43_run18.pth"
+        v43_ckpt = args.v43_model or "models/condornet_v43_run18.pth"
         print(f"\n[Phase 7] Loading CondorNet v4.3 checkpoint: {v43_ckpt}")
         v43_model_obj = load_v43_model(v43_ckpt, DEVICE, verbose=True)
         print(f"[Phase 7] Loading multi-TF bundle from: {args.v43_data_dir}")
