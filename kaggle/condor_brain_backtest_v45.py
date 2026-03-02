@@ -2344,13 +2344,15 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                              chain_te = float(np.median(te_vals.values))
                      if chain_te is None or not np.isfinite(chain_te):
                          chain_te = 30.0
-                     dte = float(np.clip(dte_raw, 1.0, min(chain_te, 45.0)))
-                     # Gate: skip if position would expire after sim window
-                     _expiry_dt = pd.Timestamp(ts) + pd.Timedelta(days=dte)
-                     if _expiry_dt > sim_end_dt:
+                     # Cap DTE so position never expires after sim window
+                     _days_left = (sim_end_dt.date() - pd.Timestamp(ts).date()).days
+                     _max_dte   = max(1, _days_left)
+                     dte = float(np.clip(dte_raw, 1.0, min(chain_te, 45.0, _max_dte)))
+                     # Gate: skip only if truly 0 calendar days remain in sim
+                     if _days_left < 1:
                          run_backtest._entry_dbg['expiry_past_sim'] = run_backtest._entry_dbg.get('expiry_past_sim', 0) + 1
                          if verbose_sim:
-                             print(f'  -- SKIP expiry_past_sim: expiry {_expiry_dt.date()} > sim_end {sim_end_dt.date()}')
+                             print(f'  -- SKIP expiry_past_sim: 0 days left in sim (ts={pd.Timestamp(ts).date()} sim_end={sim_end_dt.date()})')
                          continue
 
                      # Expected collateral estimate (pre-fill — used for capital check)
