@@ -46,6 +46,12 @@ except NameError:
 sys.path.insert(0, '/content/spy-iron-condor-trading')
 sys.path.insert(0, '/kaggle/working/spy-iron-condor-trading')
 sys.path.insert(0, os.getcwd())
+# Ensure kaggle/ dir itself is on path so backtest_v45_data is importable
+# regardless of whether kaggle/ has an __init__.py
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+except NameError:
+    pass
 
 from intelligence.condor_brain import CondorBrain
 from intelligence.canonical_feature_registry import (
@@ -76,7 +82,7 @@ from intelligence.rule_engine.executor import RuleExecutionEngine
 
 # ── Phase 7: CondorNet v4.3 multi-TF data layer ───────────────────────────
 try:
-    from kaggle.backtest_v45_data import (
+    from backtest_v45_data import (
         load_multi_tf_bundle, run_v43_batch_inference, load_v43_model,
         normalize_v43_chain, MultiTFDataBundle,
     )
