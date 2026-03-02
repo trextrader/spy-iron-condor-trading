@@ -577,67 +577,151 @@ _RANK_DELTA = {
 def select_best_template(strategy_idx: int, bar_df=None):
     """
     Given a model-predicted strategy class index (0-9) and an optional 1-row
-    M5 feature DataFrame (raw un-normalized values), return the best-fit
-    StrategyTemplate from STRATEGY_CATALOG.
+    M5 feature DataFrame (raw un-normalized values), return:
+        (best_template, decision_record)
+
+    decision_record is a dict capturing every reasoning step:
+      - predicted_class, strategy_idx
+      - atoms: all predicate atom values (bool) for this bar
+      - pop/ev/max_loss scoring inputs
+      - candidates: per-template eligibility + score breakdown
+      - winner: which template won and why (or fallback reason)
 
     Selection logic mirrors data_pipeline_v43._compute_strategy_labels():
       score = 0.40*pop + 0.35*tanh(3*ev) - 0.15*tanh(2*ml) + 0.10*dte_affinity
 
-    Falls back to the first template of the predicted class when:
-      - catalog is unavailable
-      - no template passes its eligibility predicate
-      - bar_df is None
-    Returns None only for abstain (idx 9) or unknown idx.
+    Falls back to the first template of the predicted class when no template
+    passes its eligibility predicate.  Returns (None, decision) for abstain.
     """
+    pred_class = STRATEGY_TYPES[strategy_idx] if (0 <= strategy_idx < len(STRATEGY_TYPES)) else 'unknown'
+    decision = {
+        'strategy_idx':       strategy_idx,
+        'predicted_class':    pred_class,
+        'total_candidates':   0,
+        'atoms':              {},
+        'pop':                0.5,
+        'ev':                 0.0,
+        'max_loss':           0.1,
+        'dte_affinity':       0.5,
+        'score_formula':      '0.40×pop + 0.35×tanh(3×ev) - 0.15×tanh(2×ml) + 0.10×dte_aff',
+        'candidates':         [],
+        'eligible_count':     0,
+        'winner':             None,
+        'fallback':           False,
+        'fallback_reason':    None,
+    }
+
     if not _CATALOG_OK or strategy_idx < 0 or strategy_idx >= len(STRATEGY_TYPES):
-        return None
-    target_class = STRATEGY_TYPES[strategy_idx]
-    if target_class == 'abstain':
-        return None
+        decision['fallback'] = True
+        decision['fallback_reason'] = 'catalog_unavailable_or_bad_idx'
+        return None, decision
+    if pred_class == 'abstain':
+        decision['fallback_reason'] = 'abstain'
+        return None, decision
 
-    candidates = [t for t in STRATEGY_CATALOG if t.v43_class == target_class]
+    candidates = [t for t in STRATEGY_CATALOG if t.v43_class == pred_class]
+    decision['total_candidates'] = len(candidates)
     if not candidates:
-        return None
-    if len(candidates) == 1:
-        return candidates[0]
+        decision['fallback'] = True
+        decision['fallback_reason'] = 'no_candidates_in_class'
+        return None, decision
 
-    # Compute predicate atoms if raw features available
+    if len(candidates) == 1:
+        t = candidates[0]
+        decision['candidates'] = [{'template_id': t.template_id, 'v43_class': t.v43_class,
+                                    'family': t.family, 'notes': t.notes, 'eligible': True,
+                                    'eligibility_reason': 'sole_candidate', 'score': None,
+                                    'pop_scale': t.pop_scale, 'ev_scale': t.ev_scale,
+                                    'max_loss_scale': t.max_loss_scale}]
+        decision['eligible_count'] = 1
+        decision['winner'] = {'template_id': t.template_id, 'score': None,
+                              'is_fallback': False, 'fallback_reason': None}
+        return t, decision
+
+    # ── Compute predicate atoms ───────────────────────────────────────────────
     atoms = None
     if bar_df is not None and not bar_df.empty:
         try:
             atoms = compute_predicate_atoms(bar_df)
-        except Exception:
-            atoms = None
+            decision['atoms'] = {k: bool(v[0]) for k, v in atoms.items()}
+        except Exception as _ae:
+            decision['atoms'] = {'_error': str(_ae)}
 
     pop = float(bar_df['pop'].iloc[0]) if (bar_df is not None and 'pop' in bar_df.columns) else 0.5
     ev  = float(bar_df['ev'].iloc[0])  if (bar_df is not None and 'ev'  in bar_df.columns) else 0.0
     ml  = float(bar_df['max_loss'].iloc[0]) if (bar_df is not None and 'max_loss' in bar_df.columns) else 0.1
+    decision['pop']      = round(pop, 4)
+    decision['ev']       = round(ev, 4)
+    decision['max_loss'] = round(ml, 4)
 
+    # ── Score each candidate ─────────────────────────────────────────────────
     best_template = None
     best_score    = -np.inf
+    cand_records  = []
     for t in candidates:
+        rec = {
+            'template_id':      t.template_id,
+            'v43_class':        t.v43_class,
+            'family':           t.family,
+            'notes':            t.notes,
+            'pop_scale':        t.pop_scale,
+            'ev_scale':         t.ev_scale,
+            'max_loss_scale':   t.max_loss_scale,
+            'eligible':         False,
+            'eligibility_reason': 'predicate_failed',
+            'score':            None,
+        }
         eligible = True
         if atoms is not None:
             try:
                 mask = t.get_eligibility_mask(atoms)
                 eligible = bool(mask[0])
-            except Exception:
-                pass  # predicate error → treat as eligible
-        if not eligible:
-            continue
-        try:
-            dte_aff = get_dte_affinity(t.v43_class, 1)
-        except Exception:
-            dte_aff = 0.5
-        score = (0.40 * pop
-                 + 0.35 * float(np.tanh(3.0 * ev))
-                 - 0.15 * float(np.tanh(2.0 * ml))
-                 + 0.10 * dte_aff)
-        if score > best_score:
-            best_score    = score
-            best_template = t
+                rec['eligibility_reason'] = 'passed' if eligible else 'predicate_failed'
+            except Exception as _pe:
+                rec['eligibility_reason'] = f'predicate_error:{_pe}'
+        else:
+            rec['eligibility_reason'] = 'no_atoms_available'
 
-    return best_template if best_template is not None else candidates[0]
+        if eligible:
+            try:
+                dte_aff = get_dte_affinity(t.v43_class, 1)
+            except Exception:
+                dte_aff = 0.5
+            decision['dte_affinity'] = round(float(dte_aff), 4)
+            score = (0.40 * pop
+                     + 0.35 * float(np.tanh(3.0 * ev))
+                     - 0.15 * float(np.tanh(2.0 * ml))
+                     + 0.10 * dte_aff)
+            rec['eligible'] = True
+            rec['score']    = round(float(score), 6)
+            if score > best_score:
+                best_score    = score
+                best_template = t
+        cand_records.append(rec)
+
+    decision['candidates']    = cand_records
+    decision['eligible_count'] = sum(1 for r in cand_records if r['eligible'])
+
+    if best_template is not None:
+        decision['winner'] = {
+            'template_id':   best_template.template_id,
+            'score':         round(best_score, 6),
+            'is_fallback':   False,
+            'fallback_reason': None,
+        }
+        return best_template, decision
+    else:
+        # No template passed its predicate — use first candidate as safety fallback
+        fb = candidates[0]
+        decision['fallback']        = True
+        decision['fallback_reason'] = 'no_eligible_candidates_predicate_all_failed'
+        decision['winner'] = {
+            'template_id':   fb.template_id,
+            'score':         None,
+            'is_fallback':   True,
+            'fallback_reason': 'all_predicates_failed_using_first_candidate',
+        }
+        return fb, decision
 
 
 def build_legs_from_template(template, chain_df, spot: float,
@@ -2440,6 +2524,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                  print(f"  Best delta candidates:\n{_vd.to_string(index=False)}")
 
                          # ── v43 mode: template-driven leg builder ────────────
+                         _tmpl_decision = None
                          if v43_outputs is not None and _CATALOG_OK:
                              _bar_df = None
                              if bundle is not None and getattr(bundle, 'm5_df_raw', None) is not None:
@@ -2447,13 +2532,56 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                      _bar_df = bundle.m5_df_raw.iloc[[i]]
                                  except Exception:
                                      _bar_df = None
-                             _tmpl = select_best_template(_sidx, _bar_df)
+                             _tmpl, _tmpl_decision = select_best_template(_sidx, _bar_df)
+
+                             # -- Verbose: full strategy selection story
+                             if verbose_sim and _tmpl_decision is not None:
+                                 _dc = _tmpl_decision
+                                 _w  = _dc.get("winner") or {}
+                                 print("\n  " + "-"*60)
+                                 print(f"  (G) STRATEGY SELECTION  "
+                                     f"predicted_class={_dc['predicted_class']}  "
+                                     f"sidx={_dc['strategy_idx']}")
+                                 print(f"      candidates_in_class={_dc['total_candidates']}  "
+                                     f"eligible={_dc['eligible_count']}  "
+                                     f"fallback={_dc['fallback']}")
+                                 print(f"      Scoring: {_dc['score_formula']}")
+                                 print(f"      Inputs : pop={_dc['pop']:.4f}  "
+                                     f"ev={_dc['ev']:.4f}  "
+                                     f"max_loss={_dc['max_loss']:.4f}  "
+                                     f"dte_aff={_dc['dte_affinity']:.3f}")
+                                 print("      Candidates:")
+                                 for _cr in _dc["candidates"]:
+                                     _sym = "V" if _cr["eligible"] else "X"
+                                     _win = "  <- WINNER" if _cr["template_id"] == _w.get("template_id") else ""
+                                     _fb  = " [FALLBACK]" if (_cr["template_id"] == _w.get("template_id") and _dc["fallback"]) else ""
+                                     _sc  = f"score={_cr['score']:.4f}" if _cr["score"] is not None else "score=n/a "
+                                     print(f"        {_sym} {_cr['template_id']:<36s} {_sc:<14s}"
+                                         f"[{_cr['eligibility_reason']}]{_win}{_fb}")
+                                     if _cr.get("notes"):
+                                         print(f"            notes: {_cr['notes']}")
+                                 if _dc.get("fallback_reason"):
+                                     print(f"      ! Fallback reason: {_dc['fallback_reason']}")
+                                 _atoms = _dc.get("atoms", {})
+                                 if _atoms and "_error" not in _atoms:
+                                     _a_true  = sorted(k for k, v in _atoms.items() if v)
+                                     _a_false = sorted(k for k, v in _atoms.items() if not v)
+                                     print(f"      Atoms TRUE  ({len(_a_true)}): "
+                                         f"{chr(44).join(_a_true) or 'none'}")
+                                     print(f"      Atoms FALSE ({len(_a_false)}): "
+                                         f"{chr(44).join(_a_false) or 'none'}")
+                                 elif "_error" in _atoms:
+                                     print(f"      Atoms ERROR: {_atoms['_error']}")
+                                 else:
+                                     print("      Atoms: unavailable (no raw M5 data for this bar)")
+                                 print("  " + "-"*60)
+
                              if _tmpl is not None:
                                  legs = build_legs_from_template(
                                      _tmpl, chain_with_prices, spot, target_dte=dte)
                                  if verbose_sim and legs is not None:
                                      print(f"  (G) Template: {_tmpl.template_id} "
-                                           f"({_tmpl.v43_class}) — {legs['n_legs']} legs")
+                                         f"({_tmpl.v43_class}) -- {legs['n_legs']} legs")
                              else:
                                  legs = None
                          else:
@@ -2755,6 +2883,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                                  'deployed':   round(currently_deployed_exact + trade_margin, 2),
                                                  'max_deploy': round(live_max_deploy, 2),
                                                  'n_open':     len(open_trades),
+                                                 'strategy_decision': _tmpl_decision,
                                              })
          
          # 6. Record Equity Curve
