@@ -164,6 +164,16 @@ IC_MULTIPLIER = 100  # Options multiplier
 IC_STOP_LOSS_MULT = 2.0      # Close when loss ≥ 2× credit (standard IC management rule)
 RULE_FEATURES = ["rule_long_consensus", "rule_short_consensus", "rule_exit_consensus", "rule_block_any"]
 
+# Per-strategy profit targets (dollar PnL thresholds derived from historical sweet-spot analysis).
+# When a trade's unrealized_pnl hits this value, it exits with PROFIT_TARGET.
+# Strategies not listed here fall back to the default 50%-of-credit calculation.
+# iron_condor intentionally omitted — uses default 50% credit target.
+STRATEGY_PROFIT_TARGETS = {
+    'custom_multi_leg':  1100,   # iron_butterfly sweet spot: $1,100 min win → 21 trades $72,289 total
+    'bear_put_spread':   1029,   # sweet spot: $1,029 min win → 5 trades $15,447 total
+    'bull_call_spread':   820,   # sweet spot: $820 min win  → 3 trades $9,158 total
+}
+
 # =============================================================================
 # PHASE 5.2: EXECUTION REALITY CONFIG (Truth Alignment)
 # =============================================================================
@@ -1671,11 +1681,12 @@ def find_best_legs(chain_df, spot, call_off, put_off, width, validate_greeks=Tru
 # --- M1 BACKTEST CORE ---
 
 class Trade:
-    def __init__(self, trade_id, entry_dt, legs, entry_credit, max_loss, rules=None, scores=None, dte=None):
+    def __init__(self, trade_id, entry_dt, legs, entry_credit, max_loss, rules=None, scores=None, dte=None, strategy_class=None):
         self.trade_id = trade_id
         self.entry_dt = entry_dt
         self.legs = legs
         self.net_credit = entry_credit
+        self.strategy_class = strategy_class  # e.g. 'custom_multi_leg', 'bear_put_spread'
         self.max_loss = max_loss
         self.qty = IC_CONTRACTS
         
@@ -1785,7 +1796,7 @@ def build_ts_ranges(df, time_col='dt'):
 def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None,
                  use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None,
                  v43_outputs=None, bundle=None, verbose_sim=False, max_positions=5,
-                 allowed_strategy_idxs=None):
+                 allowed_strategy_idxs=None, use_profit_targets=False):
 
     # ==========================================================================
     # PHASE 5.5: Initialize Execution Reality Engine
@@ -2276,46 +2287,48 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                        f"  equity_after=${equity:,.2f}")
                  continue  # Trade is gone
 
-             # Check Profit Target (50% of max profit)
-             if tr.net_credit > 0 and tr.unrealized_pnl > 0:
-                 profit_target = tr.net_credit * 0.50 * tr.qty * IC_MULTIPLIER
-                 if tr.unrealized_pnl >= profit_target:
-                     if exec_engine and market_state:
-                         exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
-                             tr.legs, marks_bid, marks_ask, marks_mid, exec_engine, market_state
-                         )
-                     else:
-                         exit_debit, exit_valid, exit_details = calculate_exit_fill(
-                             tr.legs, marks_bid, marks_ask, marks_mid
-                         )
-                     if exit_valid:
-                         realized_pnl = (tr.net_credit - exit_debit) * tr.qty * IC_MULTIPLIER
-                     else:
-                         realized_pnl = tr.unrealized_pnl
-                     tr.exit_dt = ts
-                     tr.exit_reason = "PROFIT_TARGET"
-                     tr.realized_pnl = realized_pnl
-                     tr.is_closed = True
-                     equity += tr.realized_pnl
-                     closed_trades.append({
-                         'trade_id': tr.trade_id, 'entry_dt': tr.entry_dt, 'exit_dt': ts,
-                         'pnl': tr.realized_pnl, 'pnl_pct': tr.pnl_pct * 100,
-                         'reason': "PROFIT_50PCT", 'max_dd': tr.max_dd_pct * 100,
-                         'exit_details': exit_details if exit_valid else None
-                     })
-                     _trace_close(tr, realized_pnl, "PROFIT_50PCT")
-                     _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
-                     _max_credit3 = tr.net_credit * tr.qty * IC_MULTIPLIER
-                     _prem_cap3   = (realized_pnl / _max_credit3 * 100) if _max_credit3 != 0 else 0.0
-                     print(f"\n  ✅ CLOSED [PROFIT_50PCT] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
-                           f"\n     EARLY EXIT — took 50%% profit at {_dh:.1f}d held / {tr.dte_entry:.0f}d DTE"
-                           f"  ({max(0.0, tr.dte_entry - _dh):.1f}d left on contract)"
-                           f"\n     credit=${tr.net_credit:.4f}/shr  target=${profit_target:,.2f}"
-                           f"  unrealized=${tr.unrealized_pnl:,.2f}"
-                           f"\n     realized=${realized_pnl:,.2f}  premium_captured={_prem_cap3:+.1f}%"
-                           f"  fill_valid={exit_valid}  equity_after=${equity:,.2f}")
-                     continue
-                     continue
+             # Check Profit Target — per-strategy dollar target (if --profittargets) or 50%-of-credit
+             _strat_cls_tr = getattr(tr, 'strategy_class', None)
+             if use_profit_targets and _strat_cls_tr in STRATEGY_PROFIT_TARGETS:
+                 profit_target = float(STRATEGY_PROFIT_TARGETS[_strat_cls_tr])
+             else:
+                 profit_target = abs(tr.net_credit) * 0.50 * tr.qty * IC_MULTIPLIER
+             if tr.unrealized_pnl >= profit_target and tr.unrealized_pnl > 0:
+                 if exec_engine and market_state:
+                     exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
+                         tr.legs, marks_bid, marks_ask, marks_mid, exec_engine, market_state
+                     )
+                 else:
+                     exit_debit, exit_valid, exit_details = calculate_exit_fill(
+                         tr.legs, marks_bid, marks_ask, marks_mid
+                     )
+                 if exit_valid:
+                     realized_pnl = (tr.net_credit - exit_debit) * tr.qty * IC_MULTIPLIER
+                 else:
+                     realized_pnl = tr.unrealized_pnl
+                 tr.exit_dt = ts
+                 tr.exit_reason = "PROFIT_TARGET"
+                 tr.realized_pnl = realized_pnl
+                 tr.is_closed = True
+                 equity += tr.realized_pnl
+                 closed_trades.append({
+                     'trade_id': tr.trade_id, 'entry_dt': tr.entry_dt, 'exit_dt': ts,
+                     'pnl': tr.realized_pnl, 'pnl_pct': tr.pnl_pct * 100,
+                     'reason': "PROFIT_TARGET", 'max_dd': tr.max_dd_pct * 100,
+                     'exit_details': exit_details if exit_valid else None
+                 })
+                 _trace_close(tr, realized_pnl, "PROFIT_TARGET")
+                 _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
+                 _max_credit3 = tr.net_credit * tr.qty * IC_MULTIPLIER
+                 _prem_cap3   = (realized_pnl / _max_credit3 * 100) if _max_credit3 != 0 else 0.0
+                 print(f"\n  ✅ CLOSED [PROFIT_TARGET] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
+                       f"\n     EARLY EXIT — hit ${profit_target:,.0f} target at {_dh:.1f}d held / {tr.dte_entry:.0f}d DTE"
+                       f"  ({max(0.0, tr.dte_entry - _dh):.1f}d left on contract)"
+                       f"\n     strategy={getattr(tr, 'strategy_class', '?')}  target=${profit_target:,.0f}"
+                       f"  unrealized=${tr.unrealized_pnl:,.2f}"
+                       f"\n     realized=${realized_pnl:,.2f}  premium_captured={_prem_cap3:+.1f}%"
+                       f"  fill_valid={exit_valid}  equity_after=${equity:,.2f}")
+                 continue
 
              # Check Expiration (DTE < 0.1)
              try:
@@ -2793,6 +2806,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                          new_trade = Trade(
                                              trade_id, ts, legs, net_credit_val, max_loss,
                                              dte=dte,
+                                             strategy_class=_strat_cls,
                                              scores={
                                                  'entry_logit':      entry_logit,
                                                  'pop_prob':         round(pop_prob, 4),
@@ -3120,6 +3134,9 @@ def main():
                               "an index (e.g. '7'), or comma-separated mix "
                               "(e.g. 'iron_condor,strangle,5'). "
                               "Strategy names: " + ", ".join(V43_STRATEGY_NAMES)))
+    parser.add_argument("--profittargets", action="store_true", default=False,
+                        help=("Enable per-strategy dollar profit targets (from STRATEGY_PROFIT_TARGETS). "
+                              "Off by default; falls back to standard 50%%-of-credit exit for all strategies."))
     parser.add_argument("--strategyomit", type=str, default=None,
                         help=("Exclude specific strategy classes from trading. "
                               "Comma-separated names or indices (e.g. 'iron_condor,bear_put_spread'). "
@@ -3199,6 +3216,15 @@ def main():
                 _final_names = [V43_STRATEGY_NAMES[i] for i in sorted(ALLOWED_STRATEGY_IDXS)
                                 if i < len(V43_STRATEGY_NAMES)]
                 print(f"[strategyomit] Final allowed: {_final_names}")
+
+    # --- Profit targets mode ---
+    if getattr(args, 'profittargets', False):
+        print(f"[profittargets] ON — per-strategy dollar targets:")
+        for _s, _t in STRATEGY_PROFIT_TARGETS.items():
+            print(f"    {_s:<25} -> ${_t:,.0f}")
+        print(f"    (all other strategies use default 50%%-of-credit target)")
+    else:
+        print("[profittargets] OFF — all strategies use 50%%-of-credit profit target")
 
     # --- GPU CHECK ---
     print("="*60)
@@ -3423,8 +3449,9 @@ def main():
         verbose_sim=getattr(args, 'verbose', False),
         max_positions=args.max_positions,
         allowed_strategy_idxs=ALLOWED_STRATEGY_IDXS,
+        use_profit_targets=getattr(args, 'profittargets', False),
     )
-    
+
     # 5. Report
     if not equity:
         print("⚠️ Simulation produced no data (0 bars simulated). Check data/limit settings.")
