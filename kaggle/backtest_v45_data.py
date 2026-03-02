@@ -113,6 +113,36 @@ class MultiTFDataBundle:
     # for compute_predicate_atoms() which needs real feature values (ivr_zone, rsi_dyn, etc.)
     m5_df_raw:   Optional[pd.DataFrame] = None  # [N rows × TF_FEATURE_NAMES cols]
 
+    # GPU-pinned tensors (populated by preload_to_gpu(); None until called)
+    _gpu: Optional[Dict] = None  # keys: m1, m5, m15, h1, m5_piv, m5_piv_mask, pos_state
+
+    def preload_to_gpu(self, device) -> None:
+        """
+        Pre-convert all fixed-size feature arrays to GPU tensors once at load time.
+        Eliminates per-batch numpy→GPU transfers in run_v43_batch_inference.
+        Also pre-processes pivot NaN→0 and builds the boolean mask.
+        """
+        import torch
+        if str(device) == 'cpu':
+            return  # no-op on CPU — saves RAM
+        print(f"[GPU] Pinning feature arrays to {device}...")
+        piv = self.m5_piv.astype(np.float32)
+        piv_mask = np.isnan(piv)
+        piv[piv_mask] = 0.0
+        ps = self.pos_state if self.pos_state is not None else np.zeros(
+            (self.n_bars, N_POS_STATE), dtype=np.float32)
+        self._gpu = {
+            'm1':         torch.from_numpy(self.m1_feat).to(device),
+            'm5':         torch.from_numpy(self.m5_feat).to(device),
+            'm15':        torch.from_numpy(self.m15_feat).to(device),
+            'h1':         torch.from_numpy(self.h1_feat).to(device),
+            'm5_piv':     torch.from_numpy(piv).to(device),
+            'm5_piv_mask':torch.from_numpy(piv_mask).to(device),
+            'pos_state':  torch.from_numpy(ps.astype(np.float32)).to(device),
+        }
+        total_mb = sum(t.element_size() * t.nelement() for t in self._gpu.values()) / 1e6
+        print(f"[GPU] Pinned {len(self._gpu)} tensors ({total_mb:.1f} MB) to {device}")
+
 
 # =============================================================================
 # Private helpers
@@ -453,34 +483,9 @@ def run_v43_batch_inference(
         b_indices = bar_indices[b_start: b_start + batch_size]
         B = len(b_indices)
 
-        # ── Build per-sample inputs ──────────────────────────────────────────
-        x_m1_list, x_m5_list, x_m15_list, x_h1_list = [], [], [], []
-        piv_feat_list, piv_mask_list = [], []
-        ps_list = []
+        # ── Build batch inputs ───────────────────────────────────────────────
         chain_list, cmask_list = [], []
-
         for i in b_indices:
-            s = i - seq_len   # window start
-
-            x_m1_list.append(bundle.m1_feat[s:i])
-            x_m5_list.append(bundle.m5_feat[s:i])
-            x_m15_list.append(bundle.m15_feat[s:i])
-            x_h1_list.append(bundle.h1_feat[s:i])
-
-            # Pivot features [seq_len, 13]: NaN → 0, build mask
-            piv = bundle.m5_piv[s:i].astype(np.float32)
-            pmask = np.isnan(piv)
-            piv[pmask] = 0.0
-            piv_feat_list.append(piv)
-            piv_mask_list.append(pmask)
-
-            # Position state [seq_len, 11]
-            if bundle.pos_state is not None:
-                ps_list.append(bundle.pos_state[s:i])
-            else:
-                ps_list.append(np.zeros((seq_len, N_POS_STATE), dtype=np.float32))
-
-            # Chain grid for current bar's date
             date_str = bundle.m5_dates[i]
             chain_arr = bundle.chain_grid_by_date.get(str(date_str))
             if chain_arr is None or len(chain_arr) == 0:
@@ -492,14 +497,46 @@ def run_v43_batch_inference(
                 chain_list.append(chain_arr)
                 cmask_list.append(np.zeros(len(chain_arr), dtype=bool))
 
-        # ── Stack fixed-size tensors ─────────────────────────────────────────
-        x_m1_t  = torch.tensor(np.stack(x_m1_list),  dtype=torch.float32, device=device)
-        x_m5_t  = torch.tensor(np.stack(x_m5_list),  dtype=torch.float32, device=device)
-        x_m15_t = torch.tensor(np.stack(x_m15_list), dtype=torch.float32, device=device)
-        x_h1_t  = torch.tensor(np.stack(x_h1_list),  dtype=torch.float32, device=device)
-        piv_f_t = torch.tensor(np.stack(piv_feat_list), dtype=torch.float32, device=device)
-        piv_m_t = torch.tensor(np.stack(piv_mask_list), dtype=torch.bool,    device=device)
-        ps_t    = torch.tensor(np.stack(ps_list),     dtype=torch.float32, device=device)
+        # ── Stack fixed-size tensors (GPU fast-path if pre-pinned) ───────────
+        if bundle._gpu is not None:
+            # Vectorised GPU index: one gather per array, zero CPU→GPU transfers
+            g = bundle._gpu
+            idx = torch.tensor(
+                [[i - seq_len + t for t in range(seq_len)] for i in b_indices],
+                dtype=torch.long, device=device)   # [B, seq_len]
+            x_m1_t  = g['m1'][idx]           # [B, seq_len, F]
+            x_m5_t  = g['m5'][idx]
+            x_m15_t = g['m15'][idx]
+            x_h1_t  = g['h1'][idx]
+            piv_f_t = g['m5_piv'][idx]
+            piv_m_t = g['m5_piv_mask'][idx]
+            ps_t    = g['pos_state'][idx]
+        else:
+            # CPU fallback (no GPU or preload_to_gpu() not called)
+            x_m1_list, x_m5_list, x_m15_list, x_h1_list = [], [], [], []
+            piv_feat_list, piv_mask_list, ps_list = [], [], []
+            for i in b_indices:
+                s = i - seq_len
+                x_m1_list.append(bundle.m1_feat[s:i])
+                x_m5_list.append(bundle.m5_feat[s:i])
+                x_m15_list.append(bundle.m15_feat[s:i])
+                x_h1_list.append(bundle.h1_feat[s:i])
+                piv = bundle.m5_piv[s:i].astype(np.float32)
+                pmask = np.isnan(piv)
+                piv[pmask] = 0.0
+                piv_feat_list.append(piv)
+                piv_mask_list.append(pmask)
+                if bundle.pos_state is not None:
+                    ps_list.append(bundle.pos_state[s:i])
+                else:
+                    ps_list.append(np.zeros((seq_len, N_POS_STATE), dtype=np.float32))
+            x_m1_t  = torch.tensor(np.stack(x_m1_list),     dtype=torch.float32, device=device)
+            x_m5_t  = torch.tensor(np.stack(x_m5_list),     dtype=torch.float32, device=device)
+            x_m15_t = torch.tensor(np.stack(x_m15_list),    dtype=torch.float32, device=device)
+            x_h1_t  = torch.tensor(np.stack(x_h1_list),     dtype=torch.float32, device=device)
+            piv_f_t = torch.tensor(np.stack(piv_feat_list), dtype=torch.float32, device=device)
+            piv_m_t = torch.tensor(np.stack(piv_mask_list), dtype=torch.bool,    device=device)
+            ps_t    = torch.tensor(np.stack(ps_list),        dtype=torch.float32, device=device)
 
         # Pad chains to batch-max N_contracts
         max_n = max(len(c) for c in chain_list)

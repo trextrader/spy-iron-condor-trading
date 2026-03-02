@@ -3407,6 +3407,7 @@ def main():
         v43_model_obj = load_v43_model(v43_ckpt, DEVICE, verbose=True)
         print(f"[Phase 7] Loading multi-TF bundle from: {args.v43_data_dir}")
         bundle_v43 = load_multi_tf_bundle(data_dir=args.v43_data_dir, verbose=True)
+        bundle_v43.preload_to_gpu(DEVICE)
         _infer_bars = bundle_v43.n_bars if not args.limit else min(bundle_v43.n_bars, args.limit + args.v43_seq_len)
         print(f"[Phase 7] Running batch inference ({_infer_bars:,} M5 bars, seq_len={args.v43_seq_len})...")
         v43_outputs = run_v43_batch_inference(
