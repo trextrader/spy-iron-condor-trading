@@ -499,18 +499,16 @@ def run_v43_batch_inference(
 
         # ── Stack fixed-size tensors (GPU fast-path if pre-pinned) ───────────
         if bundle._gpu is not None:
-            # Vectorised GPU index: one gather per array, zero CPU→GPU transfers
+            # GPU fast-path: torch.stack of contiguous slice views (avoids non-contiguous
+            # tensor bug from 2D advanced indexing which corrupts model outputs)
             g = bundle._gpu
-            idx = torch.tensor(
-                [[i - seq_len + t for t in range(seq_len)] for i in b_indices],
-                dtype=torch.long, device=device)   # [B, seq_len]
-            x_m1_t  = g['m1'][idx]           # [B, seq_len, F]
-            x_m5_t  = g['m5'][idx]
-            x_m15_t = g['m15'][idx]
-            x_h1_t  = g['h1'][idx]
-            piv_f_t = g['m5_piv'][idx]
-            piv_m_t = g['m5_piv_mask'][idx]
-            ps_t    = g['pos_state'][idx]
+            x_m1_t  = torch.stack([g['m1'][i - seq_len:i]       for i in b_indices])
+            x_m5_t  = torch.stack([g['m5'][i - seq_len:i]       for i in b_indices])
+            x_m15_t = torch.stack([g['m15'][i - seq_len:i]      for i in b_indices])
+            x_h1_t  = torch.stack([g['h1'][i - seq_len:i]       for i in b_indices])
+            piv_f_t = torch.stack([g['m5_piv'][i - seq_len:i]      for i in b_indices])
+            piv_m_t = torch.stack([g['m5_piv_mask'][i - seq_len:i] for i in b_indices])
+            ps_t    = torch.stack([g['pos_state'][i - seq_len:i]    for i in b_indices])
         else:
             # CPU fallback (no GPU or preload_to_gpu() not called)
             x_m1_list, x_m5_list, x_m15_list, x_h1_list = [], [], [], []
