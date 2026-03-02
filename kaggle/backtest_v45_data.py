@@ -109,6 +109,10 @@ class MultiTFDataBundle:
     data_dir:    str            # source directory
     files:       Dict[str, str] = field(default_factory=dict)  # filename map
 
+    # Raw (un-normalized) M5 feature DataFrame — used by select_best_template()
+    # for compute_predicate_atoms() which needs real feature values (ivr_zone, rsi_dyn, etc.)
+    m5_df_raw:   Optional[pd.DataFrame] = None  # [N rows × TF_FEATURE_NAMES cols]
+
 
 # =============================================================================
 # Private helpers
@@ -288,6 +292,8 @@ def load_multi_tf_bundle(
     N = len(m5_ts)
     m5_dates = pd.to_datetime(m5_ts).strftime('%Y-%m-%d').values.astype(str)
     if verbose: print(f"  M5: {N:,} bars, {m5_raw_feat.shape[1]} features")
+    # Build raw (un-normalized) M5 DataFrame for predicate atom evaluation
+    m5_df_raw = pd.DataFrame(m5_raw_feat, columns=TF_FEATURE_NAMES) if TF_FEATURE_NAMES else None
 
     # Also load pos_state from M5 CSV if present
     pos_state: Optional[np.ndarray] = None
@@ -383,6 +389,7 @@ def load_multi_tf_bundle(
             'm15': m15_file, 'h1': h1_file,
             'chain': chain_file,
         },
+        m5_df_raw=m5_df_raw,
     )
 
 

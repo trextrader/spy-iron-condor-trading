@@ -101,6 +101,21 @@ except ImportError as _v43_import_err:
     HAS_V43_DATA = False
     _V43_IMPORT_ERR = str(_v43_import_err)
 
+# ── Strategy catalog: template selection + generic leg builder ─────────────
+try:
+    from intelligence.strategy_templates_v43 import (
+        compute_predicate_atoms, STRATEGY_CATALOG,
+    )
+    from intelligence.schema_v43 import (
+        STRATEGY_TYPES, ABSTAIN_IDX, get_dte_affinity,
+    )
+    _CATALOG_OK = True
+except ImportError as _cat_err:
+    _CATALOG_OK = False
+    STRATEGY_CATALOG = []
+    STRATEGY_TYPES   = []
+    ABSTAIN_IDX      = 9
+
 try:
     from torch.utils.tensorboard import SummaryWriter # Added for TB support
 except ImportError:
@@ -537,6 +552,311 @@ def _bsm_option_price(S, K, T_years, iv, r, cp):
         price = K * np.exp(-r * T_years) * norm.cdf(-d2) - S * norm.cdf(-d1)
     
     return max(0.01, price)  # Floor at $0.01
+
+
+# =============================================================================
+# Strategy catalog helpers — select_best_template + build_legs_from_template
+# =============================================================================
+
+# Absolute-delta targets by (opt_type, strike_rank).
+# Rank 0 = lowest strike; rank 3 = highest strike.
+# Calls: lower strike → higher delta (deeper ITM).
+# Puts:  lower strike → lower delta (more OTM).
+_RANK_DELTA = {
+    ('C', 0): 0.70,   # deep ITM call
+    ('C', 1): 0.45,   # near-ATM call
+    ('C', 2): 0.20,   # OTM call  (IC short-call zone)
+    ('C', 3): 0.10,   # far OTM call (IC long-call wing)
+    ('P', 0): 0.10,   # far OTM put  (IC long-put wing)
+    ('P', 1): 0.20,   # OTM put  (IC short-put zone)
+    ('P', 2): 0.45,   # near-ATM put
+    ('P', 3): 0.70,   # deep ITM put
+}
+
+
+def select_best_template(strategy_idx: int, bar_df=None):
+    """
+    Given a model-predicted strategy class index (0-9) and an optional 1-row
+    M5 feature DataFrame (raw un-normalized values), return the best-fit
+    StrategyTemplate from STRATEGY_CATALOG.
+
+    Selection logic mirrors data_pipeline_v43._compute_strategy_labels():
+      score = 0.40*pop + 0.35*tanh(3*ev) - 0.15*tanh(2*ml) + 0.10*dte_affinity
+
+    Falls back to the first template of the predicted class when:
+      - catalog is unavailable
+      - no template passes its eligibility predicate
+      - bar_df is None
+    Returns None only for abstain (idx 9) or unknown idx.
+    """
+    if not _CATALOG_OK or strategy_idx < 0 or strategy_idx >= len(STRATEGY_TYPES):
+        return None
+    target_class = STRATEGY_TYPES[strategy_idx]
+    if target_class == 'abstain':
+        return None
+
+    candidates = [t for t in STRATEGY_CATALOG if t.v43_class == target_class]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Compute predicate atoms if raw features available
+    atoms = None
+    if bar_df is not None and not bar_df.empty:
+        try:
+            atoms = compute_predicate_atoms(bar_df)
+        except Exception:
+            atoms = None
+
+    pop = float(bar_df['pop'].iloc[0]) if (bar_df is not None and 'pop' in bar_df.columns) else 0.5
+    ev  = float(bar_df['ev'].iloc[0])  if (bar_df is not None and 'ev'  in bar_df.columns) else 0.0
+    ml  = float(bar_df['max_loss'].iloc[0]) if (bar_df is not None and 'max_loss' in bar_df.columns) else 0.1
+
+    best_template = None
+    best_score    = -np.inf
+    for t in candidates:
+        eligible = True
+        if atoms is not None:
+            try:
+                mask = t.get_eligibility_mask(atoms)
+                eligible = bool(mask[0])
+            except Exception:
+                pass  # predicate error → treat as eligible
+        if not eligible:
+            continue
+        try:
+            dte_aff = get_dte_affinity(t.v43_class, 1)
+        except Exception:
+            dte_aff = 0.5
+        score = (0.40 * pop
+                 + 0.35 * float(np.tanh(3.0 * ev))
+                 - 0.15 * float(np.tanh(2.0 * ml))
+                 + 0.10 * dte_aff)
+        if score > best_score:
+            best_score    = score
+            best_template = t
+
+    return best_template if best_template is not None else candidates[0]
+
+
+def build_legs_from_template(template, chain_df, spot: float,
+                              target_dte: float = None,
+                              max_leg_spread: float = 0.15):
+    """
+    Build a legs dict for any StrategyTemplate by reading its LegTemplate list.
+
+    For each unique (opt_type, strike_rank) in the template legs, the closest
+    liquid strike is selected by delta targeting (_RANK_DELTA map).
+
+    Returns a dict compatible with calculate_entry_fill_generic() and the
+    existing verbose display code.  Also populates IC-compat keys
+    (short_call / long_call / short_put / long_put) where the roles are
+    unambiguous, so the existing credit-fail audit log still works.
+
+    Returns None if construction fails (empty chain, missing strikes, etc.).
+    """
+    if template is None or chain_df is None or chain_df.empty:
+        return None
+
+    if target_dte is None:
+        target_dte = V43_DEFAULT_DTE
+
+    chain = synthesize_chain_prices(chain_df.copy())
+
+    # Spread-quality pre-filter (same as find_best_legs Phase 5.6)
+    if 'bid' in chain.columns and 'ask' in chain.columns:
+        _ask_s = chain['ask'].clip(lower=0.001)
+        _sr    = (chain['ask'] - chain['bid']) / _ask_s
+        chain  = chain[_sr <= max_leg_spread].copy()
+        if chain.empty:
+            return None
+
+    # Single-expiry DTE filter (same as find_best_legs Phase 5.7)
+    if 'te' in chain.columns:
+        _utes = chain['te'].dropna().unique()
+        if len(_utes) > 0:
+            _best_te = float(_utes[np.argmin(np.abs(_utes - target_dte))])
+            chain = chain[np.abs(chain['te'] - _best_te) < 1.0].copy()
+            if chain.empty:
+                return None
+
+    calls = chain[chain['call_put'] == 'C'].copy()
+    puts  = chain[chain['call_put'] == 'P'].copy()
+
+    # ── Strike selection: one row per (opt_type, rank) ──────────────────────
+    strike_cache: dict = {}   # (opt_type, rank) → row dict
+    for leg in template.legs:
+        key = (leg.opt_type, leg.strike_rank)
+        if key in strike_cache:
+            continue
+        pool = calls if leg.opt_type == 'C' else puts
+        if pool.empty:
+            return None
+        target_delta = _RANK_DELTA.get(key, 0.20)
+        if 'delta' in pool.columns:
+            pool = pool.copy()
+            pool['_da'] = pool['delta'].abs()
+            row = pool.iloc[(pool['_da'] - target_delta).abs().argsort()[:1]]
+        else:
+            # Fallback: strike offset from spot
+            # Calls: higher delta → lower strike → spot * (1 - offset)
+            # Puts : higher delta → higher strike → spot * (1 + offset)
+            if leg.opt_type == 'C':
+                tgt = spot * (1.0 - (0.5 - target_delta) * 0.10)
+            else:
+                tgt = spot * (1.0 - (target_delta - 0.5) * 0.10)
+            row = pool.iloc[(pool['strike'] - tgt).abs().argsort()[:1]]
+        if row.empty:
+            return None
+        strike_cache[key] = row.iloc[0].to_dict()
+
+    # ── Build legs list ──────────────────────────────────────────────────────
+    legs_built = []
+    for leg in template.legs:
+        key = (leg.opt_type, leg.strike_rank)
+        r   = strike_cache[key]
+        bid = float(r.get('bid', 0.0) or 0.0)
+        ask = float(r.get('ask', bid) or bid)
+        mid = float(r.get('mid', (bid + ask) / 2.0) or (bid + ask) / 2.0)
+        legs_built.append({
+            'leg_name': f"{'long' if leg.side == 'LONG' else 'short'}_{leg.opt_type.lower()}_rk{leg.strike_rank}",
+            'opt_type': leg.opt_type,
+            'side':     leg.side,
+            'qty':      leg.qty,
+            'strike':   float(r.get('strike', 0.0)),
+            'bid':      bid,
+            'ask':      ask,
+            'mid':      mid,
+            'delta':    float(r.get('delta', 0.0) or 0.0),
+            'symbol':   r.get('option_symbol', r.get('symbol',
+                              f"OPT_{leg.opt_type}_rk{leg.strike_rank}")),
+            'expiry_mode': leg.expiry_mode,
+        })
+
+    # ── Net credit (positive = received, negative = debit paid) ─────────────
+    net_credit = 0.0
+    for l in legs_built:
+        if l['side'] == 'SHORT':
+            net_credit += l['bid'] * l['qty']
+        else:
+            net_credit -= l['ask'] * l['qty']
+
+    # ── Spread width ─────────────────────────────────────────────────────────
+    c_strikes = sorted(set(l['strike'] for l in legs_built if l['opt_type'] == 'C'))
+    p_strikes = sorted(set(l['strike'] for l in legs_built if l['opt_type'] == 'P'))
+    c_width   = (max(c_strikes) - min(c_strikes)) if len(c_strikes) >= 2 else 0.0
+    p_width   = (max(p_strikes) - min(p_strikes)) if len(p_strikes) >= 2 else 0.0
+    width     = max(c_width, p_width)
+
+    # ── Max-loss estimate ────────────────────────────────────────────────────
+    if width > 0 and net_credit >= 0:
+        max_loss_per = max(0.0, width - net_credit)
+    elif net_credit < 0:
+        max_loss_per = abs(net_credit)   # debit trade: premium at risk
+    else:
+        # Single naked short: cap at 20% of spot
+        max_loss_per = spot * 0.20
+
+    # ── Result dict ──────────────────────────────────────────────────────────
+    result = {
+        'legs_built':          legs_built,
+        'net_credit':          net_credit,
+        'width':               width,
+        'n_legs':              len(legs_built),
+        'max_loss_per_contract': max_loss_per,
+        'template_id':         template.template_id,
+        'v43_class':           template.v43_class,
+        'min_fill_prob':       1.0,
+        'liquidity_issues':    [],
+    }
+
+    # Populate IC-compat keys for display and audit log
+    # (first SHORT call, first LONG call, first SHORT put, first LONG put)
+    for l in legs_built:
+        if l['side'] == 'SHORT' and l['opt_type'] == 'C' and 'short_call' not in result:
+            result.update({'short_call': l['strike'], 'short_call_bid': l['bid'],
+                           'short_call_ask': l['ask'], 'short_call_mid': l['mid'],
+                           'short_call_delta': l['delta'], 'short_call_symbol': l['symbol'],
+                           'short_call_close': l['mid']})
+        elif l['side'] == 'LONG' and l['opt_type'] == 'C' and 'long_call' not in result:
+            result.update({'long_call': l['strike'], 'long_call_bid': l['bid'],
+                           'long_call_ask': l['ask'], 'long_call_mid': l['mid'],
+                           'long_call_delta': l['delta'], 'long_call_symbol': l['symbol'],
+                           'long_call_close': l['mid']})
+        elif l['side'] == 'SHORT' and l['opt_type'] == 'P' and 'short_put' not in result:
+            result.update({'short_put': l['strike'], 'short_put_bid': l['bid'],
+                           'short_put_ask': l['ask'], 'short_put_mid': l['mid'],
+                           'short_put_delta': l['delta'], 'short_put_symbol': l['symbol'],
+                           'short_put_close': l['mid']})
+        elif l['side'] == 'LONG' and l['opt_type'] == 'P' and 'long_put' not in result:
+            result.update({'long_put': l['strike'], 'long_put_bid': l['bid'],
+                           'long_put_ask': l['ask'], 'long_put_mid': l['mid'],
+                           'long_put_delta': l['delta'], 'long_put_symbol': l['symbol'],
+                           'long_put_close': l['mid']})
+    return result
+
+
+def calculate_entry_fill_generic(legs_result, chain_df, target_qty):
+    """
+    Generic fill calculator that works with any leg structure from
+    build_legs_from_template(). Replaces the IC-hardcoded
+    calculate_entry_fill() for v43 mode.
+
+    SHORT legs fill at BID; LONG legs fill at ASK.
+    Slippage = EXEC_SLIPPAGE_PER_LEG × total contract count.
+    Atomicity fails if any leg's spread ratio > max_leg_spread (0.15).
+    """
+    if legs_result is None:
+        return 0, 0.0, False, {"reason": "no_legs"}
+    legs_built = legs_result.get('legs_built', [])
+    if not legs_built:
+        return 0, 0.0, False, {"reason": "no_legs_built"}
+
+    # Build symbol → prices lookup from chain
+    prices = {}
+    for _, row in chain_df.iterrows():
+        sym = row.get('option_symbol', row.get('symbol', ''))
+        if sym:
+            prices[sym] = synthesize_bid_ask(row)
+
+    # Atomicity: all symbols present
+    missing = [l['symbol'] for l in legs_built if l['symbol'] not in prices]
+    if missing and EXEC_ATOMICITY_STRICT:
+        return 0, 0.0, False, {"reason": "missing_legs", "missing": missing}
+
+    gross_credit = 0.0
+    fill_details: dict = {}
+    n_contracts  = sum(l['qty'] for l in legs_built)
+
+    for leg in legs_built:
+        sym = leg['symbol']
+        p   = prices.get(sym, {'bid': leg['bid'], 'ask': leg['ask']})
+        if leg['side'] == 'SHORT':
+            price_used = p['bid']
+            gross_credit += price_used * leg['qty']
+        else:
+            price_used = p['ask']
+            gross_credit -= price_used * leg['qty']
+        fill_details[f"{leg['leg_name']}_fill"] = round(price_used, 4)
+
+        # Per-leg spread ratio check (BrokenSpreadDetector equivalent)
+        bid = p.get('bid', leg['bid'])
+        ask = p.get('ask', leg['ask'])
+        if ask > 0 and (ask - bid) / ask > 0.15:
+            fill_details['reason'] = f"spread_too_wide:{leg['leg_name']}:{(ask-bid)/ask:.2f}"
+            return 0, 0.0, False, fill_details
+
+    total_slippage = EXEC_SLIPPAGE_PER_LEG * n_contracts
+    net_credit     = gross_credit - total_slippage
+    fill_details.update({
+        'gross_credit': round(gross_credit, 4),
+        'slippage':     round(total_slippage, 4),
+        'net_credit':   round(net_credit, 4),
+        'n_legs':       n_contracts,
+        'template_id':  legs_result.get('template_id', '?'),
+    })
+    return target_qty, net_credit, True, fill_details
 
 
 def synthesize_bid_ask(row):
@@ -2082,10 +2402,28 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                  _vd = _valid_d[['strike','call_put','delta','bid','ask','te']].sort_values('delta', key=abs).head(6) if all(c in _valid_d.columns for c in ['strike','call_put','delta','bid','ask','te']) else _valid_d.head(6)
                                  print(f"  Best delta candidates:\n{_vd.to_string(index=False)}")
 
-                         legs = find_best_legs(
-                             chain_with_prices, spot, call_off, put_off, width,
-                             validate_greeks=True
-                         )
+                         # ── v43 mode: template-driven leg builder ────────────
+                         if v43_outputs is not None and _CATALOG_OK:
+                             _bar_df = None
+                             if bundle is not None and getattr(bundle, 'm5_df_raw', None) is not None:
+                                 try:
+                                     _bar_df = bundle.m5_df_raw.iloc[[i]]
+                                 except Exception:
+                                     _bar_df = None
+                             _tmpl = select_best_template(_sidx, _bar_df)
+                             if _tmpl is not None:
+                                 legs = build_legs_from_template(
+                                     _tmpl, chain_with_prices, spot, target_dte=dte)
+                                 if verbose_sim and legs is not None:
+                                     print(f"  (G) Template: {_tmpl.template_id} "
+                                           f"({_tmpl.v43_class}) — {legs['n_legs']} legs")
+                             else:
+                                 legs = None
+                         else:
+                             legs = find_best_legs(
+                                 chain_with_prices, spot, call_off, put_off, width,
+                                 validate_greeks=True
+                             )
 
                          if legs is None:
                              run_backtest._entry_dbg['legs_none'] += 1
@@ -2113,7 +2451,14 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                        f"      LP={legs.get('long_put')}  δ=? ask={legs.get('long_put_ask','?')}")
 
                              # (H) Execution fill
-                             if exec_engine and market_state:
+                             _use_generic = (v43_outputs is not None
+                                             and _CATALOG_OK
+                                             and legs.get('legs_built') is not None)
+                             if _use_generic:
+                                 filled_qty, net_credit, is_atomic, fill_details = \
+                                     calculate_entry_fill_generic(
+                                         legs, chain_with_prices, IC_CONTRACTS)
+                             elif exec_engine and market_state:
                                  filled_qty, net_credit, is_atomic, fill_details = \
                                      calculate_entry_fill_reality(
                                          legs, chain_with_prices, IC_CONTRACTS,
@@ -2138,48 +2483,55 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                             for k, v in fill_details.items()}})
 
                              else:
-                                 # (I) Credit floor: max(0.10, 5% of width)
+                                 # (I) Credit/debit quality check
                                  spread_width   = float(legs.get('width', width))
-                                 min_credit     = max(0.10, MIN_CREDIT_WIDTH_RATIO * spread_width)
                                  net_credit_val = float(net_credit) if net_credit is not None else 0.0
+                                 is_debit       = net_credit_val < 0  # debit trade (long options)
+
+                                 if is_debit:
+                                     # Debit trade: require non-trivial premium (> $0.05)
+                                     credit_ok = np.isfinite(net_credit_val) and abs(net_credit_val) > 0.05
+                                 else:
+                                     # Credit trade: require min(0.10, 5% of width)
+                                     min_credit = max(0.10, MIN_CREDIT_WIDTH_RATIO * spread_width)
+                                     credit_ok  = np.isfinite(net_credit_val) and net_credit_val >= min_credit
 
                                  if verbose_sim:
-                                     print(f"  (I) Fill result: net_credit={net_credit_val:.4f} "
-                                           f"min_req={min_credit:.4f} (max($0.10, 5%×width={spread_width:.2f}))")
+                                     _tmpl_id = legs.get('template_id', 'IC')
+                                     print(f"  (I) Fill: net={'debit' if is_debit else 'credit'}="
+                                           f"{net_credit_val:.4f} template={_tmpl_id} "
+                                           f"width={spread_width:.2f} ok={credit_ok}")
 
-                                 if not np.isfinite(net_credit_val) or net_credit_val < min_credit:
+                                 if not credit_ok:
                                      run_backtest._entry_dbg['credit_fail'] += 1
                                      if verbose_sim:
-                                         print(f"  ✗ CREDIT FAIL: {net_credit_val:.4f} < min {min_credit:.4f}")
+                                         print(f"  ✗ FILL QUALITY FAIL: {net_credit_val:.4f}")
                                      if len(run_backtest._credit_samples) < AUDIT_MAX_CREDIT_SAMPLES:
                                          run_backtest._credit_samples.append({
                                              'ts': str(ts), 'spot': round(spot, 4),
-                                             'gross':   round(fill_details.get('gross_credit', 0), 4),
-                                             'net':     round(net_credit_val, 4),
-                                             'min_req': round(min_credit, 4),
-                                             'slippage':round(fill_details.get('slippage', 0), 4),
-                                             'width': round(spread_width, 4),
-                                             'call_off': round(call_off, 4),
-                                             'put_off': round(put_off, 4),
-                                             's_call': legs.get('short_call'),
-                                             'l_call': legs.get('long_call'),
-                                             's_put': legs.get('short_put'),
-                                             'l_put': legs.get('long_put'),
-                                             's_call_bid': legs.get('short_call_bid'),
-                                             'l_call_ask': legs.get('long_call_ask'),
-                                             's_put_bid': legs.get('short_put_bid'),
-                                             'l_put_ask': legs.get('long_put_ask'),
+                                             'gross':    round(fill_details.get('gross_credit', 0), 4),
+                                             'net':      round(net_credit_val, 4),
+                                             'slippage': round(fill_details.get('slippage', 0), 4),
+                                             'width':    round(spread_width, 4),
+                                             'template': legs.get('template_id', '?'),
                                          })
                                      _entry_audit_log(i, ts, spot, pol, 'SKIP',
-                                         f'credit_fail:{net_credit_val:.4f}<min={min_credit:.4f}',
+                                         f'credit_fail:{net_credit_val:.4f}',
                                          extra={'net_credit': round(net_credit_val, 4),
-                                                'min_credit': round(min_credit, 4),
-                                                'spread_width': round(spread_width, 4)})
+                                                'spread_width': round(spread_width, 4),
+                                                'template': legs.get('template_id', '?')})
 
                                  else:
                                      # (J) Final collateral vs. capital check (exact post-fill)
-                                     trade_margin = max(0.0, (spread_width - net_credit_val)) \
-                                                    * IC_MULTIPLIER * int(filled_qty)
+                                     # Debit: margin = premium paid; Credit: margin = width - credit
+                                     if is_debit:
+                                         trade_margin = abs(net_credit_val) * IC_MULTIPLIER * int(filled_qty)
+                                     elif spread_width > 0:
+                                         trade_margin = max(0.0, spread_width - net_credit_val) \
+                                                        * IC_MULTIPLIER * int(filled_qty)
+                                     else:
+                                         # Single naked short: cap margin at 20% of spot
+                                         trade_margin = spot * 0.20 * IC_MULTIPLIER * int(filled_qty)
                                      currently_deployed_exact = _deployed_margin(open_trades)
 
                                      if (currently_deployed_exact + trade_margin) > live_max_deploy:
@@ -2193,7 +2545,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
                                      else:
                                          # ── ALL GATES PASSED — Open trade ────────────
-                                         max_loss  = trade_margin  # (spread_width − credit)×100×qty
+                                         max_loss  = trade_margin
                                          trade_id  = f"TR_{i}"
 
                                          # Sizing audit: verify position size is consistent
