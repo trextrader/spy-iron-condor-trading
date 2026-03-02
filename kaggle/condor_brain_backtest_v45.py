@@ -2236,7 +2236,6 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                        f"\n     realized=${realized_pnl:,.2f}  premium_captured={_prem_cap:+.1f}%"
                        f"  fill_valid={exit_valid}  equity_after=${equity:,.2f}")
                  continue
-                 continue
 
              # Check Risk Stop (5%) - PHASE 5.2/5.5 FIX: Use realistic exit cost
              if tr.should_risk_close(equity):
@@ -2384,7 +2383,6 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                        f"  days_held={days_held:.1f}"
                        f"\n     realized=${realized_pnl:,.2f}  premium_captured={_prem_cap4:+.1f}%"
                        f"  fill_valid={exit_valid}  equity_after=${equity:,.2f}")
-                 continue
                  continue
 
              active_trades.append(tr)
