@@ -1150,45 +1150,43 @@ def calculate_entry_fill(legs, chain_df, target_qty):
         if sym:
             prices[sym] = synthesize_bid_ask(row)
 
-    required_symbols = [
-        legs['short_call_symbol'],
-        legs['long_call_symbol'],
-        legs['short_put_symbol'],
-        legs['long_put_symbol']
+    # Build leg list dynamically — supports partial-leg strategies
+    _leg_defs = [
+        ('short_call_symbol', 'short', 'bid'),
+        ('long_call_symbol',  'long',  'ask'),
+        ('short_put_symbol',  'short', 'bid'),
+        ('long_put_symbol',   'long',  'ask'),
     ]
+    required_symbols = [legs[k] for k, _, _ in _leg_defs if legs.get(k) is not None]
 
-    # Atomicity check: All legs must have valid prices
+    # Atomicity check: all declared legs must have valid prices
     missing = [s for s in required_symbols if s not in prices]
     if missing and EXEC_ATOMICITY_STRICT:
         return 0, 0.0, False, {"reason": "missing_legs", "missing": missing}
 
     # Calculate credit using proper bid/ask
-    # Short legs: we SELL at BID
-    # Long legs: we BUY at ASK
+    # Short legs: we SELL at BID  |  Long legs: we BUY at ASK
+    gross_credit = 0.0
+    fill_details = {}
+    n_legs = 0
     try:
-        short_call_bid = prices[legs['short_call_symbol']]['bid']
-        short_put_bid = prices[legs['short_put_symbol']]['bid']
-        long_call_ask = prices[legs['long_call_symbol']]['ask']
-        long_put_ask = prices[legs['long_put_symbol']]['ask']
-    except KeyError as e:
+        for sym_key, role, side in _leg_defs:
+            sym = legs.get(sym_key)
+            if sym is None:
+                continue   # leg absent in this strategy type
+            p = prices.get(sym, {})
+            price = p.get(side, 0.0)
+            fill_details[f"{sym_key.replace('_symbol','')}_{side}"] = price
+            gross_credit += price if role == 'short' else -price
+            n_legs += 1
+    except Exception as e:
         return 0, 0.0, False, {"reason": f"price_lookup_failed: {e}"}
 
-    # Gross credit (before slippage)
-    gross_credit = (short_call_bid + short_put_bid) - (long_call_ask + long_put_ask)
-
-    # Apply slippage (4 legs)
-    total_slippage = EXEC_SLIPPAGE_PER_LEG * 4
+    # Apply slippage per actual leg count
+    total_slippage = EXEC_SLIPPAGE_PER_LEG * n_legs
     net_credit = gross_credit - total_slippage
-
-    fill_details = {
-        "short_call_bid": short_call_bid,
-        "short_put_bid": short_put_bid,
-        "long_call_ask": long_call_ask,
-        "long_put_ask": long_put_ask,
-        "gross_credit": gross_credit,
-        "slippage": total_slippage,
-        "net_credit": net_credit
-    }
+    fill_details.update({"gross_credit": gross_credit, "slippage": total_slippage,
+                         "net_credit": net_credit})
 
     return target_qty, net_credit, True, fill_details
 
@@ -1205,42 +1203,40 @@ def calculate_exit_fill(legs, marks_bid, marks_ask, marks_mid):
     Returns:
         (exit_debit, is_valid, fill_details)
     """
-    required_symbols = [
-        legs['short_call_symbol'],
-        legs['long_call_symbol'],
-        legs['short_put_symbol'],
-        legs['long_put_symbol']
+    # Build leg list dynamically — supports partial-leg strategies
+    _exit_leg_defs = [
+        ('short_call_symbol', 'short', 'ask'),  # buy back shorts at ASK
+        ('long_call_symbol',  'long',  'bid'),  # sell longs at BID
+        ('short_put_symbol',  'short', 'ask'),
+        ('long_put_symbol',   'long',  'bid'),
     ]
+    required_symbols = [legs[k] for k, _, _ in _exit_leg_defs if legs.get(k) is not None]
 
-    # Check all legs have prices
-    missing = [s for s in required_symbols if s not in marks_ask or s not in marks_bid]
+    # Check all declared legs have prices
+    missing = [s for s in required_symbols
+               if s not in marks_ask or s not in marks_bid]
     if missing:
         return None, False, {"reason": "missing_legs", "missing": missing}
 
-    # Calculate debit using proper bid/ask
-    # Short legs: we BUY BACK at ASK
-    # Long legs: we SELL at BID
-    short_call_ask = marks_ask[legs['short_call_symbol']]
-    short_put_ask = marks_ask[legs['short_put_symbol']]
-    long_call_bid = marks_bid[legs['long_call_symbol']]
-    long_put_bid = marks_bid[legs['long_put_symbol']]
+    # Gross debit: cost to close = buy back shorts (ASK) - sell longs (BID)
+    gross_debit = 0.0
+    fill_details = {}
+    n_legs = 0
+    for sym_key, role, side in _exit_leg_defs:
+        sym = legs.get(sym_key)
+        if sym is None:
+            continue   # leg absent in this strategy type
+        src = marks_ask if side == 'ask' else marks_bid
+        price = src.get(sym, marks_mid.get(sym, 0.0))
+        fill_details[f"{sym_key.replace('_symbol','')}_{side}"] = price
+        gross_debit += price if role == 'short' else -price
+        n_legs += 1
 
-    # Gross debit (before slippage)
-    gross_debit = (short_call_ask + short_put_ask) - (long_call_bid + long_put_bid)
-
-    # Apply slippage (4 legs)
-    total_slippage = EXEC_SLIPPAGE_PER_LEG * 4
+    # Apply slippage per actual leg count
+    total_slippage = EXEC_SLIPPAGE_PER_LEG * n_legs
     net_debit = gross_debit + total_slippage
-
-    fill_details = {
-        "short_call_ask": short_call_ask,
-        "short_put_ask": short_put_ask,
-        "long_call_bid": long_call_bid,
-        "long_put_bid": long_put_bid,
-        "gross_debit": gross_debit,
-        "slippage": total_slippage,
-        "net_debit": net_debit
-    }
+    fill_details.update({"gross_debit": gross_debit, "slippage": total_slippage,
+                         "net_debit": net_debit})
 
     return net_debit, True, fill_details
 
@@ -1290,11 +1286,16 @@ def calculate_entry_fill_reality(legs, chain_df, target_qty, engine, market_stat
         if sym:
             prices[sym] = synthesize_bid_ask(row)
 
+    # Build leg list dynamically — only include legs present in this strategy
     leg_configs = [
-        ('short_call', legs['short_call_symbol'], True),   # is_short=True (we sell)
-        ('long_call', legs['long_call_symbol'], False),    # is_short=False (we buy)
-        ('short_put', legs['short_put_symbol'], True),
-        ('long_put', legs['long_put_symbol'], False),
+        (name, legs.get(sym_key), is_short)
+        for name, sym_key, is_short in [
+            ('short_call', 'short_call_symbol', True),
+            ('long_call',  'long_call_symbol',  False),
+            ('short_put',  'short_put_symbol',  True),
+            ('long_put',   'long_put_symbol',   False),
+        ]
+        if legs.get(sym_key) is not None
     ]
 
     fill_results = {}
@@ -1369,11 +1370,16 @@ def calculate_exit_fill_reality(legs, marks_bid, marks_ask, marks_mid, engine, m
         # Fallback to simple model
         return calculate_exit_fill(legs, marks_bid, marks_ask, marks_mid)
 
+    # Build leg list dynamically — only include legs present in this strategy
     leg_configs = [
-        ('short_call', legs['short_call_symbol'], True),   # is_short=True (we buy back)
-        ('long_call', legs['long_call_symbol'], False),    # is_short=False (we sell)
-        ('short_put', legs['short_put_symbol'], True),
-        ('long_put', legs['long_put_symbol'], False),
+        (name, legs.get(sym_key), is_short)
+        for name, sym_key, is_short in [
+            ('short_call', 'short_call_symbol', True),
+            ('long_call',  'long_call_symbol',  False),
+            ('short_put',  'short_put_symbol',  True),
+            ('long_put',   'long_put_symbol',   False),
+        ]
+        if legs.get(sym_key) is not None
     ]
 
     fill_results = {}
@@ -1690,56 +1696,55 @@ class Trade:
         """
         Update unrealized PnL using current O(1) mark cache.
 
-        Phase 5.2 Fix:
-        - Uses MID prices for fair value MTM
-        - Optionally uses bid/ask for realistic exit cost estimation
-        - Handles missing legs by using last known price (carry forward)
+        Supports partial-leg strategies (bull_call_spread, bear_put_spread,
+        straddle, etc.) — missing leg symbols contribute 0.0 to the debit.
+        Slippage is counted per actual leg present, not hard-coded to 4.
         """
-        # Price 4 legs using MID for fair value
-        sc = marks_mid.get(self.legs['short_call_symbol'])
-        lc = marks_mid.get(self.legs['long_call_symbol'])
-        sp = marks_mid.get(self.legs['short_put_symbol'])
-        lp = marks_mid.get(self.legs['long_put_symbol'])
-
-        # If any leg missing, use last known prices (carry forward)
-        # Initialize carry-forward cache if not present
         if not hasattr(self, '_last_marks'):
             self._last_marks = {}
-        
-        syms = ['short_call_symbol', 'long_call_symbol', 'short_put_symbol', 'long_put_symbol']
-        vals = [sc, lc, sp, lp]
-        resolved = []
-        for sym_key, val in zip(syms, vals):
+
+        ALL_LEG_KEYS = [
+            'short_call_symbol', 'long_call_symbol',
+            'short_put_symbol',  'long_put_symbol',
+        ]
+        # Signs: shorts are sold (positive credit), longs are bought (negative)
+        # debit_mid = (short_prices) - (long_prices)
+        # Only include legs that the strategy actually has a symbol for.
+        def _resolve(sym_key, bid_ask_map=None, fallback_mid=None):
+            """Get the current mark for a leg, with carry-forward and 0-default."""
+            sym = self.legs.get(sym_key)
+            if sym is None:
+                return 0.0   # leg doesn't exist in this strategy
+            src = bid_ask_map if bid_ask_map is not None else marks_mid
+            val = src.get(sym)
             if val is not None:
                 self._last_marks[sym_key] = val
-                resolved.append(val)
-            elif sym_key in self._last_marks:
-                resolved.append(self._last_marks[sym_key])
-            else:
-                # No current or historical price - use entry price as fallback
-                entry_key = sym_key.replace('_symbol', '_mid')
-                resolved.append(self.legs.get(entry_key, 0.01))
-        
-        sc, lc, sp, lp = resolved
+                return val
+            if sym_key in self._last_marks:
+                return self._last_marks[sym_key]
+            # Final fallback: entry mid price or 0.01
+            entry_key = sym_key.replace('_symbol', '_mid')
+            return self.legs.get(entry_key, fallback_mid or 0.01)
 
-        # MTM using MID prices (fair value)
+        sc = _resolve('short_call_symbol')
+        lc = _resolve('long_call_symbol')
+        sp = _resolve('short_put_symbol')
+        lp = _resolve('long_put_symbol')
+
+        # MTM: debit to close = cost of buying back shorts - value of longs
         debit_mid = (sc + sp) - (lc + lp)
-
-        # PnL = Credit - Debit
         pnl_per_share = self.net_credit - debit_mid
         self.unrealized_pnl = pnl_per_share * self.qty * IC_MULTIPLIER
 
-        # Also calculate realistic exit cost using bid/ask if available
+        # Realistic exit cost (bid/ask + slippage per actual leg)
         if marks_bid is not None and marks_ask is not None:
-            # To close: buy back shorts at ASK, sell longs at BID
-            sc_ask = marks_ask.get(self.legs['short_call_symbol'], sc)
-            sp_ask = marks_ask.get(self.legs['short_put_symbol'], sp)
-            lc_bid = marks_bid.get(self.legs['long_call_symbol'], lc)
-            lp_bid = marks_bid.get(self.legs['long_put_symbol'], lp)
-
+            sc_ask = _resolve('short_call_symbol', bid_ask_map=marks_ask, fallback_mid=sc)
+            sp_ask = _resolve('short_put_symbol',  bid_ask_map=marks_ask, fallback_mid=sp)
+            lc_bid = _resolve('long_call_symbol',  bid_ask_map=marks_bid, fallback_mid=lc)
+            lp_bid = _resolve('long_put_symbol',   bid_ask_map=marks_bid, fallback_mid=lp)
+            n_legs = sum(1 for k in ALL_LEG_KEYS if self.legs.get(k) is not None)
             debit_real = (sc_ask + sp_ask) - (lc_bid + lp_bid)
-            debit_real += EXEC_SLIPPAGE_PER_LEG * 4  # Add slippage
-
+            debit_real += EXEC_SLIPPAGE_PER_LEG * n_legs
             pnl_real = self.net_credit - debit_real
             self.unrealized_pnl_real = pnl_real * self.qty * IC_MULTIPLIER
         else:
@@ -2161,16 +2166,16 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              if not hasattr(run_backtest, '_mark_debug_count'):
                  run_backtest._mark_debug_count = 0
              if run_backtest._mark_debug_count < 5:
-                 sc_found = tr.legs['short_call_symbol'] in marks_mid
-                 lc_found = tr.legs['long_call_symbol'] in marks_mid
-                 sp_found = tr.legs['short_put_symbol'] in marks_mid
-                 lp_found = tr.legs['long_put_symbol'] in marks_mid
+                 sc_found = (tr.legs.get('short_call_symbol') or '') in marks_mid
+                 lc_found = (tr.legs.get('long_call_symbol')  or '') in marks_mid
+                 sp_found = (tr.legs.get('short_put_symbol')  or '') in marks_mid
+                 lp_found = (tr.legs.get('long_put_symbol')   or '') in marks_mid
                  found_count = sum([sc_found, lc_found, sp_found, lp_found])
                  if run_backtest._mark_debug_count == 0:
                      print(f"\n[DEBUG] TRADE LIFECYCLE - First mark update:")
                      print(f"   Trade {tr.trade_id} entered at {tr.entry_dt}")
-                     print(f"   Symbols: SC={tr.legs['short_call_symbol']}, LC={tr.legs['long_call_symbol']}")
-                     print(f"   Symbols: SP={tr.legs['short_put_symbol']}, LP={tr.legs['long_put_symbol']}")
+                     print(f"   Symbols: SC={tr.legs.get('short_call_symbol')}, LC={tr.legs.get('long_call_symbol')}")
+                     print(f"   Symbols: SP={tr.legs.get('short_put_symbol')}, LP={tr.legs.get('long_put_symbol')}")
                      print(f"   Marks available: {len(marks_mid)} symbols")
                      print(f"   Legs found in marks: {found_count}/4 (SC={sc_found}, LC={lc_found}, SP={sp_found}, LP={lp_found})")
                      print(f"   Unrealized PnL: ${tr.unrealized_pnl:.4f}")
