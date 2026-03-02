@@ -3120,6 +3120,11 @@ def main():
                               "an index (e.g. '7'), or comma-separated mix "
                               "(e.g. 'iron_condor,strangle,5'). "
                               "Strategy names: " + ", ".join(V43_STRATEGY_NAMES)))
+    parser.add_argument("--strategyomit", type=str, default=None,
+                        help=("Exclude specific strategy classes from trading. "
+                              "Comma-separated names or indices (e.g. 'iron_condor,bear_put_spread'). "
+                              "Applied after --strategies, so you can combine both. "
+                              "Strategy names: " + ", ".join(V43_STRATEGY_NAMES)))
 
     # Phase 5.5: Execution Reality Toggles
     parser.add_argument("--no-exec-reality", action="store_true", default=False, help="Disable Phase 5.5 execution reality modeling")
@@ -3164,6 +3169,36 @@ def main():
         print(f"[strategies] Filtering to indices {sorted(ALLOWED_STRATEGY_IDXS)}: {_names}")
     else:
         print("[strategies] No strategy filter — all non-abstain classes allowed")
+
+    # --- Parse --strategyomit (exclusion list, applied after --strategies) ---
+    if args.strategyomit:
+        _omit_idxs = set()
+        for _tok in args.strategyomit.split(","):
+            _tok = _tok.strip().lower()
+            if _tok.isdigit():
+                _omit_idxs.add(int(_tok))
+            elif _tok in [n.lower() for n in V43_STRATEGY_NAMES]:
+                _omit_idxs.add(
+                    next(i for i, n in enumerate(V43_STRATEGY_NAMES) if n.lower() == _tok))
+            else:
+                print(f"[WARN] --strategyomit: unknown token '{_tok}', ignoring. "
+                      f"Valid names: {', '.join(V43_STRATEGY_NAMES)}")
+        if _omit_idxs:
+            _omit_names = [V43_STRATEGY_NAMES[i] for i in sorted(_omit_idxs)
+                           if i < len(V43_STRATEGY_NAMES)]
+            print(f"[strategyomit] Excluding indices {sorted(_omit_idxs)}: {_omit_names}")
+            # If no allow-list yet, build one from the full set minus omitted
+            if ALLOWED_STRATEGY_IDXS is None:
+                ALLOWED_STRATEGY_IDXS = set(range(len(V43_STRATEGY_NAMES) - 1)) - _omit_idxs  # -1: exclude abstain index
+            else:
+                ALLOWED_STRATEGY_IDXS -= _omit_idxs
+            if not ALLOWED_STRATEGY_IDXS:
+                print("[WARN] --strategyomit removed all strategies; ignoring omit filter")
+                ALLOWED_STRATEGY_IDXS = None
+            else:
+                _final_names = [V43_STRATEGY_NAMES[i] for i in sorted(ALLOWED_STRATEGY_IDXS)
+                                if i < len(V43_STRATEGY_NAMES)]
+                print(f"[strategyomit] Final allowed: {_final_names}")
 
     # --- GPU CHECK ---
     print("="*60)
