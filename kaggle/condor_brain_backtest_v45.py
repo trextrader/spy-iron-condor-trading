@@ -1946,7 +1946,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              # Gate booleans (direct thresholds)
              entry_gate_pass = (_es > V43_ENTRY_THRESHOLD)
              pop_gate_pass   = (_pop > V43_POP_THRESHOLD)
-             ic_gate_pass    = ((not _abt) and (_sidx == V43_IC_STRATEGY_IDX))
+             ic_gate_pass    = (not _abt)   # allow any non-abstain strategy; IC struct always used
              # Synthetic pol for _entry_audit_log compatibility (display only)
              pol = np.zeros(10, dtype=np.float32)
              pol[8] = np.log(max(_es, 1e-9) / max(1.0 - _es, 1e-9))         # entry logit
@@ -1973,7 +1973,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
          if v43_outputs is not None and verbose_sim:
              _v_entry = f"entry={'✓' if entry_gate_pass else '✗'}({_es:.3f}>{V43_ENTRY_THRESHOLD})"
              _v_pop   = f"pop={'✓' if pop_gate_pass else '✗'}({_pop:.3f}>{V43_POP_THRESHOLD})"
-             _v_ic    = f"IC={'✓' if ic_gate_pass else '✗'}(abt={_abt},sidx={_sidx})"
+             _v_ic    = f"nonAbt={'✓' if ic_gate_pass else '✗'}(abt={_abt},sidx={_sidx}/{V43_STRATEGY_NAMES[_sidx] if 0<=_sidx<len(V43_STRATEGY_NAMES) else '?'})"
              _v_open  = len(open_trades)
              print(f"[{i:>5}] {str(ts)[:19]} spot={spot:>8.2f}  {_v_entry}  {_v_pop}  {_v_ic}  open={_v_open}")
 
@@ -2419,7 +2419,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         print(f"  {'missing_chain_cols':<28s}: {d['missing_chain_cols']:>8,}")
         print(f"  {'gate_fail_entry_logit':<28s}: {d['gate_fail_entry']:>8,}  ({d['gate_fail_entry']/bars*100:.1f}%)")
         print(f"  {'gate_fail_pop':<28s}: {d['gate_fail_pop']:>8,}  ({d['gate_fail_pop']/bars*100:.1f}%)")
-        print(f"  {'gate_fail_ic(abstain/non-IC)':<28s}: {d['gate_fail_ic']:>8,}  ({d['gate_fail_ic']/bars*100:.1f}%)")
+        print(f"  {'gate_fail_ic(abstain)':<28s}: {d['gate_fail_ic']:>8,}  ({d['gate_fail_ic']/bars*100:.1f}%)")
         print(f"  {'collateral_oob':<28s}: {d['collateral_oob']:>8,}")
         print(f"  {'legs_none':<28s}: {d['legs_none']:>8,}")
         print(f"  {'atomicity_fail':<28s}: {d['atomicity_fail']:>8,}")
