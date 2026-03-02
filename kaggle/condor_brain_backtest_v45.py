@@ -2112,8 +2112,6 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                             or fill_details.get('rejection', {}).get('reason', '?'))
                                  if verbose_sim or run_backtest._entry_dbg['atomicity_fail'] <= 3:
                                      print(f"  ✗ ATOMICITY FAIL #{run_backtest._entry_dbg['atomicity_fail']}"
-                                     print(f"  {'expiry_past_sim':<28s}: {d.get('expiry_past_sim', 0):>8,}  ({d.get('expiry_past_sim', 0)/bars*100:.1f}%)")
-                                     print(f"  {'max_pos_block':<28s}: {d.get('max_pos_block', 0):>8,}  ({d.get('max_pos_block', 0)/bars*100:.1f}%)")
                                            f" reason={_reason}")
                                      if verbose_sim:
                                          print(f"      fill_details={fill_details}")
@@ -2410,6 +2408,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         print(f"  {'legs_none':<28s}: {d['legs_none']:>8,}")
         print(f"  {'atomicity_fail':<28s}: {d['atomicity_fail']:>8,}")
         print(f"  {'credit_fail':<28s}: {d['credit_fail']:>8,}")
+        print(f"  expiry_past_sim            : {d.get('expiry_past_sim', 0):>8,}  ({d.get('expiry_past_sim', 0)/bars*100:.1f}%)")
+        print(f"  max_pos_block              : {d.get('max_pos_block', 0):>8,}  ({d.get('max_pos_block', 0)/bars*100:.1f}%)")
         print(f"  {'SUCCESS (trades opened)':<28s}: {opens:>8,}  ({opens/bars*100:.1f}%)")
         print(f"\n  Capital: start=${STARTING_EQUITY:,.0f} | leverage={LEVERAGE_FACTOR:.0f}x | "
               f"buying_power=${STARTING_EQUITY*LEVERAGE_FACTOR:,.0f} | "
