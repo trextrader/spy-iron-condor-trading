@@ -2009,6 +2009,13 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      if chain_te is None or not np.isfinite(chain_te):
                          chain_te = 30.0
                      dte = float(np.clip(dte_raw, 1.0, min(chain_te, 45.0)))
+                     # Gate: skip if position would expire after sim window
+                     _expiry_dt = pd.Timestamp(ts) + pd.Timedelta(days=dte)
+                     if _expiry_dt > sim_end_dt:
+                         run_backtest._entry_dbg['expiry_past_sim'] = run_backtest._entry_dbg.get('expiry_past_sim', 0) + 1
+                         if verbose_sim:
+                             print(f'  -- SKIP expiry_past_sim: expiry {_expiry_dt.date()} > sim_end {sim_end_dt.date()}')
+                         continue
 
                      # Expected collateral estimate (pre-fill — used for capital check)
                      estimated_margin = max(0.0, (width - 0.0)) * IC_MULTIPLIER * IC_CONTRACTS
@@ -2031,6 +2038,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                              extra={'estimated_margin': round(estimated_margin, 2),
                                     'deployed': round(currently_deployed, 2),
                                     'live_max_deploy': round(live_max_deploy, 2)})
+
+                     elif len(open_trades) >= max_positions:
+                         run_backtest._entry_dbg['max_pos_block'] = run_backtest._entry_dbg.get('max_pos_block', 0) + 1
 
                      elif (currently_deployed + estimated_margin) > live_max_deploy:
                          run_backtest._entry_dbg['capital_block'] += 1
@@ -2102,6 +2112,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                             or fill_details.get('rejection', {}).get('reason', '?'))
                                  if verbose_sim or run_backtest._entry_dbg['atomicity_fail'] <= 3:
                                      print(f"  ✗ ATOMICITY FAIL #{run_backtest._entry_dbg['atomicity_fail']}"
+                                     print(f"  {'expiry_past_sim':<28s}: {d.get('expiry_past_sim', 0):>8,}  ({d.get('expiry_past_sim', 0)/bars*100:.1f}%)")
+                                     print(f"  {'max_pos_block':<28s}: {d.get('max_pos_block', 0):>8,}  ({d.get('max_pos_block', 0)/bars*100:.1f}%)")
                                            f" reason={_reason}")
                                      if verbose_sim:
                                          print(f"      fill_details={fill_details}")
@@ -2356,6 +2368,26 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
          })
          
     # End Simulation
+    # Force-close any positions still open at simulation end
+    if open_trades:
+        print(f'\n[SIM_END] Force-closing {len(open_trades)} open position(s) at MTM.')
+    for tr in open_trades:
+        _fc_pnl = getattr(tr, 'unrealized_pnl_real', tr.unrealized_pnl)
+        equity += _fc_pnl
+        closed_trades.append({
+            'trade_id':    tr.trade_id,
+            'entry_dt':    tr.entry_dt,
+            'exit_dt':     str(spot_timestamps[num_bars - 1]),
+            'pnl':         round(_fc_pnl, 4),
+            'pnl_pct':     round(tr.pnl_pct * 100, 4),
+            'reason':      'SIM_END',
+            'max_dd':      round(tr.max_dd_pct * 100, 4),
+            'exit_details': 'force_closed_at_sim_end',
+        })
+        _trace_close(tr, _fc_pnl, 'SIM_END')
+        print(f'  [SIM_END] {tr.trade_id}: MTM PnL=${_fc_pnl:,.2f}')
+    open_trades = []
+
     print(f"Simulation Complete. Final Equity: ${equity:,.2f}")
     
     # ── V4.5 ENTRY DEBUG SUMMARY ──────────────────────────────────────────────
