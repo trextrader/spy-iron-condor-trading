@@ -2182,11 +2182,14 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      print(f"   DTE at entry: {tr.dte_entry}")
                  run_backtest._mark_debug_count += 1
              
-             # Per-trade stop: close when loss >= IC_STOP_LOSS_MULT × credit collected.
-             # Standard IC management rule (2× credit = 200% of max profit).
-             # This prevents a single position from losing more than 2× its premium
-             # even if the portfolio-level 5% stop hasn't fired yet.
-             _per_trade_stop = -(tr.net_credit * IC_STOP_LOSS_MULT * tr.qty * IC_MULTIPLIER)
+             # Per-trade stop: close when loss >= IC_STOP_LOSS_MULT × |credit|.
+             # For credit strategies (net_credit > 0): stop at 2× premium received.
+             # For debit strategies (net_credit < 0): stop at 2× premium paid.
+             # Using abs() ensures the threshold is always negative (a loss level)
+             # regardless of strategy direction — a positive net_credit would give a
+             # negative threshold (correct), but a negative net_credit would flip it
+             # to a positive number and fire the stop instantly (bug).
+             _per_trade_stop = -(abs(tr.net_credit) * IC_STOP_LOSS_MULT * tr.qty * IC_MULTIPLIER)
              if tr.unrealized_pnl < _per_trade_stop:
                  if exec_engine and market_state:
                      exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
