@@ -1688,7 +1688,8 @@ def build_ts_ranges(df, time_col='dt'):
 
 def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None,
                  use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None,
-                 v43_outputs=None, bundle=None, verbose_sim=False, max_positions=5):
+                 v43_outputs=None, bundle=None, verbose_sim=False, max_positions=5,
+                 allowed_strategy_idxs=None):
 
     # ==========================================================================
     # PHASE 5.5: Initialize Execution Reality Engine
@@ -2114,6 +2115,13 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      'exit_details': exit_details if exit_valid else None
                  })
                  _trace_close(tr, realized_pnl, "PER_TRADE_STOP")
+                 if verbose_sim:
+                     _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
+                     print(f"\n  ❌ CLOSED [PER_TRADE_STOP] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
+                           f"\n     credit=${tr.net_credit:.4f}  stop_thresh=${_per_trade_stop:,.2f}"
+                           f"  unrealized=${tr.unrealized_pnl:,.2f}"
+                           f"\n     realized=${realized_pnl:,.2f}  fill_valid={exit_valid}"
+                           f"  held={_dh:.1f}d  equity_after=${equity:,.2f}")
                  continue
 
              # Check Risk Stop (5%) - PHASE 5.2/5.5 FIX: Use realistic exit cost
@@ -2154,8 +2162,15 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      'exit_details': exit_details if exit_valid else None
                  })
                  _trace_close(tr, realized_pnl, "RISK_STOP")
+                 if verbose_sim:
+                     _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
+                     print(f"\n  🛑 CLOSED [RISK_STOP_5PCT] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
+                           f"\n     unrealized=${tr.unrealized_pnl:,.2f}"
+                           f"  fill_valid={exit_valid}"
+                           f"\n     realized=${realized_pnl:,.2f}  held={_dh:.1f}d"
+                           f"  equity_after=${equity:,.2f}")
                  continue  # Trade is gone
-            
+
              # Check Profit Target (50% of max profit)
              if tr.net_credit > 0 and tr.unrealized_pnl > 0:
                  profit_target = tr.net_credit * 0.50 * tr.qty * IC_MULTIPLIER
@@ -2184,8 +2199,15 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                          'exit_details': exit_details if exit_valid else None
                      })
                      _trace_close(tr, realized_pnl, "PROFIT_50PCT")
+                     if verbose_sim:
+                         _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
+                         print(f"\n  ✅ CLOSED [PROFIT_50PCT] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
+                               f"\n     credit=${tr.net_credit:.4f}  target=${profit_target:,.2f}"
+                               f"  unrealized=${tr.unrealized_pnl:,.2f}"
+                               f"\n     realized=${realized_pnl:,.2f}  fill_valid={exit_valid}"
+                               f"  held={_dh:.1f}d  equity_after=${equity:,.2f}")
                      continue
-             
+
              # Check Expiration (DTE < 0.1)
              try:
                  days_held = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
@@ -2232,9 +2254,21 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      'exit_details': exit_details if exit_valid else None
                  })
                  _trace_close(tr, realized_pnl, "EXPIRED")
+                 if verbose_sim:
+                     print(f"\n  ⏰ CLOSED [EXPIRED] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
+                           f"\n     credit=${tr.net_credit:.4f}  dte_entry={tr.dte_entry:.1f}"
+                           f"  days_held={days_held:.1f}"
+                           f"\n     realized=${realized_pnl:,.2f}  fill_valid={exit_valid}"
+                           f"  equity_after=${equity:,.2f}")
                  continue
 
              active_trades.append(tr)
+             if verbose_sim:
+                 _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
+                 print(f"  [HOLD] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
+                       f"  held={_dh:.1f}d/{tr.dte_entry:.0f}dte"
+                       f"  unrealized=${tr.unrealized_pnl:,.2f}"
+                       f"  spot={spot:.2f}")
          
          open_trades = active_trades
          
@@ -2266,7 +2300,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              # Gate booleans (direct thresholds)
              entry_gate_pass = (_es > V43_ENTRY_THRESHOLD)
              pop_gate_pass   = (_pop > V43_POP_THRESHOLD)
-             ic_gate_pass    = (not _abt)   # allow any non-abstain strategy; IC struct always used
+             _strat_allowed  = (allowed_strategy_idxs is None or _sidx in allowed_strategy_idxs)
+             ic_gate_pass    = (not _abt) and _strat_allowed  # non-abstain + strategy filter
              # Synthetic pol for _entry_audit_log compatibility (display only)
              pol = np.zeros(10, dtype=np.float32)
              pol[8] = np.log(max(_es, 1e-9) / max(1.0 - _es, 1e-9))         # entry logit
@@ -2833,6 +2868,13 @@ def main():
                         help="Max simultaneous open IC positions (default: 5)")
     parser.add_argument("--verbose", action="store_true", default=False,
                         help="Print detailed per-bar output: gate checks, chain state, leg selection, fill details")
+    parser.add_argument("--strategies", type=str, default="all",
+                        help=("Filter which strategy classes the model may trade. "
+                              "Default 'all' = any non-abstain class. "
+                              "Accepts: 'all', a strategy name (e.g. 'iron_condor'), "
+                              "an index (e.g. '7'), or comma-separated mix "
+                              "(e.g. 'iron_condor,strangle,5'). "
+                              "Strategy names: " + ", ".join(V43_STRATEGY_NAMES)))
 
     # Phase 5.5: Execution Reality Toggles
     parser.add_argument("--no-exec-reality", action="store_true", default=False, help="Disable Phase 5.5 execution reality modeling")
@@ -2851,6 +2893,32 @@ def main():
                         help=f"Inference sequence length for CondorNet v4.3 (default: {V43_SEQ_LEN})")
 
     args = parser.parse_args()
+
+    # --- Parse --strategies filter into a set of allowed strategy indices ---
+    _strat_filter_raw = (args.strategies or "all").strip().lower()
+    if _strat_filter_raw == "all":
+        ALLOWED_STRATEGY_IDXS = None  # None = unrestricted
+    else:
+        ALLOWED_STRATEGY_IDXS = set()
+        for _tok in _strat_filter_raw.split(","):
+            _tok = _tok.strip()
+            if _tok.isdigit():
+                ALLOWED_STRATEGY_IDXS.add(int(_tok))
+            elif _tok in [n.lower() for n in V43_STRATEGY_NAMES]:
+                ALLOWED_STRATEGY_IDXS.add(
+                    next(i for i, n in enumerate(V43_STRATEGY_NAMES) if n.lower() == _tok))
+            else:
+                print(f"[WARN] --strategies: unknown token '{_tok}', ignoring. "
+                      f"Valid names: {', '.join(V43_STRATEGY_NAMES)}")
+        if not ALLOWED_STRATEGY_IDXS:
+            print("[WARN] --strategies produced empty set; falling back to 'all'")
+            ALLOWED_STRATEGY_IDXS = None
+    if ALLOWED_STRATEGY_IDXS is not None:
+        _names = [V43_STRATEGY_NAMES[i] for i in sorted(ALLOWED_STRATEGY_IDXS)
+                  if i < len(V43_STRATEGY_NAMES)]
+        print(f"[strategies] Filtering to indices {sorted(ALLOWED_STRATEGY_IDXS)}: {_names}")
+    else:
+        print("[strategies] No strategy filter — all non-abstain classes allowed")
 
     # --- GPU CHECK ---
     print("="*60)
@@ -3074,6 +3142,7 @@ def main():
         bundle=bundle_v43,
         verbose_sim=getattr(args, 'verbose', False),
         max_positions=args.max_positions,
+        allowed_strategy_idxs=ALLOWED_STRATEGY_IDXS,
     )
     
     # 5. Report
