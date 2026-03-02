@@ -12,7 +12,7 @@ BASE_ARGS = [
     sys.executable,
     "kaggle/condor_brain_backtest_v45.py",
     "--use-v43",
-    "--v43-model",    "models/condornet_v43_run18.pth",
+    "--v43-model",    "models/condor_net_v43_run18.pth",
     "--v43-data-dir", "data/Datasetv4/v43",
     "--strategyomit", "iron_condor",
     "--profittargets",
