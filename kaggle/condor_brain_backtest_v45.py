@@ -3082,22 +3082,105 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     # ── STRATEGY BREAKDOWN ────────────────────────────────────────────────────
     _open_records = [t for t in closed_trades if t.get('action') == 'OPEN']
     if _open_records:
-        from collections import Counter
+        from collections import Counter, defaultdict
+
+        # Build trade_id → strategy_class / template_id lookup from OPEN records
+        _tid_to_cls  = {t['trade_id']: t.get('strategy_class', 'IC') for t in _open_records}
+        _tid_to_tmpl = {t['trade_id']: t.get('template_id', '?')    for t in _open_records}
+
+        # Gather close records with realized PnL (non-OPEN rows that have 'pnl')
+        _close_records = [t for t in closed_trades
+                          if t.get('action') != 'OPEN' and 'pnl' in t]
+
+        # ── Per-strategy PnL aggregation ──────────────────────────────────────
+        def _compute_strategy_stats(grouping_fn):
+            """Return {group_key: stats_dict} for a given grouping function."""
+            groups = defaultdict(list)
+            for cr in _close_records:
+                key = grouping_fn(cr.get('trade_id', ''))
+                if key is not None:
+                    groups[key].append(float(cr.get('pnl', 0)))
+
+            stats = {}
+            for key, pnls in groups.items():
+                n        = len(pnls)
+                net      = sum(pnls)
+                wins     = sum(1 for p in pnls if p > 0)
+                losses   = n - wins
+                best     = max(pnls) if pnls else 0.0
+                worst    = min(pnls) if pnls else 0.0
+
+                # Max drawdown: peak-to-trough on cumulative PnL curve
+                cum = 0.0; peak = 0.0; max_dd = 0.0
+                for p in pnls:
+                    cum += p
+                    if cum > peak: peak = cum
+                    dd = cum - peak
+                    if dd < max_dd: max_dd = dd
+
+                # Max consecutive losses (PnL <= $0)
+                max_consec = 0; cur_consec = 0
+                for p in pnls:
+                    if p <= 0:
+                        cur_consec += 1
+                        if cur_consec > max_consec: max_consec = cur_consec
+                    else:
+                        cur_consec = 0
+
+                stats[key] = {
+                    'count': n, 'net': net, 'wins': wins, 'losses': losses,
+                    'best': best, 'worst': worst, 'max_dd': max_dd,
+                    'max_consec_loss': max_consec,
+                }
+            return stats
+
+        _cls_stats  = _compute_strategy_stats(lambda tid: _tid_to_cls.get(tid))
+        _tmpl_stats = _compute_strategy_stats(lambda tid: _tid_to_tmpl.get(tid))
+
         _cls_counts  = Counter(t.get('strategy_class', 'IC') for t in _open_records)
         _tmpl_counts = Counter(t.get('template_id', '?')     for t in _open_records)
         _total_open  = len(_open_records)
-        print("\n" + "="*80)
+
+        # ── Print Strategy Class table ────────────────────────────────────────
+        print("\n" + "="*140)
         print("  STRATEGY BREAKDOWN (trades opened)")
-        print("="*80)
-        print(f"  {'Strategy Class':<30s}  {'Count':>6}  {'%':>6}")
-        print(f"  {'-'*30}  {'-'*6}  {'-'*6}")
+        print("="*140)
+        _hdr = (f"  {'Strategy Class':<25s}  {'Count':>5}  {'%':>5}  "
+                f"{'Net Profit':>12}  {'MaxDD':>10}  {'W / L':>7}  "
+                f"{'Best Trade':>11}  {'Worst Trade':>12}  {'Max Consec L':>12}")
+        print(_hdr)
+        print(f"  {'-'*25}  {'-'*5}  {'-'*5}  {'-'*12}  {'-'*10}  {'-'*7}  {'-'*11}  {'-'*12}  {'-'*12}")
         for cls, cnt in sorted(_cls_counts.items(), key=lambda x: -x[1]):
-            print(f"  {cls:<30s}  {cnt:>6}  {cnt/_total_open*100:>5.1f}%")
-        print(f"\n  {'Template ID':<40s}  {'Count':>6}  {'%':>6}")
-        print(f"  {'-'*40}  {'-'*6}  {'-'*6}")
+            s = _cls_stats.get(cls, {})
+            _net   = s.get('net', 0)
+            _dd    = s.get('max_dd', 0)
+            _w     = s.get('wins', 0)
+            _l     = s.get('losses', 0)
+            _best  = s.get('best', 0)
+            _worst = s.get('worst', 0)
+            _mcl   = s.get('max_consec_loss', 0)
+            print(f"  {cls:<25s}  {cnt:>5}  {cnt/_total_open*100:>4.1f}%  "
+                  f"${_net:>+11,.2f}  ${_dd:>+9,.2f}  {_w:>3}/{_l:<3}  "
+                  f"${_best:>+10,.2f}  ${_worst:>+11,.2f}  {_mcl:>12}")
+
+        # ── Print Template ID table ───────────────────────────────────────────
+        print(f"\n  {'Template ID':<25s}  {'Count':>5}  {'%':>5}  "
+              f"{'Net Profit':>12}  {'MaxDD':>10}  {'W / L':>7}  "
+              f"{'Best Trade':>11}  {'Worst Trade':>12}  {'Max Consec L':>12}")
+        print(f"  {'-'*25}  {'-'*5}  {'-'*5}  {'-'*12}  {'-'*10}  {'-'*7}  {'-'*11}  {'-'*12}  {'-'*12}")
         for tmpl, cnt in sorted(_tmpl_counts.items(), key=lambda x: -x[1]):
-            print(f"  {tmpl:<40s}  {cnt:>6}  {cnt/_total_open*100:>5.1f}%")
-        print("="*80)
+            s = _tmpl_stats.get(tmpl, {})
+            _net   = s.get('net', 0)
+            _dd    = s.get('max_dd', 0)
+            _w     = s.get('wins', 0)
+            _l     = s.get('losses', 0)
+            _best  = s.get('best', 0)
+            _worst = s.get('worst', 0)
+            _mcl   = s.get('max_consec_loss', 0)
+            print(f"  {tmpl:<25s}  {cnt:>5}  {cnt/_total_open*100:>4.1f}%  "
+                  f"${_net:>+11,.2f}  ${_dd:>+9,.2f}  {_w:>3}/{_l:<3}  "
+                  f"${_best:>+10,.2f}  ${_worst:>+11,.2f}  {_mcl:>12}")
+        print("="*140)
 
     # ── FINAL PERFORMANCE SUMMARY ─────────────────────────────────────────────
     _closed_pnl = [t for t in closed_trades if t.get('action') not in ('OPEN',) and 'pnl' in t]
