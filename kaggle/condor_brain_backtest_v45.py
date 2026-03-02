@@ -3152,8 +3152,8 @@ def main():
     # Phase 7: CondorNet v4.3 multi-TF data layer
     parser.add_argument("--use-v43", action="store_true", default=False,
                         help="Use CondorNet v4.3 multi-TF inference instead of CondorBrain v2.2")
-    parser.add_argument("--v43-model", type=str, default="models/condor_net_v43_run18.pth",
-                        help="Path to CondorNet v4.3 checkpoint (.pth). Default: models/condor_net_v43_run18.pth")
+    parser.add_argument("--v43-model", type=str, default="models/condornet_v43_run18.pth",
+                        help="Path to CondorNet v4.3 checkpoint (.pth). Default: models/condornet_v43_run18.pth")
     parser.add_argument("--v43-data-dir", type=str, default="data/Datasetv4/v43",
                         help="Directory containing v4.3 multi-TF dataset CSVs (default: data/Datasetv4/v43)")
     parser.add_argument("--v43-seq-len", type=int, default=V43_SEQ_LEN,
