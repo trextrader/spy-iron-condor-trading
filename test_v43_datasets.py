@@ -109,29 +109,37 @@ if extra_beyond_expected:
     print(f"  [{WARN}] m5 has unexpected extra cols: {sorted(extra_beyond_expected)}")
 
 # ── Test 4: Curvature columns have real data ──────────────────
-print("\n[5] Curvature data spot-check (loading 500 rows each)...")
+# Pivots are SPARSE by design (only set at pivot bars, NaN elsewhere).
+# We sample 2000 rows from the MIDDLE of the file to catch real pivot events.
+print("\n[5] Curvature data spot-check (2000 rows from file middle)...")
 for tf in ("m1", "m5", "m15", "h1"):
     path = FILES[tf]
-    df   = pd.read_csv(path, nrows=500, usecols=lambda c: c in CURVATURE_COLS or c == "timestamp")
+    # Count rows fast, then skip to middle
+    total = sum(1 for _ in open(path)) - 1
+    skip  = max(0, total // 2 - 1000)
+    df = pd.read_csv(path, skiprows=range(1, skip + 1), nrows=2000,
+                     usecols=lambda c: c in CURVATURE_COLS or c == "timestamp")
     present = [c for c in CURVATURE_COLS if c in df.columns]
     missing = [c for c in CURVATURE_COLS if c not in df.columns]
     if missing:
         check(f"{tf}: curvature cols present", False, f"missing cols: {missing}")
         continue
-    all_zero = [c for c in present if df[c].fillna(0).abs().sum() == 0]
     all_nan  = [c for c in present if df[c].isna().all()]
+    all_zero = [c for c in present if not df[c].isna().all()
+                and df[c].fillna(0).abs().sum() == 0]
+    check(f"{tf}: curvature cols not all-NaN (sparse=ok, sampled middle {skip}–{skip+2000})",
+          not all_nan, f"all-NaN: {all_nan}" if all_nan else "")
     check(f"{tf}: curvature cols not all-zero", not all_zero,
           f"all-zero: {all_zero}" if all_zero else "")
-    check(f"{tf}: curvature cols not all-NaN",  not all_nan,
-          f"all-NaN:  {all_nan}"  if all_nan  else "")
-    # Show pct non-null for key cols
     pcts = {c: f"{df[c].notna().mean()*100:.0f}%" for c in ["PivotCurvatureProxy","SlopeATR"]}
-    print(f"      {tf}: non-null rates → {pcts}")
+    print(f"      {tf}: non-null rates in sample → {pcts}")
 
 # ── Test 5: Row counts ────────────────────────────────────────
 print("\n[6] Row counts...")
-EXPECTED = {"m1": (1_100_000, 1_300_000), "m5": (18_000, 20_000),
-            "m15": (5_500, 7_500),        "h1":  (1_200, 1_800)}
+EXPECTED = {"m1": (80_000, 120_000),  # 1-min bars for 2025 (~390/day × ~252 days)
+            "m5": (18_000, 20_000),   # 5-min bars for 2025
+            "m15": (5_500, 7_500),    # 15-min bars for 2025
+            "h1":  (1_200, 1_800)}    # hourly bars for 2025
 for tf, path in FILES.items():
     n = sum(1 for _ in open(path)) - 1  # fast line count
     lo, hi = EXPECTED[tf]
