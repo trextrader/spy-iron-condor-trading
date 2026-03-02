@@ -136,10 +136,10 @@ for tf in ("m1", "m5", "m15", "h1"):
 
 # ── Test 5: Row counts ────────────────────────────────────────
 print("\n[6] Row counts...")
-EXPECTED = {"m1": (80_000, 120_000),  # 1-min bars for 2025 (~390/day × ~252 days)
-            "m5": (18_000, 20_000),   # 5-min bars for 2025
-            "m15": (5_500, 7_500),    # 15-min bars for 2025
-            "h1":  (1_200, 1_800)}    # hourly bars for 2025
+EXPECTED = {"m1": (80_000, 110_000),  # 1-min bars: Jan 3 – Dec 12 2025 (~237 trading days × 390)
+            "m5": (18_000, 20_000),   # 5-min bars: Jan 3 – Dec 12 2025
+            "m15": (5_500, 7_500),    # 15-min bars: Jan 3 – Dec 12 2025
+            "h1":  (1_200, 1_800)}    # hourly bars: Jan 3 – Dec 12 2025
 for tf, path in FILES.items():
     n = sum(1 for _ in open(path)) - 1  # fast line count
     lo, hi = EXPECTED[tf]
