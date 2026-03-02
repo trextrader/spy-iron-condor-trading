@@ -3173,9 +3173,11 @@ def main():
     parser.add_argument("--profittargets", action="store_true", default=False,
                         help=("Enable per-strategy dollar profit targets (from STRATEGY_PROFIT_TARGETS). "
                               "Off by default; falls back to standard 50%%-of-credit exit for all strategies."))
-    parser.add_argument("--strategyomit", type=str, default=None,
+    parser.add_argument("--strategyomit", nargs='+', default=None,
                         help=("Exclude specific strategy classes from trading. "
-                              "Comma-separated names or indices (e.g. 'iron_condor,bear_put_spread'). "
+                              "Space-separated names or indices "
+                              "(e.g. --strategyomit iron_condor iron_butterfly bear_put_spread). "
+                              "Comma-separated also supported for backward compat. "
                               "Applied after --strategies, so you can combine both. "
                               "Strategy names: " + ", ".join(V43_STRATEGY_NAMES)))
 
@@ -3224,10 +3226,16 @@ def main():
         print("[strategies] No strategy filter — all non-abstain classes allowed")
 
     # --- Parse --strategyomit (exclusion list, applied after --strategies) ---
+    # nargs='+' gives us a list; also split each element on commas for backward compat
     if args.strategyomit:
         _omit_idxs = set()
-        for _tok in args.strategyomit.split(","):
+        _raw_tokens = []
+        for _arg in args.strategyomit:
+            _raw_tokens.extend(_arg.split(","))
+        for _tok in _raw_tokens:
             _tok = _tok.strip().lower()
+            if not _tok:
+                continue
             if _tok.isdigit():
                 _omit_idxs.add(int(_tok))
             elif _tok in [n.lower() for n in V43_STRATEGY_NAMES]:
