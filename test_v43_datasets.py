@@ -111,12 +111,15 @@ if extra_beyond_expected:
 # ── Test 4: Curvature columns have real data ──────────────────
 # Pivots are SPARSE by design (only set at pivot bars, NaN elsewhere).
 # We sample 2000 rows from the MIDDLE of the file to catch real pivot events.
-print("\n[5] Curvature data spot-check (2000 rows from file middle)...")
+print("\n[5] Curvature data spot-check (2000 rows; m5 from last 25% — pivots start mid-year)...")
 for tf in ("m1", "m5", "m15", "h1"):
     path = FILES[tf]
-    # Count rows fast, then skip to middle
     total = sum(1 for _ in open(path)) - 1
-    skip  = max(0, total // 2 - 1000)
+    # m5 pivots only appear in the second half of 2025 — sample last 25%
+    if tf == "m5":
+        skip = max(0, int(total * 0.75) - 1000)
+    else:
+        skip = max(0, total // 2 - 1000)
     df = pd.read_csv(path, skiprows=range(1, skip + 1), nrows=2000,
                      usecols=lambda c: c in CURVATURE_COLS or c == "timestamp")
     present = [c for c in CURVATURE_COLS if c in df.columns]
