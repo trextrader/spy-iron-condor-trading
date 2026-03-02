@@ -48,10 +48,20 @@ sys.path.insert(0, '/kaggle/working/spy-iron-condor-trading')
 sys.path.insert(0, os.getcwd())
 # Ensure kaggle/ dir itself is on path so backtest_v45_data is importable
 # regardless of whether kaggle/ has an __init__.py
+_kaggle_dirs = []
 try:
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    _kaggle_dirs.append(os.path.dirname(os.path.abspath(__file__)))
 except NameError:
     pass
+_kaggle_dirs.extend([
+    os.path.join(os.getcwd(), 'kaggle'),
+    '/teamspace/studios/this_studio/spy-iron-condor-trading/kaggle',
+    '/content/spy-iron-condor-trading/kaggle',
+    '/kaggle/working/spy-iron-condor-trading/kaggle',
+])
+for _d in _kaggle_dirs:
+    if os.path.isdir(_d) and _d not in sys.path:
+        sys.path.insert(0, _d)
 
 from intelligence.condor_brain import CondorBrain
 from intelligence.canonical_feature_registry import (
@@ -2661,6 +2671,8 @@ def main():
     if args.use_v43:
         if not HAS_V43_DATA:
             print(f"❌ --use-v43 requires backtest_v45_data.py. Import error: {_V43_IMPORT_ERR}")
+            _spy_paths = [p for p in sys.path if 'spy' in p.lower() or 'kaggle' in p.lower() or 'condor' in p.lower()]
+            print(f"   sys.path (relevant): {_spy_paths}")
             return
         v43_ckpt = args.v43_model or "models/condornet_v43_best.pth"
         print(f"\n[Phase 7] Loading CondorNet v4.3 checkpoint: {v43_ckpt}")
