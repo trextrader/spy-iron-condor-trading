@@ -2088,6 +2088,34 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                   f"pop={_sigmoid(pol[4]):.3f} conf={_sigmoid(pol[7]):.3f}"
                   + (f" | {extra}" if extra else ""))
 
+    # ── Scoreboard helper — printed after every entry and every exit ──────────
+    def _scoreboard(label, event_pnl=None):
+        """Print a compact running account summary."""
+        _unrealized   = sum(t.unrealized_pnl for t in open_trades)
+        _total_equity = equity + _unrealized
+        _cur_dd       = (_total_equity - peak_equity) / peak_equity * 100 if peak_equity > 0 else 0.0
+        _wins  = sum(1 for r in closed_trades if r.get('action') != 'OPEN' and float(r.get('pnl') or 0) > 0)
+        _losses= sum(1 for r in closed_trades if r.get('action') != 'OPEN' and float(r.get('pnl') or 0) <= 0)
+        _wl    = f"{_wins/_losses:.2f}" if _losses else "—"
+        _n_open = len(open_trades)
+        _max_dd_all = min(
+            ((_total_equity - peak_equity) / peak_equity * 100) if peak_equity > 0 else 0.0,
+            *[float(r.get('max_dd') or 0) for r in closed_trades if r.get('action') != 'OPEN'] or [0.0]
+        )
+        _pnl_str = f"  event_pnl={event_pnl:+,.2f}" if event_pnl is not None else ""
+        print(
+            f"  {'─'*56}\n"
+            f"  [{label}]"
+            f"  cash=${equity:>12,.2f}"
+            f"  unrealized={_unrealized:>+10,.2f}"
+            f"  total=${_total_equity:>12,.2f}{_pnl_str}\n"
+            f"  cur_dd={_cur_dd:>+6.2f}%"
+            f"  max_dd={_max_dd_all:>+7.2f}%"
+            f"  W={_wins}  L={_losses}  W/L={_wl}"
+            f"  open_positions={_n_open}\n"
+            f"  {'─'*56}"
+        )
+
     # ── Entry debug counters (persistent across calls for summary) ────────────
     if not hasattr(run_backtest, '_entry_dbg'):
         run_backtest._entry_dbg = {
@@ -2235,6 +2263,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                        f"  unrealized=${tr.unrealized_pnl:,.2f}"
                        f"\n     realized=${realized_pnl:,.2f}  premium_captured={_prem_cap:+.1f}%"
                        f"  fill_valid={exit_valid}  equity_after=${equity:,.2f}")
+                 _scoreboard("AFTER EXIT:PER_TRADE_STOP", realized_pnl)
                  continue
 
              # Check Risk Stop (5%) - PHASE 5.2/5.5 FIX: Use realistic exit cost
@@ -2284,6 +2313,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                        f"\n     unrealized=${tr.unrealized_pnl:,.2f}  fill_valid={exit_valid}"
                        f"\n     realized=${realized_pnl:,.2f}  premium_captured={_prem_cap2:+.1f}%"
                        f"  equity_after=${equity:,.2f}")
+                 _scoreboard("AFTER EXIT:RISK_STOP_5PCT", realized_pnl)
                  continue  # Trade is gone
 
              # Check Profit Target — per-strategy dollar target (if --profittargets) or 50%-of-credit
@@ -2327,6 +2357,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                        f"  unrealized=${tr.unrealized_pnl:,.2f}"
                        f"\n     realized=${realized_pnl:,.2f}  premium_captured={_prem_cap3:+.1f}%"
                        f"  fill_valid={exit_valid}  equity_after=${equity:,.2f}")
+                 _scoreboard("AFTER EXIT:PROFIT_TARGET", realized_pnl)
                  continue
 
              # Check Expiration (DTE < 0.1)
@@ -2383,6 +2414,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                        f"  days_held={days_held:.1f}"
                        f"\n     realized=${realized_pnl:,.2f}  premium_captured={_prem_cap4:+.1f}%"
                        f"  fill_valid={exit_valid}  equity_after=${equity:,.2f}")
+                 _scoreboard("AFTER EXIT:EXPIRED", realized_pnl)
                  continue
 
              active_trades.append(tr)
@@ -2963,6 +2995,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                                  'n_open':     len(open_trades),
                                                  'strategy_decision': _tmpl_decision,
                                              })
+                                         _scoreboard("AFTER ENTRY")
          
          # 6. Record Equity Curve
          unrealized = sum(t.unrealized_pnl for t in open_trades)
@@ -2996,6 +3029,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         })
         _trace_close(tr, _fc_pnl, 'SIM_END')
         print(f'  [SIM_END] {tr.trade_id}: MTM PnL=${_fc_pnl:,.2f}')
+    if open_trades:
+        _scoreboard("AFTER SIM_END FORCE-CLOSE")
     open_trades = []
 
     # ── Compute portfolio-level Max Drawdown from equity curve ────────────────
