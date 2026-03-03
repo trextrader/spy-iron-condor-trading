@@ -117,19 +117,45 @@ except ImportError as _cat_err:
     ABSTAIN_IDX      = 9
 
 # ── Per-strategy config files ──────────────────────────────────────────────
+def get_config(configs, class_name):
+    """Get strategy config; returns empty dict if not found."""
+    return configs.get(class_name, {}) if configs else {}
+
+_STRATEGY_CONFIGS = {}
 try:
-    import sys as _sys
     _kaggle_dir = os.path.dirname(os.path.abspath(__file__))
-    if _kaggle_dir not in _sys.path:
-        _sys.path.insert(0, _kaggle_dir)
-    from strategies import load_strategy_configs, get_config
-    _STRATEGY_CONFIGS = load_strategy_configs(verbose=True)
+    _strat_dir = os.path.join(_kaggle_dir, "strategies")
+    if os.path.isdir(_strat_dir):
+        import importlib.util
+        # Load _defaults first
+        _def_spec = importlib.util.spec_from_file_location(
+            "_defaults", os.path.join(_strat_dir, "_defaults.py"))
+        _def_mod = importlib.util.module_from_spec(_def_spec)
+        _def_spec.loader.exec_module(_def_mod)
+        _DEFAULT_CFG = getattr(_def_mod, "DEFAULT_CONFIG", {})
+        # Scan for strategy configs
+        for _fname in sorted(os.listdir(_strat_dir)):
+            if _fname.startswith("_") or not _fname.endswith(".py"):
+                continue
+            _fpath = os.path.join(_strat_dir, _fname)
+            try:
+                _spec = importlib.util.spec_from_file_location(_fname[:-3], _fpath)
+                _mod = importlib.util.module_from_spec(_spec)
+                _spec.loader.exec_module(_mod)
+                _cfg = getattr(_mod, "CONFIG", None)
+                if _cfg:
+                    _cn = _cfg.get("class_name", _fname[:-3])
+                    _STRATEGY_CONFIGS[_cn] = {**_DEFAULT_CFG, **_cfg}
+                    print(f"  [strategies] Loaded: {_cn} "
+                          f"(max_qty={_cfg.get('max_contracts','?')}, "
+                          f"stop={_cfg.get('stop_loss_mult','?')}x, "
+                          f"target=${_cfg.get('profit_target','?')}, "
+                          f"fallback={_cfg.get('fallback_template','?')}, "
+                          f"SL$={_cfg.get('stop_loss_dollar','?')})")
+            except Exception as _e:
+                print(f"  [strategies] SKIP {_fname}: {_e}")
 except Exception as _cfg_err:
-    _STRATEGY_CONFIGS = {}
-    # Fallback get_config when import fails
-    def get_config(configs, class_name):
-        return configs.get(class_name, {})
-    print(f"[strategies] Config load failed: {_cfg_err}")
+    print(f"[strategies] Config scan failed: {_cfg_err}")
 
 
 try:

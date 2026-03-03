@@ -10,11 +10,7 @@ Tuning notes (run18 backtest, 500 bars, 2025 bullish market):
   - Current: short_call (1 qty, $3k hard stop) — profit-generating template with capped risk
 """
 
-from strategies._defaults import DEFAULT_CONFIG
-
 CONFIG = {
-    **DEFAULT_CONFIG,
-
     # ── Identity ─────────────────────────────────────────────────────────
     "class_name":           "single_call",
     "class_idx":            0,
