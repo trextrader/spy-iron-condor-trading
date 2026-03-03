@@ -118,10 +118,17 @@ except ImportError as _cat_err:
 
 # ── Per-strategy config files ──────────────────────────────────────────────
 try:
+    import sys as _sys
+    _kaggle_dir = os.path.dirname(os.path.abspath(__file__))
+    if _kaggle_dir not in _sys.path:
+        _sys.path.insert(0, _kaggle_dir)
     from strategies import load_strategy_configs, get_config
-    _STRATEGY_CONFIGS = load_strategy_configs(verbose=False)
+    _STRATEGY_CONFIGS = load_strategy_configs(verbose=True)
 except Exception as _cfg_err:
     _STRATEGY_CONFIGS = {}
+    # Fallback get_config when import fails
+    def get_config(configs, class_name):
+        return configs.get(class_name, {})
     print(f"[strategies] Config load failed: {_cfg_err}")
 
 
