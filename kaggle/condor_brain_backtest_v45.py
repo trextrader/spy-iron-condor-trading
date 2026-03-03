@@ -2594,18 +2594,15 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                              print(f'  -- SKIP expiry_past_sim: 0 days left in sim (ts={pd.Timestamp(ts).date()} sim_end={sim_end_dt.date()})')
                          continue
 
-                     # Strategy-aware pre-fill margin estimate
-                     _tmpl_n_legs = len(_tmpl.legs) if (_tmpl is not None) else 4
-                     _has_short = any(l.side == "SHORT" for l in (_tmpl.legs if _tmpl else []))
-                     if _tmpl_n_legs <= 2 and _has_short:
-                         # Naked/cash-secured short: 15% of spot per contract
-                         estimated_margin = spot * 0.15 * IC_MULTIPLIER * IC_CONTRACTS
-                     elif _tmpl_n_legs <= 2:
-                         # Long single option: premium estimate (~2% of spot)
-                         estimated_margin = spot * 0.02 * IC_MULTIPLIER * IC_CONTRACTS
-                     else:
-                         # Spread/multi-leg: width-based (existing IC formula)
-                         estimated_margin = max(0.0, width) * IC_MULTIPLIER * IC_CONTRACTS
+                     # Strategy-aware pre-fill margin estimate (using _sidx, not _tmpl)
+                     # single_call(0) and single_put(1) are single-leg strategies
+                     _is_single_leg = (_sidx in (0, 1))  # single_call or single_put
+                     if _is_single_leg:
+                         # Single-leg: use ~2% of spot as premium estimate (conservative)
+                         estimated_margin = spot * 0.02 * IC_MULTIPLIER * IC_CONTRACTS
+                     else:
+                         # Spread/multi-leg: width-based (existing IC formula)
+                         estimated_margin = max(0.0, width) * IC_MULTIPLIER * IC_CONTRACTS
 
                      # (F) Capital constraint check — update buying power with current equity
                      live_buying_power = equity * LEVERAGE_FACTOR
@@ -2616,7 +2613,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      min_collateral = live_buying_power * MIN_COLLATERAL_PCT
                      max_collateral = live_buying_power * MAX_COLLATERAL_PCT
                      # Single-leg strategies have different margin profiles -- relax bounds
-                     _collateral_floor = min_collateral * 0.1 if (_tmpl and len(_tmpl.legs) <= 2) else min_collateral
+                     _collateral_floor = min_collateral * 0.1 if _is_single_leg else min_collateral
                      if not (_collateral_floor <= estimated_margin <= max_collateral * 2.0):
                          # Width parameter produced collateral outside reasonable bounds
                          run_backtest._entry_dbg['collateral_oob'] += 1
@@ -2632,7 +2629,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
                      elif (currently_deployed + estimated_margin) > live_max_deploy:
                          run_backtest._entry_dbg['capital_block'] += 1
-                         print(f"  ** CAPITAL_BLOCK(pre-fill) bar={i} deployed={currently_deployed:.0f} est_margin={estimated_margin:.0f} max_deploy={live_max_deploy:.0f}")
+                         print(f"  ** CAPITAL_BLOCK(pre-fill) bar={i} deployed={currently_deployed:.0f} est_margin={estimated_margin:.0f} max_deploy={live_max_deploy:.0f}")
+
                          _entry_audit_log(i, ts, spot, pol, 'SKIP',
                              f'capital_ceiling:'
                              f'deployed={currently_deployed:.0f}+'
@@ -2852,7 +2850,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                      if (currently_deployed_exact + trade_margin) > live_max_deploy:
                                          # Exact post-fill check failed (estimated was OK)
                                          run_backtest._entry_dbg['capital_block'] += 1
-                                         print(f"  ** CAPITAL_BLOCK(post-fill) bar={i} deployed={currently_deployed_exact:.0f} trade_margin={trade_margin:.0f} max={live_max_deploy:.0f} debit={is_debit} width={spread_width:.2f} credit={net_credit_val:.4f} qty={filled_qty}")
+                                         print(f"  ** CAPITAL_BLOCK(post-fill) bar={i} deployed={currently_deployed_exact:.0f} trade_margin={trade_margin:.0f} max={live_max_deploy:.0f} debit={is_debit} width={spread_width:.2f} credit={net_credit_val:.4f} qty={filled_qty}")
+
                                          _entry_audit_log(i, ts, spot, pol, 'SKIP',
                                              'capital_post_fill_exceeded',
                                              extra={'deployed': round(currently_deployed_exact, 2),
