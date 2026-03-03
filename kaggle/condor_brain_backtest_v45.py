@@ -116,6 +116,15 @@ except ImportError as _cat_err:
     STRATEGY_TYPES   = []
     ABSTAIN_IDX      = 9
 
+# ── Per-strategy config files ──────────────────────────────────────────────
+try:
+    from kaggle.strategies import load_strategy_configs, get_config
+    _STRATEGY_CONFIGS = load_strategy_configs(verbose=False)
+except Exception as _cfg_err:
+    _STRATEGY_CONFIGS = {}
+    print(f"[strategies] Config load failed: {_cfg_err}")
+
+
 try:
     from torch.utils.tensorboard import SummaryWriter # Added for TB support
 except ImportError:
@@ -752,8 +761,14 @@ def select_best_template(strategy_idx: int, bar_df=None, v43_pop=None, v43_ev=No
         }
         return best_template, decision
     else:
-        # No template passed its predicate — use first candidate as safety fallback
-        fb = candidates[0]
+        # No template passed its predicate — use config fallback_template
+        _fb_cfg = get_config(_STRATEGY_CONFIGS, pred_class)
+        _fb_tid = _fb_cfg.get("fallback_template")
+        fb = None
+        if _fb_tid:
+            fb = next((c for c in candidates if c.template_id == _fb_tid), None)
+        if fb is None:
+            fb = candidates[0]  # ultimate fallback: first candidate
         decision['fallback']        = True
         decision['fallback_reason'] = 'no_eligible_candidates_predicate_all_failed'
         decision['winner'] = {
@@ -2041,6 +2056,15 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         print(f"[DEBUG] ALL GATES PASS count: {combined_pass.sum()}")
 
     # 3. SIMULATION LOOP
+    # Per-strategy configs
+    if _STRATEGY_CONFIGS:
+        print(f"[strategies] {len(_STRATEGY_CONFIGS)} per-strategy config(s) loaded:")
+        for _cn, _cc in _STRATEGY_CONFIGS.items():
+            print(f"    {_cn}: max_qty={_cc['max_contracts']}, "
+                  f"stop={_cc['stop_loss_mult']}x, "
+                  f"target=${_cc['profit_target']}, "
+                  f"fallback={_cc['fallback_template']}")
+
     print("Starting Simulation Loop...")
 
     equity = STARTING_EQUITY
@@ -2254,9 +2278,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      print(f"   DTE at entry: {tr.dte_entry}")
                  run_backtest._mark_debug_count += 1
              
-             # Per-strategy stop-loss: use STRATEGY_STOP_LOSS if available
-
-             _sl_mult = STRATEGY_STOP_LOSS.get(tr.strategy_class, IC_STOP_LOSS_MULT)
+             # Per-strategy stop-loss from config
+             _sl_cfg = get_config(_STRATEGY_CONFIGS, getattr(tr, "strategy_class", ""))
+             _sl_mult = _sl_cfg.get("stop_loss_mult", IC_STOP_LOSS_MULT)
 
              # Per-trade stop: close when loss >= _sl_mult × |credit|.
              # For credit strategies (net_credit > 0): stop at 2× premium received.
@@ -2266,6 +2290,10 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              # negative threshold (correct), but a negative net_credit would flip it
              # to a positive number and fire the stop instantly (bug).
              _per_trade_stop = -(abs(tr.net_credit) * _sl_mult * tr.qty * IC_MULTIPLIER)
+             # Dollar hard stop from config (if set)
+             _sl_dollar = _sl_cfg.get("stop_loss_dollar")
+             if _sl_dollar is not None:
+                 _per_trade_stop = max(_per_trade_stop, -abs(_sl_dollar))
              if tr.unrealized_pnl < _per_trade_stop:
                  if exec_engine and market_state:
                      exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
@@ -2355,7 +2383,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
              # Check Profit Target — per-strategy dollar target (if --profittargets) or 50%-of-credit
              _strat_cls_tr = getattr(tr, 'strategy_class', None)
-             if use_profit_targets and _strat_cls_tr in STRATEGY_PROFIT_TARGETS:
+             # Per-strategy config profit target takes priority
+             _pt_cfg = get_config(_STRATEGY_CONFIGS, _strat_cls_tr or "")
+             _cfg_pt = _pt_cfg.get("profit_target")
+             if use_profit_targets and _cfg_pt is not None:
+                 profit_target = float(_cfg_pt)
+             elif use_profit_targets and _strat_cls_tr in STRATEGY_PROFIT_TARGETS:
                  profit_target = float(STRATEGY_PROFIT_TARGETS[_strat_cls_tr])
              else:
                  profit_target = abs(tr.net_credit) * 0.50 * tr.qty * IC_MULTIPLIER
@@ -2625,19 +2658,16 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      # Strategy-aware pre-fill margin estimate (using _sidx, not _tmpl)
 
                      # single_call(0) and single_put(1) are single-leg strategies
-
-                     _is_single_leg = (_sidx in (0, 1))  # single_call or single_put
-
-                     if _is_single_leg:
-
-                         # Single-leg: use ~2% of spot as premium estimate (conservative)
-
+                     # Per-strategy margin estimate (from config)
+                     _strat_class = STRATEGY_TYPES[_sidx] if (0 <= _sidx < len(STRATEGY_TYPES)) else "unknown"
+                     _strat_cfg = get_config(_STRATEGY_CONFIGS, _strat_class)
+                     _is_single_leg = (_sidx in (0, 1))
+                     if _strat_cfg.get("margin_type") == "pct_spot":
+                         _mpct = _strat_cfg.get("margin_spot_pct", 0.02)
+                         estimated_margin = spot * _mpct * IC_MULTIPLIER * IC_CONTRACTS
+                     elif _is_single_leg:
                          estimated_margin = spot * 0.02 * IC_MULTIPLIER * IC_CONTRACTS
-
                      else:
-
-                         # Spread/multi-leg: width-based (existing IC formula)
-
                          estimated_margin = max(0.0, width) * IC_MULTIPLIER * IC_CONTRACTS
 
 
@@ -2785,20 +2815,21 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                      print(f"      SC={legs.get('short_call','?')} LC={legs.get('long_call','?')} "
                                            f"SP={legs.get('short_put','?')} LP={legs.get('long_put','?')}")
 
-                             # Cap contract qty for single-leg strategies to fit capital
+                             # Qty capping from per-strategy config
                              _fill_qty = IC_CONTRACTS
-                             if _tmpl is not None and len(_tmpl.legs) <= 2:
-                                 _has_short_leg = any(l.side == "SHORT" for l in _tmpl.legs)
-                                 if _has_short_leg:
-                                     _margin_per = spot * 0.15 * IC_MULTIPLIER
+                             if _strat_cfg is not None:
+                                 _cfg_max = _strat_cfg.get("max_contracts", IC_CONTRACTS)
+                                 _cfg_margin_pct = _strat_cfg.get("margin_pct", 0.50)
+                                 _cfg_mpct = _strat_cfg.get("margin_spot_pct", 0.15)
+                                 if _strat_cfg.get("margin_type") == "pct_spot":
+                                     _margin_per = spot * _cfg_mpct * IC_MULTIPLIER
                                  else:
-                                     _margin_per = spot * 0.02 * IC_MULTIPLIER
-                                 _max_affordable = max(1, int(live_max_deploy * 0.25 / max(_margin_per, 1)))
-                                 _fill_qty = min(IC_CONTRACTS, _max_affordable)
+                                     _margin_per = max(0.0, width) * IC_MULTIPLIER
+                                 _max_affordable = max(1, int(live_max_deploy * _cfg_margin_pct / max(_margin_per, 1)))
+                                 _fill_qty = min(IC_CONTRACTS, _cfg_max, _max_affordable)
                                  if verbose_sim and _fill_qty != IC_CONTRACTS:
                                      print(f"  (H-pre) Qty capped: {IC_CONTRACTS} -> {_fill_qty} "
-                                           f"(margin/contract=${_margin_per:,.0f}, "
-                                           f"max_deploy_25%=${live_max_deploy*0.25:,.0f})")
+                                           f"(config max={_cfg_max}, margin/ct=${_margin_per:,.0f})")
 
                              # (H) Execution fill
                              _use_generic = (v43_outputs is not None
