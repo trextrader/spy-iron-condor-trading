@@ -10,7 +10,7 @@ Tuning notes (run18 backtest, 500 bars, 2025 bullish market):
   - Current: short_call (1 qty, $3k hard stop) — profit-generating template with capped risk
 """
 
-from kaggle.strategies._defaults import DEFAULT_CONFIG
+from strategies._defaults import DEFAULT_CONFIG
 
 CONFIG = {
     **DEFAULT_CONFIG,
@@ -28,7 +28,7 @@ CONFIG = {
 
     # ── Exit: Stop-Loss ──────────────────────────────────────────────────
     "stop_loss_mult":       1.5,        # 1.5× credit for naked shorts
-    "stop_loss_dollar":     3000,       # Hard $ cap: never lose > $3,000/trade
+    "stop_loss_dollar":     500,       # Hard $ cap: $500 max loss/trade (1:5 SL:PT ratio)
 
     # ── Exit: Profit Target ──────────────────────────────────────────────
     "profit_target":        2500,       # Take profit at $2,500

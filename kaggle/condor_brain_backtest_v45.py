@@ -118,7 +118,7 @@ except ImportError as _cat_err:
 
 # ── Per-strategy config files ──────────────────────────────────────────────
 try:
-    from kaggle.strategies import load_strategy_configs, get_config
+    from strategies import load_strategy_configs, get_config
     _STRATEGY_CONFIGS = load_strategy_configs(verbose=False)
 except Exception as _cfg_err:
     _STRATEGY_CONFIGS = {}

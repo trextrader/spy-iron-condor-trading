@@ -17,7 +17,7 @@ import os
 import sys
 from typing import Dict, Optional
 
-from kaggle.strategies._defaults import DEFAULT_CONFIG
+from strategies._defaults import DEFAULT_CONFIG
 
 # Strategy class names (must match V43_STRATEGY_NAMES in the backtester)
 _V43_CLASS_NAMES = [
@@ -46,7 +46,7 @@ def load_strategy_configs(verbose: bool = True) -> Dict[str, dict]:
 
         module_name = fname[:-3]  # strip .py
         try:
-            mod = importlib.import_module(f"kaggle.strategies.{module_name}")
+            mod = importlib.import_module(f"strategies.{module_name}")
             cfg = getattr(mod, "CONFIG", None)
             if cfg is None:
                 if verbose:
