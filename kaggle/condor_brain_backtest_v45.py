@@ -2414,6 +2414,43 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  _scoreboard("AFTER EXIT:RISK_STOP_5PCT", realized_pnl)
                  continue  # Trade is gone
 
+             # Check Dollar Hard Stop — per-strategy $ cap from config
+             _sl_cfg_tr = get_config(_STRATEGY_CONFIGS, getattr(tr, "strategy_class", "") or "")
+             _sl_dollar = _sl_cfg_tr.get("stop_loss_dollar")
+             if _sl_dollar is not None and tr.unrealized_pnl < -abs(float(_sl_dollar)):
+                 if exec_engine and market_state:
+                     exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
+                         tr.legs, marks_bid, marks_ask, marks_mid, exec_engine, market_state
+                     )
+                 else:
+                     exit_debit, exit_valid, exit_details = calculate_exit_fill(
+                         tr.legs, marks_bid, marks_ask, marks_mid
+                     )
+                 if exit_valid:
+                     realized_pnl = (tr.net_credit - exit_debit) * tr.qty * IC_MULTIPLIER
+                 else:
+                     realized_pnl = tr.unrealized_pnl
+                 tr.exit_dt = ts
+                 tr.exit_reason = "DOLLAR_STOP"
+                 tr.realized_pnl = realized_pnl
+                 tr.is_closed = True
+                 equity += tr.realized_pnl
+                 closed_trades.append({
+                     'trade_id': tr.trade_id, 'entry_dt': tr.entry_dt, 'exit_dt': ts,
+                     'pnl': tr.realized_pnl, 'pnl_pct': tr.pnl_pct * 100,
+                     'reason': 'DOLLAR_STOP', 'max_dd': tr.max_dd_pct * 100,
+                     'exit_details': exit_details if exit_valid else None
+                 })
+                 _trace_close(tr, realized_pnl, "DOLLAR_STOP")
+                 _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
+                 print(f"\n  \U0001f6d1 CLOSED [DOLLAR_STOP] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
+                       f"\n     strategy={getattr(tr, 'strategy_class', '?')}" 
+                       f"  stop=${_sl_dollar:,.0f}  unrealized=${tr.unrealized_pnl:,.2f}"
+                       f"\n     realized=${realized_pnl:,.2f}  held={_dh:.1f}d"
+                       f"  equity_after=${equity:,.2f}")
+                 _scoreboard("AFTER EXIT:DOLLAR_STOP", realized_pnl)
+                 continue
+
              # Check Profit Target — per-strategy dollar target (if --profittargets) or 50%-of-credit
              _strat_cls_tr = getattr(tr, 'strategy_class', None)
              # Per-strategy config profit target takes priority
