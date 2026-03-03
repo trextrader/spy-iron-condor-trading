@@ -172,19 +172,31 @@ STRATEGY_PROFIT_TARGETS = {
     'custom_multi_leg':  1100,   # iron_butterfly sweet spot: $1,100 min win → 21 trades $72,289 total
     'bear_put_spread':   1029,   # sweet spot: $1,029 min win → 5 trades $15,447 total
     'bull_call_spread':   820,   # sweet spot: $820 min win  → 3 trades $9,158 total
-    'single_call':       2500,   # naked short call: take profit at $2,500 to limit reversal risk
-    'single_put':        2500,   # naked short put: same target
+    'single_call':       2500,   # naked short call: take profit at $2,500 to limit reversal risk
+
+    'single_put':        2500,   # naked short put: same target
+
 }
-
-# Per-strategy stop-loss multiplier (of credit received).
-# Default IC_STOP_LOSS_MULT (2.0) used for strategies not listed here.
-# Naked/undefined-risk strategies use tighter stops to bound max loss.
-STRATEGY_STOP_LOSS = {
-    'single_call':       1.5,   # naked short: stop at 1.5× credit (tighter than IC 2.0×)
-    'single_put':        1.5,   # same for puts
-    'straddle':          1.5,
-    'strangle':          1.5,
-}
+
+
+# Per-strategy stop-loss multiplier (of credit received).
+
+# Default IC_STOP_LOSS_MULT (2.0) used for strategies not listed here.
+
+# Naked/undefined-risk strategies use tighter stops to bound max loss.
+
+STRATEGY_STOP_LOSS = {
+
+    'single_call':       1.5,   # naked short: stop at 1.5× credit (tighter than IC 2.0×)
+
+    'single_put':        1.5,   # same for puts
+
+    'straddle':          1.5,
+
+    'strangle':          1.5,
+
+}
+
 
 # =============================================================================
 # PHASE 5.2: EXECUTION REALITY CONFIG (Truth Alignment)
@@ -2242,8 +2254,10 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      print(f"   DTE at entry: {tr.dte_entry}")
                  run_backtest._mark_debug_count += 1
              
-             # Per-strategy stop-loss: use STRATEGY_STOP_LOSS if available
-             _sl_mult = STRATEGY_STOP_LOSS.get(t.strategy_class, IC_STOP_LOSS_MULT)
+             # Per-strategy stop-loss: use STRATEGY_STOP_LOSS if available
+
+             _sl_mult = STRATEGY_STOP_LOSS.get(tr.strategy_class, IC_STOP_LOSS_MULT)
+
              # Per-trade stop: close when loss >= _sl_mult × |credit|.
              # For credit strategies (net_credit > 0): stop at 2× premium received.
              # For debit strategies (net_credit < 0): stop at 2× premium paid.
@@ -2251,7 +2265,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              # regardless of strategy direction — a positive net_credit would give a
              # negative threshold (correct), but a negative net_credit would flip it
              # to a positive number and fire the stop instantly (bug).
-             _per_trade_stop = -(abs(tr.net_credit) * IC_STOP_LOSS_MULT * tr.qty * IC_MULTIPLIER)
+             _per_trade_stop = -(abs(tr.net_credit) * _sl_mult * tr.qty * IC_MULTIPLIER)
              if tr.unrealized_pnl < _per_trade_stop:
                  if exec_engine and market_state:
                      exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
