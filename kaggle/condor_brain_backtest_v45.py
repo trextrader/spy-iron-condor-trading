@@ -172,7 +172,19 @@ STRATEGY_PROFIT_TARGETS = {
     'custom_multi_leg':  1100,   # iron_butterfly sweet spot: $1,100 min win → 21 trades $72,289 total
     'bear_put_spread':   1029,   # sweet spot: $1,029 min win → 5 trades $15,447 total
     'bull_call_spread':   820,   # sweet spot: $820 min win  → 3 trades $9,158 total
+    'single_call':       2500,   # naked short call: take profit at $2,500 to limit reversal risk
+    'single_put':        2500,   # naked short put: same target
 }
+
+# Per-strategy stop-loss multiplier (of credit received).
+# Default IC_STOP_LOSS_MULT (2.0) used for strategies not listed here.
+# Naked/undefined-risk strategies use tighter stops to bound max loss.
+STRATEGY_STOP_LOSS = {
+    'single_call':       1.5,   # naked short: stop at 1.5× credit (tighter than IC 2.0×)
+    'single_put':        1.5,   # same for puts
+    'straddle':          1.5,
+    'strangle':          1.5,
+}
 
 # =============================================================================
 # PHASE 5.2: EXECUTION REALITY CONFIG (Truth Alignment)
@@ -2230,7 +2242,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      print(f"   DTE at entry: {tr.dte_entry}")
                  run_backtest._mark_debug_count += 1
              
-             # Per-trade stop: close when loss >= IC_STOP_LOSS_MULT × |credit|.
+             # Per-strategy stop-loss: use STRATEGY_STOP_LOSS if available
+             _sl_mult = STRATEGY_STOP_LOSS.get(t.strategy_class, IC_STOP_LOSS_MULT)
+             # Per-trade stop: close when loss >= _sl_mult × |credit|.
              # For credit strategies (net_credit > 0): stop at 2× premium received.
              # For debit strategies (net_credit < 0): stop at 2× premium paid.
              # Using abs() ensures the threshold is always negative (a loss level)
@@ -2765,12 +2779,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                      _margin_per = spot * 0.15 * IC_MULTIPLIER
                                  else:
                                      _margin_per = spot * 0.02 * IC_MULTIPLIER
-                                 _max_affordable = max(1, int(live_max_deploy * 0.5 / max(_margin_per, 1)))
+                                 _max_affordable = max(1, int(live_max_deploy * 0.25 / max(_margin_per, 1)))
                                  _fill_qty = min(IC_CONTRACTS, _max_affordable)
                                  if verbose_sim and _fill_qty != IC_CONTRACTS:
                                      print(f"  (H-pre) Qty capped: {IC_CONTRACTS} -> {_fill_qty} "
                                            f"(margin/contract=${_margin_per:,.0f}, "
-                                           f"max_deploy_50%=${live_max_deploy*0.5:,.0f})")
+                                           f"max_deploy_25%=${live_max_deploy*0.25:,.0f})")
 
                              # (H) Execution fill
                              _use_generic = (v43_outputs is not None
@@ -2874,7 +2888,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                          trade_id  = f"TR_{i}"
 
                                          # Sizing audit: verify position size is consistent
-                                         expected_qty = _fill_qty  # Use capped qty for single-leg strategies
+                                         expected_qty = _fill_qty  # Use capped qty for single-leg strategies
+
                                          if int(filled_qty) != expected_qty:
                                              audit_msg = (
                                                  f"[SIZING INCONSISTENCY] bar={i} ts={ts} "
