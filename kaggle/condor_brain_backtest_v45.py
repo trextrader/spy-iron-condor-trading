@@ -2594,9 +2594,18 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                              print(f'  -- SKIP expiry_past_sim: 0 days left in sim (ts={pd.Timestamp(ts).date()} sim_end={sim_end_dt.date()})')
                          continue
 
-                     # Expected collateral estimate (pre-fill — used for capital check)
-                     estimated_margin = max(0.0, (width - 0.0)) * IC_MULTIPLIER * IC_CONTRACTS
-                     # (credit unknown pre-fill, so conservatively assume 0 credit for sizing gate)
+                     # Strategy-aware pre-fill margin estimate
+                     _tmpl_n_legs = len(_tmpl.legs) if (_tmpl is not None) else 4
+                     _has_short = any(l.side == "SHORT" for l in (_tmpl.legs if _tmpl else []))
+                     if _tmpl_n_legs <= 2 and _has_short:
+                         # Naked/cash-secured short: 15% of spot per contract
+                         estimated_margin = spot * 0.15 * IC_MULTIPLIER * IC_CONTRACTS
+                     elif _tmpl_n_legs <= 2:
+                         # Long single option: premium estimate (~2% of spot)
+                         estimated_margin = spot * 0.02 * IC_MULTIPLIER * IC_CONTRACTS
+                     else:
+                         # Spread/multi-leg: width-based (existing IC formula)
+                         estimated_margin = max(0.0, width) * IC_MULTIPLIER * IC_CONTRACTS
 
                      # (F) Capital constraint check — update buying power with current equity
                      live_buying_power = equity * LEVERAGE_FACTOR
@@ -2606,7 +2615,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      # Per-trade collateral bounds check
                      min_collateral = live_buying_power * MIN_COLLATERAL_PCT
                      max_collateral = live_buying_power * MAX_COLLATERAL_PCT
-                     if not (min_collateral <= estimated_margin <= max_collateral * 1.5):
+                     # Single-leg strategies have different margin profiles -- relax bounds
+                     _collateral_floor = min_collateral * 0.1 if (_tmpl and len(_tmpl.legs) <= 2) else min_collateral
+                     if not (_collateral_floor <= estimated_margin <= max_collateral * 2.0):
                          # Width parameter produced collateral outside reasonable bounds
                          run_backtest._entry_dbg['collateral_oob'] += 1
                          _entry_audit_log(i, ts, spot, pol, 'SKIP',
@@ -2726,18 +2737,31 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                          else:
                              if verbose_sim:
                                  print(f"  (G) Legs selected:")
-                                 print(f"      SC={legs.get('short_call')} δ={legs.get('short_call_delta','?'):.3f} bid={legs.get('short_call_bid','?'):.3f}"
-                                       if isinstance(legs.get('short_call_delta'), float) else
-                                       f"      SC={legs.get('short_call')} δ=? bid={legs.get('short_call_bid','?')}")
-                                 print(f"      LC={legs.get('long_call')}  δ={legs.get('long_call_delta','?'):.3f} ask={legs.get('long_call_ask','?'):.3f}"
-                                       if isinstance(legs.get('long_call_delta'), float) else
-                                       f"      LC={legs.get('long_call')}  δ=? ask={legs.get('long_call_ask','?')}")
-                                 print(f"      SP={legs.get('short_put')} δ={legs.get('short_put_delta','?'):.3f} bid={legs.get('short_put_bid','?'):.3f}"
-                                       if isinstance(legs.get('short_put_delta'), float) else
-                                       f"      SP={legs.get('short_put')} δ=? bid={legs.get('short_put_bid','?')}")
-                                 print(f"      LP={legs.get('long_put')}  δ={legs.get('long_put_delta','?'):.3f} ask={legs.get('long_put_ask','?'):.3f}"
-                                       if isinstance(legs.get('long_put_delta'), float) else
-                                       f"      LP={legs.get('long_put')}  δ=? ask={legs.get('long_put_ask','?')}")
+                                 if legs.get("legs_built"):
+                                     for _lb in legs["legs_built"]:
+                                         _lb_price = _lb["bid"] if _lb["side"] == "SHORT" else _lb["ask"]
+                                         _lb_label = "bid" if _lb["side"] == "SHORT" else "ask"
+                                         print(f"      {_lb['leg_name']}: K={_lb['strike']} "
+                                               f"delta={_lb['delta']:.3f} {_lb_label}={_lb_price:.3f}")
+                                 else:
+                                     # Legacy 4-leg IC display
+                                     print(f"      SC={legs.get('short_call','?')} LC={legs.get('long_call','?')} "
+                                           f"SP={legs.get('short_put','?')} LP={legs.get('long_put','?')}")
+
+                             # Cap contract qty for single-leg strategies to fit capital
+                             _fill_qty = IC_CONTRACTS
+                             if _tmpl is not None and len(_tmpl.legs) <= 2:
+                                 _has_short_leg = any(l.side == "SHORT" for l in _tmpl.legs)
+                                 if _has_short_leg:
+                                     _margin_per = spot * 0.15 * IC_MULTIPLIER
+                                 else:
+                                     _margin_per = spot * 0.02 * IC_MULTIPLIER
+                                 _max_affordable = max(1, int(live_max_deploy * 0.5 / max(_margin_per, 1)))
+                                 _fill_qty = min(IC_CONTRACTS, _max_affordable)
+                                 if verbose_sim and _fill_qty != IC_CONTRACTS:
+                                     print(f"  (H-pre) Qty capped: {IC_CONTRACTS} -> {_fill_qty} "
+                                           f"(margin/contract=${_margin_per:,.0f}, "
+                                           f"max_deploy_50%=${live_max_deploy*0.5:,.0f})")
 
                              # (H) Execution fill
                              _use_generic = (v43_outputs is not None
@@ -2746,7 +2770,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                              if _use_generic:
                                  filled_qty, net_credit, is_atomic, fill_details = \
                                      calculate_entry_fill_generic(
-                                         legs, chain_with_prices, IC_CONTRACTS)
+                                         legs, chain_with_prices, _fill_qty)
                              elif exec_engine and market_state:
                                  filled_qty, net_credit, is_atomic, fill_details = \
                                      calculate_entry_fill_reality(
@@ -2754,7 +2778,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                          exec_engine, market_state)
                              else:
                                  filled_qty, net_credit, is_atomic, fill_details = \
-                                     calculate_entry_fill(legs, chain_with_prices, IC_CONTRACTS)
+                                     calculate_entry_fill(legs, chain_with_prices, _fill_qty)
 
                              if not is_atomic:
                                  run_backtest._entry_dbg['atomicity_fail'] += 1
@@ -2782,7 +2806,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                      credit_ok = np.isfinite(net_credit_val) and abs(net_credit_val) > 0.05
                                  else:
                                      # Credit trade: require min(0.10, 5% of width)
-                                     min_credit = max(0.10, MIN_CREDIT_WIDTH_RATIO * spread_width)
+                                     # Single naked short has width=0; use absolute minimum credit only
+                                     min_credit = 0.05 if spread_width == 0 else max(0.10, MIN_CREDIT_WIDTH_RATIO * spread_width)
                                      credit_ok  = np.isfinite(net_credit_val) and net_credit_val >= min_credit
 
                                  if verbose_sim:
@@ -2819,8 +2844,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                          trade_margin = max(0.0, spread_width - net_credit_val) \
                                                         * IC_MULTIPLIER * int(filled_qty)
                                      else:
-                                         # Single naked short: cap margin at 20% of spot
-                                         trade_margin = spot * 0.20 * IC_MULTIPLIER * int(filled_qty)
+                                         # Single naked short: 15% of spot (standard Reg-T approximation)
+                                         trade_margin = spot * 0.15 * IC_MULTIPLIER * int(filled_qty)
                                      currently_deployed_exact = _deployed_margin(open_trades)
 
                                      if (currently_deployed_exact + trade_margin) > live_max_deploy:
@@ -2947,9 +2972,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
                                          run_backtest._last_entry_bar = i
                                          run_backtest._entry_dbg['success'] += 1
-                                         # Per-class opened tracking
-                                         if hasattr(run_backtest, '_strat_dist') and v43_outputs is not None and 0 <= _sidx < len(V43_STRATEGY_NAMES):
-                                             run_backtest._strat_dist[_sidx]['opened'] += 1
+                                         # Per-class opened tracking
+
+                                         if hasattr(run_backtest, '_strat_dist') and v43_outputs is not None and 0 <= _sidx < len(V43_STRATEGY_NAMES):
+
+                                             run_backtest._strat_dist[_sidx]['opened'] += 1
+
                                          # Rolling stats panel
                                          _close_recs = [r for r in closed_trades if r.get('action') != 'OPEN' and r.get('reason')]
                                          _n_wins     = sum(1 for r in _close_recs if float(r.get('pnl') or 0) > 0)
