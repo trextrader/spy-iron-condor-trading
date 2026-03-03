@@ -2137,6 +2137,15 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         run_backtest._last_entry_bar = -10**9
     if not hasattr(run_backtest, '_credit_samples'):
         run_backtest._credit_samples = []
+    # Per-class strategy distribution tracking (diagnostic)
+    if not hasattr(run_backtest, '_strat_dist'):
+        # For each strategy class idx: count predictions + per-gate outcomes
+        run_backtest._strat_dist = {
+            i: {'predicted': 0, 'pass_entry': 0, 'pass_pop': 0,
+                'pass_ic': 0, 'pass_all_gates': 0, 'opened': 0,
+                'abstain_blocked': 0, 'filter_blocked': 0}
+            for i in range(len(V43_STRATEGY_NAMES))
+        }
     
     # Pre-extract spot timestamps as numpy array to ensure type match
     if bundle is not None:
@@ -2497,6 +2506,19 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              entry_logit = float(pol[8])
              pop_prob    = float(_pop)
              conf_prob   = float(_sigmoid(pol[7]))
+
+             # -- Per-class strategy distribution tracking ------------------
+             if hasattr(run_backtest, '_strat_dist') and 0 <= _sidx < len(V43_STRATEGY_NAMES):
+                 _sd = run_backtest._strat_dist[_sidx]
+                 _sd['predicted'] += 1
+                 if entry_gate_pass:  _sd['pass_entry'] += 1
+                 if pop_gate_pass:    _sd['pass_pop']   += 1
+                 if ic_gate_pass:     _sd['pass_ic']    += 1
+                 if _abt:             _sd['abstain_blocked'] += 1
+                 elif not _strat_allowed: _sd['filter_blocked'] += 1
+                 if entry_gate_pass and pop_gate_pass and ic_gate_pass:
+                     _sd['pass_all_gates'] += 1
+
          else:
              pol = policy_matrix[pol_idx]
              entry_logit      = float(pol[8])
@@ -2925,6 +2947,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
                                          run_backtest._last_entry_bar = i
                                          run_backtest._entry_dbg['success'] += 1
+                                         # Per-class opened tracking
+                                         if hasattr(run_backtest, '_strat_dist') and v43_outputs is not None and 0 <= _sidx < len(V43_STRATEGY_NAMES):
+                                             run_backtest._strat_dist[_sidx]['opened'] += 1
                                          # Rolling stats panel
                                          _close_recs = [r for r in closed_trades if r.get('action') != 'OPEN' and r.get('reason')]
                                          _n_wins     = sum(1 for r in _close_recs if float(r.get('pnl') or 0) > 0)
@@ -3078,6 +3103,37 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
               f"buying_power=${STARTING_EQUITY*LEVERAGE_FACTOR:,.0f} | "
               f"max_deploy=${MAX_DEPLOY:,.0f}")
         print("="*80)
+
+    # ── MODEL STRATEGY DISTRIBUTION (v43 diagnostic) ─────────────────────────
+    if hasattr(run_backtest, '_strat_dist'):
+        _sd_all = run_backtest._strat_dist
+        _total_pred = sum(v['predicted'] for v in _sd_all.values())
+        if _total_pred > 0:
+            print("\n" + "="*140)
+            print("  MODEL STRATEGY DISTRIBUTION (what the model predicted vs. what entered)")
+            print("="*140)
+            _sd_hdr = (f"  {'Idx':>3}  {'Strategy Class':<22s}  {'Predicted':>9}  {'%':>6}  "
+                       f"{'→Entry':>7}  {'→Pop':>7}  {'→IC':>7}  {'AllGates':>8}  "
+                       f"{'Opened':>7}  {'Abstain':>8}  {'Filtered':>8}")
+            print(_sd_hdr)
+            _sd_sep = (f"  {'-'*3}  {'-'*22}  {'-'*9}  {'-'*6}  "
+                       f"{'-'*7}  {'-'*7}  {'-'*7}  {'-'*8}  "
+                       f"{'-'*7}  {'-'*8}  {'-'*8}")
+            print(_sd_sep)
+            for idx in range(len(V43_STRATEGY_NAMES)):
+                sd = _sd_all.get(idx, {})
+                _pred = sd.get('predicted', 0)
+                _name = V43_STRATEGY_NAMES[idx] if idx < len(V43_STRATEGY_NAMES) else '?'
+                _pct  = (_pred / _total_pred * 100) if _total_pred > 0 else 0.0
+                print(f"  {idx:>3}  {_name:<22s}  {_pred:>9,}  {_pct:>5.1f}%  "
+                      f"{sd.get('pass_entry', 0):>7,}  {sd.get('pass_pop', 0):>7,}  "
+                      f"{sd.get('pass_ic', 0):>7,}  {sd.get('pass_all_gates', 0):>8,}  "
+                      f"{sd.get('opened', 0):>7,}  "
+                      f"{sd.get('abstain_blocked', 0):>8,}  {sd.get('filter_blocked', 0):>8,}")
+            print(f"\n  Total predictions: {_total_pred:,}  |  "
+                  f"Abstain (idx=9): {_sd_all.get(9, {}).get('predicted', 0):,}  |  "
+                  f"Non-abstain: {_total_pred - _sd_all.get(9, {}).get('predicted', 0):,}")
+            print("="*140)
 
     # ── STRATEGY BREAKDOWN ────────────────────────────────────────────────────
     _open_records = [t for t in closed_trades if t.get('action') == 'OPEN']
