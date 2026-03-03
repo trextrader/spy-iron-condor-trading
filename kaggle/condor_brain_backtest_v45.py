@@ -239,6 +239,15 @@ STRATEGY_STOP_LOSS = {
 
 }
 
+# Per-strategy dollar hard stop — max loss per trade in $.
+# Uses 1:5 to 1:10 SL:PT ratio.  Same lookup pattern as STRATEGY_PROFIT_TARGETS.
+STRATEGY_DOLLAR_STOPS = {
+    'single_call':       500,    # $500 max loss (1:5 with $2,500 PT)
+    'single_put':        500,    # $500 max loss
+    'straddle':          750,    # $750 max loss
+    'strangle':          750,
+}
+
 
 # =============================================================================
 # PHASE 5.2: EXECUTION REALITY CONFIG (Truth Alignment)
@@ -2416,7 +2425,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
              # Check Dollar Hard Stop — per-strategy $ cap from config
              _sl_cfg_tr = get_config(_STRATEGY_CONFIGS, getattr(tr, "strategy_class", "") or "")
-             _sl_dollar = _sl_cfg_tr.get("stop_loss_dollar")
+             _sl_dollar = _sl_cfg_tr.get("stop_loss_dollar") or STRATEGY_DOLLAR_STOPS.get(getattr(tr, "strategy_class", ""))
              if _sl_dollar is not None and tr.unrealized_pnl < -abs(float(_sl_dollar)):
                  if exec_engine and market_state:
                      exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
