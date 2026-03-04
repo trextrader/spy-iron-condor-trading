@@ -2356,6 +2356,41 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  _scoreboard("AFTER EXIT:FRIDAY_CLOSEOUT", realized_pnl)
                  continue
 
+             # Friday close-out: force-close positions on Friday 3pm+
+             # to prevent weekend gap risk -- controlled by dte_by_dow
+             _bar_dow = pd.Timestamp(ts).dayofweek   # 0=Mon..4=Fri
+             _bar_hour = pd.Timestamp(ts).hour
+             if dte_by_dow and _bar_dow == 4 and _bar_hour >= 15:
+                 if exec_engine and market_state:
+                     exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
+                         tr.legs, marks_bid, marks_ask, marks_mid, exec_engine, market_state
+                     )
+                 else:
+                     exit_debit, exit_valid, exit_details = calculate_exit_fill(
+                         tr.legs, marks_bid, marks_ask, marks_mid
+                     )
+                 realized_pnl = ((tr.net_credit - exit_debit) * tr.qty * IC_MULTIPLIER
+                                 if exit_valid
+                                 else getattr(tr, 'unrealized_pnl_real', tr.unrealized_pnl))
+                 tr.exit_dt = ts
+                 tr.exit_reason = "FRIDAY_CLOSEOUT"
+                 tr.realized_pnl = realized_pnl
+                 tr.is_closed = True
+                 equity += tr.realized_pnl
+                 closed_trades.append({
+                     'trade_id': tr.trade_id, 'entry_dt': tr.entry_dt, 'exit_dt': ts,
+                     'pnl': tr.realized_pnl, 'pnl_pct': tr.pnl_pct * 100,
+                     'reason': "FRIDAY_CLOSEOUT", 'max_dd': tr.max_dd_pct * 100,
+                     'exit_details': exit_details if exit_valid else None
+                 })
+                 _trace_close(tr, realized_pnl, "FRIDAY_CLOSEOUT")
+                 _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
+                 print(f"\n  CLOSED [FRIDAY_CLOSEOUT] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
+                       f"\n     Forced exit before weekend -- held {_dh:.1f}d / {tr.dte_entry:.0f}d DTE"
+                       f"\n     realized=${realized_pnl:,.2f}  equity_after=${equity:,.2f}")
+                 _scoreboard("AFTER EXIT:FRIDAY_CLOSEOUT", realized_pnl)
+                 continue
+
              # Per-strategy stop-loss from config
              _sl_cfg = get_config(_STRATEGY_CONFIGS, getattr(tr, "strategy_class", ""))
              _sl_mult = _sl_cfg.get("stop_loss_mult", IC_STOP_LOSS_MULT)
@@ -2777,13 +2812,14 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      _strat_class = STRATEGY_TYPES[_sidx] if (0 <= _sidx < len(STRATEGY_TYPES)) else "unknown"
                      _strat_cfg = get_config(_STRATEGY_CONFIGS, _strat_class)
                      _is_single_leg = (_sidx in (0, 1))
+                     _est_qty = _strat_cfg.get("max_contracts", 1) if _is_single_leg else IC_CONTRACTS
                      if _strat_cfg.get("margin_type") == "pct_spot":
                          _mpct = _strat_cfg.get("margin_spot_pct", 0.02)
-                         estimated_margin = spot * _mpct * IC_MULTIPLIER * IC_CONTRACTS
+                         estimated_margin = spot * _mpct * IC_MULTIPLIER * _est_qty
                      elif _is_single_leg:
-                         estimated_margin = spot * 0.02 * IC_MULTIPLIER * IC_CONTRACTS
+                         estimated_margin = spot * 0.02 * IC_MULTIPLIER * _est_qty
                      else:
-                         estimated_margin = max(0.0, width) * IC_MULTIPLIER * IC_CONTRACTS
+                         estimated_margin = max(0.0, width) * IC_MULTIPLIER * _est_qty
 
 
                      # (F) Capital constraint check — update buying power with current equity
@@ -2799,6 +2835,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
                      if not (_collateral_floor <= estimated_margin <= max_collateral * 2.0):
                          # Width parameter produced collateral outside reasonable bounds
+                         if verbose_sim:
+                             print(f"  -- SKIP collateral_oob: est=${estimated_margin:,.0f} floor=${_collateral_floor:,.0f} cap=${max_collateral*2:,.0f} qty={_est_qty}")
                          run_backtest._entry_dbg['collateral_oob'] += 1
                          _entry_audit_log(i, ts, spot, pol, 'SKIP',
                              f'collateral_oob:{estimated_margin:.0f} '
