@@ -1877,7 +1877,8 @@ def build_ts_ranges(df, time_col='dt'):
 def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None,
                  use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None,
                  v43_outputs=None, bundle=None, verbose_sim=False, max_positions=5,
-                 allowed_strategy_idxs=None, use_profit_targets=False):
+                 allowed_strategy_idxs=None, use_profit_targets=False,
+                 dte_by_dow=None):
 
     # ==========================================================================
     # PHASE 5.5: Initialize Execution Reality Engine
@@ -2727,6 +2728,16 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      _days_left = (sim_end_dt.date() - pd.Timestamp(ts).date()).days
                      _max_dte   = max(1, _days_left)
                      dte = float(np.clip(dte_raw, 1.0, min(chain_te, 45.0, _max_dte)))
+                     # Per-day-of-week DTE cap: e.g. --dte-fri 1 = Friday entries must have DTE<=1
+                     _entry_dow = pd.Timestamp(ts).dayofweek  # 0=Mon..4=Fri
+                     if dte_by_dow and _entry_dow in dte_by_dow:
+                         _max_dte_dow = dte_by_dow[_entry_dow]
+                         if dte > _max_dte_dow:
+                             if verbose_sim:
+                                 _dow_name = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][_entry_dow]
+                                 print(f"  -- SKIP dte_dow_cap: {_dow_name} entry DTE={dte:.0f}d > max {_max_dte_dow}d")
+                             run_backtest._entry_dbg["dte_dow_cap"] = run_backtest._entry_dbg.get("dte_dow_cap", 0) + 1
+                             continue
                      # Gate: skip only if truly 0 calendar days remain in sim
                      if _days_left < 1:
                          run_backtest._entry_dbg['expiry_past_sim'] = run_backtest._entry_dbg.get('expiry_past_sim', 0) + 1
@@ -3275,6 +3286,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         print(f"  {'atomicity_fail':<28s}: {d['atomicity_fail']:>8,}")
         print(f"  {'credit_fail':<28s}: {d['credit_fail']:>8,}")
         print(f"  expiry_past_sim            : {d.get('expiry_past_sim', 0):>8,}  ({d.get('expiry_past_sim', 0)/bars*100:.1f}%)")
+        if d.get('dte_dow_cap', 0) > 0:
+            print(f"  dte_dow_cap                : {d['dte_dow_cap']:>8,}  ({d['dte_dow_cap']/bars*100:.1f}%)")
         print(f"  max_pos_block              : {d.get('max_pos_block', 0):>8,}  ({d.get('max_pos_block', 0)/bars*100:.1f}%)")
         print(f"  {'SUCCESS (trades opened)':<28s}: {opens:>8,}  ({opens/bars*100:.1f}%)")
         print(f"\n  Capital: start=${STARTING_EQUITY:,.0f} | leverage={LEVERAGE_FACTOR:.0f}x | "
@@ -3514,7 +3527,31 @@ def main():
     parser.add_argument("--v43-seq-len", type=int, default=V43_SEQ_LEN,
                         help=f"Inference sequence length for CondorNet v4.3 (default: {V43_SEQ_LEN})")
 
+    # Per-day-of-week max DTE caps (prevents weekend/overnight carry-over)
+    parser.add_argument("--dte-mon", type=int, default=5,
+                        help="Max DTE for entries on Monday (default: 5 = expires by Friday)")
+    parser.add_argument("--dte-tue", type=int, default=4,
+                        help="Max DTE for entries on Tuesday (default: 4)")
+    parser.add_argument("--dte-wed", type=int, default=3,
+                        help="Max DTE for entries on Wednesday (default: 3)")
+    parser.add_argument("--dte-thu", type=int, default=2,
+                        help="Max DTE for entries on Thursday (default: 2)")
+    parser.add_argument("--dte-fri", type=int, default=1,
+                        help="Max DTE for entries on Friday (default: 1 = 0DTE, expires same day)")
+
     args = parser.parse_args()
+
+    # Build per-day-of-week DTE cap dict: {0: Mon, 1: Tue, ..., 4: Fri}
+    _dte_by_dow = {}
+    _dow_args = [(0, args.dte_mon), (1, args.dte_tue), (2, args.dte_wed),
+                  (3, args.dte_thu), (4, args.dte_fri)]
+    for _dow_idx, _dow_val in _dow_args:
+        if _dow_val is not None:
+            _dte_by_dow[_dow_idx] = _dow_val
+    if _dte_by_dow:
+        _dow_names = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri"}
+        print(f"[DTE-DOW] Per-day max DTE caps: "
+              + ", ".join(f"{_dow_names[k]}={v}d" for k, v in sorted(_dte_by_dow.items())))
 
     # --- Parse --strategies filter into a set of allowed strategy indices ---
     _strat_filter_raw = (args.strategies or "all").strip().lower()
@@ -3812,6 +3849,7 @@ def main():
         max_positions=args.max_positions,
         allowed_strategy_idxs=ALLOWED_STRATEGY_IDXS,
         use_profit_targets=getattr(args, 'profittargets', False),
+        dte_by_dow=_dte_by_dow,
     )
 
     # 5. Report
