@@ -1,81 +1,54 @@
 """
-kaggle/strategies/__init__.py — Strategy Config Loader
-======================================================
-Auto-discovers all per-strategy .py files in this directory and returns
-a unified STRATEGY_CONFIGS dict keyed by class_name.
+kaggle/strategies/__init__.py — Auto-discovery loader for strategy configs
+==========================================================================
 
-Usage:
-    from kaggle.strategies import load_strategy_configs
-    STRATEGY_CONFIGS = load_strategy_configs()
-    cfg = STRATEGY_CONFIGS.get("single_call")  # → dict or None
+Scans this directory for all .py files (excluding _ prefixed files),
+imports each one's CONFIG dict, and merges with _defaults.py.
+
+Usage in backtester:
+    from strategies import load_strategy_configs
+    configs = load_strategy_configs()  # dict: template_id -> merged config
 """
-
-from __future__ import annotations
-
-import importlib
 import os
-import sys
-from typing import Dict, Optional
+import importlib.util
 
-from strategies._defaults import DEFAULT_CONFIG
-
-# Strategy class names (must match V43_STRATEGY_NAMES in the backtester)
-_V43_CLASS_NAMES = [
-    "single_call", "single_put", "bull_call_spread", "bear_put_spread",
-    "straddle", "strangle", "butterfly_call", "iron_condor",
-    "custom_multi_leg",
-]
-
-# Files to skip when scanning this directory
-_SKIP_FILES = {"__init__.py", "_defaults.py", "__pycache__"}
+def _load_defaults():
+    """Load DEFAULT_CONFIG from _defaults.py."""
+    defaults_path = os.path.join(os.path.dirname(__file__), "_defaults.py")
+    if not os.path.exists(defaults_path):
+        return {}
+    spec = importlib.util.spec_from_file_location("_defaults", defaults_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return getattr(mod, "DEFAULT_CONFIG", {})
 
 
-def load_strategy_configs(verbose: bool = True) -> Dict[str, dict]:
+def load_strategy_configs():
     """
-    Scan kaggle/strategies/ for per-strategy .py files.
-    Each must export a CONFIG dict.
-    Returns {class_name: merged_config} for all found strategies.
-    Strategies without a config file get DEFAULT_CONFIG.
+    Scan strategies/ for all .py files and return {template_id: merged_config}.
+    Each strategy file must define a CONFIG dict with at least 'template_id'.
     """
-    configs: Dict[str, dict] = {}
-    strategies_dir = os.path.dirname(os.path.abspath(__file__))
+    strat_dir = os.path.dirname(__file__)
+    defaults = _load_defaults()
+    configs = {}
 
-    for fname in sorted(os.listdir(strategies_dir)):
-        if fname in _SKIP_FILES or not fname.endswith(".py"):
+    for fname in sorted(os.listdir(strat_dir)):
+        if fname.startswith("_") or not fname.endswith(".py"):
             continue
-
-        module_name = fname[:-3]  # strip .py
+        fpath = os.path.join(strat_dir, fname)
         try:
-            mod = importlib.import_module(f"strategies.{module_name}")
+            spec = importlib.util.spec_from_file_location(fname[:-3], fpath)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
             cfg = getattr(mod, "CONFIG", None)
-            if cfg is None:
-                if verbose:
-                    print(f"  [strategies] SKIP {fname}: no CONFIG dict")
-                continue
-
-            class_name = cfg.get("class_name", module_name)
-
-            # Merge with defaults (config overrides defaults)
-            merged = {**DEFAULT_CONFIG, **cfg}
-            configs[class_name] = merged
-
-            if verbose:
-                print(f"  [strategies] Loaded: {class_name} "
-                      f"(max_qty={merged['max_contracts']}, "
-                      f"stop={merged['stop_loss_mult']}×, "
-                      f"target=${merged['profit_target']}, "
-                      f"fallback={merged['fallback_template']})")
-
+            if cfg and "template_id" in cfg:
+                merged = {**defaults, **cfg}
+                configs[cfg["template_id"]] = merged
         except Exception as e:
-            print(f"  [strategies] ERROR loading {fname}: {e}")
-
-    if verbose and not configs:
-        print("  [strategies] No per-strategy configs found — using defaults")
+            print(f"  [strategies] SKIP {fname}: {e}")
 
     return configs
 
 
-def get_config(configs: Dict[str, dict],
-               class_name: str) -> dict:
-    """Get config for a strategy class, falling back to DEFAULT_CONFIG."""
-    return configs.get(class_name, DEFAULT_CONFIG.copy())
+# Pre-load at import time for convenience
+STRATEGY_CONFIGS = load_strategy_configs()

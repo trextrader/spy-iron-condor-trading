@@ -1,39 +1,33 @@
 """
-_defaults.py — Default strategy config inherited by all strategies.
-=================================================================
-Any key not overridden in a per-strategy config file uses these values.
+_defaults.py — Default configuration inherited by all strategies
+================================================================
+
+These defaults are merged with per-strategy CONFIG overrides.
+Any key not specified in a strategy's CONFIG inherits from here.
 """
 
 DEFAULT_CONFIG = {
-    # ── Identity ────────────────────────────────────────────────────────────
-    "class_name":           None,       # e.g. "single_call" (set per-strategy)
-    "class_idx":            None,       # e.g. 0 (set per-strategy)
+    # ── Sizing ────────────────────────────────────────────────────────────
+    "max_contracts":      10,          # Max contracts per trade
+    "margin_pct":         0.50,        # Max % of buying power to deploy per trade
+    "margin_type":        "width",     # "width" (spread) or "pct_spot" (naked)
+    "margin_spot_pct":    0.15,        # If pct_spot: margin = spot * this * 100
 
-    # ── Sizing ──────────────────────────────────────────────────────────────
-    "max_contracts":        10,         # Hard cap on contracts per trade
-    "margin_pct":           0.50,       # % of max_deploy used for qty calculation
-    "margin_type":          "width",    # "pct_spot" | "width" | "premium"
-    "margin_spot_pct":      0.15,       # For margin_type="pct_spot": fraction of spot
-    #   - Short single-leg: 0.15 (15% of spot, Reg-T approx)
-    #   - Long single-leg:  0.02 (2% of spot, premium estimate)
+    # ── Exit: Stop-Loss ───────────────────────────────────────────────────
+    "stop_loss_mult":     2.0,         # Close when loss >= N × |credit| × qty × 100
+    "stop_loss_dollar":   None,        # Hard dollar cap per trade (None = use multiplier only)
 
-    # ── Exit: Stop-Loss ─────────────────────────────────────────────────────
-    "stop_loss_mult":       2.0,        # ×credit stop-loss multiplier
-    "stop_loss_dollar":     None,       # Fixed $ stop override (None = use multiplier)
+    # ── Exit: Profit Target ───────────────────────────────────────────────
+    "profit_target":      None,        # Dollar target (None = use 50% of credit)
 
-    # ── Exit: Profit Target ─────────────────────────────────────────────────
-    "profit_target":        None,       # $ profit target (None = 50% of credit default)
+    # ── Template Preference ───────────────────────────────────────────────
+    "fallback_template":  None,        # If no template eligible, use this template_id
 
-    # ── Template Preference ─────────────────────────────────────────────────
-    "preferred_templates":  None,       # Ordered list of template_ids to prefer
-    "fallback_template":    None,       # Template to use when all predicates fail
+    # ── Entry Gate Overrides ──────────────────────────────────────────────
+    "entry_threshold":    None,        # Override entry_logit threshold (default 0.55)
+    "pop_threshold":      None,        # Override PoP threshold (default 0.50)
 
-    # ── Entry Gate Overrides ────────────────────────────────────────────────
-    "entry_threshold":      None,       # Override V43_ENTRY_THRESHOLD (None = global)
-    "pop_threshold":        None,       # Override V43_POP_THRESHOLD (None = global)
-    "abstain_threshold":    None,       # Override ABSTAIN_CONFIDENCE_THRESHOLD
-
-    # ── Position Limits ─────────────────────────────────────────────────────
-    "max_positions":        None,       # Per-strategy position limit (None = global)
-    "cooldown_bars":        None,       # Override MIN_BARS_BETWEEN_TRADES
+    # ── Position Limits ───────────────────────────────────────────────────
+    "max_positions":      6,           # Max concurrent open positions for this strategy
+    "cooldown_bars":      5,           # Min bars between trades
 }

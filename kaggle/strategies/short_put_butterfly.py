@@ -1,0 +1,70 @@
+"""
+short_put_butterfly.py — Short Put Butterfly
+===============================================
+
+FAMILY: B) Long Vol / Convex — buy options, profit from large moves and volatility expansion
+CLASS:  butterfly_call (index 6)
+DIRECTION: Neutral
+
+WHAT IT IS:
+    Put-side long vol butterfly. Mirror of short call butterfly.
+
+LEG STRUCTURE:
+#   Leg 1: SHORT P rank0
+#   Leg 2: LONG P rank1 (2x)
+#   Leg 3: SHORT P rank2
+
+RISK PROFILE:
+    Risk:   Defined: max loss = wing width minus credit.
+    Reward: Limited to net credit.
+
+WHEN IT FIRES (predicate atoms):
+    bw_expanding & ivr_high & no_breakout & friction_ok
+
+HOW IT'S USED IN THE BACKTESTER:
+    1. CondorNet v4.3 predicts strategy class 'butterfly_call' (index 6)
+    2. All templates mapped to this class are scored
+    3. Eligibility predicate checks market atoms (above)
+    4. If eligible, template is scored: 0.40*pop + 0.35*tanh(3*ev) - 0.15*tanh(2*ml) + 0.10*dte_aff
+    5. Highest-scoring eligible template wins; legs are built from chain
+    6. Fill engine executes the trade with qty, margin, and exit rules from CONFIG below
+"""
+
+CONFIG = {
+    # ── Identity ──────────────────────────────────────────────────────────
+    "template_id":        "short_put_butterfly",
+    "class_name":         "butterfly_call",
+    "class_idx":          6,
+    "family":             "LongVolConvex",
+
+    # ── Leg Structure ─────────────────────────────────────────────────────
+    "legs": [
+        {"type": "P", "side": "SHORT", "qty": 1, "rank": 0},
+        {"type": "P", "side": "LONG", "qty": 2, "rank": 1},
+        {"type": "P", "side": "SHORT", "qty": 1, "rank": 2}
+    ],
+
+    # ── Sizing ────────────────────────────────────────────────────────────
+    "max_contracts":      10,          # Max contracts per trade
+    "margin_pct":         0.50,        # Max % of buying power to deploy per trade
+    "margin_type":        "width",   # "width" (spread) or "pct_spot" (naked)
+    "margin_spot_pct":    0.5,      # If pct_spot: margin = spot * this * 100
+
+    # ── Exit: Stop-Loss ───────────────────────────────────────────────────
+    "stop_loss_mult":     2.0,   # Close when loss >= N * |credit| * qty * 100
+    "stop_loss_dollar":   None,  # Hard dollar cap per trade (None = use multiplier only)
+
+    # ── Exit: Profit Target ───────────────────────────────────────────────
+    "profit_target":      None,    # Dollar target (None = use 50% of credit)
+
+    # ── Template Preference ───────────────────────────────────────────────
+    "fallback_template":  None,        # If no template eligible, use this template_id
+
+    # ── Entry Gate Overrides ──────────────────────────────────────────────
+    "entry_threshold":    None,        # Override entry_logit threshold (default 0.55)
+    "pop_threshold":      None,        # Override PoP threshold (default 0.50)
+
+    # ── Position Limits ───────────────────────────────────────────────────
+    "max_positions":      6,           # Max concurrent open positions for this strategy
+    "cooldown_bars":      5,           # Min bars between trades
+}
