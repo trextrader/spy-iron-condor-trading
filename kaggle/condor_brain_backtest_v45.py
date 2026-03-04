@@ -2430,6 +2430,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                  if exit_valid
                                  else getattr(tr, 'unrealized_pnl_real', tr.unrealized_pnl))
                  tr.exit_dt = ts
+                 realized_pnl = max(realized_pnl, _per_trade_stop)  # stop-on-tick: cap at stop level
                  tr.exit_reason = "PER_TRADE_STOP"
                  tr.realized_pnl = realized_pnl
                  tr.is_closed = True
@@ -2521,6 +2522,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  else:
                      realized_pnl = tr.unrealized_pnl
                  tr.exit_dt = ts
+                 realized_pnl = max(realized_pnl, -abs(float(_sl_dollar)))  # stop-on-tick: cap at $stop
                  tr.exit_reason = "DOLLAR_STOP"
                  tr.realized_pnl = realized_pnl
                  tr.is_closed = True

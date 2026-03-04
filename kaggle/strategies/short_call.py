@@ -48,7 +48,7 @@ CONFIG = {
 
     # ── Exit: Stop-Loss ───────────────────────────────────────────────────
     "stop_loss_mult":     1.5,   # Close when loss >= N * |credit| * qty * 100
-    "stop_loss_dollar":   500,  # Hard dollar cap per trade (None = use multiplier only)
+    "stop_loss_dollar":   750,  # Hard dollar cap per trade (None = use multiplier only)
 
     # ── Exit: Profit Target ───────────────────────────────────────────────
     "profit_target":      2500,    # Dollar target (None = use 50% of credit)
