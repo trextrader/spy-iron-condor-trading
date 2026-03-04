@@ -2812,7 +2812,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      _strat_class = STRATEGY_TYPES[_sidx] if (0 <= _sidx < len(STRATEGY_TYPES)) else "unknown"
                      _strat_cfg = get_config(_STRATEGY_CONFIGS, _strat_class)
                      _is_single_leg = (_sidx in (0, 1))
-                     _est_qty = _strat_cfg.get("max_contracts", 1) if _is_single_leg else IC_CONTRACTS
+                     _est_qty = 1 if _is_single_leg else IC_CONTRACTS  # pre-fill sanity: qty=1 for naked
                      if _strat_cfg.get("margin_type") == "pct_spot":
                          _mpct = _strat_cfg.get("margin_spot_pct", 0.02)
                          estimated_margin = spot * _mpct * IC_MULTIPLIER * _est_qty
