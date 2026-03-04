@@ -121,6 +121,16 @@ def get_config(configs, class_name):
     """Get strategy config; returns empty dict if not found."""
     return configs.get(class_name, {}) if configs else {}
 
+
+def _resolve_template(sidx, configs):
+    """Given strategy index, find first template with matching class_idx."""
+    for tid, cfg in configs.items():
+        if cfg.get("class_idx") == sidx:
+            return tid
+    if 0 <= sidx < len(STRATEGY_TYPES):
+        return STRATEGY_TYPES[sidx]
+    return "unknown"
+
 _STRATEGY_CONFIGS = {}
 try:
     _kaggle_dir = os.path.dirname(os.path.abspath(__file__))
@@ -144,9 +154,9 @@ try:
                 _spec.loader.exec_module(_mod)
                 _cfg = getattr(_mod, "CONFIG", None)
                 if _cfg:
-                    _cn = _cfg.get("class_name", _fname[:-3])
+                    _cn = _cfg.get("template_id", _fname[:-3])
                     _STRATEGY_CONFIGS[_cn] = {**_DEFAULT_CFG, **_cfg}
-                    print(f"  [strategies] Loaded: {_cn} "
+                    print(f"  [strategies] Loaded: {_cn} (class={_cfg.get('class_name','?')}) "
                           f"(max_qty={_cfg.get('max_contracts','?')}, "
                           f"stop={_cfg.get('stop_loss_mult','?')}x, "
                           f"target=${_cfg.get('profit_target','?')}, "
@@ -1877,7 +1887,7 @@ def build_ts_ranges(df, time_col='dt'):
 def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None,
                  use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None,
                  v43_outputs=None, bundle=None, verbose_sim=False, max_positions=5,
-                 allowed_strategy_idxs=None, use_profit_targets=False,
+                 allowed_strategy_idxs=None, allowed_template_ids=None, use_profit_targets=False,
                  dte_by_dow=None):
 
     # ==========================================================================
@@ -2703,6 +2713,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              entry_gate_pass = (_es > V43_ENTRY_THRESHOLD)
              pop_gate_pass   = (_pop > V43_POP_THRESHOLD)
              _strat_allowed  = (allowed_strategy_idxs is None or _sidx in allowed_strategy_idxs)
+             _active_template = _resolve_template(_sidx, _STRATEGY_CONFIGS)
+             if allowed_template_ids is not None and _strat_allowed:
+                 _strat_allowed = (_active_template in allowed_template_ids)
              ic_gate_pass    = (not _abt) and _strat_allowed  # non-abstain + strategy filter
              # Synthetic pol for _entry_audit_log compatibility (display only)
              pol = np.zeros(10, dtype=np.float32)
@@ -2810,7 +2823,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      # single_call(0) and single_put(1) are single-leg strategies
                      # Per-strategy margin estimate (from config)
                      _strat_class = STRATEGY_TYPES[_sidx] if (0 <= _sidx < len(STRATEGY_TYPES)) else "unknown"
-                     _strat_cfg = get_config(_STRATEGY_CONFIGS, _strat_class)
+                     _strat_cfg = get_config(_STRATEGY_CONFIGS, _active_template)
                      _is_single_leg = (_sidx in (0, 1))
                      _est_qty = 1 if _is_single_leg else IC_CONTRACTS  # pre-fill sanity: qty=1 for naked
                      if _strat_cfg.get("margin_type") == "pct_spot":
@@ -3110,7 +3123,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                          new_trade = Trade(
                                              trade_id, ts, legs, net_credit_val, max_loss,
                                              dte=dte,
-                                             strategy_class=_strat_cls,
+                                             strategy_class=_active_template,
                                              scores={
                                                  'entry_logit':      entry_logit,
                                                  'pop_prob':         round(pop_prob, 4),
@@ -3617,28 +3630,43 @@ def main():
     # --- Parse --strategies filter into a set of allowed strategy indices ---
     _strat_filter_raw = (args.strategies or "all").strip().lower()
     if _strat_filter_raw == "all":
-        ALLOWED_STRATEGY_IDXS = None  # None = unrestricted
+        ALLOWED_STRATEGY_IDXS = None
+        ALLOWED_TEMPLATE_IDS = None
     else:
         ALLOWED_STRATEGY_IDXS = set()
+        ALLOWED_TEMPLATE_IDS = set()
         for _tok in _strat_filter_raw.split(","):
             _tok = _tok.strip()
             if _tok.isdigit():
                 ALLOWED_STRATEGY_IDXS.add(int(_tok))
             elif _tok in [n.lower() for n in V43_STRATEGY_NAMES]:
-                ALLOWED_STRATEGY_IDXS.add(
-                    next(i for i, n in enumerate(V43_STRATEGY_NAMES) if n.lower() == _tok))
+                # Class-level filter: allow ALL templates in this class
+                _cls_idx = next(i for i, n in enumerate(V43_STRATEGY_NAMES) if n.lower() == _tok)
+                ALLOWED_STRATEGY_IDXS.add(_cls_idx)
+                for _tid, _tcfg in _STRATEGY_CONFIGS.items():
+                    if _tcfg.get("class_idx") == _cls_idx:
+                        ALLOWED_TEMPLATE_IDS.add(_tid)
+            elif _tok in _STRATEGY_CONFIGS:
+                # Template-level filter
+                _tcfg = _STRATEGY_CONFIGS[_tok]
+                _cls_idx = _tcfg.get("class_idx", 0)
+                ALLOWED_STRATEGY_IDXS.add(_cls_idx)
+                ALLOWED_TEMPLATE_IDS.add(_tok)
+                _cn = V43_STRATEGY_NAMES[_cls_idx] if _cls_idx < len(V43_STRATEGY_NAMES) else "?"
+                print(f"[strategies] Template {_tok!r} -> class_idx={_cls_idx} ({_cn})")
             else:
-                print(f"[WARN] --strategies: unknown token '{_tok}', ignoring. "
-                      f"Valid names: {', '.join(V43_STRATEGY_NAMES)}")
+                _valid = ", ".join(sorted(_STRATEGY_CONFIGS.keys()))
+                print(f"[WARN] --strategies: unknown {_tok!r}. Valid templates: {_valid}")
         if not ALLOWED_STRATEGY_IDXS:
-            print("[WARN] --strategies produced empty set; falling back to 'all'")
+            print("[WARN] --strategies produced empty set; falling back to all")
             ALLOWED_STRATEGY_IDXS = None
+            ALLOWED_TEMPLATE_IDS = None
     if ALLOWED_STRATEGY_IDXS is not None:
-        _names = [V43_STRATEGY_NAMES[i] for i in sorted(ALLOWED_STRATEGY_IDXS)
-                  if i < len(V43_STRATEGY_NAMES)]
-        print(f"[strategies] Filtering to indices {sorted(ALLOWED_STRATEGY_IDXS)}: {_names}")
+        _names = [V43_STRATEGY_NAMES[i] for i in sorted(ALLOWED_STRATEGY_IDXS) if i < len(V43_STRATEGY_NAMES)]
+        _tmpls = sorted(ALLOWED_TEMPLATE_IDS) if ALLOWED_TEMPLATE_IDS else ["(all)"]
+        print(f"[strategies] Class filter: {_names}  |  Template filter: {_tmpls}")
     else:
-        print("[strategies] No strategy filter — all non-abstain classes allowed")
+        print("[strategies] No strategy filter -- all non-abstain classes allowed")
 
     # --- Parse --strategyomit (exclusion list, applied after --strategies) ---
     # nargs='+' gives us a list; also split each element on commas for backward compat
@@ -3909,6 +3937,7 @@ def main():
         verbose_sim=getattr(args, 'verbose', False),
         max_positions=args.max_positions,
         allowed_strategy_idxs=ALLOWED_STRATEGY_IDXS,
+        allowed_template_ids=ALLOWED_TEMPLATE_IDS,
         use_profit_targets=getattr(args, 'profittargets', False),
         dte_by_dow=_dte_by_dow,
     )
