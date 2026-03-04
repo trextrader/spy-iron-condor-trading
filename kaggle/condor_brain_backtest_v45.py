@@ -2715,7 +2715,13 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              _strat_allowed  = (allowed_strategy_idxs is None or _sidx in allowed_strategy_idxs)
              _active_template = _resolve_template(_sidx, _STRATEGY_CONFIGS)
              if allowed_template_ids is not None and _strat_allowed:
-                 _strat_allowed = (_active_template in allowed_template_ids)
+                 # Prefer an allowed template that matches the predicted class_idx
+                 _matching = [t for t in allowed_template_ids
+                              if _STRATEGY_CONFIGS.get(t, {}).get("class_idx") == _sidx]
+                 if _matching:
+                     _active_template = _matching[0]
+                 else:
+                     _strat_allowed = False  # no allowed template for this class
              ic_gate_pass    = (not _abt) and _strat_allowed  # non-abstain + strategy filter
              # Synthetic pol for _entry_audit_log compatibility (display only)
              pol = np.zeros(10, dtype=np.float32)
