@@ -144,6 +144,24 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
     results = []
     start_time = time.time()
 
+    # Incremental CSV output (survives crashes / early stops)
+    import datetime as _dt
+    os.makedirs("reports", exist_ok=True)
+    csv_path = os.path.join("reports",
+                            f"optimizer_{template_id}_{_dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+
+    def _save_csv():
+        """Write top 100 results (sorted by NP/DD) to CSV."""
+        sorted_res = sorted(results, key=lambda x: x['np_dd'], reverse=True)[:100]
+        rows = []
+        for ri, r in enumerate(sorted_res):
+            row_data = {"rank": ri + 1}
+            row_data.update(r['combo'])
+            row_data.update({k: v for k, v in r.items() if k != 'combo'})
+            rows.append(row_data)
+        pd.DataFrame(rows).to_csv(csv_path, index=False)
+
+
     for ci, combo in enumerate(combos):
         combo_dict = dict(zip(all_keys, combo))
 
@@ -252,6 +270,9 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
             'total_trades': n_wins + n_losses,
         })
 
+        # Save after every iteration (crash-safe)
+        _save_csv()
+
     total_time = (time.time() - start_time) / 60
     print(f"\n  Optimization complete: {len(results)} results in {total_time:.1f} minutes")
 
@@ -296,19 +317,9 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
 
     print("=" * 140)
 
-    # Save CSV
-    import datetime as _dt
-    os.makedirs("reports", exist_ok=True)
-    csv_path = os.path.join("reports",
-                            f"optimizer_{template_id}_{_dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
-    rows = []
-    for ri, r in enumerate(results):
-        row_data = {"rank": ri + 1}
-        row_data.update(r['combo'])
-        row_data.update({k: v for k, v in r.items() if k != 'combo'})
-        rows.append(row_data)
-    pd.DataFrame(rows).to_csv(csv_path, index=False)
-    print(f"  Saved full results to {csv_path}")
+    # Final CSV save (already saved incrementally)
+    _save_csv()
+    print(f"  Results saved to {csv_path}")
 
     # Prompt for selection
     print()
