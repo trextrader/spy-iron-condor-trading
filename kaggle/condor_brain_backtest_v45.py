@@ -3585,6 +3585,8 @@ def main():
     parser.add_argument("--profittargets", action="store_true", default=False,
                         help=("Enable per-strategy dollar profit targets (from STRATEGY_PROFIT_TARGETS). "
                               "Off by default; falls back to standard 50%%-of-credit exit for all strategies."))
+    parser.add_argument("--optimize", action="store_true", default=False,
+                        help="Interactive parameter optimizer mode (grid search)")
     parser.add_argument("--strategyomit", nargs='+', default=None,
                         help=("Exclude specific strategy classes from trading. "
                               "Space-separated names or indices "
@@ -3925,6 +3927,19 @@ def main():
         checkpoint_path=model_path,
         extra={"mode": "backtest", "data_path": DATA_PATH},
     )
+
+    # Optimizer mode: grid search over parameter combinations
+    if getattr(args, "optimize", False):
+        from strategy_optimizer import run_optimizer
+        run_optimizer(
+            run_backtest, args, df, rule_signals, model, feature_cols, DEVICE,
+            ruleset, model_path=model_path, data_path=use_data_path,
+            norm_stats=norm_stats, v43_outputs=v43_outputs, bundle=bundle_v43,
+            dte_by_dow=_dte_by_dow,
+            allowed_strategy_idxs=ALLOWED_STRATEGY_IDXS,
+            allowed_template_ids=ALLOWED_TEMPLATE_IDS,
+            strategy_configs=_STRATEGY_CONFIGS)
+        import sys; sys.exit(0)
 
     equity, trades = run_backtest(
         df,
