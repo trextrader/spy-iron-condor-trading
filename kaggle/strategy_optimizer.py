@@ -9,6 +9,8 @@ import time
 import os
 import re
 import sys
+import io
+import contextlib
 import numpy as np
 import pandas as pd
 
@@ -163,22 +165,29 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
         elapsed = time.time() - start_time
         eta = (elapsed / max(ci, 1)) * (n_combos - ci) / 60 if ci > 0 else est_min
         settings_str = " | ".join(f"{k}={v}" for k, v in combo_dict.items())
-        print(f"  [{ci+1}/{n_combos}] {settings_str}  (ETA {eta:.1f}m)", end="", flush=True)
+        pct = (ci + 1) / n_combos * 100
+        bar_len = 30
+        filled = int(bar_len * (ci + 1) / n_combos)
+        bar = '#' * filled + '-' * (bar_len - filled)
+        sys.stdout.write(f"\r  [{bar}] {ci+1}/{n_combos} ({pct:.0f}%)  {settings_str}  ETA {eta:.1f}m   ")
+        sys.stdout.flush()
 
         try:
-            eq_vals, cl_trades = run_backtest_fn(
-                df, rule_signals, model, feature_cols, device, ruleset,
-                model_path=model_path, data_path=data_path, norm_stats=norm_stats,
-                use_fuzzy_sizing=args.use_fuzzy_sizing, use_trade_rules=args.use_trade_rules,
-                use_diffusion=args.use_diffusion, limit=args.limit,
-                v43_outputs=v43_outputs, bundle=bundle,
-                verbose_sim=False, max_positions=mp,
-                allowed_strategy_idxs=allowed_strategy_idxs,
-                allowed_template_ids=allowed_template_ids,
-                use_profit_targets=getattr(args, 'profittargets', False),
-                dte_by_dow=dte_by_dow,
-                bar_cache=_bar_cache,
-            )
+            # Suppress all stdout from run_backtest (strategy loader, tqdm, trade logs)
+            with contextlib.redirect_stdout(io.StringIO()):
+                eq_vals, cl_trades = run_backtest_fn(
+                    df, rule_signals, model, feature_cols, device, ruleset,
+                    model_path=model_path, data_path=data_path, norm_stats=norm_stats,
+                    use_fuzzy_sizing=args.use_fuzzy_sizing, use_trade_rules=args.use_trade_rules,
+                    use_diffusion=args.use_diffusion, limit=args.limit,
+                    v43_outputs=v43_outputs, bundle=bundle,
+                    verbose_sim=False, max_positions=mp,
+                    allowed_strategy_idxs=allowed_strategy_idxs,
+                    allowed_template_ids=allowed_template_ids,
+                    use_profit_targets=getattr(args, 'profittargets', False),
+                    dte_by_dow=dte_by_dow,
+                    bar_cache=_bar_cache,
+                )
         except Exception as e:
             print(f"  ERROR: {e}")
             for k, v in saved.items():
@@ -231,7 +240,7 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
             else:
                 cur_consec = 0
 
-        print(f"  -> NP=${net_pnl:+,.0f} DD={max_dd:.2f}% Ratio={np_dd:.1f}")
+        print(f"\n  #{ci+1:>4}  NP=${net_pnl:+,.0f}  DD={max_dd:.2f}%  Ratio={np_dd:.1f}  W={n_wins} L={n_losses}")
 
         results.append({
             'combo': combo_dict,
