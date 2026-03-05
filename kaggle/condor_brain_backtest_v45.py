@@ -1888,7 +1888,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None,
                  v43_outputs=None, bundle=None, verbose_sim=False, max_positions=5,
                  allowed_strategy_idxs=None, allowed_template_ids=None, use_profit_targets=False,
-                 dte_by_dow=None):
+                 dte_by_dow=None, bar_cache=None, return_bar_cache=False):
 
     # ==========================================================================
     # PHASE 5.5: Initialize Execution Reality Engine
@@ -2254,6 +2254,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     else:
         spot_timestamps = spot_bars[time_col].values
 
+    _bar_cache_out = {} if return_bar_cache else None
+
     for i in tqdm(range(sim_start_idx, num_bars), desc="Simulating"):
          # ── Policy index: v43 uses bar index directly; legacy uses offset ────
          if v43_outputs is not None:
@@ -2269,42 +2271,52 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
          else:
              spot = float(spot_bars['close'].iloc[i])
 
-         # 2. Get Option Chain
-         if bundle is not None:
-             # Phase 7: look up by date string
-             date_str = str(bundle.m5_dates[i])
-             chain_slice = bundle.chain_df_by_date.get(date_str, pd.DataFrame())
-             if chain_slice.empty:
-                 continue
+
+         # BAR CACHE: skip chain lookup/normalization if cached (optimizer speedup)
+         if bar_cache is not None and i in bar_cache:
+             _cached = bar_cache[i]
+             marks_bid, marks_ask, marks_mid, market_state = _cached
          else:
-             # Legacy: O(1) ts_ranges lookup
-             s, e = ts_ranges.get(ts, (None, None))
-             if s is None:
-                 continue
-             chain_slice = df.iloc[s:e]
+             # 2. Get Option Chain
+             if bundle is not None:
+                 # Phase 7: look up by date string
+                 date_str = str(bundle.m5_dates[i])
+                 chain_slice = bundle.chain_df_by_date.get(date_str, pd.DataFrame())
+                 if chain_slice.empty:
+                     continue
+             else:
+                 # Legacy: O(1) ts_ranges lookup
+                 s, e = ts_ranges.get(ts, (None, None))
+                 if s is None:
+                     continue
+                 chain_slice = df.iloc[s:e]
 
-         # 3. Build Marks (Transient) - PHASE 5.2 FIX: Separate bid/ask/mid
-         # v43 bundle: normalize column names (already BSM-priced, no re-synthesis needed)
-         # Legacy path: synthesize bid/ask from close + spread_ratio
-         if bundle is not None:
-             chain_with_prices = normalize_v43_chain(chain_slice, spot)
-         else:
-             chain_with_prices = synthesize_chain_prices(chain_slice)
+             # 3. Build Marks (Transient) - PHASE 5.2 FIX: Separate bid/ask/mid
+             # v43 bundle: normalize column names (already BSM-priced, no re-synthesis needed)
+             # Legacy path: synthesize bid/ask from close + spread_ratio
+             if bundle is not None:
+                 chain_with_prices = normalize_v43_chain(chain_slice, spot)
+             else:
+                 chain_with_prices = synthesize_chain_prices(chain_slice)
 
-         marks_mid = dict(zip(chain_with_prices['option_symbol'], chain_with_prices['mid']))
-         marks_bid = dict(zip(chain_with_prices['option_symbol'], chain_with_prices['bid']))
-         marks_ask = dict(zip(chain_with_prices['option_symbol'], chain_with_prices['ask']))
+             marks_mid = dict(zip(chain_with_prices['option_symbol'], chain_with_prices['mid']))
+             marks_bid = dict(zip(chain_with_prices['option_symbol'], chain_with_prices['bid']))
+             marks_ask = dict(zip(chain_with_prices['option_symbol'], chain_with_prices['ask']))
 
-         # PHASE 5.5: Create MarketState for execution reality engine
-         bar_data = spot_bars.iloc[i]
-         vix_val = bar_data.get('vix', bar_data.get('VIX', 15.0)) if hasattr(bar_data, 'get') else 15.0
-         vol_val = bar_data.get('volume', 100) if hasattr(bar_data, 'get') else 100
-         # Extract hour from timestamp for TOD liquidity
-         try:
-             ts_hour = pd.Timestamp(ts).hour + pd.Timestamp(ts).minute / 60.0
-         except:
-             ts_hour = 12.0
-         market_state = create_market_state_from_bar(spot, vix_val, ts_hour, vol_val) if exec_engine else None
+             # PHASE 5.5: Create MarketState for execution reality engine
+             bar_data = spot_bars.iloc[i]
+             vix_val = bar_data.get('vix', bar_data.get('VIX', 15.0)) if hasattr(bar_data, 'get') else 15.0
+             vol_val = bar_data.get('volume', 100) if hasattr(bar_data, 'get') else 100
+             # Extract hour from timestamp for TOD liquidity
+             try:
+                 ts_hour = pd.Timestamp(ts).hour + pd.Timestamp(ts).minute / 60.0
+             except:
+                 ts_hour = 12.0
+             market_state = create_market_state_from_bar(spot, vix_val, ts_hour, vol_val) if exec_engine else None
+
+             # Cache bar data for optimizer reuse
+             if _bar_cache_out is not None:
+                 _bar_cache_out[i] = (marks_bid, marks_ask, marks_mid, market_state)
 
          # 4. Update Open Trades - PHASE 5.2 FIX: Pass bid/ask/mid
          active_trades = []
@@ -3555,6 +3567,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
     pd.DataFrame(equity_curve).to_csv(os.path.join(REPORTS_DIR, "equity_curve.csv"), index=False)
     pd.DataFrame(closed_trades).to_csv(os.path.join(REPORTS_DIR, "trades.csv"), index=False)
     
+    if return_bar_cache:
+        return equity_vals, closed_trades, _bar_cache_out
     return equity_vals, closed_trades
 
 def main():

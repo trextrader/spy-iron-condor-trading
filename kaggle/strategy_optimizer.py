@@ -110,10 +110,10 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
 
     print(f"\n  Grid: {' x '.join(str(len(v)) for v in all_vals)} = {n_combos} combinations")
 
-    # Estimate time with a quick benchmark
-    print("  Running benchmark (1 backtest)...")
+    # Estimate time with a quick benchmark + cache bar data
+    print("  Running benchmark (1 backtest + caching bar data)...")
     t0 = time.time()
-    _bm_eq, _bm_tr = run_backtest_fn(
+    _bm_result = run_backtest_fn(
         df, rule_signals, model, feature_cols, device, ruleset,
         model_path=model_path, data_path=data_path, norm_stats=norm_stats,
         use_fuzzy_sizing=args.use_fuzzy_sizing, use_trade_rules=args.use_trade_rules,
@@ -124,7 +124,10 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
         allowed_template_ids=allowed_template_ids,
         use_profit_targets=getattr(args, 'profittargets', False),
         dte_by_dow=dte_by_dow,
+        return_bar_cache=True,
     )
+    _bm_eq, _bm_tr, _bar_cache = _bm_result
+    print(f"  Bar cache: {len(_bar_cache)} bars cached")
     bench_sec = time.time() - t0
     est_min = (bench_sec * n_combos) / 60
     print(f"  Benchmark: {bench_sec:.1f}s per run")
@@ -174,6 +177,7 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
                 allowed_template_ids=allowed_template_ids,
                 use_profit_targets=getattr(args, 'profittargets', False),
                 dte_by_dow=dte_by_dow,
+                bar_cache=_bar_cache,
             )
         except Exception as e:
             print(f"  ERROR: {e}")
