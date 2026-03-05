@@ -2218,35 +2218,31 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         )
 
     # ── Entry debug counters (persistent across calls for summary) ────────────
-    if not hasattr(run_backtest, '_entry_dbg'):
-        run_backtest._entry_dbg = {
-            'bars_seen':           0,
-            'cooldown_block':      0,
-            'capital_block':       0,   # NEW: capital ceiling hit
-            'policy_nan_block':    0,
-            'missing_chain_cols':  0,
-            'gate_fail_entry':     0,
-            'gate_fail_pop':       0,
-            'gate_fail_ic':        0,
-            'legs_none':           0,
-            'atomicity_fail':      0,
-            'credit_fail':         0,
-            'collateral_oob':      0,   # NEW: collateral outside [min, max] bounds
-            'success':             0,
-        }
-    if not hasattr(run_backtest, '_last_entry_bar'):
-        run_backtest._last_entry_bar = -10**9
-    if not hasattr(run_backtest, '_credit_samples'):
-        run_backtest._credit_samples = []
+    run_backtest._entry_dbg = {
+        'bars_seen':           0,
+        'cooldown_block':      0,
+        'capital_block':       0,   # NEW: capital ceiling hit
+        'policy_nan_block':    0,
+        'missing_chain_cols':  0,
+        'gate_fail_entry':     0,
+        'gate_fail_pop':       0,
+        'gate_fail_ic':        0,
+        'legs_none':           0,
+        'atomicity_fail':      0,
+        'credit_fail':         0,
+        'collateral_oob':      0,   # NEW: collateral outside [min, max] bounds
+        'success':             0,
+    }
+    run_backtest._last_entry_bar = -10**9
+    run_backtest._credit_samples = []
     # Per-class strategy distribution tracking (diagnostic)
-    if not hasattr(run_backtest, '_strat_dist'):
-        # For each strategy class idx: count predictions + per-gate outcomes
-        run_backtest._strat_dist = {
-            i: {'predicted': 0, 'pass_entry': 0, 'pass_pop': 0,
-                'pass_ic': 0, 'pass_all_gates': 0, 'opened': 0,
-                'abstain_blocked': 0, 'filter_blocked': 0}
-            for i in range(len(V43_STRATEGY_NAMES))
-        }
+    # For each strategy class idx: count predictions + per-gate outcomes
+    run_backtest._strat_dist = {
+        i: {'predicted': 0, 'pass_entry': 0, 'pass_pop': 0,
+            'pass_ic': 0, 'pass_all_gates': 0, 'opened': 0,
+            'abstain_blocked': 0, 'filter_blocked': 0}
+        for i in range(len(V43_STRATEGY_NAMES))
+    }
     
     # Pre-extract spot timestamps as numpy array to ensure type match
     if bundle is not None:
@@ -2275,7 +2271,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
          # BAR CACHE: skip chain lookup/normalization if cached (optimizer speedup)
          if bar_cache is not None and i in bar_cache:
              _cached = bar_cache[i]
-             marks_bid, marks_ask, marks_mid, market_state = _cached
+             spot, chain_with_prices, marks_bid, marks_ask, marks_mid, market_state = _cached
          else:
              # 2. Get Option Chain
              if bundle is not None:
@@ -2316,7 +2312,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
              # Cache bar data for optimizer reuse
              if _bar_cache_out is not None:
-                 _bar_cache_out[i] = (marks_bid, marks_ask, marks_mid, market_state)
+                 _bar_cache_out[i] = (spot, chain_with_prices, marks_bid, marks_ask, marks_mid, market_state)
 
          # 4. Update Open Trades - PHASE 5.2 FIX: Pass bid/ask/mid
          active_trades = []
