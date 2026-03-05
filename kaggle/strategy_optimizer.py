@@ -33,7 +33,9 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
         print("[optimizer] Multiple templates selected. Pick one for optimization.")
         for i, tid in enumerate(sorted(allowed_template_ids)):
             print(f"  {i}: {tid}")
-        sel = input("Select index: ").strip()
+        sys.stdout.write("Select index: ")
+        sys.stdout.flush()
+        sel = input().strip()
         template_id = sorted(allowed_template_ids)[int(sel)]
     else:
         print("[optimizer] ERROR: --strategies must specify a template (e.g. --strategies short_call)")
@@ -71,8 +73,9 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
         else:
             current = base_cfg.get(key, "?")
 
-        prompt = f"  {display} ({current}): "
-        raw = input(prompt).strip()
+        sys.stdout.write(f"  {display} ({current}): ")
+        sys.stdout.flush()
+        raw = input().strip()
 
         if not raw:
             # Skip: use current value only
@@ -135,7 +138,9 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
     print(f"  Benchmark: {bench_sec:.1f}s per run")
     print(f"  Est. time: {est_min:.1f} minutes ({n_combos} x {bench_sec:.1f}s)")
 
-    confirm = input(f"  Proceed with {n_combos} combinations? [y/N]: ").strip().lower()
+    sys.stdout.write(f"  Proceed with {n_combos} combinations? [y/N]: ")
+    sys.stdout.flush()
+    confirm = input().strip().lower()
     if confirm != 'y':
         print("  Aborted.")
         return
@@ -323,7 +328,9 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
 
     # Prompt for selection
     print()
-    sel = input("  Select row number to apply (or 'q' to quit): ").strip()
+    sys.stdout.write("  Select row number to apply (or 'q' to quit): ")
+    sys.stdout.flush()
+    sel = input().strip()
     if sel.lower() == 'q' or not sel.isdigit():
         print("  No changes applied.")
         return
