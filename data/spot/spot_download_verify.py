@@ -441,7 +441,7 @@ def main() -> int:
 
     summary_df = pd.DataFrame(summary_rows)
 
-        if all_issue_dfs:
+    if all_issue_dfs:
         non_empty = [x for x in all_issue_dfs if not x.empty]
         issues_df = (
             pd.concat(non_empty, ignore_index=True)
