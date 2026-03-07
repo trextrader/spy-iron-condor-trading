@@ -100,56 +100,123 @@ def find_timestamp_column(df: pd.DataFrame) -> str:
 
 def parse_timestamps(series: pd.Series) -> pd.Series:
     """
-    Parse timestamps robustly and localize/convert to America/New_York.
+    Parse timestamps robustly and convert/localize to America/New_York.
+    Also normalizes to minute precision.
     """
-    ts = pd.to_datetime(series, errors="coerce")
+    raw = series.astype(str)
 
-    if ts.isna().any():
-        bad_count = int(ts.isna().sum())
-        raise ValueError(f"Failed to parse {bad_count} timestamp values.")
+    # Path 1: parse as UTC-aware
+    ts_utc = pd.to_datetime(raw, errors="coerce", utc=True)
 
-    if ts.dt.tz is None:
-        ts = ts.dt.tz_localize(NY_TZ)
+    # Path 2: parse as naive local NY time
+    ts_naive = pd.to_datetime(raw, errors="coerce")
+    if getattr(ts_naive.dt, "tz", None) is None:
+        ts_naive = ts_naive.dt.tz_localize(
+            NY_TZ,
+            nonexistent="shift_forward",
+            ambiguous="NaT",
+        )
     else:
-        ts = ts.dt.tz_convert(NY_TZ)
+        ts_naive = ts_naive.dt.tz_convert(NY_TZ)
 
-    return ts
+    ts_utc_ny = ts_utc.dt.tz_convert(NY_TZ)
+
+    if ts_utc_ny.isna().all() and ts_naive.isna().all():
+        raise ValueError("Failed to parse all timestamps.")
+
+    def score_session_fit(ts: pd.Series) -> int:
+        valid = ts.dropna()
+        if valid.empty:
+            return -1
+        h = valid.dt.hour
+        m = valid.dt.minute
+        mask = ((h > 9) | ((h == 9) & (m >= 30))) & (h <= 16)
+        return int(mask.sum())
+
+    score_utc = score_session_fit(ts_utc_ny)
+    score_naive = score_session_fit(ts_naive)
+
+    chosen = ts_utc_ny if score_utc > score_naive else ts_naive
+    chosen = chosen.dt.floor("min")
+
+    bad = int(chosen.isna().sum())
+    if bad > 0:
+        raise ValueError(f"Failed to parse/localize {bad} timestamps.")
+
+    return chosen
 
 
-def expected_intraday_index_for_day(day: pd.Timestamp, tf_key: str) -> pd.DatetimeIndex:
+def detect_stamp_mode(
+    actual_ts_unique: pd.DatetimeIndex,
+    year: int,
+    tf_key: str,
+) -> str:
+    """
+    Auto-detect whether timestamps are bar-start or bar-end stamped.
+    Chooses the convention with the larger overlap.
+    """
+    exp_start = build_expected_index_for_year(year, tf_key, "start")
+    exp_end = build_expected_index_for_year(year, tf_key, "end")
+
+    overlap_start = len(actual_ts_unique.intersection(exp_start))
+    overlap_end = len(actual_ts_unique.intersection(exp_end))
+
+    return "end" if overlap_end > overlap_start else "start"
+
+
+def expected_intraday_index_for_day(
+    day: pd.Timestamp,
+    tf_key: str,
+    stamp_mode: str = "start",
+) -> pd.DatetimeIndex:
     """
     Return expected timestamps for one trading day in America/New_York.
-    Uses left-edge bar timestamps aligned to SPY regular session.
+
+    stamp_mode:
+      - 'start': bars are stamped by bar start
+      - 'end'  : bars are stamped by bar end
     """
     if tf_key not in FILE_SPECS:
         raise ValueError(f"Unsupported timeframe: {tf_key}")
 
     if tf_key == "m1":
-        start = day.replace(hour=9, minute=30, second=0)
-        end = day.replace(hour=15, minute=59, second=0)
-        return pd.date_range(start=start, end=end, freq="1min", tz=NY_TZ)
+        base = pd.date_range(
+            start=day.replace(hour=9, minute=30, second=0),
+            end=day.replace(hour=15, minute=59, second=0),
+            freq="1min",
+            tz=NY_TZ,
+        )
+        return base + pd.Timedelta(minutes=1) if stamp_mode == "end" else base
 
     if tf_key == "m5":
-        start = day.replace(hour=9, minute=30, second=0)
-        end = day.replace(hour=15, minute=55, second=0)
-        return pd.date_range(start=start, end=end, freq="5min", tz=NY_TZ)
+        base = pd.date_range(
+            start=day.replace(hour=9, minute=30, second=0),
+            end=day.replace(hour=15, minute=55, second=0),
+            freq="5min",
+            tz=NY_TZ,
+        )
+        return base + pd.Timedelta(minutes=5) if stamp_mode == "end" else base
 
     if tf_key == "m15":
-        start = day.replace(hour=9, minute=30, second=0)
-        end = day.replace(hour=15, minute=45, second=0)
-        return pd.date_range(start=start, end=end, freq="15min", tz=NY_TZ)
+        base = pd.date_range(
+            start=day.replace(hour=9, minute=30, second=0),
+            end=day.replace(hour=15, minute=45, second=0),
+            freq="15min",
+            tz=NY_TZ,
+        )
+        return base + pd.Timedelta(minutes=15) if stamp_mode == "end" else base
 
     if tf_key == "h1":
-        # Full 60-minute bars only; omit the 09:30-10:00 partial bar.
-        anchors = [
+        # Full-hour bars only; omit 09:30 partial bar.
+        base = pd.DatetimeIndex([
             day.replace(hour=10, minute=0, second=0),
             day.replace(hour=11, minute=0, second=0),
             day.replace(hour=12, minute=0, second=0),
             day.replace(hour=13, minute=0, second=0),
             day.replace(hour=14, minute=0, second=0),
             day.replace(hour=15, minute=0, second=0),
-        ]
-        return pd.DatetimeIndex(anchors)
+        ])
+        return base + pd.Timedelta(minutes=60) if stamp_mode == "end" else base
 
     raise ValueError(f"Unhandled timeframe: {tf_key}")
 
@@ -157,22 +224,32 @@ def expected_intraday_index_for_day(day: pd.Timestamp, tf_key: str) -> pd.Dateti
 def get_trading_days_for_year(year: int) -> pd.DatetimeIndex:
     """
     Get NYSE valid trading days for a full calendar year in America/New_York.
+
+    Important:
+    schedule.index is already date-like trading days. Do NOT localize to UTC and
+    convert to NY, or you can shift dates backward.
     """
     schedule = NYSE_CAL.schedule(
         start_date=f"{year}-01-01",
         end_date=f"{year}-12-31",
     )
-    days = pd.DatetimeIndex(schedule.index).tz_localize("UTC").tz_convert(NY_TZ)
-    days = pd.DatetimeIndex([d.normalize() for d in days])
+
+    days = pd.DatetimeIndex(schedule.index)
+    days = pd.DatetimeIndex(
+        [pd.Timestamp(d).tz_localize(NY_TZ).normalize() for d in days]
+    )
     return days
 
-
-def build_expected_index_for_year(year: int, tf_key: str) -> pd.DatetimeIndex:
+def build_expected_index_for_year(
+    year: int,
+    tf_key: str,
+    stamp_mode: str = "start",
+) -> pd.DatetimeIndex:
     trading_days = get_trading_days_for_year(year)
     pieces: List[pd.DatetimeIndex] = []
 
     for day in trading_days:
-        pieces.append(expected_intraday_index_for_day(day, tf_key))
+        pieces.append(expected_intraday_index_for_day(day, tf_key, stamp_mode))
 
     if not pieces:
         return pd.DatetimeIndex([], tz=NY_TZ)
@@ -210,6 +287,7 @@ def load_and_normalize_csv(path: Path) -> pd.DataFrame:
     ts_col = find_timestamp_column(df)
     df[ts_col] = parse_timestamps(df[ts_col])
     df = df.rename(columns={ts_col: "timestamp"})
+    df["timestamp"] = df["timestamp"].dt.floor("min")
     df = df.sort_values("timestamp").reset_index(drop=True)
     return df
 
@@ -226,7 +304,9 @@ def analyze_file(path: Path) -> Tuple[pd.DataFrame, Dict[str, object]]:
 
     actual_ts = pd.DatetimeIndex(df["timestamp"])
     actual_ts_unique = pd.DatetimeIndex(sorted(pd.unique(actual_ts)))
-    expected_ts = build_expected_index_for_year(year, tf_key)
+
+    stamp_mode = detect_stamp_mode(actual_ts_unique, year, tf_key)
+    expected_ts = build_expected_index_for_year(year, tf_key, stamp_mode)
 
     missing_ts = expected_ts.difference(actual_ts_unique)
     extra_ts = actual_ts_unique.difference(expected_ts)
@@ -241,6 +321,7 @@ def analyze_file(path: Path) -> Tuple[pd.DataFrame, Dict[str, object]]:
                 "file": path.name,
                 "timeframe": tf_key,
                 "year": year,
+                "stamp_mode": stamp_mode,
                 "issue_type": "missing_bar",
                 "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S%z"),
                 "trade_date": ts.strftime("%Y-%m-%d"),
@@ -254,6 +335,7 @@ def analyze_file(path: Path) -> Tuple[pd.DataFrame, Dict[str, object]]:
                 "file": path.name,
                 "timeframe": tf_key,
                 "year": year,
+                "stamp_mode": stamp_mode,
                 "issue_type": "unexpected_timestamp",
                 "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S%z"),
                 "trade_date": ts.strftime("%Y-%m-%d"),
@@ -268,6 +350,7 @@ def analyze_file(path: Path) -> Tuple[pd.DataFrame, Dict[str, object]]:
                     "file": path.name,
                     "timeframe": tf_key,
                     "year": year,
+                    "stamp_mode": stamp_mode,
                     "issue_type": "duplicate_timestamp",
                     "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S%z"),
                     "trade_date": ts.strftime("%Y-%m-%d"),
@@ -283,6 +366,7 @@ def analyze_file(path: Path) -> Tuple[pd.DataFrame, Dict[str, object]]:
         "file": path.name,
         "timeframe": tf_key,
         "year": year,
+        "stamp_mode": stamp_mode,
         "rows_in_file": int(len(df)),
         "unique_timestamps": int(len(actual_ts_unique)),
         "expected_bars": int(expected_bars),
@@ -357,18 +441,34 @@ def main() -> int:
 
     summary_df = pd.DataFrame(summary_rows)
 
-    if all_issue_dfs:
+        if all_issue_dfs:
         non_empty = [x for x in all_issue_dfs if not x.empty]
         issues_df = (
             pd.concat(non_empty, ignore_index=True)
             if non_empty
             else pd.DataFrame(
-                columns=["file", "timeframe", "year", "issue_type", "timestamp", "trade_date"]
+                columns=[
+                    "file",
+                    "timeframe",
+                    "year",
+                    "stamp_mode",
+                    "issue_type",
+                    "timestamp",
+                    "trade_date",
+                ]
             )
         )
     else:
         issues_df = pd.DataFrame(
-            columns=["file", "timeframe", "year", "issue_type", "timestamp", "trade_date"]
+            columns=[
+                "file",
+                "timeframe",
+                "year",
+                "stamp_mode",
+                "issue_type",
+                "timestamp",
+                "trade_date",
+            ]
         )
 
     summary_df.to_csv(OUTPUT_SUMMARY_CSV, index=False)
