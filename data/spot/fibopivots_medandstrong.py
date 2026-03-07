@@ -22,6 +22,10 @@ TIMEFRAMES = ["m1", "m5", "m15", "h1"]
 
 NY_TZ = "America/New_York"
 
+# Medium pivot parameters: set these to match TradingView exactly.
+MEDIUM_LEFT = 17
+MEDIUM_RIGHT = 22
+
 # Strong pivot parameters: set these to match TradingView exactly.
 STRONG_LEFT = 35
 STRONG_RIGHT = 40
@@ -550,7 +554,7 @@ def main() -> int:
     output_root.mkdir(parents=True, exist_ok=True)
 
     print("=" * 88)
-    print("GENERATING STRONG PIVOTS, FIB SEGMENTS, BAR-LEVEL DATASETS, AND PLOTS")
+    print("GENERATING STRONG and MEDIUM STRENGTH PIVOTS, FIB SEGMENTS, BAR-LEVEL DATASETS, AND PLOTS")
     print("=" * 88)
 
     for year in YEAR_DIRS:
