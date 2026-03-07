@@ -145,7 +145,7 @@ def build_raw_pivot_df(df: pd.DataFrame, left: int, right: int) -> pd.DataFrame:
         "pivot_low": pl.astype(int),
         "pivot_price": np.full(len(df), np.nan, dtype=float),
         "pivot_type": pd.Series([""] * len(df), dtype="object"),
-        "confirmed_on": pd.Series([pd.NaT] * len(df), dtype="datetime64[ns, America/New_York]"),
+        "confirmed_on": pd.Series([pd.NaT] * len(df), dtype=f"datetime64[ns, {NY_TZ}]"),
         "left_bars": np.full(len(df), left, dtype=int),
         "right_bars": np.full(len(df), right, dtype=int),
     })
@@ -160,12 +160,12 @@ def build_raw_pivot_df(df: pd.DataFrame, left: int, right: int) -> pd.DataFrame:
     valid = confirm_idx < len(df)
 
     if np.any(valid):
-        raw.loc[pivot_idx[valid], "confirmed_on"] = pd.DatetimeIndex(
-            df.loc[confirm_idx[valid], "datetime"]
-        ).to_numpy(dtype="datetime64[ns]")
-
-        # preserve tz-aware column by reassignment after creation
-        raw["confirmed_on"] = pd.to_datetime(raw["confirmed_on"]).dt.tz_localize(NY_TZ, nonexistent="shift_forward", ambiguous="NaT")
+        confirmed_vals = pd.Series(
+            pd.DatetimeIndex(df.loc[confirm_idx[valid], "datetime"]).tz_convert(NY_TZ),
+            index=raw.index[pivot_idx[valid]],
+            dtype=f"datetime64[ns, {NY_TZ}]",
+        )
+        raw.loc[pivot_idx[valid], "confirmed_on"] = confirmed_vals
 
     raw = raw[(raw["pivot_high"] == 1) | (raw["pivot_low"] == 1)].copy()
     raw = raw.reset_index(drop=True)
