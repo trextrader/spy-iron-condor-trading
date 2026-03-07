@@ -16,12 +16,19 @@ Assumptions:
 - CSV has a timestamp column.
 - Timestamps are parseable and represent market-time bars.
 - Regular market session only: 09:30 to 16:00 America/New_York.
-- For 60-minute bars, expected anchors are:
+- H1 is expected to use full-hour-only training anchors:
       10:00, 11:00, 12:00, 13:00, 14:00, 15:00
   The 09:30-10:00 partial bar is intentionally excluded.
 - For 15-minute bars: 26 bars/day.
 - For 5-minute bars: 78 bars/day.
 - For 1-minute bars: 390 bars/day.
+
+Behavior:
+- Recursively scans subfolders such as ./2020, ./2021, ...
+- Auto-detects whether timestamps are stamped at bar START or bar END.
+- Normalizes timestamps to minute precision.
+- Reports missing bars, unexpected timestamps, and duplicates.
+- Prints the most common unexpected time-of-day per file when present.
 
 Outputs:
 - missing_rows_report.csv
@@ -207,7 +214,7 @@ def expected_intraday_index_for_day(
         return base + pd.Timedelta(minutes=15) if stamp_mode == "end" else base
 
     if tf_key == "h1":
-        # Full-hour bars only; omit 09:30 partial bar.
+        # Full-hour bars only; omit the 09:30 partial bar.
         base = pd.DatetimeIndex([
             day.replace(hour=10, minute=0, second=0),
             day.replace(hour=11, minute=0, second=0),
@@ -239,6 +246,7 @@ def get_trading_days_for_year(year: int) -> pd.DatetimeIndex:
         [pd.Timestamp(d).tz_localize(NY_TZ).normalize() for d in days]
     )
     return days
+
 
 def build_expected_index_for_year(
     year: int,
@@ -290,6 +298,30 @@ def load_and_normalize_csv(path: Path) -> pd.DataFrame:
     df["timestamp"] = df["timestamp"].dt.floor("min")
     df = df.sort_values("timestamp").reset_index(drop=True)
     return df
+
+
+def inspect_extra_time_patterns(
+    actual_ts_unique: pd.DatetimeIndex,
+    expected_ts: pd.DatetimeIndex,
+) -> str:
+    """
+    Returns a compact summary of unexpected timestamp times-of-day.
+    Example: "16:00 x253"
+    """
+    extra_ts = actual_ts_unique.difference(expected_ts)
+    if len(extra_ts) == 0:
+        return ""
+
+    extra_df = pd.DataFrame({"timestamp": extra_ts})
+    extra_df["time_only"] = extra_df["timestamp"].strftime("%H:%M")
+
+    counts = extra_df["time_only"].value_counts()
+    if counts.empty:
+        return ""
+
+    top_time = counts.index[0]
+    top_count = int(counts.iloc[0])
+    return f"{top_time} x{top_count}"
 
 
 # ============================================================
@@ -361,6 +393,7 @@ def analyze_file(path: Path) -> Tuple[pd.DataFrame, Dict[str, object]]:
 
     trading_days = get_trading_days_for_year(year)
     expected_bars = len(expected_ts)
+    extra_time_pattern = inspect_extra_time_patterns(actual_ts_unique, expected_ts)
 
     summary = {
         "file": path.name,
@@ -375,6 +408,7 @@ def analyze_file(path: Path) -> Tuple[pd.DataFrame, Dict[str, object]]:
         "missing_bar_count": int(len(missing_ts)),
         "unexpected_timestamp_count": int(len(extra_ts)),
         "duplicate_timestamp_count": int(len(dup_df)),
+        "extra_time_pattern": extra_time_pattern,
         "status": "OK" if len(missing_ts) == 0 and len(extra_ts) == 0 and len(dup_df) == 0 else "ISSUES_FOUND",
     }
 
@@ -412,14 +446,19 @@ def main() -> int:
             all_issue_dfs.append(issue_df)
             summary_rows.append(summary)
 
-            print(
+            line = (
                 f"  status={summary['status']} | "
+                f"stamp_mode={summary['stamp_mode']} | "
                 f"rows={summary['rows_in_file']} | "
                 f"expected={summary['expected_bars']} | "
                 f"missing={summary['missing_bar_count']} | "
                 f"extra={summary['unexpected_timestamp_count']} | "
                 f"dupes={summary['duplicate_timestamp_count']}"
             )
+            if summary["extra_time_pattern"]:
+                line += f" | extra_times={summary['extra_time_pattern']}"
+            print(line)
+
         except Exception as e:
             print(f"  ERROR: {e}")
             summary_rows.append(
@@ -427,6 +466,7 @@ def main() -> int:
                     "file": path.name,
                     "timeframe": "",
                     "year": "",
+                    "stamp_mode": "",
                     "rows_in_file": "",
                     "unique_timestamps": "",
                     "expected_bars": "",
@@ -435,6 +475,7 @@ def main() -> int:
                     "missing_bar_count": "",
                     "unexpected_timestamp_count": "",
                     "duplicate_timestamp_count": "",
+                    "extra_time_pattern": "",
                     "status": f"ERROR: {e}",
                 }
             )
