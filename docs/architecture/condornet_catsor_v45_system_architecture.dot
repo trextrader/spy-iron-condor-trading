@@ -1,0 +1,593 @@
+digraph CondorNet_CATSOR_V45_System_Architecture {
+    rankdir=TB;
+    compound=true;
+    splines=ortho;
+    newrank=true;
+
+    graph [
+        bgcolor="#000000",
+        fontname="Helvetica Neue",
+        fontsize=18,
+        pad=0.35,
+        nodesep=0.42,
+        ranksep=0.62,
+        labelloc="t",
+        labeljust="c",
+        label="CondorNet™ Automated Trading System Options Research Platform (CATSOR)\nSystem Architecture — v4.5 Research / Simulation / Dataset Factory",
+        fontcolor="#ffffff",
+        size="8.0,10.5!",
+        ratio="fill",
+        page="8.5,11",
+		splines=true
+    ];
+
+    node [
+        shape=box,
+        style="filled,rounded",
+        fontname="Helvetica Neue",
+        fontsize=10,
+        penwidth=2.0,
+        margin="0.14,0.08",
+        color="#666666",
+        fillcolor="#141414",
+        fontcolor="#ffffff"
+    ];
+
+    edge [
+        fontname="Helvetica Neue",
+        fontsize=8,
+        color="#8a8a8a",
+        fontcolor="#cfcfcf",
+        penwidth=1.5,
+        arrowsize=0.8
+    ];
+
+    // =========================================================================
+    // TITLE STRIP
+    // =========================================================================
+    title_block [
+        shape=box,
+        style="filled,bold,rounded",
+        fillcolor="#1a2a3a",
+        color="#00d4ff",
+        penwidth=2.8,
+        fontsize=15,
+        label=<
+            <B>CondorNet™ CATSOR v4.5 — Institutional Volatility Research Platform</B><BR/>
+            Data → Inference → Simulation → Execution Reality → Optimization → State–Action Dataset Factory
+        >
+    ];
+
+    // =========================================================================
+    // ROW 1 — RUNTIME ASSETS
+    // =========================================================================
+    subgraph cluster_assets {
+        label="RUNTIME ASSETS";
+        style="rounded,dashed";
+        color="#00d4ff";
+        penwidth=2.0;
+        fontcolor="#00d4ff";
+        fontsize=13;
+
+        asset_tf [
+            label=<
+                <B>Multi-TF Market Datasets</B><BR ALIGN="LEFT"/>
+                M1 / M5 / M15 / H1<BR ALIGN="LEFT"/>
+                canonical clock = M5
+            >,
+            fillcolor="#0d1f2d",
+            color="#00d4ff"
+        ];
+
+        asset_chain [
+            label=<
+                <B>Options Chain History</B><BR ALIGN="LEFT"/>
+                per-date chain slices<BR ALIGN="LEFT"/>
+                bid / ask / IV / Greeks / OI / volume
+            >,
+            fillcolor="#0d1f2d",
+            color="#00d4ff"
+        ];
+
+        asset_model [
+            label=<
+                <B>CondorNet v4.3 Checkpoint</B><BR ALIGN="LEFT"/>
+                optional neural inference<BR ALIGN="LEFT"/>
+                strategy logits / entry / POP / EV / size
+            >,
+            fillcolor="#1a1a2a",
+            color="#9f7aea"
+        ];
+
+        asset_rules [
+            label=<
+                <B>Ruleset + Runtime Policy Inputs</B><BR ALIGN="LEFT"/>
+                YAML rules / toggles / DTE caps<BR ALIGN="LEFT"/>
+                strategy filters / execution flags
+            >,
+            fillcolor="#1a2a1a",
+            color="#48bb78"
+        ];
+
+        { rank=same; asset_tf; asset_chain; asset_model; asset_rules; }
+    }
+
+    // =========================================================================
+    // ROW 2 — DATA LAYER
+    // =========================================================================
+    subgraph cluster_data {
+        label="DATA LAYER — backtest_v45_data.py";
+        style="rounded";
+        color="#4a6cff";
+        penwidth=2.2;
+        fontcolor="#4a6cff";
+        fontsize=13;
+
+        data_load [
+            label=<
+                <B>load_multi_tf_bundle(...)</B><BR ALIGN="LEFT"/>
+                load all datasets<BR ALIGN="LEFT"/>
+                align M1 / M15 / H1 → M5<BR ALIGN="LEFT"/>
+                build MultiTFDataBundle
+            >,
+            fillcolor="#0d1a3a",
+            color="#4a6cff"
+        ];
+
+        data_align [
+            label=<
+                <B>Timestamp Alignment</B><BR ALIGN="LEFT"/>
+                searchsorted(other_ts, m5_ts, side='right') - 1<BR ALIGN="LEFT"/>
+                forward-fill coarser / finer TFs
+            >,
+            fillcolor="#10204a",
+            color="#4a6cff"
+        ];
+
+        data_norm [
+            label=<
+                <B>Robust Normalization</B><BR ALIGN="LEFT"/>
+                median / MAD fit on train fraction<BR ALIGN="LEFT"/>
+                z = (x - median) / (1.4826 × MAD)<BR ALIGN="LEFT"/>
+                clip to bounded range
+            >,
+            fillcolor="#13275a",
+            color="#4a6cff"
+        ];
+
+        data_chaingrid [
+            label=<
+                <B>Chain Grid Builder</B><BR ALIGN="LEFT"/>
+                build [N_contracts, 10] inference tensor<BR ALIGN="LEFT"/>
+                preserve raw chain for leg selection
+            >,
+            fillcolor="#162d68",
+            color="#4a6cff"
+        ];
+
+        bundle_node [
+            label=<
+                <B>MultiTFDataBundle</B><BR ALIGN="LEFT"/>
+                m1_feat / m5_feat / m15_feat / h1_feat<BR ALIGN="LEFT"/>
+                pivots / pos_state / m5_timestamps / m5_spot<BR ALIGN="LEFT"/>
+                chain_grid_by_date / chain_df_by_date
+            >,
+            fillcolor="#1c3577",
+            color="#7ea6ff"
+        ];
+
+        data_load -> data_align -> data_norm -> data_chaingrid -> bundle_node;
+    }
+
+    // =========================================================================
+    // ROW 3 — INFERENCE LAYER
+    // =========================================================================
+    subgraph cluster_inference {
+        label="INFERENCE LAYER — optional CondorNet v4.3 path";
+        style="rounded";
+        color="#9f7aea";
+        penwidth=2.2;
+        fontcolor="#9f7aea";
+        fontsize=13;
+
+        inf_model [
+            label=<
+                <B>load_v43_model(...)</B><BR ALIGN="LEFT"/>
+                reconstruct architecture<BR ALIGN="LEFT"/>
+                load checkpoint / move to device
+            >,
+            fillcolor="#1a0d2a",
+            color="#9f7aea"
+        ];
+
+        inf_batch [
+            label=<
+                <B>run_v43_batch_inference(...)</B><BR ALIGN="LEFT"/>
+                sequence windows over M5 clock<BR ALIGN="LEFT"/>
+                batched forward pass
+            >,
+            fillcolor="#24103a",
+            color="#9f7aea"
+        ];
+
+        inf_outputs [
+            label=<
+                <B>Named Model Outputs</B><BR ALIGN="LEFT"/>
+                entry_signal / exit_signal / POP / EV<BR ALIGN="LEFT"/>
+                position_size / strategy_idx / abstain
+            >,
+            fillcolor="#2d1448",
+            color="#c6a6ff"
+        ];
+
+        inf_model -> inf_batch -> inf_outputs;
+    }
+
+    // =========================================================================
+    // ROW 4 — STRATEGY CATALOG
+    // =========================================================================
+    subgraph cluster_catalog {
+        label="STRATEGY CATALOG — strategies/ + defaults merge";
+        style="rounded";
+        color="#48bb78";
+        penwidth=2.2;
+        fontcolor="#48bb78";
+        fontsize=13;
+
+        strat_scan [
+            label=<
+                <B>Template Discovery</B><BR ALIGN="LEFT"/>
+                scan strategies/*.py<BR ALIGN="LEFT"/>
+                exclude _*.py<BR ALIGN="LEFT"/>
+                load CONFIG dictionaries
+            >,
+            fillcolor="#0d2a1a",
+            color="#48bb78"
+        ];
+
+        strat_defaults [
+            label=<
+                <B>Global Defaults Merge</B><BR ALIGN="LEFT"/>
+                strategies/_defaults.py<BR ALIGN="LEFT"/>
+                template overrides default policy
+            >,
+            fillcolor="#123720",
+            color="#48bb78"
+        ];
+
+        strat_catalog [
+            label=<
+                <B>Executable Template Catalog</B><BR ALIGN="LEFT"/>
+                58 strategy templates<BR ALIGN="LEFT"/>
+                legs / DTE / stop / target / margin model
+            >,
+            fillcolor="#184526",
+            color="#7fdf9c"
+        ];
+
+        strat_scan -> strat_defaults -> strat_catalog;
+    }
+
+    // =========================================================================
+    // ROW 5 — MAIN BACKTEST ENGINE
+    // =========================================================================
+    subgraph cluster_backtest {
+        label="SIMULATION ENGINE — condor_brain_backtest_v45.py";
+        style="rounded";
+        color="#ed8936";
+        penwidth=2.4;
+        fontcolor="#ed8936";
+        fontsize=13;
+
+        bt_main [
+            label=<
+                <B>main()</B><BR ALIGN="LEFT"/>
+                parse CLI / load assets / configure runtime<BR ALIGN="LEFT"/>
+                choose legacy or v4.3 path
+            >,
+            fillcolor="#2a1a0a",
+            color="#ed8936"
+        ];
+
+        bt_loop [
+            label=<
+                <B>run_backtest(...)</B><BR ALIGN="LEFT"/>
+                sequential bar loop on canonical clock<BR ALIGN="LEFT"/>
+                multi-position portfolio simulation
+            >,
+            fillcolor="#35200b",
+            color="#ed8936"
+        ];
+
+        bt_state [
+            label=<
+                <B>Per-Bar MarketState</B><BR ALIGN="LEFT"/>
+                spot / chain / feature state / portfolio state<BR ALIGN="LEFT"/>
+                execution inputs assembled each bar
+            >,
+            fillcolor="#42280d",
+            color="#ed8936"
+        ];
+
+        bt_main -> bt_loop -> bt_state;
+    }
+
+    // =========================================================================
+    // ROW 6 — ENTRY / EXIT / EXECUTION
+    // =========================================================================
+    subgraph cluster_policy {
+        label="ENTRY–EXIT POLICY LIFECYCLE";
+        style="rounded";
+        color="#e53e3e";
+        penwidth=2.2;
+        fontcolor="#e53e3e";
+        fontsize=13;
+
+        gate_stack [
+            label=<
+                <B>Entry Gate Stack</B><BR ALIGN="LEFT"/>
+                policy finite / cooldown / signal / POP<BR ALIGN="LEFT"/>
+                abstain / chain integrity / legs found<BR ALIGN="LEFT"/>
+                atomic fill / credit floor / capital gate
+            >,
+            fillcolor="#2a0d0d",
+            color="#e53e3e"
+        ];
+
+        leg_select [
+            label=<
+                <B>Template → Legs Mapping</B><BR ALIGN="LEFT"/>
+                select_best_template(...)<BR ALIGN="LEFT"/>
+                find_best_legs(...) / build_legs_from_template(...)
+            >,
+            fillcolor="#341010",
+            color="#e53e3e"
+        ];
+
+        lifecycle [
+            label=<
+                <B>Lifecycle Decisions</B><BR ALIGN="LEFT"/>
+                ENTER / HOLD / EXIT / MODIFY / ADD<BR ALIGN="LEFT"/>
+                stop / target / DTE / Friday closeout / risk stop
+            >,
+            fillcolor="#401313",
+            color="#ff8b8b"
+        ];
+
+        gate_stack -> leg_select -> lifecycle;
+    }
+
+    subgraph cluster_exec {
+        label="EXECUTION REALITY MODEL";
+        style="rounded";
+        color="#00d4ff";
+        penwidth=2.2;
+        fontcolor="#00d4ff";
+        fontsize=13;
+
+        exec_price [
+            label=<
+                <B>Bid / Ask / Mid Synthesis</B><BR ALIGN="LEFT"/>
+                spread model / mark model<BR ALIGN="LEFT"/>
+                slippage and quote realism
+            >,
+            fillcolor="#0d1f2d",
+            color="#00d4ff"
+        ];
+
+        exec_fill [
+            label=<
+                <B>Fill Engine</B><BR ALIGN="LEFT"/>
+                atomic multi-leg fill checks<BR ALIGN="LEFT"/>
+                partial-fill rejection<BR ALIGN="LEFT"/>
+                entry and exit cost modeling
+            >,
+            fillcolor="#123048",
+            color="#00d4ff"
+        ];
+
+        exec_price -> exec_fill;
+    }
+
+    // =========================================================================
+    // ROW 7 — CAPITAL / RISK / METRICS
+    // =========================================================================
+    subgraph cluster_risk {
+        label="CAPITAL, RISK, AND METRICS";
+        style="rounded";
+        color="#d69e2e";
+        penwidth=2.2;
+        fontcolor="#d69e2e";
+        fontsize=13;
+
+        capital_model [
+            label=<
+                <B>Capital Constraint System</B><BR ALIGN="LEFT"/>
+                E₀ = 100,000<BR ALIGN="LEFT"/>
+                leverage = 2:1<BR ALIGN="LEFT"/>
+                max deploy = 40% of BP = 80,000
+            >,
+            fillcolor="#2a2a0d",
+            color="#d69e2e"
+        ];
+
+        margin_model [
+            label=<
+                <B>Margin Models</B><BR ALIGN="LEFT"/>
+                width-based spreads<BR ALIGN="LEFT"/>
+                pct-spot naked approximations<BR ALIGN="LEFT"/>
+                per-template CONFIG overrides
+            >,
+            fillcolor="#353510",
+            color="#d69e2e"
+        ];
+
+        metrics_node [
+            label=<
+                <B>Metrics + Truth Metrics</B><BR ALIGN="LEFT"/>
+                return / drawdown / WR / hold time / capital efficiency<BR ALIGN="LEFT"/>
+                slippage / atomic fill success / chain integrity failures
+            >,
+            fillcolor="#444414",
+            color="#ffe08a"
+        ];
+
+        capital_model -> margin_model -> metrics_node;
+    }
+
+    // =========================================================================
+    // ROW 8 — OPTIMIZER + DATASET FACTORY
+    // =========================================================================
+    subgraph cluster_optimizer {
+        label="OPTIMIZATION SYSTEM — strategy_optimizer.py";
+        style="rounded";
+        color="#f39c12";
+        penwidth=2.2;
+        fontcolor="#f39c12";
+        fontsize=13;
+
+        opt_grid [
+            label=<
+                <B>Parameter Grid</B><BR ALIGN="LEFT"/>
+                stop_loss_dollar / profit_target / max_positions<BR ALIGN="LEFT"/>
+                cooldown_bars / stop_loss_mult / max_contracts
+            >,
+            fillcolor="#2f1c07",
+            color="#f39c12"
+        ];
+
+        opt_loop [
+            label=<
+                <B>run_optimizer(...)</B><BR ALIGN="LEFT"/>
+                clone config / run repeated backtests<BR ALIGN="LEFT"/>
+                isolate state / collect metrics
+            >,
+            fillcolor="#3d2408",
+            color="#f39c12"
+        ];
+
+        opt_rank [
+            label=<
+                <B>Optimization Surface + Ranking</B><BR ALIGN="LEFT"/>
+                NP/DD ranking<BR ALIGN="LEFT"/>
+                CSV export + optional CONFIG patchback
+            >,
+            fillcolor="#4a2c0a",
+            color="#ffd08a"
+        ];
+
+        opt_grid -> opt_loop -> opt_rank;
+    }
+
+    subgraph cluster_dataset {
+        label="PRIMARY PRODUCT — STATE–ACTION DATASET FACTORY";
+        style="rounded";
+        color="#2E7D32";
+        penwidth=2.4;
+        fontcolor="#2E7D32";
+        fontsize=13;
+
+        event_log [
+            label=<
+                <B>Event Log Stream</B><BR ALIGN="LEFT"/>
+                OPEN / CLOSE / MODIFY / ADD<BR ALIGN="LEFT"/>
+                bar trace / decision trace / audit records
+            >,
+            fillcolor="#103119",
+            color="#2E7D32"
+        ];
+
+        traj_factory [
+            label=<
+                <B>StateActionRecord Builder</B><BR ALIGN="LEFT"/>
+                state = market + portfolio + strategy context<BR ALIGN="LEFT"/>
+                action = ENTER / HOLD / EXIT / MODIFY / ADD<BR ALIGN="LEFT"/>
+                reward = immediate + terminal + risk-shaped
+            >,
+            fillcolor="#154521",
+            color="#2E7D32"
+        ];
+
+        outputs_node [
+            label=<
+                <B>Research Artifacts</B><BR ALIGN="LEFT"/>
+                trades.csv / equity_curve.csv / bar_trace.jsonl<BR ALIGN="LEFT"/>
+                optimization/*.csv / trajectories/*.parquet
+            >,
+            fillcolor="#1b5a2a",
+            color="#8ad39a"
+        ];
+
+        event_log -> traj_factory -> outputs_node;
+    }
+
+    // =========================================================================
+    // CONNECTORS
+    // =========================================================================
+    title_block -> asset_tf;
+    title_block -> asset_chain;
+    title_block -> asset_model;
+    title_block -> asset_rules;
+
+    asset_tf    -> data_load     [color="#4a6cff"];
+    asset_chain -> data_chaingrid[color="#4a6cff"];
+    asset_model -> inf_model     [color="#9f7aea"];
+    asset_rules -> bt_main       [color="#48bb78"];
+
+    bundle_node -> inf_batch     [color="#9f7aea"];
+    bundle_node -> bt_loop       [color="#ed8936"];
+    inf_outputs -> bt_loop       [color="#9f7aea", penwidth=2.0];
+
+    strat_catalog -> gate_stack  [color="#48bb78"];
+    bt_state      -> gate_stack  [color="#e53e3e"];
+    bt_state      -> exec_price  [color="#00d4ff"];
+    leg_select    -> exec_fill   [color="#00d4ff"];
+    exec_fill     -> lifecycle   [color="#00d4ff"];
+
+    lifecycle     -> capital_model [color="#d69e2e"];
+    lifecycle     -> event_log     [color="#2E7D32"];
+    metrics_node  -> opt_loop      [color="#f39c12"];
+    bt_loop       -> opt_loop      [color="#f39c12", style=dashed];
+    metrics_node  -> outputs_node  [color="#2E7D32"];
+    event_log     -> outputs_node  [color="#2E7D32"];
+    lifecycle     -> traj_factory  [color="#2E7D32", penwidth=2.0];
+
+    // Layout helpers
+    { rank=same; data_load; inf_model; strat_scan; bt_main; }
+    { rank=same; gate_stack; exec_price; capital_model; opt_grid; event_log; }
+
+    // =========================================================================
+    // LEGEND
+    // =========================================================================
+    legend [
+        shape=note,
+        fillcolor="#ffffcc",
+        color="#999966",
+        fontcolor="#111111",
+        fontsize=9,
+        label=<
+            <B>Legend</B><BR ALIGN="LEFT"/>
+            Blue = data layer<BR ALIGN="LEFT"/>
+            Purple = neural inference<BR ALIGN="LEFT"/>
+            Green = strategy catalog / dataset outputs<BR ALIGN="LEFT"/>
+            Orange = simulation / optimizer<BR ALIGN="LEFT"/>
+            Red = entry / exit decision system<BR ALIGN="LEFT"/>
+            Cyan = execution reality<BR ALIGN="LEFT"/>
+            Gold = capital / risk / metrics
+        >
+    ];
+
+    outputs_node -> legend [style=invis];
+
+    // =========================================================================
+    // COPYRIGHT / FOOTER
+    // =========================================================================
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=9, fontcolor="#777777", fontname="Helvetica Neue"];
+        copyright_note [
+            label="© 2026 by Dr. T. Jerry Mahabub, Ph.D. — CondorNet™ / Quantor-MTFuzz™ Research Architecture"
+        ];
+    }
+}

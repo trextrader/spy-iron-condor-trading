@@ -1,0 +1,586 @@
+{
+  "best_model": {
+    "epoch": 7,
+    "val_loss": 0.955302975394509,
+    "train_loss": 0.8817779290676117
+  },
+  "comparisons": {
+    "Epoch1": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 499,
+      "different_sets": 13,
+      "same_super_sets": 499,
+      "different_super_sets": 13,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.006341,
+      "val_loss": 1.2840217351913452,
+      "train_loss": 2.055202376842499
+    },
+    "Epoch2": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 503,
+      "different_sets": 9,
+      "same_super_sets": 503,
+      "different_super_sets": 9,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.076845,
+      "val_loss": 1.0198942531238904,
+      "train_loss": 1.1198304319381713
+    },
+    "Epoch3": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 503,
+      "different_sets": 9,
+      "same_super_sets": 503,
+      "different_super_sets": 9,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.080078,
+      "val_loss": 0.9866994456811384,
+      "train_loss": 0.9813314199447631
+    },
+    "Epoch4": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 501,
+      "different_sets": 11,
+      "same_super_sets": 501,
+      "different_super_sets": 11,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.029936,
+      "val_loss": 0.976110425862399,
+      "train_loss": 0.9417323017120361
+    },
+    "Epoch5": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 504,
+      "different_sets": 8,
+      "same_super_sets": 504,
+      "different_super_sets": 8,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.013244,
+      "val_loss": 0.9626391259106722,
+      "train_loss": 0.9158481872081756
+    },
+    "Epoch6": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 506,
+      "different_sets": 6,
+      "same_super_sets": 506,
+      "different_super_sets": 6,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.002817,
+      "val_loss": 0.9678273255174811,
+      "train_loss": 0.9006953775882721
+    },
+    "Epoch7": "BEST MODEL \u2014 omitted from diff",
+    "Epoch8": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 512,
+      "different_sets": 0,
+      "same_super_sets": 512,
+      "different_super_sets": 0,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.02234,
+      "val_loss": 0.9759948958050121,
+      "train_loss": 0.8632332468032837
+    },
+    "Epoch9": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.003562,
+      "val_loss": 0.9592421650886536,
+      "train_loss": 0.8501874554157257
+    },
+    "Epoch10": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 508,
+      "different_sets": 4,
+      "same_super_sets": 508,
+      "different_super_sets": 4,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.00243,
+      "val_loss": 0.9712506586855109,
+      "train_loss": 0.8350671398639679
+    },
+    "Epoch11": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 507,
+      "different_sets": 5,
+      "same_super_sets": 507,
+      "different_super_sets": 5,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.033362,
+      "val_loss": 0.9598308151418512,
+      "train_loss": 0.8193446207046509
+    },
+    "Epoch12": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 505,
+      "different_sets": 7,
+      "same_super_sets": 505,
+      "different_super_sets": 7,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.051411,
+      "val_loss": 0.9678160331465981,
+      "train_loss": 0.8067734360694885
+    },
+    "Epoch13": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 504,
+      "different_sets": 8,
+      "same_super_sets": 504,
+      "different_super_sets": 8,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.072472,
+      "val_loss": 0.9679936604066328,
+      "train_loss": 0.7991606628894806
+    },
+    "Epoch14": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 504,
+      "different_sets": 8,
+      "same_super_sets": 504,
+      "different_super_sets": 8,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.088908,
+      "val_loss": 0.9634273919192228,
+      "train_loss": 0.7856738698482514
+    },
+    "Epoch15": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 503,
+      "different_sets": 9,
+      "same_super_sets": 503,
+      "different_super_sets": 9,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.098321,
+      "val_loss": 0.9633531462062489,
+      "train_loss": 0.7807512843608856
+    },
+    "Epoch16": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 506,
+      "different_sets": 6,
+      "same_super_sets": 506,
+      "different_super_sets": 6,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.105643,
+      "val_loss": 0.9736759879372336,
+      "train_loss": 0.7732723009586334
+    },
+    "Epoch17": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 504,
+      "different_sets": 8,
+      "same_super_sets": 504,
+      "different_super_sets": 8,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.112256,
+      "val_loss": 0.9670211347666654,
+      "train_loss": 0.7640036427974701
+    },
+    "Epoch18": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 502,
+      "different_sets": 10,
+      "same_super_sets": 502,
+      "different_super_sets": 10,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.117816,
+      "val_loss": 0.9736279520121488,
+      "train_loss": 0.759752653837204
+    },
+    "Epoch19": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 501,
+      "different_sets": 11,
+      "same_super_sets": 501,
+      "different_super_sets": 11,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.121844,
+      "val_loss": 0.9882952679287303,
+      "train_loss": 0.7515766298770905
+    },
+    "Epoch20": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 503,
+      "different_sets": 9,
+      "same_super_sets": 503,
+      "different_super_sets": 9,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.129013,
+      "val_loss": 0.9815737334164706,
+      "train_loss": 0.7542509579658508
+    },
+    "Epoch21": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 504,
+      "different_sets": 8,
+      "same_super_sets": 504,
+      "different_super_sets": 8,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.129431,
+      "val_loss": 0.9891042600978505,
+      "train_loss": 0.7456917321681976
+    },
+    "Epoch22": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 502,
+      "different_sets": 10,
+      "same_super_sets": 502,
+      "different_super_sets": 10,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.130421,
+      "val_loss": 0.9882560101422396,
+      "train_loss": 0.741809778213501
+    },
+    "Epoch23": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 502,
+      "different_sets": 10,
+      "same_super_sets": 502,
+      "different_super_sets": 10,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.134147,
+      "val_loss": 0.99700373953039,
+      "train_loss": 0.7378484356403351
+    },
+    "Epoch24": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 499,
+      "different_sets": 13,
+      "same_super_sets": 499,
+      "different_super_sets": 13,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.139635,
+      "val_loss": 0.9878388263962485,
+      "train_loss": 0.7388743150234223
+    },
+    "Epoch25": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 499,
+      "different_sets": 13,
+      "same_super_sets": 499,
+      "different_super_sets": 13,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.139512,
+      "val_loss": 0.9912075400352478,
+      "train_loss": 0.7300065743923188
+    },
+    "Epoch26": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 498,
+      "different_sets": 14,
+      "same_super_sets": 498,
+      "different_super_sets": 14,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.14005,
+      "val_loss": 0.9967860200188376,
+      "train_loss": 0.7293510890007019
+    },
+    "Epoch27": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 497,
+      "different_sets": 15,
+      "same_super_sets": 497,
+      "different_super_sets": 15,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.139377,
+      "val_loss": 0.9870298342271284,
+      "train_loss": 0.7278033518791198
+    },
+    "Epoch28": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 497,
+      "different_sets": 15,
+      "same_super_sets": 497,
+      "different_super_sets": 15,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.138957,
+      "val_loss": 0.9960969361391935,
+      "train_loss": 0.7258314001560211
+    },
+    "Epoch29": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 495,
+      "different_sets": 17,
+      "same_super_sets": 495,
+      "different_super_sets": 17,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.141729,
+      "val_loss": 0.9945243759588762,
+      "train_loss": 0.7267557895183563
+    },
+    "Epoch30": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 495,
+      "different_sets": 17,
+      "same_super_sets": 495,
+      "different_super_sets": 17,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.14357,
+      "val_loss": 0.9983871254053983,
+      "train_loss": 0.7225223529338837
+    },
+    "Epoch31": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 495,
+      "different_sets": 17,
+      "same_super_sets": 495,
+      "different_super_sets": 17,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.145396,
+      "val_loss": 0.9993526881391351,
+      "train_loss": 0.7248644638061523
+    },
+    "Epoch32": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 494,
+      "different_sets": 18,
+      "same_super_sets": 494,
+      "different_super_sets": 18,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.145409,
+      "val_loss": 0.998838104984977,
+      "train_loss": 0.7152929377555847
+    },
+    "Epoch33": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 495,
+      "different_sets": 17,
+      "same_super_sets": 495,
+      "different_super_sets": 17,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.144904,
+      "val_loss": 0.9952684261582114,
+      "train_loss": 0.7256310629844666
+    },
+    "Epoch34": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 495,
+      "different_sets": 17,
+      "same_super_sets": 495,
+      "different_super_sets": 17,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.145436,
+      "val_loss": 0.9960301247510043,
+      "train_loss": 0.718386207818985
+    },
+    "Epoch35": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 495,
+      "different_sets": 17,
+      "same_super_sets": 495,
+      "different_super_sets": 17,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.145877,
+      "val_loss": 0.9967581358822909,
+      "train_loss": 0.7188031125068665
+    },
+    "Epoch36": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 495,
+      "different_sets": 17,
+      "same_super_sets": 495,
+      "different_super_sets": 17,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.146323,
+      "val_loss": 0.9970448233864524,
+      "train_loss": 0.7166693186759949
+    },
+    "Epoch37": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 495,
+      "different_sets": 17,
+      "same_super_sets": 495,
+      "different_super_sets": 17,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.146482,
+      "val_loss": 0.9967101595618508,
+      "train_loss": 0.717290426492691
+    }
+  }
+}

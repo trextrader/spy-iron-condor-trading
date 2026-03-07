@@ -1,0 +1,796 @@
+{
+  "best_model": {
+    "epoch": 27,
+    "val_loss": 1.5598328547044233,
+    "train_loss": 1.2155258679389953
+  },
+  "comparisons": {
+    "Epoch1": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 497,
+      "different_sets": 15,
+      "same_super_sets": 497,
+      "different_super_sets": 15,
+      "strategy_head_diff": {
+        "changed_classes": [
+          {
+            "class": "single_call",
+            "delta": 0.117
+          },
+          {
+            "class": "single_put",
+            "delta": 0.0661
+          },
+          {
+            "class": "bear_put_spread",
+            "delta": 0.0636
+          },
+          {
+            "class": "straddle",
+            "delta": 0.078
+          },
+          {
+            "class": "butterfly_call",
+            "delta": 0.0532
+          },
+          {
+            "class": "abstain",
+            "delta": 0.0779
+          }
+        ],
+        "n_changed": 6
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.162403,
+      "val_loss": 2.4550950960679487,
+      "train_loss": 2.9951440048217775
+    },
+    "Epoch2": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 501,
+      "different_sets": 11,
+      "same_super_sets": 501,
+      "different_super_sets": 11,
+      "strategy_head_diff": {
+        "changed_classes": [
+          {
+            "class": "single_call",
+            "delta": 0.1089
+          },
+          {
+            "class": "single_put",
+            "delta": 0.0633
+          },
+          {
+            "class": "bear_put_spread",
+            "delta": 0.0575
+          },
+          {
+            "class": "straddle",
+            "delta": 0.0759
+          },
+          {
+            "class": "butterfly_call",
+            "delta": 0.0505
+          },
+          {
+            "class": "abstain",
+            "delta": 0.0715
+          }
+        ],
+        "n_changed": 6
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.143464,
+      "val_loss": 2.1218201355500654,
+      "train_loss": 2.3159928035736086
+    },
+    "Epoch3": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 503,
+      "different_sets": 9,
+      "same_super_sets": 503,
+      "different_super_sets": 9,
+      "strategy_head_diff": {
+        "changed_classes": [
+          {
+            "class": "single_call",
+            "delta": 0.1015
+          },
+          {
+            "class": "single_put",
+            "delta": 0.0612
+          },
+          {
+            "class": "bear_put_spread",
+            "delta": 0.0512
+          },
+          {
+            "class": "straddle",
+            "delta": 0.0726
+          },
+          {
+            "class": "abstain",
+            "delta": 0.0655
+          }
+        ],
+        "n_changed": 5
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.111948,
+      "val_loss": 1.9812620227987117,
+      "train_loss": 2.086103627681732
+    },
+    "Epoch4": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 503,
+      "different_sets": 9,
+      "same_super_sets": 503,
+      "different_super_sets": 9,
+      "strategy_head_diff": {
+        "changed_classes": [
+          {
+            "class": "single_call",
+            "delta": 0.0949
+          },
+          {
+            "class": "single_put",
+            "delta": 0.0596
+          },
+          {
+            "class": "straddle",
+            "delta": 0.0688
+          },
+          {
+            "class": "abstain",
+            "delta": 0.0605
+          }
+        ],
+        "n_changed": 4
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.106637,
+      "val_loss": 1.9017043763940984,
+      "train_loss": 1.9502161860466003
+    },
+    "Epoch5": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 506,
+      "different_sets": 6,
+      "same_super_sets": 506,
+      "different_super_sets": 6,
+      "strategy_head_diff": {
+        "changed_classes": [
+          {
+            "class": "single_call",
+            "delta": 0.0886
+          },
+          {
+            "class": "single_put",
+            "delta": 0.058
+          },
+          {
+            "class": "straddle",
+            "delta": 0.0645
+          },
+          {
+            "class": "butterfly_call",
+            "delta": 0.0504
+          },
+          {
+            "class": "abstain",
+            "delta": 0.0559
+          }
+        ],
+        "n_changed": 5
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.1001,
+      "val_loss": 1.8579177964817395,
+      "train_loss": 1.8656536412239075
+    },
+    "Epoch6": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 506,
+      "different_sets": 6,
+      "same_super_sets": 506,
+      "different_super_sets": 6,
+      "strategy_head_diff": {
+        "changed_classes": [
+          {
+            "class": "single_call",
+            "delta": 0.082
+          },
+          {
+            "class": "single_put",
+            "delta": 0.0554
+          },
+          {
+            "class": "straddle",
+            "delta": 0.0599
+          },
+          {
+            "class": "butterfly_call",
+            "delta": 0.0504
+          },
+          {
+            "class": "abstain",
+            "delta": 0.0512
+          }
+        ],
+        "n_changed": 5
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.086926,
+      "val_loss": 1.808782610026273,
+      "train_loss": 1.788301706314087
+    },
+    "Epoch7": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 506,
+      "different_sets": 6,
+      "same_super_sets": 506,
+      "different_super_sets": 6,
+      "strategy_head_diff": {
+        "changed_classes": [
+          {
+            "class": "single_call",
+            "delta": 0.0758
+          },
+          {
+            "class": "single_put",
+            "delta": 0.0522
+          },
+          {
+            "class": "straddle",
+            "delta": 0.055
+          }
+        ],
+        "n_changed": 3
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.076327,
+      "val_loss": 1.7616143009879373,
+      "train_loss": 1.7292664194107055
+    },
+    "Epoch8": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 508,
+      "different_sets": 4,
+      "same_super_sets": 508,
+      "different_super_sets": 4,
+      "strategy_head_diff": {
+        "changed_classes": [
+          {
+            "class": "single_call",
+            "delta": 0.0688
+          },
+          {
+            "class": "straddle",
+            "delta": 0.0503
+          }
+        ],
+        "n_changed": 2
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.056713,
+      "val_loss": 1.7553406303579158,
+      "train_loss": 1.678606662750244
+    },
+    "Epoch9": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 508,
+      "different_sets": 4,
+      "same_super_sets": 508,
+      "different_super_sets": 4,
+      "strategy_head_diff": {
+        "changed_classes": [
+          {
+            "class": "single_call",
+            "delta": 0.0623
+          }
+        ],
+        "n_changed": 1
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.036487,
+      "val_loss": 1.7201429497111926,
+      "train_loss": 1.6298939514160156
+    },
+    "Epoch10": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [
+          {
+            "class": "single_call",
+            "delta": 0.0557
+          }
+        ],
+        "n_changed": 1
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.051935,
+      "val_loss": 1.6824574578892102,
+      "train_loss": 1.582272810935974
+    },
+    "Epoch11": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 510,
+      "different_sets": 2,
+      "same_super_sets": 510,
+      "different_super_sets": 2,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.023465,
+      "val_loss": 1.6766465468840166,
+      "train_loss": 1.5349768114089966
+    },
+    "Epoch12": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 511,
+      "different_sets": 1,
+      "same_super_sets": 511,
+      "different_super_sets": 1,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.018286,
+      "val_loss": 1.6524173021316528,
+      "train_loss": 1.4984721970558166
+    },
+    "Epoch13": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 512,
+      "different_sets": 0,
+      "same_super_sets": 512,
+      "different_super_sets": 0,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.02431,
+      "val_loss": 1.6378184990449385,
+      "train_loss": 1.472510850429535
+    },
+    "Epoch14": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 512,
+      "different_sets": 0,
+      "same_super_sets": 512,
+      "different_super_sets": 0,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.019,
+      "val_loss": 1.6271245371211658,
+      "train_loss": 1.4348846411705016
+    },
+    "Epoch15": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 512,
+      "different_sets": 0,
+      "same_super_sets": 512,
+      "different_super_sets": 0,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.010489,
+      "val_loss": 1.6130465052344582,
+      "train_loss": 1.401463668346405
+    },
+    "Epoch16": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 512,
+      "different_sets": 0,
+      "same_super_sets": 512,
+      "different_super_sets": 0,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.024499,
+      "val_loss": 1.6180179986086758,
+      "train_loss": 1.3844321155548096
+    },
+    "Epoch17": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 512,
+      "different_sets": 0,
+      "same_super_sets": 512,
+      "different_super_sets": 0,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.017819,
+      "val_loss": 1.5982679237018933,
+      "train_loss": 1.3551276445388794
+    },
+    "Epoch18": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 512,
+      "different_sets": 0,
+      "same_super_sets": 512,
+      "different_super_sets": 0,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.015725,
+      "val_loss": 1.5920248790220781,
+      "train_loss": 1.3390925073623656
+    },
+    "Epoch19": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 512,
+      "different_sets": 0,
+      "same_super_sets": 512,
+      "different_super_sets": 0,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.022838,
+      "val_loss": 1.5907085050236096,
+      "train_loss": 1.3230731964111329
+    },
+    "Epoch20": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 512,
+      "different_sets": 0,
+      "same_super_sets": 512,
+      "different_super_sets": 0,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.018749,
+      "val_loss": 1.598405816338279,
+      "train_loss": 1.2938526439666749
+    },
+    "Epoch21": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 512,
+      "different_sets": 0,
+      "same_super_sets": 512,
+      "different_super_sets": 0,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.01704,
+      "val_loss": 1.5838984901254827,
+      "train_loss": 1.2895927047729492
+    },
+    "Epoch22": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 512,
+      "different_sets": 0,
+      "same_super_sets": 512,
+      "different_super_sets": 0,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.008706,
+      "val_loss": 1.5739766359329224,
+      "train_loss": 1.2700401759147644
+    },
+    "Epoch23": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 512,
+      "different_sets": 0,
+      "same_super_sets": 512,
+      "different_super_sets": 0,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.006989,
+      "val_loss": 1.5696785124865444,
+      "train_loss": 1.253742389678955
+    },
+    "Epoch24": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 511,
+      "different_sets": 1,
+      "same_super_sets": 511,
+      "different_super_sets": 1,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.004631,
+      "val_loss": 1.567420569333163,
+      "train_loss": 1.2474928998947143
+    },
+    "Epoch25": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 511,
+      "different_sets": 1,
+      "same_super_sets": 511,
+      "different_super_sets": 1,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": -0.000847,
+      "val_loss": 1.5609091086821123,
+      "train_loss": 1.2338538718223573
+    },
+    "Epoch26": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 512,
+      "different_sets": 0,
+      "same_super_sets": 512,
+      "different_super_sets": 0,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.00521,
+      "val_loss": 1.571365150538358,
+      "train_loss": 1.216238522529602
+    },
+    "Epoch27": "BEST MODEL \u2014 omitted from diff",
+    "Epoch28": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 511,
+      "different_sets": 1,
+      "same_super_sets": 511,
+      "different_super_sets": 1,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.004503,
+      "val_loss": 1.5638113997199319,
+      "train_loss": 1.2007320594787598
+    },
+    "Epoch29": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 510,
+      "different_sets": 2,
+      "same_super_sets": 510,
+      "different_super_sets": 2,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.008058,
+      "val_loss": 1.566189321604642,
+      "train_loss": 1.1948331785202027
+    },
+    "Epoch30": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.007476,
+      "val_loss": 1.5626408945430408,
+      "train_loss": 1.1912286257743836
+    },
+    "Epoch31": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 510,
+      "different_sets": 2,
+      "same_super_sets": 510,
+      "different_super_sets": 2,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.00814,
+      "val_loss": 1.5599639957601374,
+      "train_loss": 1.1875433421134949
+    },
+    "Epoch32": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 511,
+      "different_sets": 1,
+      "same_super_sets": 511,
+      "different_super_sets": 1,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.007647,
+      "val_loss": 1.5602866844697432,
+      "train_loss": 1.1801788854598998
+    },
+    "Epoch33": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 510,
+      "different_sets": 2,
+      "same_super_sets": 510,
+      "different_super_sets": 2,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.008915,
+      "val_loss": 1.562339024110274,
+      "train_loss": 1.1721271109580993
+    },
+    "Epoch34": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.009947,
+      "val_loss": 1.564312067898837,
+      "train_loss": 1.1753415060043335
+    },
+    "Epoch35": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.009974,
+      "val_loss": 1.5621342658996582,
+      "train_loss": 1.1691926193237305
+    },
+    "Epoch36": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.010062,
+      "val_loss": 1.5616490082307295,
+      "train_loss": 1.1707597327232362
+    },
+    "Epoch37": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.010208,
+      "val_loss": 1.5606346672231501,
+      "train_loss": 1.1703068661689757
+    },
+    "Epoch38": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.010428,
+      "val_loss": 1.5605718439275569,
+      "train_loss": 1.1679956531524658
+    },
+    "Epoch39": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.010414,
+      "val_loss": 1.5604547695680098,
+      "train_loss": 1.1656288480758668
+    },
+    "Epoch40": {
+      "same_predicates": 8,
+      "different_predicates": 0,
+      "same_sets": 509,
+      "different_sets": 3,
+      "same_super_sets": 509,
+      "different_super_sets": 3,
+      "strategy_head_diff": {
+        "changed_classes": [],
+        "n_changed": 0
+      },
+      "pivot_head_diff": {},
+      "spectral_radius_delta": 0.010433,
+      "val_loss": 1.5605655149980024,
+      "train_loss": 1.1741872596740723
+    }
+  }
+}

@@ -1,0 +1,3181 @@
+.
+├── CHANGELOG.md
+├── CLAUDE.md
+├── CN43Interp.py
+├── README.md
+├── Screenshots
+│   └── Tradingview
+│       ├── CME_Trading Portal using IVR Pivots Signal for Manual Execution.PNG
+│       ├── IVR-Pivots-QMTF.PNG
+│       ├── IVR-Pivots-Updated-QMTF.PNG
+│       ├── Quantor Dynamic Fib and Multi-strength pivots merged.PNG
+│       ├── QuantorReversal.PNG
+│       ├── SPY_m1_Pivot_settings.PNG
+│       └── Settings for Multi-tier pivot engine.PNG
+├── _patch_exit_logging.py
+├── analytics
+│   ├── __init__.py
+│   ├── audit_logger.py
+│   ├── carry_model.py
+│   ├── divergence.py
+│   ├── gaps.py
+│   ├── indicators.py
+│   ├── metrics.py
+│   ├── realized_vol.py
+│   └── skew.py
+├── architecture
+│   └── condornet_v43_architecture.dot
+├── archive
+│   ├── docs
+│   │   ├── diagrams
+│   │   │   ├── robust_pricing_hedging_deepmamba2.dot
+│   │   │   └── robust_pricing_hedging_deepmamba2.png
+│   │   ├── legacy
+│   │   │   ├── MAMBA2_FIX_VERIFICATION.md
+│   │   │   ├── Mamba-2 SSD Block Matrix.dot
+│   │   │   ├── Mamba-2 SSD Block Matrix.png
+│   │   │   ├── Mamba-2 Semiseparable SSD Matrix Block Decomposition.dot
+│   │   │   ├── Mamba-2 Semiseparable SSD Matrix Block Decomposition.png
+│   │   │   ├── Mamba2_MultiPanel_SSM_SSD.dot
+│   │   │   ├── Novel Mathematical Enhancements for CondorBrain Mamba.pdf
+│   │   │   ├── README.md
+│   │   │   ├── SSD_Banded_Outer_Product.dot
+│   │   │   ├── SSD_Banded_Outer_Product.png
+│   │   │   ├── Selective SSM Block Mamba2.dot
+│   │   │   ├── Selective SSM Block Mamba2.png
+│   │   │   ├── Selective SSM Block Mamba2.txt
+│   │   │   ├── mamba2_architecture_diagram_1768128710528.png
+│   │   │   ├── mamba_engine_logic.dot
+│   │   │   └── mamba_engine_logic.png
+│   │   └── reference
+│   │       ├── Enhancing CondorBrain (Mamba-2) for Institutional-Grade SPY Options Trading.pdf
+│   │       └── research-Enhancing the Mamba 2 Neural Network for Advanced Trading and ROI Optimization.pdf
+│   ├── intelligence
+│   │   ├── mamba_engine.py
+│   │   ├── sweep_condor_brain.py
+│   │   └── train_mamba.py
+│   ├── kaggle
+│   │   ├── condor_brain_backtest.py
+│   │   ├── condor_brain_backtest_20k.py
+│   │   ├── condor_brain_backtest_20k_multigpu.py
+│   │   ├── condor_brain_backtest_fast.py
+│   │   ├── condor_brain_backtest_final.py
+│   │   ├── condor_brain_backtest_legacy.py
+│   │   ├── condor_brain_backtest_optimized.py
+│   │   ├── condor_brain_inference_demo.py
+│   │   ├── condor_brain_rescue.py
+│   │   ├── condor_brain_retrain_tft.py
+│   │   ├── condor_brain_retrain_v2.py
+│   │   ├── condor_brain_retrain_v22.py
+│   │   ├── condor_brain_train_demo.py
+│   │   ├── condor_brain_train_fast.py
+│   │   ├── condor_brain_train_production.py
+│   │   └── inspect_checkpoint.py
+│   └── scripts
+│       ├── 04_model_forward_contract.py
+│       ├── 05_output_distribution.py
+│       ├── analyze_v21_dataset.py
+│       ├── audit_data_distribution.py
+│       ├── audit_ohlcv_groups.py
+│       ├── build_dataset_v3.py
+│       ├── construct_15m_foundation.py
+│       ├── construct_foundation_1m.py
+│       ├── create_synthetic_2025.py
+│       ├── extract_canonical_primitives.py
+│       ├── extract_docx.py
+│       ├── fix_colab_headers.py
+│       ├── generate_antigrav_instructions.py
+│       ├── generate_antigrav_instructions_updated.py
+│       ├── generate_final_antigrav_instructions.py
+│       ├── generate_major_updates.py
+│       ├── generate_remaining_rules.py
+│       ├── generate_rule_docs.py
+│       ├── generate_updated_rules.py
+│       ├── homework_check.py
+│       ├── homework_generate.py
+│       ├── lightning_train_4runs.sh
+│       ├── precompute_features.py
+│       ├── regenerate_v21_dataset.py
+│       ├── repair_2025_dataset.py
+│       ├── split_v21_dataset.py
+│       ├── validate_v3_dataset.py
+│       ├── verify_data_integrity.py
+│       └── verify_fix.py
+├── audit
+│   ├── __pycache__
+│   │   ├── contract_snapshot.cpython-312.pyc
+│   │   ├── decision_trace_logger.cpython-312.pyc
+│   │   └── generate_decision_factor_attribution.cpython-312.pyc
+│   ├── contract_snapshot.json
+│   ├── contract_snapshot.py
+│   ├── decision_trace_logger.py
+│   ├── due_diligence_dag.dot
+│   ├── export_learned_conditions.py
+│   ├── generate_audit_packet.py
+│   ├── generate_decision_factor_attribution.py
+│   ├── multi-mode screenshot running on lightningai.PNG
+│   ├── schema
+│   │   ├── __pycache__
+│   │   │   ├── validate_decision_factor_attribution.cpython-312.pyc
+│   │   │   └── validate_decision_trace.cpython-312.pyc
+│   │   ├── validate_decision_factor_attribution.py
+│   │   └── validate_decision_trace.py
+│   └── schemas
+│       ├── decision_factor_attribution_schema_v1.csv.txt
+│       ├── decision_trace_schema_v1.json
+│       └── fixtures
+│           ├── decision_factor_attribution_fixture.csv
+│           └── decision_trace_fixture.jsonl
+├── audit_run.log
+├── backtest_full.log
+├── backtest_run.log
+├── colab
+│   ├── A100_SWEEP_STRATEGY.md
+│   ├── README_COLAB.md
+│   ├── condor_brain_sweep.py
+│   └── spyt_cloud_optimizer.ipynb
+├── config.py
+├── configs
+│   └── loss_weights_v43.json
+├── core
+│   ├── __init__.py
+│   ├── __pycache__
+│   │   ├── __init__.cpython-312.pyc
+│   │   ├── backtest_engine.cpython-312.pyc
+│   │   ├── config.cpython-312.pyc
+│   │   └── dto.cpython-312.pyc
+│   ├── backtest_engine.py
+│   ├── benchmark_cpu.py
+│   ├── broker.py
+│   ├── config.py
+│   ├── config.template.py
+│   ├── config_optimized.json
+│   ├── data_validator.py
+│   ├── dto.py
+│   ├── liquidity_gate.py
+│   ├── main.py
+│   ├── optimizer.py
+│   └── risk_manager.py
+├── data
+│   ├── AllOptionsData
+│   │   ├── aapl
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── aapl_m1_test.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── abbv
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── abt
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── acn
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── adbe
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── aig
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── amd
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── amgn
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── amt
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── amzn
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── avgo
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── axp
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── ba
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── bac
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── bk
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── bkng
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── blk
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── bmy
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── brk.b
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── c
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── cat
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── cl
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── cmcsa
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── cof
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── cop
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── cost
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── crm
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── csco
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── cvs
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── cvx
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── de
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── dhr
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── dis
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── duk
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── earliest_years.csv
+│   │   ├── emr
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── fdx
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── gd
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── ge
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── gild
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── gm
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── goog
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── googl
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── gs
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── hd
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── hon
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── ibm
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── intu
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── isrg
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── iwm
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── jnj
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── jpm
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── ko
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── lin
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── lly
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── lmt
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── low
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── ma
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── mcd
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── mdlz
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── mdt
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── met
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── meta
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── mmm
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── mo
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── mrk
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── ms
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── msft
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── nee
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── nflx
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── nke
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── now
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── nvda
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── orcl
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── pep
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── pfe
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── pg
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── pltr
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── pm
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── pypl
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── qcom
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── qqq
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── rtx
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── sbux
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── schw
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── so
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── spg
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── spy
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── t
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── tgt
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── tmo
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── tmus
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── tsla
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── txn
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── uber
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── unh
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── unp
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── ups
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── usb
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── v
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── vix
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── vz
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── wfc
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   ├── wmt
+│   │   │   ├── 2016_m1.csv
+│   │   │   ├── 2017_m1.csv
+│   │   │   ├── 2018_m1.csv
+│   │   │   ├── 2019_m1.csv
+│   │   │   ├── 2020_m1.csv
+│   │   │   ├── 2021_m1.csv
+│   │   │   ├── 2022_m1.csv
+│   │   │   ├── 2023_m1.csv
+│   │   │   ├── 2024_m1.csv
+│   │   │   ├── 2025_m1.csv
+│   │   │   ├── options.parquet
+│   │   │   └── underlying.parquet
+│   │   └── xom
+│   │       ├── 2016_m1.csv
+│   │       ├── 2017_m1.csv
+│   │       ├── 2018_m1.csv
+│   │       ├── 2019_m1.csv
+│   │       ├── 2020_m1.csv
+│   │       ├── 2021_m1.csv
+│   │       ├── 2022_m1.csv
+│   │       ├── 2023_m1.csv
+│   │       ├── 2024_m1.csv
+│   │       ├── 2025_m1.csv
+│   │       ├── options.parquet
+│   │       └── underlying.parquet
+│   ├── Datasetv3
+│   │   ├── SPY_m1_02_09_2026.csv
+│   │   ├── condornet_v30_20260212.csv
+│   │   └── condornet_v30_20260212_precomputed_fixed.csv
+│   ├── Datasetv4
+│   │   ├── SPY_spot_with_studies
+│   │   │   ├── SPY_h1_2025_withStudies.csv
+│   │   │   ├── SPY_m15_2025_withStudies.csv
+│   │   │   ├── SPY_m1_2025_withStudies.csv
+│   │   │   └── SPY_m5_2025_withStudies.csv
+│   │   ├── pivots_manual.csv
+│   │   └── v43
+│   │       ├── h1_dataset_v43_final.csv
+│   │       ├── m15_dataset_v43_final.csv
+│   │       ├── m1_dataset_v43_final.csv
+│   │       ├── m5_dataset_v43_final.csv
+│   │       └── options_2025_v43.csv
+│   ├── OptionsDataPuller.py
+│   └── condornet_v41_FINAL.csv
+├── data_factory
+│   ├── DATASET_V30_CONSTRUCTION_PLAN.md
+│   ├── __init__.py
+│   ├── alpaca_data_client.py
+│   ├── aux_feeds.py
+│   ├── data_engine.py
+│   ├── downloaders
+│   │   ├── AlpacaGetData.py
+│   │   ├── AlpacaGetSPYSymbols.py
+│   │   ├── AlpacaGetTicks.py
+│   │   ├── PolyOptionsData.py
+│   │   ├── download_alpaca_intraday_options.py
+│   │   ├── download_alpaca_matched.py
+│   │   ├── download_alpaca_options.py
+│   │   ├── download_dec2025_options.ps1
+│   │   ├── download_dec2025_options.py
+│   │   ├── download_ivolatility_options.py
+│   │   ├── iqfeedoptionsdata.py
+│   │   ├── live_spy25_26_symbol_collector.py
+│   │   ├── spy_symbol_discovery_2025_2026.py
+│   │   ├── spy_symbols.txt
+│   │   ├── spy_symbols_2025_2026.txt
+│   │   └── top100_liquid_spy.py
+│   ├── fetch_volume_ratio.py
+│   ├── fix_alpaca_download_and_nyse_clean.py
+│   ├── option_chain.py
+│   ├── pipeline
+│   │   ├── SyntheticOptionsEngine.py
+│   │   ├── complete_2025_dataset.py
+│   │   ├── compute_historical_greeks.py
+│   │   ├── expand_options_intraday.py
+│   │   ├── expand_options_turbo.py
+│   │   ├── finalize_and_verify.py
+│   │   ├── merge_intraday_with_greeks.py
+│   │   ├── process_ivol_to_marks.py
+│   │   ├── repair_options_datasets.py
+│   │   ├── repair_options_fast.py
+│   │   ├── resample_intraday.py
+│   │   ├── validate_options_datasets.py
+│   │   └── verify_parity.py
+│   ├── polygon_client.py
+│   ├── scripts
+│   │   ├── __pycache__
+│   │   │   └── options_math.cpython-312.pyc
+│   │   ├── build_dataset_v30.py
+│   │   ├── merge_dec2025_into_v30.py
+│   │   ├── options_math.py
+│   │   └── schema_v30.py
+│   ├── spot_bars.py
+│   └── sync_engine.py
+├── diagnose_trades.py
+├── docs
+│   ├── 012526 Dev Team Report End-to-End Model - Checkpoint - Docs Audit  SmokeTest Harness - DeepMamba2  CondorBrain.pdf
+│   ├── Algorithmic Trading Platform - QuantConnect.com.pdf
+│   ├── BACKTEST_V45_EVOLUTION_PLAN.md
+│   ├── Bankster_move_esh6.PNG
+│   ├── CHANGELOG_2026-01-04.md
+│   ├── COLUMN_SCHEMA_AUDIT_V22.md
+│   ├── CONDORNET v4.2 — FORMAL IMPLEMENTATION BLUEPRINT.pdf
+│   ├── CONDORNET_GOVERNING_EQUATION.md
+│   ├── CONDORNET_IMPLEMENTATION_PLAN.md
+│   ├── Canonical_Rule_Primitive_Library.md
+│   ├── Capture.PNG
+│   ├── Complete_Ruleset_DSL.yaml
+│   ├── CondorBrain CondorIntelligence.pdf
+│   ├── CondorBrain CondorNet Backtester Audit & Overhaul Report.pdf
+│   ├── CondorBrain Infrastructure Critical dev Team Update 012726.pdf
+│   ├── CondorBrain Training Dashboard.pdf
+│   ├── CondorBrain – CondorIntelligence Input Data and Model Creation Process.pdf
+│   ├── CondorBrain ↔ Gaussian Stack Alignment Report.pdf
+│   ├── CondorBrain_Gaussian_DevOps_Alignment_Report.docx
+│   ├── CondorBrain_Gaussian_DevOps_Alignment_Report_Final.docx
+│   ├── CondorBrain™ & CondorIntelligence™.docx
+│   ├── CondorBrain™ – CondorIntelligence™ Input Data and Model Creation Process.docx
+│   ├── CondorNet - A New Neural Net Architecture.pdf
+│   ├── CondorNet - Mathematica Stability Test Comparison.pdf
+│   ├── CondorNet - Wiring up the CondorBrain & CondorInelligence Frameworks.pdf
+│   ├── CondorNet - Wiring up the CondorBrain & CondorIntelligence Frameworks.pdf
+│   ├── CondorNet Epoch 3 Interpretability Report February 7 2026.pdf
+│   ├── CondorNet Formal Constructive Derivations.pdf
+│   ├── CondorNet HAL-SNN New Upgraded Dataset February 11 2026.pdf
+│   ├── CondorNet Mathematica Notebook Testbench Analysis.pdf
+│   ├── CondorNet Training Output live updates in real-time.PNG
+│   ├── CondorNet v4.2 Structural Certification — Result.pdf
+│   ├── CondorNet_Logo.png
+│   ├── CondorNet_Logo_Sqaure.png
+│   ├── CondorNet_Mathematica_Test_Notebook_Output_epoch3.pdf
+│   ├── CondorNet_Unified_Governing_Equation.rtf
+│   ├── CondorNet_v43_Development_Progress.md
+│   ├── Cross-Architecture Interpretability Audit Neural CDE vs Mamba2.pdf
+│   ├── DEV_TEAM_UPDATE_2026-02-07.md
+│   ├── EXIT_SCAFFOLD_TASKLIST.md
+│   ├── GAP_ANALYSIS_MMI_Research.md
+│   ├── IMPLEMENTATION_PLAN_MODEL_AUDIT.md
+│   ├── IMPLEMENTATION_SUMMARY.md
+│   ├── INTEGRATION_PLAN_HJB_ROBUST_PRICING.md
+│   ├── INTEGRATION_PLAN_HJB_ROBUST_PRICING_PART2.md
+│   ├── INTEGRATION_PLAN_INDEX.md
+│   ├── INTEGRATION_PLAN_MASTER.md
+│   ├── INTERFACE_CATALOG.md
+│   ├── Important technical research outline Feb 2 2026.pdf
+│   ├── Institutional Entry and Exit Strategies in SPY Options)_rev2.docx
+│   ├── Institutional Entry and Exit Strategies in SPY Options.pdf
+│   ├── Institutional-Grade Trading Rules for SPY Options Model Integration.pdf
+│   ├── Integrating the Passerini–Vázquez HJB Framework and Modern Quantitative Methods into a High-Frequency SPY Options Trading System.docx
+│   ├── Integrating the Passerini–Vázquez HJB Framework and Modern Quantitative Methods into a High-Frequency SPY Options Trading System.pdf
+│   ├── Jerry_CME_Futures_Competition_day1.PNG
+│   ├── LIGHTNING_AI.md
+│   ├── MMI CondorNet HAL-SSN NeuroNetics Research Grade Addendum - Mathematical Formulations & Implementations.pdf
+│   ├── MULTI-MODEL NEURAL CDE INTERPRETABILITY.pdf
+│   ├── Machines Fixing Machines Real-Time Diagnostic and Neurosurgical Repair in Neural Networks.pdf
+│   ├── Neural_CDE.pdf
+│   ├── New CondorNet GUI Oscilliscope.PNG
+│   ├── PHASE_5_2_AUDIT_LOG.md
+│   ├── PHASE_5_3_AUDIT_LOG.md
+│   ├── PHASE_5_4_AUDIT_LOG.md
+│   ├── PHASE_5_5_AUDIT_LOG.md
+│   ├── PHASE_6_ACTION_EXECUTION_PLAN.md
+│   ├── PHASE_6_DEPENDENCY_GRAPH.md
+│   ├── PHASE_6_GANTT_TIMELINE.md
+│   ├── PHASE_6_GUI_TASK_LIST.md
+│   ├── PIPELINE_CONTRACT.json
+│   ├── PIPELINE_CONTRACT.md
+│   ├── Proposal January 19 2025.docx
+│   ├── Recursive Inequality Logic for SPY Options Using Combinatorics and Group Theory.pdf
+│   ├── Robust Pricing–Hedging Duality and DeepMamba2 Integration for SPY Iron Condor Trading - A Technical Research Report.docx
+│   ├── Robust Pricing–Hedging Duality and DeepMamba2 Integration for SPY Iron Condor Trading - A Technical Research Report.pdf
+│   ├── Rule_DSL_Specification.yaml
+│   ├── Strategic_Analysis_MMI_Paradigm.md
+│   ├── THE LAST PIECES OF THE PUZZLE ARE BEING INTEGRATED.pdf
+│   ├── TRAINING_DASHBOARD_GUIDE.md
+│   ├── The Spread -Average of H-L trading rule.docx
+│   ├── The Spread -Average of H-L trading rule.pdf
+│   ├── Trading Competition Stats and Written Statement - February 11 2026.pdf
+│   ├── advanced_roadmap.md
+│   ├── architectural_refactoring_plan.md
+│   ├── architecture
+│   │   ├── CondorBrain Logo transparent.png
+│   │   ├── CondorBrain logo mark.png
+│   │   ├── CondorBrain.docx
+│   │   ├── CondorBrain_V22_RuleEngine_Architecture.dot
+│   │   ├── CondorBrain_V22_RuleEngine_Architecture.png
+│   │   ├── CondorBrain™-CondorIntelligence™ Architecture Diagrams – Reference Guide.pdf
+│   │   ├── CondorNet_DecisionTree.dot
+│   │   ├── CondorNet_DecisionTree.png
+│   │   ├── CondorNet_Epoch3_LogicMap.dot
+│   │   ├── CondorNet_Epoch3_LogicMap.pdf
+│   │   ├── CondorNet_Epoch3_LogicMap.png
+│   │   ├── CondorNet_Epoch3_LogicMap.txt
+│   │   ├── CondorNet_EquationGraph.dot
+│   │   ├── CondorNet_EquationGraph.png
+│   │   ├── CondorNet_Equation_Derivation.dot
+│   │   ├── CondorNet_Equation_Derivation.png
+│   │   ├── CondorNet_Equation_Derivation_test.png
+│   │   ├── CondorNet_Mathematical_Integrator_Flow.dot
+│   │   ├── CondorNet_Mathematical_Integrator_Flow.png
+│   │   ├── CondorNet_NN_Architecture.dot
+│   │   ├── CondorNet_NN_Architecture.png
+│   │   ├── CondorNet_Operator_Block.dot
+│   │   ├── CondorNet_Operator_Block.png
+│   │   ├── CondorNet_v3_Feature_Stack.dot
+│   │   ├── CondorNet_v3_Feature_Stack.png
+│   │   ├── DIAGRAM_INDEX.md
+│   │   ├── Quantor_architecture.dot
+│   │   ├── Quantor_architecture.png
+│   │   ├── README.md
+│   │   ├── apply_dark_mode.ps1
+│   │   ├── audit_cde_comparison_flow.dot
+│   │   ├── audit_cde_comparison_flow.png
+│   │   ├── cde_engine_logic.dot
+│   │   ├── cde_engine_logic.png
+│   │   ├── complete_system_v23.dot
+│   │   ├── complete_system_v23.png
+│   │   ├── condor_brain_gaussian_dag.dot
+│   │   ├── condor_brain_gaussian_dag.png
+│   │   ├── condor_intelligence_flow.dot
+│   │   ├── condor_intelligence_flow.png
+│   │   ├── condor_intelligence_flow_premium.dot
+│   │   ├── condor_intelligence_flow_premium.png
+│   │   ├── condorbrain_v22_rule_engine.dot
+│   │   ├── condorbrain_v22_rule_engine.png
+│   │   ├── condornet_architecture.dot
+│   │   ├── condornet_architecture.png
+│   │   ├── condornet_equation_graph_premium_1770200590388.png
+│   │   ├── condornet_learned_logic.dot
+│   │   ├── condornet_learned_logic.pdf
+│   │   ├── condornet_learned_logic.png
+│   │   ├── condornet_nn_architecture_premium_1770200624850.png
+│   │   ├── condornet_operator_block_premium_1770200550552.png
+│   │   ├── condornet_v43_to_v50_transition.dot
+│   │   ├── condornet_v43_to_v50_transition.png
+│   │   ├── data_pipeline_detailed.dot
+│   │   ├── data_pipeline_detailed.png
+│   │   ├── dataflow.dot
+│   │   ├── dataflow.png
+│   │   ├── diagram_map.dot
+│   │   ├── diagram_map.png
+│   │   ├── enhanced_architecture.dot
+│   │   ├── enhanced_architecture.png
+│   │   ├── entryexitdecision.dot
+│   │   ├── entryexitdecision.png
+│   │   ├── epoch_checkpointing.dot
+│   │   ├── epoch_checkpointing.png
+│   │   ├── exit_priority.dot
+│   │   ├── exit_priority.png
+│   │   ├── full_system_architecture.dot
+│   │   ├── full_system_architecture.png
+│   │   ├── fuzzy_sizing_pipeline.dot
+│   │   ├── fuzzy_sizing_pipeline.png
+│   │   ├── gui_architecture.dot
+│   │   ├── gui_architecture.png
+│   │   ├── indicator_flow.png
+│   │   ├── institutional_execution_flow.dot
+│   │   ├── institutional_execution_flow.png
+│   │   ├── lag_alignment_flow.dot
+│   │   ├── lag_alignment_flow.png
+│   │   ├── membership_curves.dot
+│   │   ├── membership_curves.png
+│   │   ├── optimization_pipeline.dot
+│   │   ├── optimization_pipeline.png
+│   │   ├── phase2_phase3_architecture.dot
+│   │   ├── phase2_phase3_architecture.png
+│   │   ├── pipeline_diagram.dot
+│   │   ├── pipeline_diagram.png
+│   │   ├── position_sizing.dot
+│   │   ├── position_sizing.png
+│   │   ├── roadmap_flowchart.png
+│   │   ├── system_overview.dot
+│   │   ├── system_overview.png
+│   │   ├── technical_architecture_summary.md
+│   │   ├── training_components.dot
+│   │   ├── training_components.png
+│   │   ├── training_telemetry_flow.dot
+│   │   └── training_telemetry_flow.png
+│   ├── canonical_primitives_extracted.txt
+│   ├── condor_brain_architecture.dot
+│   ├── condor_brain_architecture.md
+│   ├── condor_brain_architecture.png
+│   ├── coverpage_condornet.png
+│   ├── diagrams
+│   │   ├── passerini_vazquez_hjb_framework.dot
+│   │   └── passerini_vazquez_hjb_framework.png
+│   ├── flipper_menu_map.png
+│   ├── implementation_plan.md
+│   ├── institutional-Grade Initial set of Trading Rules for SPY Options Model Integration.docx
+│   ├── institutional_rules_extracted.txt
+│   ├── intel_gpu_final_analysis.md
+│   ├── intel_gpu_installation_guide.md
+│   ├── internal
+│   │   ├── CONTRIBUTING.md
+│   │   ├── Condor Intelligence Weekly Research Report (jan 6–13, 2026).docx
+│   │   ├── Condor Intelligence Weekly Research Report jan 6–13 2026.pdf
+│   │   ├── DEVELOPMENT_STATUS.md
+│   │   ├── INTEGRATION_MODULE.md
+│   │   ├── ROADMAP.md
+│   │   ├── TASKS.md
+│   │   ├── WEEKLY_SUMMARY_2026-01-13.md
+│   │   └── task.md
+│   ├── ivolatility
+│   │   └── ivolatility docs 1.pdf
+│   ├── plans
+│   │   ├── implementation_plan_v43.md
+│   │   ├── implementation_plan_v43_full.md
+│   │   ├── task1_run.py
+│   │   ├── task_checklist_v43.md
+│   │   └── task_checklist_v43_full.md
+│   ├── reference
+│   │   ├── Condor Brain Mathematical Ref.pdf
+│   │   ├── Condor Brain Mathematical Reference Manual.docx
+│   │   ├── Dynamic Market Indicators - Math and Pythonic integration for CondorIntelligence.docx
+│   │   ├── Dynamic Market Indicators - Math and Pythonic integration for CondorIntelligence.pdf
+│   │   ├── Integrated Imp.pdf
+│   │   ├── Integrated Implementation Strategy.docx
+│   │   ├── Loss Function Specification and Training Error Interpretation.docx
+│   │   └── Loss Function Specification and Training Error Interpretation.pdf
+│   ├── scientific_spec.md
+│   ├── task.md
+│   ├── template_extracted.txt
+│   ├── trading_rules
+│   │   ├── AntiGrav_Implementation_Instructions.docx
+│   │   ├── Example_Rule_PSAR_Reversion.docx
+│   │   ├── Rule_A1_Dynamic_Bollinger_Band_Breakout.docx
+│   │   ├── Rule_A2_MACD_Crossover_with_Band_Expansion.docx
+│   │   ├── Rule_A3_ADX_RSI_Trend_Confirmation.docx
+│   │   ├── Rule_B1_Dynamic_Band_Reversion_Fuzzy.docx
+│   │   ├── Rule_B2_RSI_Divergence_Band_Touch.docx
+│   │   ├── Rule_C1_Band_Squeeze_Breakout.docx
+│   │   ├── Rule_C2_Persistent_Homology_Regime.docx
+│   │   ├── Rule_D1_RSI_Band_Confluence.docx
+│   │   ├── Rule_D2_Volume_Spike_Band_Break.docx
+│   │   ├── Rule_E1_Spread_vs_HighLow_Constraint.docx
+│   │   ├── Rule_E2_Band_Width_Expansion.docx
+│   │   ├── Rule_E3_Persistent_Homology_Chaos.docx
+│   │   ├── THE 14 CANONICAL PRIMITIVES.docx
+│   │   └── v2.0
+│   │       ├── Rule_A2_MACD_Crossover_v2.0.docx
+│   │       ├── Rule_B1_Fuzzy_Reversion_v2.0.docx
+│   │       ├── Rule_C1_Squeeze_Breakout_v2.0.docx
+│   │       ├── Rule_C2_Persistent_Homology_v2.5.docx
+│   │       ├── Rule_D2_Volume_Spike_v2.0.docx
+│   │       ├── Rule_E2_Band_Width_Expansion_v2.0.docx
+│   │       └── Rule_E3_Chaos_Detection_v2.5.docx
+│   ├── training
+│   │   ├── predictions_epoch_001.png
+│   │   ├── tensorboard first three.PNG
+│   │   ├── tensorboard last three.PNG
+│   │   └── tensorboard second three.PNG
+│   ├── v6_MMI_Implementation_Plan.md
+│   └── walkthrough.md
+├── download_m1_by_year.py
+├── execution
+│   ├── __pycache__
+│   │   └── alpaca_executor.cpython-312.pyc
+│   ├── alpaca_executor.py
+│   └── paper_executor.py
+├── find_checkpoint.py
+├── gui
+│   ├── Dockerfile.backend.dev
+│   ├── Dockerfile.frontend.dev
+│   ├── README.md
+│   ├── __init__.py
+│   ├── __pycache__
+│   │   └── __init__.cpython-312.pyc
+│   ├── backend
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   │   ├── __init__.cpython-312.pyc
+│   │   │   ├── config.cpython-312.pyc
+│   │   │   └── main.cpython-312.pyc
+│   │   ├── config.py
+│   │   ├── main.py
+│   │   ├── nohup.out
+│   │   ├── pyproject.toml
+│   │   ├── requirements.txt
+│   │   ├── routers
+│   │   │   ├── __init__.py
+│   │   │   ├── __pycache__
+│   │   │   │   ├── __init__.cpython-312.pyc
+│   │   │   │   ├── backtest.cpython-312.pyc
+│   │   │   │   ├── config.cpython-312.pyc
+│   │   │   │   ├── execution.cpython-312.pyc
+│   │   │   │   ├── model.cpython-312.pyc
+│   │   │   │   ├── optimization.cpython-312.pyc
+│   │   │   │   ├── readiness.cpython-312.pyc
+│   │   │   │   ├── tape.cpython-312.pyc
+│   │   │   │   ├── trades.cpython-312.pyc
+│   │   │   │   ├── training.cpython-312.pyc
+│   │   │   │   └── websocket.cpython-312.pyc
+│   │   │   ├── backtest.py
+│   │   │   ├── config.py
+│   │   │   ├── execution.py
+│   │   │   ├── model.py
+│   │   │   ├── optimization.py
+│   │   │   ├── readiness.py
+│   │   │   ├── tape.py
+│   │   │   ├── trades.py
+│   │   │   ├── training.py
+│   │   │   └── websocket.py
+│   │   ├── schemas
+│   │   │   ├── __init__.py
+│   │   │   ├── __pycache__
+│   │   │   │   ├── __init__.cpython-312.pyc
+│   │   │   │   ├── backtest.cpython-312.pyc
+│   │   │   │   ├── config.cpython-312.pyc
+│   │   │   │   ├── execution.cpython-312.pyc
+│   │   │   │   ├── intelligence.cpython-312.pyc
+│   │   │   │   └── optimization.cpython-312.pyc
+│   │   │   ├── backtest.py
+│   │   │   ├── config.py
+│   │   │   ├── execution.py
+│   │   │   ├── intelligence.py
+│   │   │   └── optimization.py
+│   │   ├── services
+│   │   │   ├── __init__.py
+│   │   │   ├── __pycache__
+│   │   │   │   ├── __init__.cpython-312.pyc
+│   │   │   │   ├── backtest_bridge.cpython-312.pyc
+│   │   │   │   ├── backtest_runner.cpython-312.pyc
+│   │   │   │   ├── config_engine.cpython-312.pyc
+│   │   │   │   └── training_emitter.cpython-312.pyc
+│   │   │   ├── backtest_bridge.py
+│   │   │   ├── backtest_runner.py
+│   │   │   ├── config_engine.py
+│   │   │   └── training_emitter.py
+│   │   └── tests
+│   │       ├── __init__.py
+│   │       └── test_health.py
+│   ├── condorbrain_gui_backend.egg-info
+│   │   ├── PKG-INFO
+│   │   ├── SOURCES.txt
+│   │   ├── dependency_links.txt
+│   │   ├── entry_points.txt
+│   │   ├── requires.txt
+│   │   └── top_level.txt
+│   ├── docker-compose.dev.yml
+│   ├── frontend
+│   │   ├── index.html
+│   │   ├── package-lock.json
+│   │   ├── package.json
+│   │   ├── postcss.config.js
+│   │   ├── public
+│   │   │   └── condor.svg
+│   │   ├── src
+│   │   │   ├── App.tsx
+│   │   │   ├── api
+│   │   │   │   ├── backtest.ts
+│   │   │   │   ├── client.ts
+│   │   │   │   ├── config.ts
+│   │   │   │   └── training.ts
+│   │   │   ├── components
+│   │   │   │   ├── dashboard
+│   │   │   │   │   ├── ActivityFeed.tsx
+│   │   │   │   │   ├── EquityCurveMini.tsx
+│   │   │   │   │   ├── MetricCard.tsx
+│   │   │   │   │   ├── RecentRunsList.tsx
+│   │   │   │   │   ├── SystemStatus.tsx
+│   │   │   │   │   └── TrainingStatusBanner.tsx
+│   │   │   │   ├── introspection
+│   │   │   │   │   ├── EpochSummaryPanel.tsx
+│   │   │   │   │   ├── FuzzyGateHeatmap.tsx
+│   │   │   │   │   ├── GateDistributionPanel.tsx
+│   │   │   │   │   └── LossTrajectoryChart.tsx
+│   │   │   │   ├── layout
+│   │   │   │   │   ├── Header.tsx
+│   │   │   │   │   ├── Layout.tsx
+│   │   │   │   │   └── Sidebar.tsx
+│   │   │   │   ├── training
+│   │   │   │   │   ├── DiagnosticsPanel.tsx
+│   │   │   │   │   ├── LiveMetricCard.tsx
+│   │   │   │   │   ├── MetricGrid.tsx
+│   │   │   │   │   ├── StreamingHeatmap.tsx
+│   │   │   │   │   ├── StreamingLossChart.tsx
+│   │   │   │   │   ├── TrainingControls.tsx
+│   │   │   │   │   ├── TrainingHeader.tsx
+│   │   │   │   │   └── index.ts
+│   │   │   │   └── ui
+│   │   │   │       └── LoadingSpinner.tsx
+│   │   │   ├── hooks
+│   │   │   │   ├── useTrainingTelemetry.ts
+│   │   │   │   └── useWebSocket.ts
+│   │   │   ├── index.css
+│   │   │   ├── main.tsx
+│   │   │   ├── pages
+│   │   │   │   ├── BacktestPanel.tsx
+│   │   │   │   ├── Dashboard.tsx
+│   │   │   │   ├── ExecutionPanel.tsx
+│   │   │   │   ├── IntelligencePanel.tsx
+│   │   │   │   ├── ModelIntrospection.tsx
+│   │   │   │   ├── OptimizationPanel.tsx
+│   │   │   │   ├── TapeViewer.tsx
+│   │   │   │   ├── TradeExplorer.tsx
+│   │   │   │   └── Training.tsx
+│   │   │   ├── providers
+│   │   │   │   └── WebSocketProvider.tsx
+│   │   │   ├── stores
+│   │   │   │   ├── backtestStore.ts
+│   │   │   │   ├── configStore.ts
+│   │   │   │   └── uiStore.ts
+│   │   │   └── vite-env.d.ts
+│   │   ├── tailwind.config.js
+│   │   ├── tsconfig.json
+│   │   ├── tsconfig.node.json
+│   │   └── vite.config.ts
+│   ├── shared
+│   │   └── types
+│   │       └── index.ts
+│   └── start_gui.sh
+├── intelligence
+│   ├── Untitled.ipynb
+│   ├── __init__.py
+│   ├── __pycache__
+│   │   ├── __init__.cpython-312.pyc
+│   │   ├── audit_condornet_interpretability.cpython-312.pyc
+│   │   ├── canonical_feature_registry.cpython-312.pyc
+│   │   ├── condor_brain.cpython-312.pyc
+│   │   ├── condor_brain_net.cpython-312.pyc
+│   │   ├── condor_brain_net_v42.cpython-312.pyc
+│   │   ├── condor_brain_net_v43.cpython-312.pyc
+│   │   ├── condor_loss.cpython-312.pyc
+│   │   ├── condor_train_net.cpython-312.pyc
+│   │   ├── condor_train_net_v42.cpython-312.pyc
+│   │   ├── condor_train_net_v43.cpython-312.pyc
+│   │   ├── data_pipeline_v43.cpython-312.pyc
+│   │   ├── execution_reality.cpython-312.pyc
+│   │   ├── exit_stack.cpython-312.pyc
+│   │   ├── fuzzy_engine.cpython-312.pyc
+│   │   ├── model_adapter.cpython-312.pyc
+│   │   ├── options_features_v43.cpython-312.pyc
+│   │   ├── predicate_discovery.cpython-312.pyc
+│   │   ├── recursive_evaluator.cpython-312.pyc
+│   │   ├── schema_v43.cpython-312.pyc
+│   │   ├── strategy_templates_v43.cpython-312.pyc
+│   │   ├── topk_moe.cpython-312.pyc
+│   │   ├── training_monitor.cpython-312.pyc
+│   │   └── vol_gated_attn.cpython-312.pyc
+│   ├── audit_cde_comparison.py
+│   ├── audit_cde_interpretability.py
+│   ├── audit_cde_vs_mamba2_comparison.py
+│   ├── audit_condornet_interpretability.py
+│   ├── audit_condornet_interpretability_v42.py
+│   ├── audit_condornet_interpretability_v43.py
+│   ├── audit_condornet_interpretability_v43_expanded.py
+│   ├── audit_consolidated.txt
+│   ├── audit_etd_gpu.py
+│   ├── audit_fuzzy_physics.py
+│   ├── audit_mamba2_vs_cde.py
+│   ├── audit_part_1.txt
+│   ├── audit_part_10.txt
+│   ├── audit_part_11.txt
+│   ├── audit_part_12.txt
+│   ├── audit_part_13.txt
+│   ├── audit_part_2.txt
+│   ├── audit_part_3.txt
+│   ├── audit_part_4.txt
+│   ├── audit_part_5.txt
+│   ├── audit_part_6.txt
+│   ├── audit_part_7.txt
+│   ├── audit_part_8.txt
+│   ├── audit_part_9.txt
+│   ├── canonical_feature_registry.py
+│   ├── condor_brain.py
+│   ├── condor_brain_net.py
+│   ├── condor_brain_net.txt
+│   ├── condor_brain_net_v42.py
+│   ├── condor_brain_net_v43.py
+│   ├── condor_loss.py
+│   ├── condor_train_net.py
+│   ├── condor_train_net.txt
+│   ├── condor_train_net_v42.py
+│   ├── condor_train_net_v43.py
+│   ├── data_pipeline_v43.py
+│   ├── defuzzifier.py
+│   ├── execution
+│   │   ├── __init__.py
+│   │   └── cost_model.py
+│   ├── execution_reality.py
+│   ├── exit_stack.py
+│   ├── features
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   │   ├── __init__.cpython-312.pyc
+│   │   │   └── dynamic_features.cpython-312.pyc
+│   │   └── dynamic_features.py
+│   ├── fis_sizer.py
+│   ├── fuzzifier.py
+│   ├── fuzzy_engine.py
+│   ├── generate_condor_targets.py
+│   ├── generative
+│   │   ├── __pycache__
+│   │   │   └── diffusion.cpython-312.pyc
+│   │   └── diffusion.py
+│   ├── indicators
+│   │   ├── __init__.py
+│   │   ├── manifold_volatility.py
+│   │   ├── policy_outputs.py
+│   │   └── tda_signature.py
+│   ├── inference_engine.py
+│   ├── meta_forecaster.py
+│   ├── model_adapter.py
+│   ├── models
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   │   ├── __init__.cpython-312.pyc
+│   │   │   └── neural_cde.cpython-312.pyc
+│   │   └── neural_cde.py
+│   ├── optimizers
+│   │   └── __init__.py
+│   ├── options_features_v43.py
+│   ├── predicate_discovery.py
+│   ├── predicate_discovery_v42.py
+│   ├── predicate_discovery_v43.py
+│   ├── predicate_interpreter.py
+│   ├── primitives
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   │   ├── __init__.cpython-312.pyc
+│   │   │   ├── bands.cpython-312.pyc
+│   │   │   ├── fuzzy.cpython-312.pyc
+│   │   │   ├── gates_extended.cpython-312.pyc
+│   │   │   ├── momentum.cpython-312.pyc
+│   │   │   ├── signals.cpython-312.pyc
+│   │   │   └── topology.cpython-312.pyc
+│   │   ├── bands.py
+│   │   ├── fuzzy.py
+│   │   ├── gates_extended.py
+│   │   ├── momentum.py
+│   │   ├── signals.py
+│   │   └── topology.py
+│   ├── recursive_evaluator.py
+│   ├── regime_filter.py
+│   ├── rule_engine
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   │   ├── __init__.cpython-312.pyc
+│   │   │   ├── dsl_parser.cpython-312.pyc
+│   │   │   └── executor.cpython-312.pyc
+│   │   ├── dsl_parser.py
+│   │   └── executor.py
+│   ├── schema_v43.py
+│   ├── strategy_suite.py
+│   ├── strategy_templates_v43.py
+│   ├── test_meta.py
+│   ├── topk_moe.py
+│   ├── train_condor_brain.py
+│   ├── train_neural_cde.py
+│   ├── train_with_predicates.py
+│   ├── training
+│   │   ├── __init__.py
+│   │   ├── __pycache__
+│   │   │   ├── __init__.cpython-312.pyc
+│   │   │   └── diagnostics.cpython-312.pyc
+│   │   └── diagnostics.py
+│   ├── training_monitor.py
+│   ├── validate_training_setup.py
+│   └── vol_gated_attn.py
+├── kaggle
+│   ├── __pycache__
+│   │   ├── backtest_v45_data.cpython-312.pyc
+│   │   └── condor_brain_backtest_v2.cpython-312.pyc
+│   ├── backtest_v45_data.py
+│   ├── condor_brain_backtest_v2.py
+│   ├── condor_brain_backtest_v45.py
+│   ├── condor_brain_backtest_v45.py.bak
+│   ├── condor_brain_backtest_v45.py.bak3
+│   └── diagnostics_integration.py
+├── models
+│   ├── A_matrices
+│   │   ├── Epoch10_A_Matrix.csv
+│   │   ├── Epoch10_B_Matrix.csv
+│   │   ├── Epoch11_A_Matrix.csv
+│   │   ├── Epoch11_B_Matrix.csv
+│   │   ├── Epoch12_A_Matrix.csv
+│   │   ├── Epoch12_B_Matrix.csv
+│   │   ├── Epoch13_A_Matrix.csv
+│   │   ├── Epoch13_B_Matrix.csv
+│   │   ├── Epoch14_A_Matrix.csv
+│   │   ├── Epoch14_B_Matrix.csv
+│   │   ├── Epoch15_A_Matrix.csv
+│   │   ├── Epoch15_B_Matrix.csv
+│   │   ├── Epoch16_A_Matrix.csv
+│   │   ├── Epoch16_B_Matrix.csv
+│   │   ├── Epoch17_A_Matrix.csv
+│   │   ├── Epoch17_B_Matrix.csv
+│   │   ├── Epoch18_A_Matrix.csv
+│   │   ├── Epoch18_B_Matrix.csv
+│   │   ├── Epoch19_A_Matrix.csv
+│   │   ├── Epoch19_B_Matrix.csv
+│   │   ├── Epoch1_A_Matrix.csv
+│   │   ├── Epoch1_B_Matrix.csv
+│   │   ├── Epoch20_A_Matrix.csv
+│   │   ├── Epoch20_B_Matrix.csv
+│   │   ├── Epoch21_A_Matrix.csv
+│   │   ├── Epoch21_B_Matrix.csv
+│   │   ├── Epoch22_A_Matrix.csv
+│   │   ├── Epoch22_B_Matrix.csv
+│   │   ├── Epoch23_A_Matrix.csv
+│   │   ├── Epoch23_B_Matrix.csv
+│   │   ├── Epoch24_A_Matrix.csv
+│   │   ├── Epoch24_B_Matrix.csv
+│   │   ├── Epoch25_A_Matrix.csv
+│   │   ├── Epoch25_B_Matrix.csv
+│   │   ├── Epoch26_A_Matrix.csv
+│   │   ├── Epoch26_B_Matrix.csv
+│   │   ├── Epoch27_A_Matrix.csv
+│   │   ├── Epoch27_B_Matrix.csv
+│   │   ├── Epoch28_A_Matrix.csv
+│   │   ├── Epoch28_B_Matrix.csv
+│   │   ├── Epoch29_A_Matrix.csv
+│   │   ├── Epoch29_B_Matrix.csv
+│   │   ├── Epoch2_A_Matrix.csv
+│   │   ├── Epoch2_B_Matrix.csv
+│   │   ├── Epoch30_A_Matrix.csv
+│   │   ├── Epoch30_B_Matrix.csv
+│   │   ├── Epoch31_A_Matrix.csv
+│   │   ├── Epoch31_B_Matrix.csv
+│   │   ├── Epoch32_A_Matrix.csv
+│   │   ├── Epoch32_B_Matrix.csv
+│   │   ├── Epoch33_A_Matrix.csv
+│   │   ├── Epoch33_B_Matrix.csv
+│   │   ├── Epoch34_A_Matrix.csv
+│   │   ├── Epoch34_B_Matrix.csv
+│   │   ├── Epoch35_A_Matrix.csv
+│   │   ├── Epoch35_B_Matrix.csv
+│   │   ├── Epoch36_A_Matrix.csv
+│   │   ├── Epoch36_B_Matrix.csv
+│   │   ├── Epoch37_A_Matrix.csv
+│   │   ├── Epoch37_B_Matrix.csv
+│   │   ├── Epoch38_A_Matrix.csv
+│   │   ├── Epoch38_B_Matrix.csv
+│   │   ├── Epoch39_A_Matrix.csv
+│   │   ├── Epoch39_B_Matrix.csv
+│   │   ├── Epoch3_A_Matrix.csv
+│   │   ├── Epoch3_B_Matrix.csv
+│   │   ├── Epoch40_A_Matrix.csv
+│   │   ├── Epoch40_B_Matrix.csv
+│   │   ├── Epoch41_A_Matrix.csv
+│   │   ├── Epoch41_B_Matrix.csv
+│   │   ├── Epoch42_A_Matrix.csv
+│   │   ├── Epoch42_B_Matrix.csv
+│   │   ├── Epoch43_A_Matrix.csv
+│   │   ├── Epoch43_B_Matrix.csv
+│   │   ├── Epoch44_A_Matrix.csv
+│   │   ├── Epoch44_B_Matrix.csv
+│   │   ├── Epoch45_A_Matrix.csv
+│   │   ├── Epoch45_B_Matrix.csv
+│   │   ├── Epoch46_A_Matrix.csv
+│   │   ├── Epoch46_B_Matrix.csv
+│   │   ├── Epoch47_A_Matrix.csv
+│   │   ├── Epoch47_B_Matrix.csv
+│   │   ├── Epoch48_A_Matrix.csv
+│   │   ├── Epoch48_B_Matrix.csv
+│   │   ├── Epoch49_A_Matrix.csv
+│   │   ├── Epoch49_B_Matrix.csv
+│   │   ├── Epoch4_A_Matrix.csv
+│   │   ├── Epoch4_B_Matrix.csv
+│   │   ├── Epoch50_A_Matrix.csv
+│   │   ├── Epoch50_B_Matrix.csv
+│   │   ├── Epoch51_A_Matrix.csv
+│   │   ├── Epoch51_B_Matrix.csv
+│   │   ├── Epoch52_A_Matrix.csv
+│   │   ├── Epoch52_B_Matrix.csv
+│   │   ├── Epoch53_A_Matrix.csv
+│   │   ├── Epoch53_B_Matrix.csv
+│   │   ├── Epoch54_A_Matrix.csv
+│   │   ├── Epoch54_B_Matrix.csv
+│   │   ├── Epoch55_A_Matrix.csv
+│   │   ├── Epoch55_B_Matrix.csv
+│   │   ├── Epoch56_A_Matrix.csv
+│   │   ├── Epoch56_B_Matrix.csv
+│   │   ├── Epoch57_A_Matrix.csv
+│   │   ├── Epoch57_B_Matrix.csv
+│   │   ├── Epoch58_A_Matrix.csv
+│   │   ├── Epoch58_B_Matrix.csv
+│   │   ├── Epoch59_A_Matrix.csv
+│   │   ├── Epoch59_B_Matrix.csv
+│   │   ├── Epoch5_A_Matrix.csv
+│   │   ├── Epoch5_B_Matrix.csv
+│   │   ├── Epoch60_A_Matrix.csv
+│   │   ├── Epoch60_B_Matrix.csv
+│   │   ├── Epoch61_A_Matrix.csv
+│   │   ├── Epoch61_B_Matrix.csv
+│   │   ├── Epoch62_A_Matrix.csv
+│   │   ├── Epoch62_B_Matrix.csv
+│   │   ├── Epoch6_A_Matrix.csv
+│   │   ├── Epoch6_B_Matrix.csv
+│   │   ├── Epoch7_A_Matrix.csv
+│   │   ├── Epoch7_B_Matrix.csv
+│   │   ├── Epoch8_A_Matrix.csv
+│   │   ├── Epoch8_B_Matrix.csv
+│   │   ├── Epoch9_A_Matrix.csv
+│   │   ├── Epoch9_B_Matrix.csv
+│   │   └── run18_csv.zip
+│   ├── checkpoints -> ckpts
+│   ├── condor_net_v43_run12.pth
+│   ├── condor_net_v43_run13.pth
+│   ├── condor_net_v43_run14.pth
+│   ├── condor_net_v43_run17.pth
+│   └── condor_net_v43_run18.pth
+├── monitor_plots
+│   ├── monitor_epoch_001.png
+│   ├── monitor_epoch_002.png
+│   ├── monitor_epoch_003.png
+│   ├── monitor_epoch_004.png
+│   ├── monitor_epoch_005.png
+│   ├── monitor_epoch_006.png
+│   ├── predictions_epoch_001.png
+│   ├── predictions_epoch_002.png
+│   ├── predictions_epoch_003.png
+│   ├── predictions_epoch_004.png
+│   ├── predictions_epoch_005.png
+│   └── predictions_epoch_006.png
+├── notebooks
+│   ├── CondorNet_Stability_Import.nb
+│   ├── CondorNet_Test.nb
+│   ├── Train_With_Predicates_Colab.ipynb
+│   └── test_predicate_discovery_colab.py
+├── ohlcv_audit_results.csv
+├── patch_entry_display.py
+├── patch_sim_guards.py
+├── pyproject.toml
+├── qtmf
+│   ├── __init__.py
+│   ├── facade.py
+│   └── models.py
+├── qtmf.egg-info
+│   ├── PKG-INFO
+│   ├── SOURCES.txt
+│   ├── dependency_links.txt
+│   └── top_level.txt
+├── reports
+│   ├── backtest_v2_result.png
+│   ├── bar_trace.jsonl
+│   ├── decision_factor_attribution.csv
+│   ├── equity_curve.csv
+│   ├── pdfs
+│   │   ├── Accountability_Audit_Packet_Template.pdf
+│   │   ├── Advanced SPY Options Strategies Integrated with Iron Condors.pdf
+│   │   ├── Canonical_model_comparison_md.pdf
+│   │   ├── Multi-Model Neural CDE Interpretability Audit Report.pdf
+│   │   ├── Multi-Model Neural CDE Interpretability and Physics Audit.pdf
+│   │   ├── QMTF Completed vs Pending Tasks.pdf
+│   │   ├── Quantor-MTFuzz Safety & Intelligence Upgrade Report.pdf
+│   │   ├── What the Figures Are and How to Interpret Each One.pdf
+│   │   ├── Why the two answers differ.pdf
+│   │   └── backtest_report.pdf
+│   ├── plots
+│   │   ├── decision_tree_condor_net_epoch1.png
+│   │   ├── decision_tree_condor_net_epoch2.png
+│   │   ├── divergence_metrics.png
+│   │   ├── fisher_comparison_condor_net_epoch1_vs_condor_net_epoch2.png
+│   │   ├── gradient_alignment.png
+│   │   ├── gradient_saliency.png
+│   │   ├── hessian_spectrum.png
+│   │   ├── importance_comparison.png
+│   │   ├── importance_heatmap_condor_net_epoch1.png
+│   │   ├── importance_heatmap_condor_net_epoch2.png
+│   │   ├── model_radar.png
+│   │   ├── mutual_information.png
+│   │   ├── output_dist_call_offset.png
+│   │   ├── output_dist_confidence.png
+│   │   ├── output_dist_dte.png
+│   │   ├── output_dist_entry.png
+│   │   ├── output_dist_exit.png
+│   │   ├── output_dist_max_loss.png
+│   │   ├── output_dist_pop.png
+│   │   ├── output_dist_put_offset.png
+│   │   ├── output_dist_roi.png
+│   │   ├── output_dist_wing_width.png
+│   │   ├── pairwise_matrix.png
+│   │   ├── ranking_summary.png
+│   │   ├── shap_comparison.png
+│   │   └── stability_condor_net_epoch1_vs_condor_net_epoch2.png
+│   ├── trades.csv
+│   ├── trades_v2.csv
+│   ├── v43TrainRun12
+│   │   ├── EPOCH_Comparison_02242026_071134.json
+│   │   ├── Epoch10_CNv43_DSv43_02242026_060751.json
+│   │   ├── Epoch11_CNv43_DSv43_02242026_061051.json
+│   │   ├── Epoch12_CNv43_DSv43_02242026_061353.json
+│   │   ├── Epoch13_CNv43_DSv43_02242026_061655.json
+│   │   ├── Epoch14_CNv43_DSv43_02242026_061958.json
+│   │   ├── Epoch15_CNv43_DSv43_02242026_062301.json
+│   │   ├── Epoch16_CNv43_DSv43_02242026_062604.json
+│   │   ├── Epoch17_CNv43_DSv43_02242026_062907.json
+│   │   ├── Epoch18_CNv43_DSv43_02242026_063209.json
+│   │   ├── Epoch19_CNv43_DSv43_02242026_063512.json
+│   │   ├── Epoch1_CNv43_DSv43_02242026_054035.json
+│   │   ├── Epoch20_CNv43_DSv43_02242026_063815.json
+│   │   ├── Epoch21_CNv43_DSv43_02242026_064118.json
+│   │   ├── Epoch22_CNv43_DSv43_02242026_064419.json
+│   │   ├── Epoch23_CNv43_DSv43_02242026_064722.json
+│   │   ├── Epoch24_CNv43_DSv43_02242026_065024.json
+│   │   ├── Epoch25_CNv43_DSv43_02242026_065324.json
+│   │   ├── Epoch26_CNv43_DSv43_02242026_065625.json
+│   │   ├── Epoch27_CNv43_DSv43_02242026_065926.json
+│   │   ├── Epoch28_CNv43_DSv43_02242026_070228.json
+│   │   ├── Epoch29_CNv43_DSv43_02242026_070529.json
+│   │   ├── Epoch2_CNv43_DSv43_02242026_054335.json
+│   │   ├── Epoch30_CNv43_DSv43_02242026_070831.json
+│   │   ├── Epoch31_CNv43_DSv43_02242026_071134.json
+│   │   ├── Epoch3_CNv43_DSv43_02242026_054635.json
+│   │   ├── Epoch4_CNv43_DSv43_02242026_054935.json
+│   │   ├── Epoch5_CNv43_DSv43_02242026_055235.json
+│   │   ├── Epoch6_CNv43_DSv43_02242026_055547.json
+│   │   ├── Epoch7_CNv43_DSv43_02242026_055850.json
+│   │   ├── Epoch8_CNv43_DSv43_02242026_060152.json
+│   │   ├── Epoch9_CNv43_DSv43_02242026_060451.json
+│   │   ├── maybe
+│   │   │   ├── Epoch3_CNv43_DSv43_02242026_043749.json
+│   │   │   └── Epoch5_CNv43_DSv43_02242026_050105.json
+│   │   └── testrun12_json.zip
+│   ├── v43TrainRun13
+│   │   ├── EPOCH_Comparison_02242026_112749.json
+│   │   ├── Epoch10_CNv43_DSv43_02242026_102810.json
+│   │   ├── Epoch11_CNv43_DSv43_02242026_103109.json
+│   │   ├── Epoch12_CNv43_DSv43_02242026_103407.json
+│   │   ├── Epoch13_CNv43_DSv43_02242026_103706.json
+│   │   ├── Epoch14_CNv43_DSv43_02242026_104005.json
+│   │   ├── Epoch15_CNv43_DSv43_02242026_104304.json
+│   │   ├── Epoch16_CNv43_DSv43_02242026_104603.json
+│   │   ├── Epoch17_CNv43_DSv43_02242026_104901.json
+│   │   ├── Epoch18_CNv43_DSv43_02242026_105200.json
+│   │   ├── Epoch19_CNv43_DSv43_02242026_105459.json
+│   │   ├── Epoch1_CNv43_DSv43_02242026_100117.json
+│   │   ├── Epoch20_CNv43_DSv43_02242026_105757.json
+│   │   ├── Epoch21_CNv43_DSv43_02242026_110055.json
+│   │   ├── Epoch22_CNv43_DSv43_02242026_110355.json
+│   │   ├── Epoch23_CNv43_DSv43_02242026_110654.json
+│   │   ├── Epoch24_CNv43_DSv43_02242026_110953.json
+│   │   ├── Epoch25_CNv43_DSv43_02242026_111252.json
+│   │   ├── Epoch26_CNv43_DSv43_02242026_111551.json
+│   │   ├── Epoch27_CNv43_DSv43_02242026_111851.json
+│   │   ├── Epoch28_CNv43_DSv43_02242026_112150.json
+│   │   ├── Epoch29_CNv43_DSv43_02242026_112449.json
+│   │   ├── Epoch2_CNv43_DSv43_02242026_100418.json
+│   │   ├── Epoch30_CNv43_DSv43_02242026_112749.json
+│   │   ├── Epoch3_CNv43_DSv43_02242026_100718.json
+│   │   ├── Epoch4_CNv43_DSv43_02242026_101018.json
+│   │   ├── Epoch5_CNv43_DSv43_02242026_101317.json
+│   │   ├── Epoch6_CNv43_DSv43_02242026_101617.json
+│   │   ├── Epoch7_CNv43_DSv43_02242026_101915.json
+│   │   ├── Epoch8_CNv43_DSv43_02242026_102213.json
+│   │   ├── Epoch9_CNv43_DSv43_02242026_102512.json
+│   │   └── run13_json.zip
+│   ├── v43TrainRun15
+│   │   ├── EPOCH_Comparison_02272026_055733.json
+│   │   ├── Epoch10_CNv43_DSv43_02272026_042741.json
+│   │   ├── Epoch11_CNv43_DSv43_02272026_043037.json
+│   │   ├── Epoch12_CNv43_DSv43_02272026_043331.json
+│   │   ├── Epoch13_CNv43_DSv43_02272026_043628.json
+│   │   ├── Epoch14_CNv43_DSv43_02272026_043928.json
+│   │   ├── Epoch15_CNv43_DSv43_02272026_044228.json
+│   │   ├── Epoch16_CNv43_DSv43_02272026_044526.json
+│   │   ├── Epoch17_CNv43_DSv43_02272026_044824.json
+│   │   ├── Epoch18_CNv43_DSv43_02272026_045126.json
+│   │   ├── Epoch19_CNv43_DSv43_02272026_045425.json
+│   │   ├── Epoch1_CNv43_DSv43_02272026_040045.json
+│   │   ├── Epoch20_CNv43_DSv43_02272026_045727.json
+│   │   ├── Epoch21_CNv43_DSv43_02272026_050025.json
+│   │   ├── Epoch22_CNv43_DSv43_02272026_050327.json
+│   │   ├── Epoch23_CNv43_DSv43_02272026_050631.json
+│   │   ├── Epoch24_CNv43_DSv43_02272026_050936.json
+│   │   ├── Epoch25_CNv43_DSv43_02272026_051240.json
+│   │   ├── Epoch26_CNv43_DSv43_02272026_051540.json
+│   │   ├── Epoch27_Audit_Interpretation_output.json
+│   │   ├── Epoch27_CNv43_DSv43_02272026_051840.json
+│   │   ├── Epoch28_CNv43_DSv43_02272026_052143.json
+│   │   ├── Epoch29_CNv43_DSv43_02272026_052441.json
+│   │   ├── Epoch2_CNv43_DSv43_02272026_040344.json
+│   │   ├── Epoch30_CNv43_DSv43_02272026_052737.json
+│   │   ├── Epoch31_CNv43_DSv43_02272026_053033.json
+│   │   ├── Epoch32_CNv43_DSv43_02272026_053331.json
+│   │   ├── Epoch33_CNv43_DSv43_02272026_053631.json
+│   │   ├── Epoch34_CNv43_DSv43_02272026_053934.json
+│   │   ├── Epoch35_CNv43_DSv43_02272026_054235.json
+│   │   ├── Epoch36_CNv43_DSv43_02272026_054534.json
+│   │   ├── Epoch37_CNv43_DSv43_02272026_054835.json
+│   │   ├── Epoch38_CNv43_DSv43_02272026_055138.json
+│   │   ├── Epoch39_CNv43_DSv43_02272026_055435.json
+│   │   ├── Epoch3_CNv43_DSv43_02272026_040644.json
+│   │   ├── Epoch40_CNv43_DSv43_02272026_055733.json
+│   │   ├── Epoch4_CNv43_DSv43_02272026_040944.json
+│   │   ├── Epoch5_CNv43_DSv43_02272026_041241.json
+│   │   ├── Epoch6_CNv43_DSv43_02272026_041537.json
+│   │   ├── Epoch7_CNv43_DSv43_02272026_041839.json
+│   │   ├── Epoch8_CNv43_DSv43_02272026_042141.json
+│   │   ├── Epoch9_CNv43_DSv43_02272026_042442.json
+│   │   ├── run15_json-Copy1.zip
+│   │   └── run15_json.zip
+│   ├── v43TrainRun16
+│   │   ├── EPOCH_Comparison_02282026_030032.json
+│   │   ├── Epoch10_CNv43_DSv43_02282026_005108.json
+│   │   ├── Epoch11_CNv43_DSv43_02282026_005423.json
+│   │   ├── Epoch12_CNv43_DSv43_02282026_005738.json
+│   │   ├── Epoch13_CNv43_DSv43_02282026_010052.json
+│   │   ├── Epoch14_CNv43_DSv43_02282026_010407.json
+│   │   ├── Epoch15_CNv43_DSv43_02282026_010721.json
+│   │   ├── Epoch16_CNv43_DSv43_02282026_011036.json
+│   │   ├── Epoch17_CNv43_DSv43_02282026_011351.json
+│   │   ├── Epoch18_CNv43_DSv43_02282026_011705.json
+│   │   ├── Epoch19_CNv43_DSv43_02282026_012017.json
+│   │   ├── Epoch1_CNv43_DSv43_02282026_002140.json
+│   │   ├── Epoch20_CNv43_DSv43_02282026_012331.json
+│   │   ├── Epoch21_CNv43_DSv43_02282026_012645.json
+│   │   ├── Epoch22_CNv43_DSv43_02282026_012958.json
+│   │   ├── Epoch23_CNv43_DSv43_02282026_013313.json
+│   │   ├── Epoch24_CNv43_DSv43_02282026_013626.json
+│   │   ├── Epoch25_CNv43_DSv43_02282026_013943.json
+│   │   ├── Epoch26_CNv43_DSv43_02282026_014256.json
+│   │   ├── Epoch27_CNv43_DSv43_02282026_014612.json
+│   │   ├── Epoch28_CNv43_DSv43_02282026_014927.json
+│   │   ├── Epoch29_CNv43_DSv43_02282026_015241.json
+│   │   ├── Epoch2_CNv43_DSv43_02282026_002458.json
+│   │   ├── Epoch30_CNv43_DSv43_02282026_015555.json
+│   │   ├── Epoch31_CNv43_DSv43_02282026_015908.json
+│   │   ├── Epoch32_CNv43_DSv43_02282026_020223.json
+│   │   ├── Epoch33_CNv43_DSv43_02282026_020538.json
+│   │   ├── Epoch34_CNv43_DSv43_02282026_020852.json
+│   │   ├── Epoch35_CNv43_DSv43_02282026_021206.json
+│   │   ├── Epoch36_CNv43_DSv43_02282026_021518.json
+│   │   ├── Epoch37_CNv43_DSv43_02282026_021832.json
+│   │   ├── Epoch38_CNv43_DSv43_02282026_022145.json
+│   │   ├── Epoch39_CNv43_DSv43_02282026_022458.json
+│   │   ├── Epoch3_CNv43_DSv43_02282026_002816.json
+│   │   ├── Epoch40_CNv43_DSv43_02282026_022811.json
+│   │   ├── Epoch41_CNv43_DSv43_02282026_023126.json
+│   │   ├── Epoch42_CNv43_DSv43_02282026_023439.json
+│   │   ├── Epoch43_CNv43_DSv43_02282026_023754.json
+│   │   ├── Epoch44_CNv43_DSv43_02282026_024108.json
+│   │   ├── Epoch45_CNv43_DSv43_02282026_024422.json
+│   │   ├── Epoch46_CNv43_DSv43_02282026_024736.json
+│   │   ├── Epoch47_CNv43_DSv43_02282026_025051.json
+│   │   ├── Epoch48_CNv43_DSv43_02282026_025403.json
+│   │   ├── Epoch49_CNv43_DSv43_02282026_025718.json
+│   │   ├── Epoch4_CNv43_DSv43_02282026_003134.json
+│   │   ├── Epoch50_CNv43_DSv43_02282026_030032.json
+│   │   ├── Epoch5_CNv43_DSv43_02282026_003451.json
+│   │   ├── Epoch6_CNv43_DSv43_02282026_003807.json
+│   │   ├── Epoch7_CNv43_DSv43_02282026_004123.json
+│   │   ├── Epoch8_CNv43_DSv43_02282026_004439.json
+│   │   └── Epoch9_CNv43_DSv43_02282026_004756.json
+│   ├── v43TrainRun17
+│   │   ├── EPOCH_Comparison_02282026_100927.json
+│   │   ├── Epoch10_CNv43_DSv43_02282026_080234.json
+│   │   ├── Epoch11_CNv43_DSv43_02282026_080547.json
+│   │   ├── Epoch12_CNv43_DSv43_02282026_080900.json
+│   │   ├── Epoch13_CNv43_DSv43_02282026_081212.json
+│   │   ├── Epoch14_CNv43_DSv43_02282026_081522.json
+│   │   ├── Epoch15_CNv43_DSv43_02282026_081833.json
+│   │   ├── Epoch16_CNv43_DSv43_02282026_082143.json
+│   │   ├── Epoch17_CNv43_DSv43_02282026_082455.json
+│   │   ├── Epoch18_CNv43_DSv43_02282026_082806.json
+│   │   ├── Epoch19_CNv43_DSv43_02282026_083119.json
+│   │   ├── Epoch1_CNv43_DSv43_02282026_070659.json
+│   │   ├── Epoch1_CNv43_DSv43_02282026_073356.json
+│   │   ├── Epoch20_CNv43_DSv43_02282026_083428.json
+│   │   ├── Epoch21_CNv43_DSv43_02282026_083736.json
+│   │   ├── Epoch22_CNv43_DSv43_02282026_084040.json
+│   │   ├── Epoch23_CNv43_DSv43_02282026_084346.json
+│   │   ├── Epoch24_CNv43_DSv43_02282026_084648.json
+│   │   ├── Epoch25_CNv43_DSv43_02282026_084954.json
+│   │   ├── Epoch26_CNv43_DSv43_02282026_085304.json
+│   │   ├── Epoch27_CNv43_DSv43_02282026_085615.json
+│   │   ├── Epoch28_CNv43_DSv43_02282026_085929.json
+│   │   ├── Epoch29_CNv43_DSv43_02282026_090241.json
+│   │   ├── Epoch2_CNv43_DSv43_02282026_071015.json
+│   │   ├── Epoch2_CNv43_DSv43_02282026_073709.json
+│   │   ├── Epoch30_CNv43_DSv43_02282026_090553.json
+│   │   ├── Epoch31_CNv43_DSv43_02282026_090909.json
+│   │   ├── Epoch32_CNv43_DSv43_02282026_091220.json
+│   │   ├── Epoch33_CNv43_DSv43_02282026_091528.json
+│   │   ├── Epoch34_CNv43_DSv43_02282026_091839.json
+│   │   ├── Epoch35_CNv43_DSv43_02282026_092150.json
+│   │   ├── Epoch36_CNv43_DSv43_02282026_092500.json
+│   │   ├── Epoch37_CNv43_DSv43_02282026_092814.json
+│   │   ├── Epoch38_CNv43_DSv43_02282026_093129.json
+│   │   ├── Epoch39_CNv43_DSv43_02282026_093443.json
+│   │   ├── Epoch3_CNv43_DSv43_02282026_071329.json
+│   │   ├── Epoch3_CNv43_DSv43_02282026_074023.json
+│   │   ├── Epoch40_CNv43_DSv43_02282026_093755.json
+│   │   ├── Epoch41_CNv43_DSv43_02282026_094105.json
+│   │   ├── Epoch42_CNv43_DSv43_02282026_094414.json
+│   │   ├── Epoch43_CNv43_DSv43_02282026_094722.json
+│   │   ├── Epoch44_CNv43_DSv43_02282026_095026.json
+│   │   ├── Epoch45_CNv43_DSv43_02282026_095331.json
+│   │   ├── Epoch46_CNv43_DSv43_02282026_095639.json
+│   │   ├── Epoch47_CNv43_DSv43_02282026_095950.json
+│   │   ├── Epoch48_CNv43_DSv43_02282026_100301.json
+│   │   ├── Epoch49_CNv43_DSv43_02282026_100614.json
+│   │   ├── Epoch4_CNv43_DSv43_02282026_071644.json
+│   │   ├── Epoch4_CNv43_DSv43_02282026_074335.json
+│   │   ├── Epoch50_CNv43_DSv43_02282026_100927.json
+│   │   ├── Epoch5_CNv43_DSv43_02282026_071959.json
+│   │   ├── Epoch5_CNv43_DSv43_02282026_074646.json
+│   │   ├── Epoch6_CNv43_DSv43_02282026_072315.json
+│   │   ├── Epoch6_CNv43_DSv43_02282026_074954.json
+│   │   ├── Epoch7_CNv43_DSv43_02282026_075303.json
+│   │   ├── Epoch8_CNv43_DSv43_02282026_075613.json
+│   │   ├── Epoch9_CNv43_DSv43_02282026_075923.json
+│   │   └── v17_json.zip
+│   ├── v43TrainRun18
+│   │   ├── EPOCH_Comparison_02282026_152727.json
+│   │   ├── Epoch10_CNv43_DSv43_02282026_124449.json
+│   │   ├── Epoch11_CNv43_DSv43_02282026_124758.json
+│   │   ├── Epoch12_CNv43_DSv43_02282026_125109.json
+│   │   ├── Epoch13_CNv43_DSv43_02282026_125418.json
+│   │   ├── Epoch14_CNv43_DSv43_02282026_125725.json
+│   │   ├── Epoch15_CNv43_DSv43_02282026_130033.json
+│   │   ├── Epoch16_CNv43_DSv43_02282026_130342.json
+│   │   ├── Epoch17_CNv43_DSv43_02282026_130653.json
+│   │   ├── Epoch18_CNv43_DSv43_02282026_131004.json
+│   │   ├── Epoch19_CNv43_DSv43_02282026_131313.json
+│   │   ├── Epoch1_CNv43_DSv43_02282026_121624.json
+│   │   ├── Epoch20_CNv43_DSv43_02282026_131621.json
+│   │   ├── Epoch21_CNv43_DSv43_02282026_131928.json
+│   │   ├── Epoch22_CNv43_DSv43_02282026_132235.json
+│   │   ├── Epoch23_CNv43_DSv43_02282026_132543.json
+│   │   ├── Epoch24_CNv43_DSv43_02282026_132850.json
+│   │   ├── Epoch25_CNv43_DSv43_02282026_133159.json
+│   │   ├── Epoch26_CNv43_DSv43_02282026_133510.json
+│   │   ├── Epoch27_CNv43_DSv43_02282026_133821.json
+│   │   ├── Epoch28_CNv43_DSv43_02282026_134134.json
+│   │   ├── Epoch29_CNv43_DSv43_02282026_134445.json
+│   │   ├── Epoch2_CNv43_DSv43_02282026_121935.json
+│   │   ├── Epoch30_CNv43_DSv43_02282026_134753.json
+│   │   ├── Epoch31_CNv43_DSv43_02282026_135059.json
+│   │   ├── Epoch32_CNv43_DSv43_02282026_135405.json
+│   │   ├── Epoch33_CNv43_DSv43_02282026_135711.json
+│   │   ├── Epoch34_CNv43_DSv43_02282026_140019.json
+│   │   ├── Epoch35_CNv43_DSv43_02282026_140325.json
+│   │   ├── Epoch36_CNv43_DSv43_02282026_140632.json
+│   │   ├── Epoch37_CNv43_DSv43_02282026_140938.json
+│   │   ├── Epoch38_CNv43_DSv43_02282026_141245.json
+│   │   ├── Epoch39_CNv43_DSv43_02282026_141552.json
+│   │   ├── Epoch3_CNv43_DSv43_02282026_122244.json
+│   │   ├── Epoch40_CNv43_DSv43_02282026_141900.json
+│   │   ├── Epoch41_CNv43_DSv43_02282026_142207.json
+│   │   ├── Epoch42_CNv43_DSv43_02282026_142514.json
+│   │   ├── Epoch43_CNv43_DSv43_02282026_142822.json
+│   │   ├── Epoch44_CNv43_DSv43_02282026_143128.json
+│   │   ├── Epoch45_CNv43_DSv43_02282026_143435.json
+│   │   ├── Epoch46_CNv43_DSv43_02282026_143742.json
+│   │   ├── Epoch47_CNv43_DSv43_02282026_144049.json
+│   │   ├── Epoch48_CNv43_DSv43_02282026_144356.json
+│   │   ├── Epoch49_CNv43_DSv43_02282026_144704.json
+│   │   ├── Epoch4_CNv43_DSv43_02282026_122552.json
+│   │   ├── Epoch50_CNv43_DSv43_02282026_145010.json
+│   │   ├── Epoch51_CNv43_DSv43_02282026_145315.json
+│   │   ├── Epoch52_CNv43_DSv43_02282026_145623.json
+│   │   ├── Epoch53_CNv43_DSv43_02282026_145928.json
+│   │   ├── Epoch54_CNv43_DSv43_02282026_150235.json
+│   │   ├── Epoch55_CNv43_DSv43_02282026_150541.json
+│   │   ├── Epoch56_CNv43_DSv43_02282026_150848.json
+│   │   ├── Epoch57_CNv43_DSv43_02282026_151154.json
+│   │   ├── Epoch58_CNv43_DSv43_02282026_151500.json
+│   │   ├── Epoch59_CNv43_DSv43_02282026_151807.json
+│   │   ├── Epoch5_CNv43_DSv43_02282026_122902.json
+│   │   ├── Epoch60_CNv43_DSv43_02282026_152114.json
+│   │   ├── Epoch61_CNv43_DSv43_02282026_152421.json
+│   │   ├── Epoch62_CNv43_DSv43_02282026_152727.json
+│   │   ├── Epoch6_CNv43_DSv43_02282026_123212.json
+│   │   ├── Epoch7_CNv43_DSv43_02282026_123522.json
+│   │   ├── Epoch8_CNv43_DSv43_02282026_123833.json
+│   │   ├── Epoch9_CNv43_DSv43_02282026_124141.json
+│   │   └── v18_json.zip
+│   ├── v43TrainRun2
+│   │   ├── EPOCH_Comparison_02232026_155521.json
+│   │   ├── Epoch10_CNv43_DSv43_02232026_155521.json
+│   │   ├── Epoch2_CNv43_DSv43_02232026_153520.json
+│   │   ├── Epoch3_CNv43_DSv43_02232026_153709.json
+│   │   ├── Epoch4_CNv43_DSv43_02232026_154000.json
+│   │   ├── Epoch5_CNv43_DSv43_02232026_154159.json
+│   │   ├── Epoch6_CNv43_DSv43_02232026_154527.json
+│   │   ├── Epoch7_CNv43_DSv43_02232026_154726.json
+│   │   ├── Epoch8_CNv43_DSv43_02232026_154946.json
+│   │   ├── Epoch9_CNv43_DSv43_02232026_155253.json
+│   │   └── analyze_logic.py
+│   ├── v43TrainRun3
+│   │   ├── EPOCH_Comparison_02232026_180830.json
+│   │   ├── Epoch10_CNv43_DSv43_02232026_180830.json
+│   │   ├── Epoch1_CNv43_DSv43_02232026_174246.json
+│   │   ├── Epoch2_CNv43_DSv43_02232026_174830.json
+│   │   ├── Epoch3_CNv43_DSv43_02232026_175138.json
+│   │   ├── Epoch4_CNv43_DSv43_02232026_175444.json
+│   │   ├── Epoch5_CNv43_DSv43_02232026_175719.json
+│   │   ├── Epoch6_CNv43_DSv43_02232026_175951.json
+│   │   ├── Epoch7_CNv43_DSv43_02232026_180155.json
+│   │   ├── Epoch8_CNv43_DSv43_02232026_180403.json
+│   │   └── Epoch9_CNv43_DSv43_02232026_180641.json
+│   ├── v43TrainRun4
+│   │   ├── EPOCH_Comparison_02232026_200248.json
+│   │   ├── Epoch10_CNv43_DSv43_02232026_200248.json
+│   │   ├── Epoch1_CNv43_DSv43_02232026_193703.json
+│   │   ├── Epoch2_CNv43_DSv43_02232026_194241.json
+│   │   ├── Epoch3_CNv43_DSv43_02232026_194651.json
+│   │   ├── Epoch4_CNv43_DSv43_02232026_194857.json
+│   │   ├── Epoch5_CNv43_DSv43_02232026_195045.json
+│   │   ├── Epoch6_CNv43_DSv43_02232026_195249.json
+│   │   ├── Epoch7_CNv43_DSv43_02232026_195613.json
+│   │   └── Epoch8_CNv43_DSv43_02232026_195757.json
+│   ├── v43_audit
+│   │   ├── audit_A_matrix.csv
+│   │   ├── audit_B_matrix.csv
+│   │   └── logic.json
+│   ├── v43_audit_epoch27
+│   │   ├── audit_A_matrix.csv
+│   │   ├── audit_B_matrix.csv
+│   │   ├── audit_report.md
+│   │   ├── importance_pop.png
+│   │   ├── logic.json
+│   │   └── v43_audit_epoch27.zip
+│   └── v43_run18audit_epoch42
+│       ├── audit_A_matrix.csv
+│       ├── audit_B_matrix.csv
+│       ├── audit_report.md
+│       ├── audit_run18.zip
+│       ├── importance_pop.png
+│       └── logic.json
+├── requirements.txt
+├── risk
+│   ├── __init__.py
+│   ├── beta_weighting.py
+│   ├── expected_shortfall.py
+│   ├── pot_monitor.py
+│   └── structure_validator.py
+├── run13_json.zip
+├── run_backtest.sh
+├── run_live_alpaca.py
+├── run_v45.py
+├── run_v45.sh
+├── runs
+│   ├── condor_brain
+│   │   ├── 20260128-065714
+│   │   │   └── events.out.tfevents.1769583434.ip-10-192-11-97.161034.0
+│   │   ├── 20260128-080023
+│   │   │   └── events.out.tfevents.1769587223.ip-10-192-11-97.378147.0
+│   │   ├── 20260129-081725
+│   │   │   └── events.out.tfevents.1769674645.ip-10-192-11-119.126776.0
+│   │   ├── 20260201-102308
+│   │   │   └── events.out.tfevents.1769941388.ip-10-192-12-143.102344.0
+│   │   ├── 20260201-102726
+│   │   │   └── events.out.tfevents.1769941646.ip-10-192-12-143.106125.0
+│   │   ├── 20260201-103115
+│   │   │   └── events.out.tfevents.1769941875.ip-10-192-12-143.111617.0
+│   │   ├── 20260201-104213
+│   │   │   └── events.out.tfevents.1769942533.ip-10-192-12-143.128698.0
+│   │   ├── 20260201-110652
+│   │   │   └── events.out.tfevents.1769944012.ip-10-192-12-143.190023.0
+│   │   ├── 20260201-111353
+│   │   │   └── events.out.tfevents.1769944433.ip-10-192-12-143.207348.0
+│   │   ├── 20260201-120801
+│   │   │   └── events.out.tfevents.1769947681.ip-10-192-12-143.327270.0
+│   │   ├── 20260201-153641
+│   │   │   └── events.out.tfevents.1769960201.ip-10-192-11-31.38095.0
+│   │   ├── 20260201-155832
+│   │   │   └── events.out.tfevents.1769961512.ip-10-192-11-31.60563.0
+│   │   ├── 20260201-160139
+│   │   │   └── events.out.tfevents.1769961699.ip-10-192-11-31.71949.0
+│   │   ├── 20260201-200149
+│   │   │   └── events.out.tfevents.1769976109.ip-10-192-11-236.134324.0
+│   │   ├── 20260201-201432
+│   │   │   └── events.out.tfevents.1769976872.ip-10-192-11-236.171489.0
+│   │   ├── 20260201-210818
+│   │   │   └── events.out.tfevents.1769980098.ip-10-192-11-236.357990.0
+│   │   ├── 20260201-232358
+│   │   │   └── events.out.tfevents.1769988238.ip-10-192-11-236.608683.0
+│   │   ├── 20260202-005214
+│   │   │   └── events.out.tfevents.1769993534.ip-10-192-11-236.749243.0
+│   │   ├── 20260202-024537
+│   │   │   └── events.out.tfevents.1770000337.ip-10-192-11-236.764580.0
+│   │   ├── 20260202-025419
+│   │   │   └── events.out.tfevents.1770000859.ip-10-192-11-236.776377.0
+│   │   ├── 20260202-031001
+│   │   │   └── events.out.tfevents.1770001801.ip-10-192-11-236.791620.0
+│   │   ├── 20260202-033152
+│   │   │   └── events.out.tfevents.1770003112.ip-10-192-11-236.814783.0
+│   │   ├── 20260202-034202
+│   │   │   └── events.out.tfevents.1770003722.ip-10-192-11-236.819985.0
+│   │   ├── 20260202-035550
+│   │   │   └── events.out.tfevents.1770004550.ip-10-192-11-236.834463.0
+│   │   ├── 20260202-040343
+│   │   │   └── events.out.tfevents.1770005023.ip-10-192-11-236.846271.0
+│   │   ├── 20260202-041011
+│   │   │   └── events.out.tfevents.1770005411.ip-10-192-11-236.851352.0
+│   │   ├── 20260202-052022
+│   │   │   └── events.out.tfevents.1770009622.ip-10-192-11-210.8644.0
+│   │   ├── 20260202-052808
+│   │   │   └── events.out.tfevents.1770010088.ip-10-192-11-210.21850.0
+│   │   ├── 20260202-052810
+│   │   │   └── events.out.tfevents.1770010090.ip-10-192-11-210.22561.0
+│   │   ├── 20260202-053208
+│   │   │   └── events.out.tfevents.1770010328.ip-10-192-11-210.38491.0
+│   │   ├── 20260202-053546
+│   │   │   └── events.out.tfevents.1770010546.ip-10-192-11-210.46141.0
+│   │   ├── 20260202-053800
+│   │   │   └── events.out.tfevents.1770010680.ip-10-192-11-210.54398.0
+│   │   ├── 20260202-055114
+│   │   │   └── events.out.tfevents.1770011474.ip-10-192-11-210.68643.0
+│   │   ├── 20260202-055513
+│   │   │   └── events.out.tfevents.1770011713.ip-10-192-11-210.76241.0
+│   │   ├── 20260202-055841
+│   │   │   └── events.out.tfevents.1770011921.ip-10-192-11-210.84192.0
+│   │   ├── 20260202-060132
+│   │   │   └── events.out.tfevents.1770012092.ip-10-192-11-210.91408.0
+│   │   ├── 20260202-061731
+│   │   │   └── events.out.tfevents.1770013051.ip-10-192-11-210.130208.0
+│   │   ├── 20260202-064658
+│   │   │   └── events.out.tfevents.1770014818.ip-10-192-11-210.155155.0
+│   │   ├── 20260202-081721
+│   │   │   └── events.out.tfevents.1770020241.ip-10-192-11-149.16947.0
+│   │   ├── 20260202-084936
+│   │   │   └── events.out.tfevents.1770022176.ip-10-192-11-149.68992.0
+│   │   ├── events.out.tfevents.1769189986.ip-10-192-11-144.4864.0
+│   │   ├── events.out.tfevents.1769199950.ip-10-192-11-115.38118.0
+│   │   ├── events.out.tfevents.1769200591.ip-10-192-11-115.52549.0
+│   │   ├── events.out.tfevents.1769201852.ip-10-192-11-115.63681.0
+│   │   ├── events.out.tfevents.1769212597.ip-10-192-11-115.379616.0
+│   │   ├── events.out.tfevents.1769221388.ip-10-192-11-115.548821.0
+│   │   ├── events.out.tfevents.1769223403.ip-10-192-11-115.565765.0
+│   │   ├── events.out.tfevents.1769226420.ip-10-192-11-115.573230.0
+│   │   ├── events.out.tfevents.1769248691.ip-10-192-11-115.765179.0
+│   │   ├── events.out.tfevents.1769249343.ip-10-192-11-115.782150.0
+│   │   ├── events.out.tfevents.1769298773.ip-10-192-11-115.880619.0
+│   │   └── events.out.tfevents.1769300120.ip-10-192-11-115.880706.0
+│   ├── condor_net
+│   │   ├── condor_dh128_lr0.0001_bs256
+│   │   │   └── events.out.tfevents.1770908391.ip-10-192-11-42.392074.0
+│   │   ├── condor_dh128_lr0.0001_bs64
+│   │   │   └── events.out.tfevents.1770906707.ip-10-192-11-42.327586.0
+│   │   ├── condor_dh128_lr1e-05_bs128
+│   │   │   └── events.out.tfevents.1770962241.ip-10-192-11-220.26827.0
+│   │   ├── condor_dh128_lr1e-05_bs256
+│   │   │   ├── events.out.tfevents.1770977101.ip-10-192-11-217.44676.0
+│   │   │   ├── events.out.tfevents.1770989183.ip-10-192-11-217.519474.0
+│   │   │   ├── events.out.tfevents.1771030546.ip-10-192-11-244.9459.0
+│   │   │   ├── events.out.tfevents.1771241184.ip-10-192-11-28.40075.0
+│   │   │   ├── events.out.tfevents.1771274636.ip-10-192-11-60.2860.0
+│   │   │   └── events.out.tfevents.1771283656.ip-10-192-11-44.6335.0
+│   │   └── condor_dh64_lr0.0001_bs512
+│   │       ├── events.out.tfevents.1770333196.ip-10-192-11-241.7766.0
+│   │       ├── events.out.tfevents.1770333392.ip-10-192-11-241.13446.0
+│   │       ├── events.out.tfevents.1770333398.ip-10-192-11-241.13466.0
+│   │       ├── events.out.tfevents.1770333497.ip-10-192-11-241.13528.0
+│   │       ├── events.out.tfevents.1770334729.ip-10-192-11-241.21384.0
+│   │       ├── events.out.tfevents.1770447159.ip-10-192-11-241.655043.0
+│   │       ├── events.out.tfevents.1770447644.ip-10-192-11-241.670375.0
+│   │       ├── events.out.tfevents.1770448605.ip-10-192-11-241.689515.0
+│   │       ├── events.out.tfevents.1770450157.ip-10-192-11-241.747778.0
+│   │       ├── events.out.tfevents.1770523561.ip-10-192-11-167.30414.0
+│   │       ├── events.out.tfevents.1770527950.ip-10-192-11-80.19651.0
+│   │       └── events.out.tfevents.1770529211.ip-10-192-11-80.34056.0
+│   └── condor_v43
+│       ├── condorv43_lr0.0001_bs256_02240044
+│       │   └── events.out.tfevents.1771893893.ip-10-192-11-11.21720.0
+│       ├── condorv43_lr0.0001_bs256_02240155
+│       │   └── events.out.tfevents.1771898138.ip-10-192-11-11.169313.0
+│       ├── condorv43_lr0.0001_bs256_02240230
+│       │   └── events.out.tfevents.1771900251.ip-10-192-11-11.214810.0
+│       ├── condorv43_lr0.0001_bs256_02240240
+│       │   └── events.out.tfevents.1771900805.ip-10-192-11-11.231212.0
+│       ├── condorv43_lr0.0001_bs256_02240254
+│       │   └── events.out.tfevents.1771901698.ip-10-192-11-11.256791.0
+│       ├── condorv43_lr0.0001_bs256_02240256
+│       │   └── events.out.tfevents.1771901804.ip-10-192-11-11.265219.0
+│       ├── condorv43_lr0.0001_bs256_02240350
+│       │   └── events.out.tfevents.1771905019.ip-10-192-11-11.305877.0
+│       ├── condorv43_lr0.0001_bs256_02240352
+│       │   └── events.out.tfevents.1771905154.ip-10-192-11-11.315718.0
+│       ├── condorv43_lr0.0001_bs256_02240446
+│       │   └── events.out.tfevents.1771908365.ip-10-192-11-11.416719.0
+│       ├── condorv43_lr0.0001_bs256_02240537
+│       │   └── events.out.tfevents.1771911458.ip-10-192-11-11.523761.0
+│       ├── condorv43_lr0.0001_bs256_02240958
+│       │   └── events.out.tfevents.1771927095.ip-10-192-11-11.1489848.0
+│       ├── condorv43_lr0.0001_bs256_02241144
+│       │   └── events.out.tfevents.1771933446.ip-10-192-11-11.1564540.0
+│       ├── condorv43_lr0.0001_bs256_02270357
+│       │   └── events.out.tfevents.1772164665.ip-10-192-11-114.22854.0
+│       ├── condorv43_lr0.0001_bs256_02280007
+│       │   └── events.out.tfevents.1772237253.ip-10-192-11-117.70910.0
+│       ├── condorv43_lr0.0001_bs256_02280018
+│       │   └── events.out.tfevents.1772237905.ip-10-192-11-117.116098.0
+│       ├── condorv43_lr0.0001_bs256_02280659
+│       │   └── events.out.tfevents.1772261957.ip-10-192-11-147.18353.0
+│       ├── condorv43_lr0.0001_bs256_02280702
+│       │   └── events.out.tfevents.1772262127.ip-10-192-11-147.30305.0
+│       ├── condorv43_lr0.0001_bs256_02280703
+│       │   └── events.out.tfevents.1772262223.ip-10-192-11-147.36509.0
+│       ├── condorv43_lr0.0001_bs256_02280730
+│       │   └── events.out.tfevents.1772263844.ip-10-192-11-147.137940.0
+│       ├── condorv43_lr0.0001_bs256_02281200
+│       │   └── events.out.tfevents.1772280009.ip-10-192-11-185.99858.0
+│       ├── condorv43_lr0.0001_bs256_02281213
+│       │   └── events.out.tfevents.1772280796.ip-10-192-11-185.151237.0
+│       ├── condorv43_lr1e-05_bs128_02231241
+│       │   └── events.out.tfevents.1771850471.ip-10-192-11-115.48335.0
+│       ├── condorv43_lr1e-05_bs128_02231314
+│       │   └── events.out.tfevents.1771852490.ip-10-192-11-154.13644.0
+│       ├── condorv43_lr1e-05_bs128_02231343
+│       │   └── events.out.tfevents.1771854191.ip-10-192-11-154.26786.0
+│       ├── condorv43_lr1e-05_bs128_02231523
+│       │   └── events.out.tfevents.1771860234.ip-10-192-11-14.11634.0
+│       ├── condorv43_lr1e-05_bs128_02231737
+│       │   └── events.out.tfevents.1771868221.ip-10-192-11-155.20559.0
+│       ├── condorv43_lr1e-05_bs128_02231931
+│       │   └── events.out.tfevents.1771875076.ip-10-192-11-186.11440.0
+│       ├── condorv43_lr1e-05_bs128_02232102
+│       │   └── events.out.tfevents.1771880522.ip-10-192-11-11.17777.0
+│       ├── condorv43_lr1e-05_bs256_02230921
+│       │   └── events.out.tfevents.1771838496.ip-10-192-11-66.34603.0
+│       ├── condorv43_lr1e-05_bs256_02230924
+│       │   └── events.out.tfevents.1771838694.ip-10-192-11-66.40785.0
+│       ├── condorv43_lr1e-05_bs256_02230928
+│       │   └── events.out.tfevents.1771838890.ip-10-192-11-66.46661.0
+│       ├── condorv43_lr1e-05_bs256_02230935
+│       │   └── events.out.tfevents.1771839313.ip-10-192-11-66.56480.0
+│       ├── condorv43_lr1e-05_bs256_02231020
+│       │   └── events.out.tfevents.1771842050.ip-10-192-11-47.21595.0
+│       ├── condorv43_lr1e-05_bs256_02231024
+│       │   └── events.out.tfevents.1771842250.ip-10-192-11-47.30245.0
+│       ├── condorv43_lr1e-05_bs256_02231027
+│       │   └── events.out.tfevents.1771842425.ip-10-192-11-47.37515.0
+│       ├── condorv43_lr1e-05_bs256_02231116
+│       │   └── events.out.tfevents.1771845409.ip-10-192-11-126.12392.0
+│       ├── condorv43_lr1e-05_bs256_02231233
+│       │   └── events.out.tfevents.1771850036.ip-10-192-11-115.29446.0
+│       ├── condorv43_lr1e-05_bs256_02232244
+│       │   └── events.out.tfevents.1771886644.ip-10-192-11-11.17384.0
+│       └── condorv43_lr1e-05_bs256_02240428
+│           └── events.out.tfevents.1771907335.ip-10-192-11-11.385179.0
+├── scripts
+│   ├── TradingView
+│   │   ├── DynamicFib_MultiPivot_v1.pine
+│   │   ├── DynamicFib_MultiPivot_v2.pine
+│   │   ├── DynamicFib_MultiPivot_v3.pine
+│   │   └── MulktiStrategyOptionsMetaEngine_v1.pine
+│   ├── __pycache__
+│   │   └── test_condornet_v42.cpython-312-pytest-9.0.2.pyc
+│   ├── audit_reality_layer.py
+│   ├── backtest
+│   │   ├── run_backtest_mtf.py
+│   │   ├── run_backtest_standard.py
+│   │   ├── run_full_backtest.py
+│   │   ├── run_stress_test.py
+│   │   └── run_validation_backtest.py
+│   ├── check_data_range.py
+│   ├── check_ivr_quality.py
+│   ├── check_processed_data.py
+│   ├── compare_eigen_spectra.py
+│   ├── competition_charts.py
+│   ├── consolidate_audit.py
+│   ├── export_A_matrix_for_mathematica.py
+│   ├── export_B_matrix_for_mathematica.py
+│   ├── fix_ivr_dataset.py
+│   ├── indicators
+│   │   ├── bb_dynamic.py
+│   │   ├── chaos_regime.py
+│   │   ├── dynamic_signals.py
+│   │   ├── execution_risk.py
+│   │   ├── fractal_adaptive.py
+│   │   ├── max_dd_60m.py
+│   │   ├── mcclellan_osc.py
+│   │   ├── microstructure.py
+│   │   ├── pivots_slopes.py
+│   │   ├── psar_adaptive.py
+│   │   ├── returns_volatility.py
+│   │   ├── reversal_stack.py
+│   │   ├── sma.py
+│   │   ├── txt_export
+│   │   │   ├── bb_dynamic.txt
+│   │   │   ├── chaos_regime.txt
+│   │   │   ├── dynamic_signals.txt
+│   │   │   ├── execution_risk.txt
+│   │   │   ├── fractal_adaptive.txt
+│   │   │   ├── max_dd_60m.txt
+│   │   │   ├── mcclellan_osc.txt
+│   │   │   ├── microstructure.txt
+│   │   │   ├── pivots_slopes.txt
+│   │   │   ├── psar_adaptive.txt
+│   │   │   ├── returns_volatility.txt
+│   │   │   ├── reversal_stack.txt
+│   │   │   ├── sma.txt
+│   │   │   └── volume_flow.txt
+│   │   └── volume_flow.py
+│   ├── model_tests
+│   │   ├── 01_checkpoint_inventory.py
+│   │   ├── 02_feature_schema_alignment.py
+│   │   ├── 03_norm_stats_sanity.py
+│   │   ├── 06_ruleset_execution_smoke.py
+│   │   ├── 07_feature_pipeline_parity.py
+│   │   ├── 12_docs_contract_sync_check.py
+│   │   ├── README.md
+│   │   └── run_smoke_suite.py
+│   ├── normalize_columns.py
+│   ├── pivot_feature_engine.py
+│   ├── pivot_labeler.py
+│   ├── pivot_labeler_lightning_safe.py
+│   ├── pivot_test.py
+│   ├── postcompute_chain_volume.py
+│   ├── postcompute_regimeskew.py
+│   ├── precompute_features_v3a.py
+│   ├── regression
+│   │   └── verify_epoch_artifacts.py
+│   ├── repair_v4_nan.py
+│   ├── run_all_timeframes_grouped_auto.sh
+│   ├── run_production_pipeline.py
+│   ├── run_v42_experiments_cloud.sh
+│   ├── run_v42_tests.sh
+│   ├── run_v42_verification.sh
+│   ├── strip_timeframe_prefixes.py
+│   ├── test_condornet_v42.py
+│   ├── test_nested_logic.py
+│   ├── test_predicate_templates.py
+│   ├── tests
+│   │   ├── test_fis_pipeline.py
+│   │   ├── test_imports.py
+│   │   ├── test_risk_manager.py
+│   │   └── test_stage2_logic.py
+│   ├── train_cde_cloud.py
+│   ├── untitled.txt
+│   ├── utils
+│   │   ├── check_data_alignment.py
+│   │   ├── clear_gpu.py
+│   │   ├── kill_zombies.py
+│   │   ├── prune_dataset_to_schema.py
+│   │   ├── validate_and_sort_data.py
+│   │   └── verify_csv_integrity.py
+│   ├── v41_row_column_validator.py
+│   ├── validate_and_fix_v22_features.py
+│   ├── validate_and_fix_v3_features.py
+│   ├── validate_and_fix_v4_features.py
+│   ├── validate_v42_structure.py
+│   ├── validate_v42_structure_v42.py
+│   ├── verification
+│   │   ├── verify_bar_structure.py
+│   │   ├── verify_bct.py
+│   │   ├── verify_brain_formal.py
+│   │   ├── verify_logic_lct.py
+│   │   ├── verify_physics.py
+│   │   ├── verify_physics_formal.py
+│   │   ├── verify_predicates_v47.py
+│   │   └── verify_stateful_parity.py
+│   ├── verify_registry_alignment.py
+│   └── verify_ruleset_loading.py
+├── strategies
+│   ├── __init__.py
+│   └── options_strategy.py
+├── task.md
+├── test.py
+├── test_exit_scaffold.py
+├── test_exit_stack.py
+├── test_phase3_etl.py
+├── tests
+│   ├── __init__.py
+│   ├── __pycache__
+│   │   ├── __init__.cpython-312.pyc
+│   │   ├── conftest.cpython-312-pytest-9.0.2.pyc
+│   │   ├── test_backtest_equivalence.cpython-312-pytest-9.0.2.pyc
+│   │   ├── test_condornet.cpython-312-pytest-9.0.2.pyc
+│   │   ├── test_execution_reality.cpython-312-pytest-9.0.2.pyc
+│   │   └── test_replay_determinism.cpython-312-pytest-9.0.2.pyc
+│   ├── benchmark_predicate.py
+│   ├── conftest.py
+│   ├── debug_predicate_init.py
+│   ├── test_backtest_equivalence.py
+│   ├── test_bb_breakout_signal.py
+│   ├── test_beta_weighting.py
+│   ├── test_cde_integration.py
+│   ├── test_condornet.py
+│   ├── test_divergence.py
+│   ├── test_engine_lifecycle.py
+│   ├── test_execution_cost_model.py
+│   ├── test_execution_reality.py
+│   ├── test_fis_sizer.py
+│   ├── test_fuzzy_routing.py
+│   ├── test_gap.py
+│   ├── test_iron_condor_sizing.py
+│   ├── test_ivol_concurrency.py
+│   ├── test_meta_forecaster.py
+│   ├── test_model_enhancements.py
+│   ├── test_primitives_bands.py
+│   ├── test_primitives_fuzzy.py
+│   ├── test_primitives_momentum.py
+│   ├── test_primitives_topology.py
+│   ├── test_realized_vol.py
+│   ├── test_registry_alignment.py
+│   ├── test_replay_determinism.py
+│   ├── test_risk_es.py
+│   ├── test_rule_engine.py
+│   ├── test_skew.py
+│   ├── test_strategy_logic.py
+│   ├── test_structure_validator.py
+│   ├── verify_inference.py
+│   └── verify_target_gen.py
+├── tools
+│   └── profile_etd1.py
+├── train_v30_t4.log
+├── train_v43_t4_11th_test.log
+├── train_v43_t4_12th_test.log
+├── train_v43_t4_13th_test.log
+├── train_v43_t4_14th_test.log
+├── train_v43_t4_15th_test.log
+├── train_v43_t4_16th_test.log
+├── train_v43_t4_17th_test.log
+├── train_v43_t4_18th_test.log
+├── train_v43_t4_eighth_test.log
+├── train_v43_t4_fifth_test.log
+├── train_v43_t4_first_test.log
+├── train_v43_t4_fourth_test.log
+├── train_v43_t4_ninth_test.log
+├── train_v43_t4_second_test.log
+├── train_v43_t4_seventh_test.log
+├── train_v43_t4_sixth_test.log
+├── train_v43_t4_tenth_test.log
+├── train_v43_t4_third_test.log
+├── training_analytics
+│   ├── analytics.json
+│   └── epoch_snapshots
+│       └── epoch_005.png
+├── training_exports
+│   ├── epoch_10
+│   │   ├── metrics.csv
+│   │   └── training_curves.png
+│   ├── epoch_11
+│   │   ├── metrics.csv
+│   │   └── training_curves.png
+│   ├── epoch_12
+│   │   ├── metrics.csv
+│   │   └── training_curves.png
+│   ├── epoch_13
+│   │   ├── metrics.csv
+│   │   ├── predictions_epoch_013_batch_00020.png
+│   │   └── training_curves.png
+│   ├── epoch_14
+│   │   ├── metrics.csv
+│   │   └── training_curves.png
+│   ├── epoch_2
+│   │   ├── metrics.csv
+│   │   └── training_curves.png
+│   ├── epoch_3
+│   │   ├── metrics.csv
+│   │   └── training_curves.png
+│   ├── epoch_4
+│   │   ├── metrics.csv
+│   │   └── training_curves.png
+│   ├── epoch_5
+│   │   ├── metrics.csv
+│   │   └── training_curves.png
+│   ├── epoch_6
+│   │   ├── metrics.csv
+│   │   └── training_curves.png
+│   ├── epoch_7
+│   │   ├── metrics.csv
+│   │   └── training_curves.png
+│   ├── epoch_8
+│   │   ├── metrics.csv
+│   │   └── training_curves.png
+│   ├── epoch_9
+│   │   ├── metrics.csv
+│   │   └── training_curves.png
+│   └── summary
+│       ├── best_model_info.csv
+│       ├── loss_history.csv
+│       └── training_summary.png
+├── tree.txt
+├── v45testcounts.py
+├── visualizations
+│   ├── NeuralOrganComposite.py
+│   ├── NeuralOrganComposite.txt
+│   ├── NeuralOrganComposite_frontier.py
+│   ├── NeuralOrganComposite_frontier.txt
+│   ├── NeuralOrganComposite_gpu.py
+│   ├── NeuralOrganComposite_plotly.py
+│   ├── NeuralOrganComposite_ultimate.py
+│   ├── NeuralOrgan_Blender.py
+│   └── outputs
+│       ├── A_MatrixHeatmap_Brainimation.mp4
+│       ├── CondorNet A-Matrix Stability Report.pdf
+│       ├── CondorNet_Brainimation.mp4
+│       ├── EigenvalueCloud_Brainimation.mp4
+│       ├── EigenvectorFlow_Brainimation.mp4
+│       ├── EpochComparisonAmatrices_video_exports.pdf
+│       ├── GershgorinShells_Brainimation.mp4
+│       ├── Gershgorin_Brainimation.mp4
+│       ├── LogicMap_Brainimation.mp4
+│       ├── NeuralGenesis_Composite_Brainimation.mp4
+│       ├── NeuralOrgan_BloomOrbit.mp4
+│       ├── NeuralOrgan_Brainimation.mp4
+│       ├── NeuralOrgan_Cathedral.html
+│       ├── NeuralOrgan_EpochFade.mp4
+│       ├── NeuralOrgan_Interactive.html
+│       ├── NeuralOrgan_Optimized.mp4
+│       ├── NeuralOrgan_Orbit360.mp4
+│       ├── NeuralOrgan_Plotly.html
+│       ├── NeuralOrgan_Pulse.mp4
+│       ├── NeuralOrgan_Scrubber.html
+│       ├── NeuralOrgan_Volumetric.html
+│       ├── SpectralDrift_Brainimation.mp4
+│       ├── StabilityTubes_Brainimation.mp4
+│       ├── TensorField_Brainimation.mp4
+│       ├── neural_organ_final_pulse.mp4
+│       ├── neural_organ_logic_shell_mode1.mp4
+│       ├── neural_organ_logic_shell_mode1_pyvista.mp4
+│       └── outputframes.py
+└── watch_exit_bce.py
+
+342 directories, 2837 files
