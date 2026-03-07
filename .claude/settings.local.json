@@ -43,7 +43,12 @@
       "Bash(py -3.12 -W ignore -c:*)",
       "Bash(printf:*)",
       "Bash(# Write:*)",
-      "Bash(py -3.12:*)"
+      "Bash(py -3.12:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(head:*)",
+      "Bash(py:*)",
+      "Bash(git:*)",
+      "Bash(grep:*)"
     ]
   }
 }

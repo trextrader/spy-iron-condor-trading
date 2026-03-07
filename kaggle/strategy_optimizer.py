@@ -357,16 +357,31 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
     for key, val in chosen['combo'].items():
         if key == 'max_positions':
             continue  # CLI param, not in config file
-        # Match: "key":  old_value,  or  "key":  old_value
-        pattern = rf'"({re.escape(key)}":\s*)[^,\n]+'
-        if isinstance(val, float):
-            replacement = rf'"{key}":     {val}'
-        else:
-            replacement = rf'"{key}":      {val}'
-        slines_new = re.sub(pattern, replacement, slines, count=1)
-        if slines_new != slines:
+        # Line-by-line search for "key": value pattern
+        found = False
+        new_lines = []
+        for line in slines.split('\n'):
+            # Match: "key":  <value>,  # optional comment
+            if f'"{key}"' in line and ':' in line.split(f'"{key}"', 1)[1]:
+                # Preserve comment if present
+                comment = ''
+                if '#' in line:
+                    # Find the comment part (after the value)
+                    parts = line.split('#', 1)
+                    comment = '  # ' + parts[1].strip()
+                # Rebuild the line
+                indent = line[:len(line) - len(line.lstrip())]
+                if isinstance(val, float):
+                    new_line = f'{indent}"{key}":     {val},{comment}'
+                else:
+                    new_line = f'{indent}"{key}":      {val},{comment}'
+                new_lines.append(new_line)
+                found = True
+            else:
+                new_lines.append(line)
+        if found:
+            slines = '\n'.join(new_lines)
             print(f"    Updated {key} = {val}")
-            slines = slines_new
         else:
             print(f"    WARN: Could not find {key} in {strat_file}")
 
