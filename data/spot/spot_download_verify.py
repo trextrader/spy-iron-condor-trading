@@ -316,7 +316,28 @@ def inspect_extra_time_patterns(
     extra_df["time_only"] = extra_df["timestamp"].strftime("%H:%M")
 
     counts = extra_df["time_only"].value_counts()
+    if counts.empty:def inspect_extra_time_patterns(
+    actual_ts_unique: pd.DatetimeIndex,
+    expected_ts: pd.DatetimeIndex,
+) -> str:
+    """
+    Returns a compact summary of unexpected timestamp times-of-day.
+    Example: "16:00 x253"
+    """
+    extra_ts = actual_ts_unique.difference(expected_ts)
+    if len(extra_ts) == 0:
+        return ""
+
+    extra_df = pd.DataFrame({"timestamp": extra_ts})
+    extra_df["time_only"] = extra_df["timestamp"].dt.strftime("%H:%M")
+
+    counts = extra_df["time_only"].value_counts()
     if counts.empty:
+        return ""
+
+    top_time = counts.index[0]
+    top_count = int(counts.iloc[0])
+    return f"{top_time} x{top_count}"
         return ""
 
     top_time = counts.index[0]
