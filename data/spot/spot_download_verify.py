@@ -298,7 +298,8 @@ def analyze_file(path: Path) -> Tuple[pd.DataFrame, Dict[str, object]]:
 
 
 def main() -> int:
-    csv_files = sorted(DATA_DIR.glob("*.csv"))
+    # Scan recursively to support yearly subfolders
+    csv_files = sorted(DATA_DIR.rglob("*.csv"))
     target_files = []
 
     for p in csv_files:
