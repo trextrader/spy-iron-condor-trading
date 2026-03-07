@@ -139,15 +139,15 @@ def build_raw_pivot_df(df: pd.DataFrame, left: int, right: int) -> pd.DataFrame:
     pl = pivot_low_tv(low, left, right)
 
     raw = pd.DataFrame({
-        "pivot_index": np.arange(len(df)),
-        "pivot_time": df["datetime"],
+        "pivot_index": np.arange(len(df), dtype=int),
+        "pivot_time": df["datetime"].to_numpy(),
         "pivot_high": ph.astype(int),
         "pivot_low": pl.astype(int),
-        "pivot_price": np.nan,
-        "pivot_type": "",
-        "confirmed_on": pd.NaT,
-        "left_bars": left,
-        "right_bars": right,
+        "pivot_price": np.full(len(df), np.nan, dtype=float),
+        "pivot_type": pd.Series([""] * len(df), dtype="object"),
+        "confirmed_on": pd.Series([pd.NaT] * len(df), dtype="datetime64[ns, America/New_York]"),
+        "left_bars": np.full(len(df), left, dtype=int),
+        "right_bars": np.full(len(df), right, dtype=int),
     })
 
     raw.loc[raw["pivot_high"] == 1, "pivot_price"] = df.loc[raw["pivot_high"] == 1, "high"].to_numpy()
@@ -158,7 +158,14 @@ def build_raw_pivot_df(df: pd.DataFrame, left: int, right: int) -> pd.DataFrame:
     pivot_idx = np.where(ph | pl)[0]
     confirm_idx = pivot_idx + right
     valid = confirm_idx < len(df)
-    raw.loc[pivot_idx[valid], "confirmed_on"] = df.loc[confirm_idx[valid], "datetime"].to_numpy()
+
+    if np.any(valid):
+        raw.loc[pivot_idx[valid], "confirmed_on"] = pd.DatetimeIndex(
+            df.loc[confirm_idx[valid], "datetime"]
+        ).to_numpy(dtype="datetime64[ns]")
+
+        # preserve tz-aware column by reassignment after creation
+        raw["confirmed_on"] = pd.to_datetime(raw["confirmed_on"]).dt.tz_localize(NY_TZ, nonexistent="shift_forward", ambiguous="NaT")
 
     raw = raw[(raw["pivot_high"] == 1) | (raw["pivot_low"] == 1)].copy()
     raw = raw.reset_index(drop=True)
@@ -199,7 +206,15 @@ def reduce_to_alternating_structure(raw_pivots: pd.DataFrame) -> pd.DataFrame:
             kept.append(row)
 
     out = pd.DataFrame(kept).reset_index(drop=True)
-    out["pivot_seq_id"] = np.arange(len(out))
+    out["pivot_seq_id"] = np.arange(len(out), dtype=int)
+
+    if "confirmed_on" in out.columns:
+        out["confirmed_on"] = pd.to_datetime(out["confirmed_on"], utc=False)
+        if getattr(out["confirmed_on"].dt, "tz", None) is None:
+            out["confirmed_on"] = out["confirmed_on"].dt.tz_localize(NY_TZ, nonexistent="shift_forward", ambiguous="NaT")
+        else:
+            out["confirmed_on"] = out["confirmed_on"].dt.tz_convert(NY_TZ)
+
     return out
 
 
@@ -285,11 +300,11 @@ def build_bar_level_dataset(
     """
     out = df.copy()
 
-    out["strong_pivot_high"] = 0
-    out["strong_pivot_low"] = 0
-    out["strong_pivot_price"] = np.nan
-    out["strong_pivot_type"] = ""
-    out["strong_pivot_confirmed_on"] = pd.NaT
+    out["strong_pivot_high"] = pd.Series(np.zeros(len(out), dtype=int), index=out.index)
+    out["strong_pivot_low"] = pd.Series(np.zeros(len(out), dtype=int), index=out.index)
+    out["strong_pivot_price"] = pd.Series(np.full(len(out), np.nan, dtype=float), index=out.index)
+    out["strong_pivot_type"] = pd.Series([""] * len(out), index=out.index, dtype="object")
+    out["strong_pivot_confirmed_on"] = pd.Series([pd.NaT] * len(out), index=out.index, dtype="datetime64[ns, America/New_York]")
 
     if not pivots.empty:
         high_mask = pivots["pivot_type"] == "HIGH"
@@ -299,26 +314,31 @@ def build_bar_level_dataset(
         out.loc[pivots.loc[low_mask, "pivot_index"].to_numpy(), "strong_pivot_low"] = 1
         out.loc[pivots["pivot_index"].to_numpy(), "strong_pivot_price"] = pivots["pivot_price"].to_numpy()
         out.loc[pivots["pivot_index"].to_numpy(), "strong_pivot_type"] = pivots["pivot_type"].to_numpy()
-        out.loc[pivots["pivot_index"].to_numpy(), "strong_pivot_confirmed_on"] = pivots["confirmed_on"].to_numpy()
+
+        confirmed_vals = pd.DatetimeIndex(pivots["confirmed_on"]).tz_convert(NY_TZ) \
+            if getattr(pd.DatetimeIndex(pivots["confirmed_on"]), "tz", None) is not None \
+            else pd.DatetimeIndex(pivots["confirmed_on"]).tz_localize(NY_TZ, nonexistent="shift_forward", ambiguous="NaT")
+
+        out.loc[pivots["pivot_index"].to_numpy(), "strong_pivot_confirmed_on"] = confirmed_vals
 
     # Forward-fill latest confirmed pivot state
-    out["last_strong_pivot_price"] = out["strong_pivot_price"].replace("", np.nan).ffill()
+    out["last_strong_pivot_price"] = out["strong_pivot_price"].ffill()
     out["last_strong_pivot_type"] = out["strong_pivot_type"].replace("", np.nan).ffill()
 
-    out["active_segment_id"] = np.nan
-    out["active_segment_direction"] = np.nan
-    out["active_segment_start_price"] = np.nan
-    out["active_segment_end_price"] = np.nan
+    out["active_segment_id"] = pd.Series(np.full(len(out), np.nan, dtype=float), index=out.index)
+    out["active_segment_direction"] = pd.Series([None] * len(out), index=out.index, dtype="object")
+    out["active_segment_start_price"] = pd.Series(np.full(len(out), np.nan, dtype=float), index=out.index)
+    out["active_segment_end_price"] = pd.Series(np.full(len(out), np.nan, dtype=float), index=out.index)
 
     for lvl in fib_levels:
         col = f"active_fib_{str(lvl).replace('-', 'neg_').replace('.', '_')}"
-        out[col] = np.nan
+        out[col] = pd.Series(np.full(len(out), np.nan, dtype=float), index=out.index)
 
     if not fib_segments.empty:
         for _, seg in fib_segments.iterrows():
             start_idx = int(seg["end_index"])  # after leg is known, use that leg as active reference going forward
             out.loc[start_idx:, "active_segment_id"] = int(seg["segment_id"])
-            out.loc[start_idx:, "active_segment_direction"] = seg["direction"]
+            out.loc[start_idx:, "active_segment_direction"] = str(seg["direction"])
             out.loc[start_idx:, "active_segment_start_price"] = float(seg["start_price"])
             out.loc[start_idx:, "active_segment_end_price"] = float(seg["end_price"])
 
