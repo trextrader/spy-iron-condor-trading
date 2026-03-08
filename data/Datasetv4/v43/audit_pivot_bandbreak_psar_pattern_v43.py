@@ -99,8 +99,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--strict-confirm-after", type=int, default=8, help="Strict allowed confirm bars after pivot")
     p.add_argument("--loose-break-near", type=int, default=8, help="Loose allowed abs(break_idx - pivot_idx)")
     p.add_argument("--loose-confirm-after", type=int, default=20, help="Loose allowed confirm bars after pivot")
-    p.add_argument("--psar-step", type=float, default=0.02, help="PSAR acceleration step")
-    p.add_argument("--psar-max-step", type=float, default=0.2, help="PSAR maximum acceleration")
+    p.add_argument("--psar-start", type=float, default=0.04, help="PSAR starting acceleration factor")
+    p.add_argument("--psar-step", type=float, default=0.10, help="PSAR acceleration increment")
+    p.add_argument("--psar-max-step", type=float, default=0.60, help="PSAR maximum acceleration")
     p.add_argument("--float-format", type=str, default="%.10g")
     return p.parse_args()
 
@@ -140,7 +141,7 @@ def num(series: pd.Series) -> np.ndarray:
     return pd.to_numeric(series, errors="coerce").to_numpy(dtype=float)
 
 
-def compute_psar(high: np.ndarray, low: np.ndarray, step: float = 0.02, max_step: float = 0.2) -> Tuple[np.ndarray, np.ndarray]:
+def compute_psar(high: np.ndarray, low: np.ndarray, start_af: float = 0.04, step: float = 0.10, max_step: float = 0.60) -> Tuple[np.ndarray, np.ndarray]:
     """
     Returns:
         psar
@@ -165,7 +166,7 @@ def compute_psar(high: np.ndarray, low: np.ndarray, step: float = 0.02, max_step
         psar[1] = high[0]
         ep = min(low[0], low[1])
 
-    af = step
+    af = start_af
 
     for i in range(2, n):
         prev_psar = psar[i - 1]
@@ -177,7 +178,7 @@ def compute_psar(high: np.ndarray, low: np.ndarray, step: float = 0.02, max_step
                 bull[i] = 0
                 psar[i] = ep
                 ep = low[i]
-                af = step
+                af = start_af
             else:
                 bull[i] = 1
                 psar[i] = cand
@@ -192,7 +193,7 @@ def compute_psar(high: np.ndarray, low: np.ndarray, step: float = 0.02, max_step
                 bull[i] = 1
                 psar[i] = ep
                 ep = high[i]
-                af = step
+                af = start_af
             else:
                 bull[i] = 0
                 psar[i] = cand
@@ -206,7 +207,7 @@ def compute_psar(high: np.ndarray, low: np.ndarray, step: float = 0.02, max_step
     return psar, bull
 
 
-def build_psar_columns(df: pd.DataFrame, step: float, max_step: float) -> pd.DataFrame:
+def build_psar_columns(df: pd.DataFrame, start_af: float, step: float, max_step: float) -> pd.DataFrame:
     out = df.copy()
 
     if "PSAR" in out.columns:
@@ -219,7 +220,7 @@ def build_psar_columns(df: pd.DataFrame, step: float, max_step: float) -> pd.Dat
     else:
         high = num(out["high"])
         low = num(out["low"])
-        psar, bull_state = compute_psar(high, low, step=step, max_step=max_step)
+        psar, bull_state = compute_psar(high, low, start_af=start_af, step=step, max_step=max_step)
         out["PSAR"] = psar
 
     out["PSARBullState"] = bull_state
@@ -611,7 +612,7 @@ def process_file(
 
     time_col = get_time_col(df)
 
-    df = build_psar_columns(df, step=args.psar_step, max_step=args.psar_max_step)
+    df = build_psar_columns(df, start_af=args.psar_start, step=args.psar_step, max_step=args.psar_max_step)
     df = detect_pattern_candidates(
         df,
         break_lookback_min=args.break_lookback_min,
