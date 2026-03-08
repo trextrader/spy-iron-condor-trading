@@ -399,12 +399,12 @@ def main() -> None:
     ap.add_argument("--output", required=True, help="Path to ranked results CSV")
     ap.add_argument("--search-window", type=int, default=200)
 
-    ap.add_argument("--bb-windows", nargs="*", type=int, default=[16, 20, 24, 30, 36])
-    ap.add_argument("--bb-ks", nargs="*", type=float, default=[1.6, 1.8, 2.0, 2.2, 2.4])
+    ap.add_argument("--bb-windows", nargs="*", type=int, default=[8, 9, 10, 11, 12, 13, 14, 15])
+    ap.add_argument("--bb-ks", nargs="*", type=float, default=[2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8])
 
-    ap.add_argument("--psar-starts", nargs="*", type=float, default=[0.01, 0.02, 0.03])
-    ap.add_argument("--psar-steps", nargs="*", type=float, default=[0.01, 0.02, 0.03])
-    ap.add_argument("--psar-maxes", nargs="*", type=float, default=[0.10, 0.14, 0.20, 0.30])
+    ap.add_argument("--psar-starts", nargs="*", type=float, default=[0.01])
+    ap.add_argument("--psar-steps", nargs="*", type=float, default=[0.10])
+    ap.add_argument("--psar-maxes", nargs="*", type=float, default=[1.00])
 
     ap.add_argument("--top-n", type=int, default=25)
     args = ap.parse_args()
