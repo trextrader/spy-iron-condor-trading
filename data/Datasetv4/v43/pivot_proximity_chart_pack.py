@@ -358,17 +358,31 @@ def plot_timeframe_panel(ax, df, signals, year, tf):
     ax.plot(x, close, lw=0.45, alpha=0.85, label="Close", zorder=1)
 
     # Pivots
+    # PivotHigh = red downward triangle above high
     ax.scatter(
-        x[piv_hi_mask], close[piv_hi_mask],
-        marker="^", s=42, color="red", edgecolors="black", linewidths=0.25,
-        label="PivotHigh", zorder=5
-    )
-    ax.scatter(
-        x[piv_lo_mask], close[piv_lo_mask],
-        marker="v", s=42, color="green", edgecolors="black", linewidths=0.25,
-        label="PivotLow", zorder=5
+        x[piv_hi_mask],
+        high[piv_hi_mask] + hi_offset,
+        marker="v",
+        s=95,
+        color="red",
+        edgecolors="black",
+        linewidths=0.35,
+        zorder=6,
+        label="PivotHigh"
     )
 
+    # PivotLow = green upward triangle below low
+    ax.scatter(
+        x[piv_lo_mask],
+        low[piv_lo_mask] - lo_offset,
+        marker="^",
+        s=95,
+        color="green",
+        edgecolors="black",
+        linewidths=0.35,
+        zorder=6,
+        label="PivotLow"
+)
     # A / B / C event markers
     ax.scatter(
         x[event_A], close[event_A],
@@ -434,10 +448,10 @@ def make_year_figure(year, data_root, compute_psar_full, outdir, export_features
     # Figure-level legend
     handles = [
         plt.Line2D([], [], color="black", lw=0.7, label="Close"),
-        plt.Line2D([], [], marker="^", linestyle="None", markerfacecolor="red",
-                   markeredgecolor="black", markersize=8, label="PivotHigh"),
-        plt.Line2D([], [], marker="v", linestyle="None", markerfacecolor="green",
-                   markeredgecolor="black", markersize=8, label="PivotLow"),
+        plt.Line2D([], [], marker="v", linestyle="None", markerfacecolor="red",
+                   markeredgecolor="black", markersize=10, label="PivotHigh"),
+        plt.Line2D([], [], marker="^", linestyle="None", markerfacecolor="green",
+                   markeredgecolor="black", markersize=10, label="PivotLow"),
         plt.Line2D([], [], marker="s", linestyle="None", markerfacecolor="orange",
                    markeredgecolor="black", markersize=7, label="A: BB break/touch"),
         plt.Line2D([], [], marker="s", linestyle="None", markerfacecolor="dodgerblue",
