@@ -2711,19 +2711,38 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  if v43_outputs is not None and i < len(v43_outputs['exit_signal']):
                      _xs = float(v43_outputs['exit_signal'][i])
                      _xs_str = f"  exit_sig={_xs:.3f}"
-                 _hold_reasons = []
-                 if _prem_pct < 50.0:  _hold_reasons.append(f"prem_only {_prem_pct:.1f}% (<50%)")
-                 if _dte_rem > 0:      _hold_reasons.append(f"{_dte_rem:.1f}d DTE remaining")
-                 if _stop_gap > 0:     _hold_reasons.append(f"${_stop_gap:,.0f} from stop")
-                 if _to_tgt > 0:       _hold_reasons.append(f"${_to_tgt:,.0f} to profit target")
-                 _hold_why = " | ".join(_hold_reasons) if _hold_reasons else "holding"
+                 # Priority-ordered exit check results (same order as real exit logic)
+                 _bar_dow_h   = pd.Timestamp(ts).dayofweek
+                 _bar_hour_h  = pd.Timestamp(ts).hour
+                 _is_fri_pm   = (_bar_dow_h == 4 and _bar_hour_h >= 15)
+                 _5pct_stop   = -0.05 * (equity + sum(t.unrealized_pnl for t in open_trades))
+                 _chk = [
+                     ("[1] Fri closeout",  "FIRE" if (friday_closeout and _is_fri_pm) else "skip",
+                      f"{'Fri 15h+ → WOULD EXIT' if _is_fri_pm else 'not Fri 15h+'}"),
+                     ("[2] Per-trade stop", "FIRE" if tr.unrealized_pnl < _stop_thr     else "skip",
+                      f"unrealized=${tr.unrealized_pnl:+,.0f}  thresh=${_stop_thr:+,.0f}  gap=${_stop_gap:+,.0f}"),
+                     ("[3] Portfolio stop", "FIRE" if tr.unrealized_pnl < _5pct_stop    else "skip",
+                      f"unrealized=${tr.unrealized_pnl:+,.0f}  5pct_thresh=${_5pct_stop:+,.0f}"),
+                     ("[4] Dollar stop",    "FIRE" if (_sl_dol_hld and tr.unrealized_pnl < -abs(float(_sl_dol_hld))) else "skip",
+                      (f"unrealized=${tr.unrealized_pnl:+,.0f}  thresh=-${_sl_dol_hld:,.0f}" if _sl_dol_hld else "disabled")),
+                     ("[5] Profit target",  "FIRE" if tr.unrealized_pnl >= _tgt_pnl      else "skip",
+                      f"unrealized=${tr.unrealized_pnl:+,.0f}  target=${_tgt_pnl:,.0f}  gap=${_to_tgt:+,.0f}"),
+                     ("[6] Time exit",      "FIRE" if (_dh >= _hold_cfg.get('hold_days', 30)
+                                                       or (_hold_cfg.get('max_dte_exit', 0) > 0
+                                                           and _dte_rem <= _hold_cfg.get('max_dte_exit', 0))
+                                                       or _dh > tr.dte_entry) else "skip",
+                      f"held={_dh:.1f}d  hold_days={_hold_cfg.get('hold_days',30)}  dte_rem={_dte_rem:.1f}d"),
+                 ]
                  print(f"  [HOLD] [{tr.trade_id}] bar={i} {str(ts)[:19]}"
-                       f"  held={_dh:.1f}d/{tr.dte_entry:.0f}dte  dte_rem={_dte_rem:.1f}d\n"
-                       f"    unrealized=${tr.unrealized_pnl:+,.2f}  prem_captured={_prem_pct:+.1f}%"
-                       f"  spot={spot:.2f}\n"
-                       f"    SC_dist={_sc_dist:+.2f}%  SP_dist={_sp_dist:+.2f}%"
-                       f"  stop_gap=${_stop_gap:,.0f}  to_target=${_to_tgt:,.0f}{_xs_str}\n"
-                       f"    WHY HOLDING: {_hold_why}")
+                       f"  strategy={getattr(tr,'strategy_class','?')}"
+                       f"  held={_dh:.1f}d/{tr.dte_entry:.0f}dte  dte_rem={_dte_rem:.1f}d"
+                       f"  spot={spot:.2f}{_xs_str}")
+                 print(f"    unrealized=${tr.unrealized_pnl:+,.2f}"
+                       f"  prem_captured={_prem_pct:+.1f}%"
+                       f"  SC_dist={_sc_dist:+.2f}%  SP_dist={_sp_dist:+.2f}%")
+                 for _chk_name, _chk_status, _chk_detail in _chk:
+                     _flag = "*** EXIT ***" if _chk_status == "FIRE" else "  hold"
+                     print(f"    {_chk_name:<22} [{_flag}]  {_chk_detail}")
          
          open_trades = active_trades
          
@@ -3289,24 +3308,50 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                                          _cur_eq     = equity + sum(t.unrealized_pnl for t in open_trades)
                                          _dd_pct     = (_cur_eq - peak_equity) / peak_equity * 100 if peak_equity > 0 else 0.0
                                          _strat_name = V43_STRATEGY_NAMES[_sidx] if v43_outputs and 0 <= _sidx < len(V43_STRATEGY_NAMES) else "?"
+                                         # Pre-compute exit thresholds for this trade (shown at open for traceability)
+                                         _to_cfg      = get_config(_STRATEGY_CONFIGS, _active_template)
+                                         _to_sl_mult  = _to_cfg.get("stop_loss_mult", IC_STOP_LOSS_MULT)
+                                         _to_sl_dol   = _to_cfg.get("stop_loss_dollar")
+                                         _to_pt_cfg   = _to_cfg.get("profit_target")
+                                         _to_max_cred = net_credit_val * filled_qty * IC_MULTIPLIER
+                                         _to_sl_mult_thr = -(abs(net_credit_val) * _to_sl_mult * filled_qty * IC_MULTIPLIER)
+                                         if _to_sl_dol is not None:
+                                             _to_sl_thr = max(_to_sl_mult_thr, -abs(float(_to_sl_dol)))
+                                         else:
+                                             _to_sl_thr = _to_sl_mult_thr
+                                         _to_pt_thr   = float(_to_pt_cfg) if _to_pt_cfg is not None else abs(_to_max_cred) * 0.50
+                                         _to_hd       = _to_cfg.get("hold_days", 30)
+                                         _to_mde      = _to_cfg.get("max_dte_exit", 0)
                                          print(
-                                             f"\n  {'='*56}"
+                                             f"\n  {'='*72}"
                                              f"\n  TRADE OPENED  [{trade_id}]  bar={i}  {str(ts)[:19]}"
-                                             f"\n  {'='*56}"
-                                             f"\n  Strategy  : {_strat_name} (idx={_sidx if v43_outputs else '?'})"
+                                             f"\n  {'='*72}"
+                                             f"\n  Strategy  : {_strat_name} (template={_active_template})"
                                              f"\n  Legs      : SC={legs.get('short_call')} / LC={legs.get('long_call')}"
                                              f"  |  SP={legs.get('short_put')} / LP={legs.get('long_put')}"
-                                             f"\n  Credit    : ${net_credit_val:.4f}/contract  qty={filled_qty}"
-                                             f"  margin=${trade_margin:.0f}  DTE={dte:.0f}"
+                                             f"\n  Credit    : ${net_credit_val:.4f}/shr  max_credit=${_to_max_cred:,.2f}"
+                                             f"  qty={filled_qty}  margin=${trade_margin:.0f}  DTE={dte:.0f}"
                                              f"\n  Spot      : {spot:.2f}"
                                              f"  entry_sig={_es:.3f}  pop={_pop:.3f}"
-                                             f"\n  {'-'*56}"
+                                             f"\n  {'-'*72}"
+                                             f"\n  EXIT THRESHOLDS (fire when unrealized crosses):"
+                                             f"\n    [1] Friday closeout  : Fri 15:00+  (always-on)"
+                                             f"\n    [2] Per-trade stop   : unrealized < ${_to_sl_thr:>+,.2f}"
+                                             f"  ({_to_sl_mult}x credit"
+                                             + (f" + ${_to_sl_dol} hard cap" if _to_sl_dol else "") + ")"
+                                             + f"\n    [3] Portfolio stop   : unrealized < -5% equity"
+                                             f"\n    [4] Dollar stop      : " + (f"unrealized < -${_to_sl_dol:,.0f}" if _to_sl_dol else "disabled")
+                                             + f"\n    [5] Profit target    : unrealized >= ${_to_pt_thr:>,.2f}"
+                                             + (f"  (max possible=${_to_max_cred:,.2f})" if _to_max_cred > 0 else f"  [debit trade]")
+                                             + f"\n    [6] Time exit        : hold_days={_to_hd}d"
+                                             + (f"  | max_dte_exit={_to_mde}d" if _to_mde > 0 else "")
+                                             + f"  | expiry at DTE=0"
+                                             + f"\n  {'-'*72}"
                                              f"\n  Balance   : ${_cur_eq:>12,.2f}"
                                              f"  (deployed ${currently_deployed_exact+trade_margin:,.0f} / ${live_max_deploy:,.0f})"
-                                             f"\n  Wins/Loss : {_n_wins}W / {_n_losses}L"
+                                             f"\n  Record    : {_n_wins}W / {_n_losses}L"
                                              f"  (closed={len(_close_recs)}, open={len(open_trades)+1})"
-                                             f"\n  Max DD    : {_dd_pct:.2f}%  (vs peak ${peak_equity:,.0f})"
-                                             f"\n  {'='*56}"
+                                             f"\n  {'='*72}"
                                          )
 
                                          # OPEN event row (state-action trajectory export)
@@ -3641,6 +3686,8 @@ def main():
                         help="Max simultaneous open IC positions (default: 5)")
     parser.add_argument("--verbose", action="store_true", default=False,
                         help="Print detailed per-bar output: gate checks, chain state, leg selection, fill details")
+    parser.add_argument("--trace", action="store_true", default=False,
+                        help="Full trade lifecycle trace: exit threshold checks printed every bar per open position")
     parser.add_argument("--strategies", type=str, default="all",
                         help=("Filter which strategy classes the model may trade. "
                               "Default 'all' = any non-abstain class. "
@@ -4013,6 +4060,12 @@ def main():
             strategy_configs=_STRATEGY_CONFIGS,
             friday_closeout=not getattr(args, 'no_friday_closeout', False))
         import sys; sys.exit(0)
+
+    # --trace: print every bar per open position (overrides HOLD_PRINT_INTERVAL)
+    global HOLD_PRINT_INTERVAL
+    if getattr(args, 'trace', False):
+        HOLD_PRINT_INTERVAL = 1
+        print("[trace] HOLD_PRINT_INTERVAL set to 1 — full per-bar lifecycle output enabled")
 
     equity, trades = run_backtest(
         df,
