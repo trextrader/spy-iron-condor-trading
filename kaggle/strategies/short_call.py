@@ -65,7 +65,7 @@ CONFIG = {
     "cooldown_bars":      5,           # Min bars between trades
 
     # ── Entry: Structure (overrides neural model when not None) ──────────────
-    "call_offset_pct":    1.5,  # % OTM for call strike (None = neural model)
+    "call_offset_pct":    None,  # % OTM for call strike (None = neural model)
     "put_offset_pct":     None,  # % OTM for put strike  (None = neural model)
     "spread_width":       None,  # Spread width points   (None = neural model / N/A)
     "target_dte":         21,  # Target DTE at entry   (None = neural model)
