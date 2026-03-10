@@ -51,7 +51,7 @@ CONFIG = {
     "stop_loss_dollar":   500,  # Hard dollar cap per trade (None = use multiplier only)
 
     # ── Exit: Profit Target ───────────────────────────────────────────────
-    "profit_target":      None,    # Dollar target (None = use 50% of credit)
+    "profit_target":      2500,    # Dollar target (None = use 50% of credit)
 
     # ── Template Preference ───────────────────────────────────────────────
     "fallback_template":  None,        # If no template eligible, use this template_id

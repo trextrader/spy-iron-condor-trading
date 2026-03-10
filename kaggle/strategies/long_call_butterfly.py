@@ -51,11 +51,11 @@ CONFIG = {
     "margin_spot_pct":    0.3,      # If pct_spot: margin = spot * this * 100
 
     # ── Exit: Stop-Loss ───────────────────────────────────────────────────
-    "stop_loss_mult":     2.0,   # Close when loss >= N * |credit| * qty * 100
-    "stop_loss_dollar":   None,  # Hard dollar cap per trade (None = use multiplier only)
+    "stop_loss_mult":     1.5,   # Close when loss >= N * |credit| * qty * 100
+    "stop_loss_dollar":   500,  # Hard dollar cap per trade (None = use multiplier only)
 
     # ── Exit: Profit Target ───────────────────────────────────────────────
-    "profit_target":      None,    # Dollar target (None = use 50% of credit)
+    "profit_target":      1000,    # Dollar target (None = use 50% of credit)
 
     # ── Template Preference ───────────────────────────────────────────────
     "fallback_template":  None,        # If no template eligible, use this template_id

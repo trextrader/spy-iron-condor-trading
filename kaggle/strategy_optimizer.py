@@ -127,7 +127,6 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
         verbose_sim=False, max_positions=args.max_positions,
         allowed_strategy_idxs=allowed_strategy_idxs,
         allowed_template_ids=allowed_template_ids,
-        use_profit_targets=getattr(args, 'profittargets', False),
         dte_by_dow=dte_by_dow,
         return_bar_cache=True,
     )
@@ -207,7 +206,6 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
                     verbose_sim=False, max_positions=mp,
                     allowed_strategy_idxs=allowed_strategy_idxs,
                     allowed_template_ids=allowed_template_ids,
-                    use_profit_targets=getattr(args, 'profittargets', False),
                     dte_by_dow=dte_by_dow,
                     bar_cache=_bar_cache,
                 )
@@ -394,4 +392,4 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
               f" Use: --max-positions {chosen['combo']['max_positions']}")
     print(f"  Run: python kaggle/condor_brain_backtest_v45.py --use-v43"
           f" --strategies {template_id} --limit {args.limit or 500}"
-          f" --profittargets --verbose")
+          f" --verbose")

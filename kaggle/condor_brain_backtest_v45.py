@@ -216,47 +216,28 @@ IC_MULTIPLIER = 100  # Options multiplier
 IC_STOP_LOSS_MULT = 2.0      # Close when loss ≥ 2× credit (standard IC management rule)
 RULE_FEATURES = ["rule_long_consensus", "rule_short_consensus", "rule_exit_consensus", "rule_block_any"]
 
-# Per-strategy profit targets (dollar PnL thresholds derived from historical sweet-spot analysis).
-# When a trade's unrealized_pnl hits this value, it exits with PROFIT_TARGET.
-# Strategies not listed here fall back to the default 50%-of-credit calculation.
-# iron_condor intentionally omitted — uses default 50% credit target.
-STRATEGY_PROFIT_TARGETS = {
-    'custom_multi_leg':  1100,   # iron_butterfly sweet spot: $1,100 min win → 21 trades $72,289 total
-    'bear_put_spread':   1029,   # sweet spot: $1,029 min win → 5 trades $15,447 total
-    'bull_call_spread':   820,   # sweet spot: $820 min win  → 3 trades $9,158 total
-    'single_call':       2500,   # naked short call: take profit at $2,500 to limit reversal risk
-
-    'single_put':        2500,   # naked short put: same target
-
-}
+# Exit parameters are stored exclusively in each strategy's CONFIG dict (strategies/*.py).
+# stop_loss_mult, stop_loss_dollar, and profit_target are read at runtime via _STRATEGY_CONFIGS.
+# Fallback chain: strategy CONFIG → _defaults.py DEFAULT_CONFIG → IC_STOP_LOSS_MULT constant.
+# Do NOT add per-strategy override dicts here — they cause split-brain between the optimizer
+# (which writes to strategy files) and the backtester (which would read from these dicts instead).
 
 
-# Per-strategy stop-loss multiplier (of credit received).
+def _stop_clamp(realized_pnl: float, tr) -> float:
+    """Cap realized_pnl at the trade's configured stop threshold (stop-on-tick guarantee).
 
-# Default IC_STOP_LOSS_MULT (2.0) used for strategies not listed here.
-
-# Naked/undefined-risk strategies use tighter stops to bound max loss.
-
-STRATEGY_STOP_LOSS = {
-
-    'single_call':       1.5,   # naked short: stop at 1.5× credit (tighter than IC 2.0×)
-
-    'single_put':        1.5,   # same for puts
-
-    'straddle':          1.5,
-
-    'strangle':          1.5,
-
-}
-
-# Per-strategy dollar hard stop — max loss per trade in $.
-# Uses 1:5 to 1:10 SL:PT ratio.  Same lookup pattern as STRATEGY_PROFIT_TARGETS.
-STRATEGY_DOLLAR_STOPS = {
-    'single_call':       500,    # $500 max loss (1:5 with $2,500 PT)
-    'single_put':        500,    # $500 max loss
-    'straddle':          750,    # $750 max loss
-    'strangle':          750,
-}
+    Emulates tick-level stop execution: no loss-exit can produce a realized loss
+    worse than the configured stop level, regardless of bar-close gaps.
+    Applied uniformly to all loss-exit paths: FRIDAY_CLOSEOUT, RISK_STOP, DOLLAR_STOP,
+    PER_TRADE_STOP.  Profitable exits are unaffected (max() leaves positives unchanged).
+    """
+    _cfg       = get_config(_STRATEGY_CONFIGS, getattr(tr, "strategy_class", ""))
+    _sl_mult   = _cfg.get("stop_loss_mult", IC_STOP_LOSS_MULT)
+    _threshold = -(abs(tr.net_credit) * _sl_mult * tr.qty * IC_MULTIPLIER)
+    _sl_dollar = _cfg.get("stop_loss_dollar")
+    if _sl_dollar is not None:
+        _threshold = max(_threshold, -abs(float(_sl_dollar)))
+    return max(realized_pnl, _threshold)
 
 
 # =============================================================================
@@ -1887,7 +1868,7 @@ def build_ts_ranges(df, time_col='dt'):
 def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, model_path=None, data_path=None, norm_stats=None,
                  use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None,
                  v43_outputs=None, bundle=None, verbose_sim=False, max_positions=5,
-                 allowed_strategy_idxs=None, allowed_template_ids=None, use_profit_targets=False,
+                 allowed_strategy_idxs=None, allowed_template_ids=None,
                  dte_by_dow=None, bar_cache=None, return_bar_cache=False):
 
     # ==========================================================================
@@ -2355,9 +2336,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  realized_pnl = ((tr.net_credit - exit_debit) * tr.qty * IC_MULTIPLIER
                                  if exit_valid
                                  else getattr(tr, 'unrealized_pnl_real', tr.unrealized_pnl))
+                 realized_pnl = _stop_clamp(realized_pnl, tr)  # stop-on-tick guarantee
                  tr.exit_dt = ts
                  tr.exit_reason = "FRIDAY_CLOSEOUT"
                  tr.realized_pnl = realized_pnl
+                 if tr.max_loss > 0:
+                     tr.pnl_pct = tr.realized_pnl / tr.max_loss
                  tr.is_closed = True
                  equity += tr.realized_pnl
                  closed_trades.append({
@@ -2390,9 +2374,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  realized_pnl = ((tr.net_credit - exit_debit) * tr.qty * IC_MULTIPLIER
                                  if exit_valid
                                  else getattr(tr, 'unrealized_pnl_real', tr.unrealized_pnl))
+                 realized_pnl = _stop_clamp(realized_pnl, tr)  # stop-on-tick guarantee
                  tr.exit_dt = ts
                  tr.exit_reason = "FRIDAY_CLOSEOUT"
                  tr.realized_pnl = realized_pnl
+                 if tr.max_loss > 0:
+                     tr.pnl_pct = tr.realized_pnl / tr.max_loss
                  tr.is_closed = True
                  equity += tr.realized_pnl
                  closed_trades.append({
@@ -2441,6 +2428,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  realized_pnl = max(realized_pnl, _per_trade_stop)  # stop-on-tick: cap at stop level
                  tr.exit_reason = "PER_TRADE_STOP"
                  tr.realized_pnl = realized_pnl
+                 if tr.max_loss > 0:
+                     tr.pnl_pct = tr.realized_pnl / tr.max_loss
                  tr.is_closed = True
                  equity += tr.realized_pnl
                  closed_trades.append({
@@ -2482,9 +2471,12 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      # Fallback to MTM-based estimate
                      realized_pnl = getattr(tr, 'unrealized_pnl_real', tr.unrealized_pnl)
 
+                 realized_pnl = _stop_clamp(realized_pnl, tr)  # stop-on-tick guarantee
                  tr.exit_dt = ts
                  tr.exit_reason = "RISK_5PCT"
                  tr.realized_pnl = realized_pnl
+                 if tr.max_loss > 0:
+                     tr.pnl_pct = tr.realized_pnl / tr.max_loss
                  tr.is_closed = True
 
                  equity += tr.realized_pnl
@@ -2513,9 +2505,9 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  _scoreboard("AFTER EXIT:RISK_STOP_5PCT", realized_pnl)
                  continue  # Trade is gone
 
-             # Check Dollar Hard Stop — per-strategy $ cap from config
+             # Check Dollar Hard Stop — per-strategy $ cap from strategy CONFIG only
              _sl_cfg_tr = get_config(_STRATEGY_CONFIGS, getattr(tr, "strategy_class", "") or "")
-             _sl_dollar = _sl_cfg_tr.get("stop_loss_dollar") or STRATEGY_DOLLAR_STOPS.get(getattr(tr, "strategy_class", ""))
+             _sl_dollar = _sl_cfg_tr.get("stop_loss_dollar")
              if _sl_dollar is not None and tr.unrealized_pnl < -abs(float(_sl_dollar)):
                  if exec_engine and market_state:
                      exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
@@ -2533,6 +2525,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  realized_pnl = max(realized_pnl, -abs(float(_sl_dollar)))  # stop-on-tick: cap at $stop
                  tr.exit_reason = "DOLLAR_STOP"
                  tr.realized_pnl = realized_pnl
+                 if tr.max_loss > 0:
+                     tr.pnl_pct = tr.realized_pnl / tr.max_loss
                  tr.is_closed = True
                  equity += tr.realized_pnl
                  closed_trades.append({
@@ -2551,15 +2545,14 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  _scoreboard("AFTER EXIT:DOLLAR_STOP", realized_pnl)
                  continue
 
-             # Check Profit Target — per-strategy dollar target (if --profittargets) or 50%-of-credit
+             # Check Profit Target — use strategy CONFIG value if set, else 50%-of-credit fallback.
+             # profit_target is written to the strategy .py file by the optimizer; it is always
+             # respected here without requiring any CLI flag.
              _strat_cls_tr = getattr(tr, 'strategy_class', None)
-             # Per-strategy config profit target takes priority
              _pt_cfg = get_config(_STRATEGY_CONFIGS, _strat_cls_tr or "")
              _cfg_pt = _pt_cfg.get("profit_target")
-             if use_profit_targets and _cfg_pt is not None:
+             if _cfg_pt is not None:
                  profit_target = float(_cfg_pt)
-             elif use_profit_targets and _strat_cls_tr in STRATEGY_PROFIT_TARGETS:
-                 profit_target = float(STRATEGY_PROFIT_TARGETS[_strat_cls_tr])
              else:
                  profit_target = abs(tr.net_credit) * 0.50 * tr.qty * IC_MULTIPLIER
              if tr.unrealized_pnl >= profit_target and tr.unrealized_pnl > 0:
@@ -3592,9 +3585,8 @@ def main():
                               "an index (e.g. '7'), or comma-separated mix "
                               "(e.g. 'iron_condor,strangle,5'). "
                               "Strategy names: " + ", ".join(V43_STRATEGY_NAMES)))
-    parser.add_argument("--profittargets", action="store_true", default=False,
-                        help=("Enable per-strategy dollar profit targets (from STRATEGY_PROFIT_TARGETS). "
-                              "Off by default; falls back to standard 50%%-of-credit exit for all strategies."))
+    # --profittargets removed: profit_target is read directly from strategy CONFIG (strategies/*.py).
+    # Optimizer writes values there; they are always respected without a flag.
     parser.add_argument("--optimize", action="store_true", default=False,
                         help="Interactive parameter optimizer mode (grid search)")
     parser.add_argument("--strategyomit", nargs='+', default=None,
@@ -3622,16 +3614,16 @@ def main():
                         help=f"Inference sequence length for CondorNet v4.3 (default: {V43_SEQ_LEN})")
 
     # Per-day-of-week max DTE caps (prevents weekend/overnight carry-over)
-    parser.add_argument("--dte-mon", type=int, default=5,
-                        help="Max DTE for entries on Monday (default: 5 = expires by Friday)")
-    parser.add_argument("--dte-tue", type=int, default=4,
-                        help="Max DTE for entries on Tuesday (default: 4)")
-    parser.add_argument("--dte-wed", type=int, default=3,
-                        help="Max DTE for entries on Wednesday (default: 3)")
-    parser.add_argument("--dte-thu", type=int, default=2,
-                        help="Max DTE for entries on Thursday (default: 2)")
-    parser.add_argument("--dte-fri", type=int, default=1,
-                        help="Max DTE for entries on Friday (default: 1 = 0DTE, expires same day)")
+    parser.add_argument("--dte-mon", type=int, default=None,
+                        help="Max DTE for entries on Monday (off by default; e.g. --dte-mon 5)")
+    parser.add_argument("--dte-tue", type=int, default=None,
+                        help="Max DTE for entries on Tuesday (off by default; e.g. --dte-tue 4)")
+    parser.add_argument("--dte-wed", type=int, default=None,
+                        help="Max DTE for entries on Wednesday (off by default; e.g. --dte-wed 3)")
+    parser.add_argument("--dte-thu", type=int, default=None,
+                        help="Max DTE for entries on Thursday (off by default; e.g. --dte-thu 2)")
+    parser.add_argument("--dte-fri", type=int, default=None,
+                        help="Max DTE for entries on Friday (off by default; e.g. --dte-fri 1)")
 
     args = parser.parse_args()
 
@@ -3724,14 +3716,17 @@ def main():
                                 if i < len(V43_STRATEGY_NAMES)]
                 print(f"[strategyomit] Final allowed: {_final_names}")
 
-    # --- Profit targets mode ---
-    if getattr(args, 'profittargets', False):
-        print(f"[profittargets] ON — per-strategy dollar targets:")
-        for _s, _t in STRATEGY_PROFIT_TARGETS.items():
-            print(f"    {_s:<25} -> ${_t:,.0f}")
-        print(f"    (all other strategies use default 50%%-of-credit target)")
+    # Profit targets: strategy CONFIG profit_target used when set; else 50%-of-credit default.
+    # Print active targets from loaded strategy configs so operator can verify before run.
+    _pt_active = {_tid: _cfg.get("profit_target") for _tid, _cfg in _STRATEGY_CONFIGS.items()
+                  if _cfg.get("profit_target") is not None}
+    if _pt_active:
+        print("[profit_target] Strategy-specific dollar targets active:")
+        for _t, _v in sorted(_pt_active.items()):
+            print(f"    {_t:<30} -> ${_v:,.0f}")
+        print("    (all other strategies: 50%%-of-credit)")
     else:
-        print("[profittargets] OFF — all strategies use 50%%-of-credit profit target")
+        print("[profit_target] No strategy-specific targets set — all strategies use 50%%-of-credit")
 
     # --- GPU CHECK ---
     print("="*60)
@@ -3971,7 +3966,6 @@ def main():
         max_positions=args.max_positions,
         allowed_strategy_idxs=ALLOWED_STRATEGY_IDXS,
         allowed_template_ids=ALLOWED_TEMPLATE_IDS,
-        use_profit_targets=getattr(args, 'profittargets', False),
         dte_by_dow=_dte_by_dow,
     )
 

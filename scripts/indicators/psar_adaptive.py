@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 def compute_psar_full(high: pd.Series, low: pd.Series, close: pd.Series,
-                      af_start: float = 0.02, af_max: float = 0.20) -> pd.DataFrame:
+                      af_start: float = 0.04, af_max: float = 1.0) -> pd.DataFrame:
     """
     Returns DataFrame with columns: psar_mark, psar_adaptive, psar_trend, psar_reversion_mu
     """

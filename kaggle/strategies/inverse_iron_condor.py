@@ -47,17 +47,17 @@ CONFIG = {
     ],
 
     # ── Sizing ────────────────────────────────────────────────────────────
-    "max_contracts":      10,          # Max contracts per trade
+    "max_contracts":      5,          # Max contracts per trade
     "margin_pct":         0.50,        # Max % of buying power to deploy per trade
     "margin_type":        "width",   # "width" (spread) or "pct_spot" (naked)
     "margin_spot_pct":    0.5,      # If pct_spot: margin = spot * this * 100
 
     # ── Exit: Stop-Loss ───────────────────────────────────────────────────
-    "stop_loss_mult":     2.0,   # Close when loss >= N * |credit| * qty * 100
-    "stop_loss_dollar":   None,  # Hard dollar cap per trade (None = use multiplier only)
+    "stop_loss_mult":     1.5,   # Close when loss >= N * |credit| * qty * 100
+    "stop_loss_dollar":   750,  # Hard dollar cap per trade (None = use multiplier only)
 
     # ── Exit: Profit Target ───────────────────────────────────────────────
-    "profit_target":      None,    # Dollar target (None = use 50% of credit)
+    "profit_target":      2000,    # Dollar target (None = use 50% of credit)
 
     # ── Template Preference ───────────────────────────────────────────────
     "fallback_template":  None,        # If no template eligible, use this template_id

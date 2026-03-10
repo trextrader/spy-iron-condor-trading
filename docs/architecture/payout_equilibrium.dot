@@ -1,0 +1,88 @@
+digraph PayoutEquilibrium {
+    rankdir=TB;
+    bgcolor="#0a0a0a";
+    fontname="Helvetica";
+    fontcolor="#e0e0e0";
+    node [fontname="Helvetica", fontcolor="#e0e0e0", style=filled, color="#404040"];
+    edge [fontname="Helvetica", fontcolor="#b0b0b0", color="#606060"];
+
+    // Title
+    label=<<b>Options Payout Equilibrium &amp; Strategy Map</b><br/>Synthetic OI &amp; Gamma Modeling Architecture>;
+    labelloc="t";
+    fontsize=20;
+
+    // Inputs Layer
+    subgraph cluster_inputs {
+        label=<<b>Input &amp; Configuration Layer</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+        
+        market_params [label="Timeframe & Market Params\n• Scaling logic\n• Expiry tracking", shape=folder, fillcolor="#4a90e2"];
+        vol_params [label="Volume & OI Assumptions\n• Avg volume\n• Put/Call ratio", shape=folder, fillcolor="#4a90e2"];
+        mm_params [label="Market Maker & Vol\n• Inventory factor\n• Implied Vol %", shape=folder, fillcolor="#4a90e2"];
+    }
+
+    data_snapshot [label=<<b>Market Data</b><br/>Current Price, TF, Tick Data>, shape=note, fillcolor="#f39c12"];
+
+    // Core Computation
+    subgraph cluster_computation {
+        label=<<b>Core Computation Module</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+        
+        strike_gen [label="Dynamic Strike Universe\n• Compress/scale by TF\n• Rounding rules ($2.50/$5)", shape=box, fillcolor="#9b59b6"];
+        gamma_model [label="Simple Gamma Model\n• Black-Scholes estimate", shape=box, fillcolor="#9b59b6"];
+        oi_model [label="Synthetic OI Estimator\n• Exponential decay logic\n• MM Bias adjustments", shape=box, fillcolor="#9b59b6"];
+    }
+
+    // Equilibrium & Analysis
+    subgraph cluster_analysis {
+        label=<<b>Analysis &amp; Equilibrium Solver</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+        
+        min_payout [label="Min Payout Solver\n• Evaluate total payout per test strike\n• Find Eq. Level (Max Pain)", shape=hexagon, fillcolor="#e74c3c"];
+        gamma_profile [label="Gamma Profile Analysis\n• Net Long vs Short Gamma\n• Find Gamma Flip Point", shape=hexagon, fillcolor="#e74c3c"];
+    }
+
+    // Output Mapping
+    subgraph cluster_visuals {
+        label=<<b>Strategy Mapping &amp; Visual Outputs</b>>;
+        style=filled;
+        fillcolor="#2d2d2d";
+        
+        strategy_zones [label="Premium Zones\n• Short Call + Long Put\n• Short Put + Long Call", shape=component, fillcolor="#1abc9c"];
+        eq_line [label="Equilibrium Line\n• Central threshold band", shape=note, fillcolor="#16a085"];
+        heatmap [label="Payout Heatmap\n• RGB payout gradient", shape=note, fillcolor="#3498db"];
+        summary [label="Dashboard Panel\n• Distance to Eq.\n• Pinning Bias rating", shape=folder, fillcolor="#95a5a6"];
+    }
+
+    // Connections
+    market_params -> data_snapshot;
+    vol_params -> data_snapshot;
+    
+    data_snapshot -> strike_gen;
+    strike_gen -> gamma_model [label="mapped strikes", fontcolor="#76d7c4"];
+    strike_gen -> oi_model [label="price dist.", fontcolor="#76d7c4"];
+    
+    mm_params -> gamma_model [label="implied vol", fontcolor="#f8c471"];
+    mm_params -> oi_model [label="inventory bias", fontcolor="#f8c471"];
+    
+    oi_model -> min_payout [label="synth call/put OI", fontcolor="#aed6f1"];
+    gamma_model -> gamma_profile [label="gamma exposure", fontcolor="#aed6f1"];
+    
+    min_payout -> eq_line [label="level", fontcolor="#f8c471"];
+    min_payout -> strategy_zones [label="bands derived", fontcolor="#76d7c4"];
+    min_payout -> heatmap [label="payout array", fontcolor="#85c1e9"];
+    
+    min_payout -> summary [label="stats", fontcolor="#aed6f1"];
+    gamma_profile -> summary [label="net bias", fontcolor="#aed6f1"];
+
+    // Copyright Notice
+    subgraph cluster_copyright {
+        style=invis;
+        rank=sink;
+        node [shape=plaintext, fontsize=10, fontcolor="#777777", fontname="Helvetica"];
+        copyright_note [label="© 2026 by Dr. T. Jerry Mahabub, Ph.D\nAll rights reserved."];
+    }
+}
