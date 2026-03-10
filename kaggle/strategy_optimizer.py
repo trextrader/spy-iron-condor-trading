@@ -56,12 +56,24 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
 
     # Optimizable params: (config_key, display_name, is_cli_param, type)
     PARAM_DEFS = [
+        # Exit / Risk
         ("stop_loss_dollar",  "stop_loss_dollar",  False, int),
         ("profit_target",     "profit_target",     False, int),
-        ("max_positions",     "max_positions",     True,  int),
-        ("cooldown_bars",     "cooldown_bars",     False, int),
         ("stop_loss_mult",    "stop_loss_mult",    False, float),
         ("max_contracts",     "max_contracts",     False, int),
+        # Exit / Time
+        ("hold_days",         "hold_days",         False, int),
+        ("max_dte_exit",      "max_dte_exit",      False, int),
+        # Position limits
+        ("max_positions",     "max_positions",     True,  int),
+        ("cooldown_bars",     "cooldown_bars",     False, int),
+        # Entry: Structure (None in CONFIG = neural model; set value to pin/override)
+        ("call_offset_pct",   "call_offset_pct",   False, float),
+        ("put_offset_pct",    "put_offset_pct",    False, float),
+        ("spread_width",      "spread_width",      False, float),
+        ("target_dte",        "target_dte",        False, int),
+        # Entry: Quality
+        ("max_leg_spread",    "max_leg_spread",    False, float),
     ]
 
     param_grids = {}      # config key -> [values]

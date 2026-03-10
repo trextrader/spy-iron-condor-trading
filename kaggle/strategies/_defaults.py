@@ -20,6 +20,19 @@ DEFAULT_CONFIG = {
     # ── Exit: Profit Target ───────────────────────────────────────────────
     "profit_target":      None,        # Dollar target (None = use 50% of credit)
 
+    # ── Exit: Time ────────────────────────────────────────────────────────
+    "max_dte_exit":       0,           # Close when DTE remaining <= this (0 = let expire naturally)
+    "hold_days":          30,          # Max calendar days to hold regardless of DTE
+
+    # ── Entry: Structure (overrides neural model pol[0..3] when not None) ─
+    "call_offset_pct":    None,        # Call strike offset % from spot (None = use neural model)
+    "put_offset_pct":     None,        # Put strike offset % from spot (None = use neural model)
+    "spread_width":       None,        # Spread width in points (None = use neural model; N/A single-leg)
+    "target_dte":         None,        # Target DTE for entries (None = use neural model)
+
+    # ── Entry: Quality Filter ─────────────────────────────────────────────
+    "max_leg_spread":     0.15,        # Max bid-ask spread ratio per leg (chain quality gate)
+
     # ── Template Preference ───────────────────────────────────────────────
     "fallback_template":  None,        # If no template eligible, use this template_id
 

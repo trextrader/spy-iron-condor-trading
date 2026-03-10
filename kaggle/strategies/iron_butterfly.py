@@ -69,4 +69,17 @@ CONFIG = {
     # ── Position Limits ───────────────────────────────────────────────────
     "max_positions":      6,           # Max concurrent open positions for this strategy
     "cooldown_bars":      5,           # Min bars between trades
+
+    # ── Entry: Structure (overrides neural model when not None) ──────────────
+    "call_offset_pct":    0.0,  # % OTM for call strike (None = neural model)
+    "put_offset_pct":     0.0,  # % OTM for put strike  (None = neural model)
+    "spread_width":       5,  # Spread width points   (None = neural model / N/A)
+    "target_dte":         7,  # Target DTE at entry   (None = neural model)
+
+    # ── Entry: Quality Filter ─────────────────────────────────────────────────
+    "max_leg_spread":     0.15,  # Max bid-ask ratio per leg
+
+    # ── Exit: Time ────────────────────────────────────────────────────────────
+    "max_dte_exit":       1,  # Close when DTE remaining <= N (0 = expire naturally)
+    "hold_days":          7,  # Max calendar days held
 }

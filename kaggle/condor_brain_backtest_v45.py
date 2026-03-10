@@ -2605,7 +2605,19 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      run_backtest._dte_error_logged = True
                  days_held = 0  # Fallback
              
-             if days_held > tr.dte_entry:
+             # Per-strategy time-based exit: honor hold_days and max_dte_exit from CONFIG
+             _time_cfg = get_config(_STRATEGY_CONFIGS, getattr(tr, "strategy_class", ""))
+             _hold_days_v    = _time_cfg.get("hold_days",    30)
+             _max_dte_exit_v = _time_cfg.get("max_dte_exit",  0)
+             _dte_remaining  = tr.dte_entry - days_held
+             _time_exit = (days_held > tr.dte_entry                          # expired naturally
+                           or days_held >= _hold_days_v                      # max hold reached
+                           or (_max_dte_exit_v > 0 and                       # early DTE exit
+                               _dte_remaining <= _max_dte_exit_v))
+             _time_exit_reason = ("EXPIRED"      if days_held > tr.dte_entry
+                                  else "MAX_HOLD" if days_held >= _hold_days_v
+                                  else "DTE_EXIT")
+             if _time_exit:
                  # PHASE 5.2/5.5 FIX: Expired - Use realistic exit cost
                  if exec_engine and market_state:
                      exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
@@ -2624,8 +2636,10 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      realized_pnl = getattr(tr, 'unrealized_pnl_real', tr.unrealized_pnl)
 
                  tr.exit_dt = ts
-                 tr.exit_reason = "EXPIRED"
+                 tr.exit_reason = _time_exit_reason
                  tr.realized_pnl = realized_pnl
+                 if tr.max_loss > 0:
+                     tr.pnl_pct = tr.realized_pnl / tr.max_loss
                  tr.is_closed = True
                  equity += tr.realized_pnl
                  closed_trades.append({
@@ -2634,20 +2648,19 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      'exit_dt': ts,
                      'pnl': tr.realized_pnl,
                      'pnl_pct': tr.pnl_pct * 100,
-                     'reason': "EXPIRED",
+                     'reason': _time_exit_reason,
                      'max_dd': tr.max_dd_pct * 100,
                      'exit_details': exit_details if exit_valid else None
                  })
-                 _trace_close(tr, realized_pnl, "EXPIRED")
+                 _trace_close(tr, realized_pnl, _time_exit_reason)
                  _max_credit4 = tr.net_credit * tr.qty * IC_MULTIPLIER
                  _prem_cap4   = (realized_pnl / _max_credit4 * 100) if _max_credit4 != 0 else 0.0
-                 print(f"\n  ⏰ CLOSED [EXPIRED] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
-                       f"\n     FULL DTE — held to expiry {days_held:.1f}d / {tr.dte_entry:.0f}d DTE (0d left)"
-                       f"\n     credit=${tr.net_credit:.4f}/shr  dte_entry={tr.dte_entry:.1f}d"
-                       f"  days_held={days_held:.1f}"
+                 print(f"\n  ⏰ CLOSED [{_time_exit_reason}] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
+                       f"\n     held={days_held:.1f}d / {tr.dte_entry:.0f}d DTE  "
+                       f"dte_remaining={_dte_remaining:.1f}  hold_limit={_hold_days_v}d"
                        f"\n     realized=${realized_pnl:,.2f}  premium_captured={_prem_cap4:+.1f}%"
                        f"  fill_valid={exit_valid}  equity_after=${equity:,.2f}")
-                 _scoreboard("AFTER EXIT:EXPIRED", realized_pnl)
+                 _scoreboard(f"AFTER EXIT:{_time_exit_reason}", realized_pnl)
                  continue
 
              active_trades.append(tr)
@@ -2803,10 +2816,21 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  else:
                      # (E) Decode and clamp model parameters
                      # pol[0..3] are set correctly for both v43 (defaults) and legacy (model output)
-                     call_off = float(np.clip(pol[0] * 5.0,  0.5, 20.0))
-                     put_off  = float(np.clip(pol[1] * 5.0,  0.5, 20.0))
-                     width    = float(np.clip(pol[2] * 10.0, 1.0, 50.0))
-                     dte_raw  = float(pol[3] * 45.0)
+                     _neural_call_off = float(np.clip(pol[0] * 5.0,  0.5, 20.0))
+                     _neural_put_off  = float(np.clip(pol[1] * 5.0,  0.5, 20.0))
+                     _neural_width    = float(np.clip(pol[2] * 10.0, 1.0, 50.0))
+                     _neural_dte_raw  = float(pol[3] * 45.0)
+
+                     # Per-strategy CONFIG overrides (None = use neural model output)
+                     _entry_cfg = get_config(_STRATEGY_CONFIGS, _active_template)
+                     _cfg_call  = _entry_cfg.get("call_offset_pct")
+                     _cfg_put   = _entry_cfg.get("put_offset_pct")
+                     _cfg_width = _entry_cfg.get("spread_width")
+                     _cfg_dte   = _entry_cfg.get("target_dte")
+                     call_off = float(_cfg_call)  if _cfg_call  is not None else _neural_call_off
+                     put_off  = float(_cfg_put)   if _cfg_put   is not None else _neural_put_off
+                     width    = float(_cfg_width) if _cfg_width is not None else _neural_width
+                     dte_raw  = float(_cfg_dte)   if _cfg_dte   is not None else _neural_dte_raw
 
                      # DTE: use chain expiry as ceiling; clamp to [1, min(chain_te, 45)]
                      chain_te = None
@@ -2962,9 +2986,10 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                              else:
                                  legs = None
                          else:
+                             _mls = _entry_cfg.get("max_leg_spread", 0.15)
                              legs = find_best_legs(
                                  chain_with_prices, spot, call_off, put_off, width,
-                                 validate_greeks=True
+                                 validate_greeks=True, max_leg_spread=_mls
                              )
 
                          if legs is None:
@@ -3476,7 +3501,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         print("  STRATEGY BREAKDOWN (trades opened)")
         print("="*140)
         _hdr = (f"  {'Strategy Class':<25s}  {'Count':>5}  {'%':>5}  "
-                f"{'Net Profit':>12}  {'MaxDD':>10}  {'W / L':>7}  "
+                f"{'Net Profit':>12}  {'CumDD(seq)':>10}  {'W / L':>7}  "
                 f"{'Best Trade':>11}  {'Worst Trade':>12}  {'Max Consec L':>12}")
         print(_hdr)
         print(f"  {'-'*25}  {'-'*5}  {'-'*5}  {'-'*12}  {'-'*10}  {'-'*7}  {'-'*11}  {'-'*12}  {'-'*12}")
@@ -3495,7 +3520,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
         # ── Print Template ID table ───────────────────────────────────────────
         print(f"\n  {'Template ID':<25s}  {'Count':>5}  {'%':>5}  "
-              f"{'Net Profit':>12}  {'MaxDD':>10}  {'W / L':>7}  "
+              f"{'Net Profit':>12}  {'CumDD(seq)':>10}  {'W / L':>7}  "
               f"{'Best Trade':>11}  {'Worst Trade':>12}  {'Max Consec L':>12}")
         print(f"  {'-'*25}  {'-'*5}  {'-'*5}  {'-'*12}  {'-'*10}  {'-'*7}  {'-'*11}  {'-'*12}  {'-'*12}")
         for tmpl, cnt in sorted(_tmpl_counts.items(), key=lambda x: -x[1]):
