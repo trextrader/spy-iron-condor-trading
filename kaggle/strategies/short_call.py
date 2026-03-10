@@ -51,7 +51,7 @@ CONFIG = {
     "stop_loss_dollar":   600,  # Hard dollar cap per trade (None = use multiplier only)
 
     # ── Exit: Profit Target ───────────────────────────────────────────────
-    "profit_target":      3000,    # Dollar target (None = use 50% of credit)
+    "profit_target":      None,     # Dollar target (None = use 50% of credit)
 
     # ── Template Preference ───────────────────────────────────────────────
     "fallback_template":  None,        # If no template eligible, use this template_id
@@ -68,7 +68,7 @@ CONFIG = {
     "call_offset_pct":    1.5,  # % OTM for call strike (None = neural model)
     "put_offset_pct":     None,  # % OTM for put strike  (None = neural model)
     "spread_width":       None,  # Spread width points   (None = neural model / N/A)
-    "target_dte":         7,  # Target DTE at entry   (None = neural model)
+    "target_dte":         21,  # Target DTE at entry   (None = neural model)
 
     # ── Entry: Quality Filter ─────────────────────────────────────────────────
     "max_leg_spread":     0.2,  # Max bid-ask ratio per leg
