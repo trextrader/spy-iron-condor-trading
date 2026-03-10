@@ -89,7 +89,12 @@ def build_optimizer_context(
         ts_series = pd.to_datetime(m5.index)
     ts_int = ts_series.astype(np.int64) // 10 ** 9  # unix seconds
 
-    bar_dates = [str(t.date()) for t in ts_series]
+    # Use bundle.m5_dates when available — same key format as chain_df_by_date
+    # (chain is indexed by these exact strings, so we must match precisely)
+    if hasattr(bundle, 'm5_dates') and bundle.m5_dates is not None:
+        bar_dates = [str(d) for d in bundle.m5_dates[:T]]
+    else:
+        bar_dates = [str(t.date()) for t in ts_series]
 
     # ── Spot ──────────────────────────────────────────────────────────────
     close_col = 'close' if 'close' in m5.columns else m5.columns[0]

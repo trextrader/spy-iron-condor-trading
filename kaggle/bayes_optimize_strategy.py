@@ -312,13 +312,25 @@ def run_bayes_optimizer(
         print(f"  Best config (rank 1):  obj={best['objective']:.4f}  "
               f"net={best['net_pct']:+.1f}%  dd={best['max_dd']:.1f}%")
         print()
-        print("  Apply best config to strategy file? [y/N]: ", end="", flush=True)
-        try:
-            ans = input().strip().lower()
-        except EOFError:
-            ans = ""
-        if ans == "y":
-            _apply_best_config(template_id, best, space)
+
+        # Guard: never apply when all candidates got the "no trades" penalty
+        all_penalty = all(r.get("objective", -100) <= -100 for r in final_rows)
+        if all_penalty:
+            print("  [WARN] All candidates scored -100 (no trades executed — chain data missing?).")
+            print("         Skipping apply to avoid overwriting strategy file with invalid params.")
+        elif sys.stdin.isatty():
+            # Only prompt when running interactively in a real terminal
+            print("  Apply best config to strategy file? [y/N]: ", end="", flush=True)
+            try:
+                ans = input().strip().lower()
+            except EOFError:
+                ans = ""
+            if ans == "y":
+                _apply_best_config(template_id, best, space)
+        else:
+            # Non-interactive mode: print the best config but don't apply automatically
+            print("  [non-interactive] Best config NOT auto-applied.")
+            print("  To apply manually, run with an interactive terminal.")
 
     return final_rows
 
