@@ -3438,6 +3438,16 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         _scoreboard("AFTER SIM_END FORCE-CLOSE")
     open_trades = []
 
+    # Append true final cash equity to curve so equity_vals[-1] is always correct
+    equity_curve.append({
+        'dt': spot_timestamps[num_bars - 1] if num_bars > 0 else None,
+        'equity': equity,
+        'cash': equity,
+        'open_pnl': 0.0,
+        'open_count': 0,
+        'final': True,
+    })
+
     # ── Compute portfolio-level Max Drawdown (trade-to-trade, realized only) ──
     # Only measures equity at each trade CLOSE event — no bar-by-bar unrealized.
     # Filters out 'OPEN' action log entries (trade entry records, no P&L).
@@ -4096,7 +4106,7 @@ def main():
         print("⚠️ Simulation produced no data (0 bars simulated). Check data/limit settings.")
         return [], []
 
-    print(f"Final Capital: ${equity[-1]:,.2f}")
+    print(f"Final Capital: ${equity[-1]:,.2f}")  # equity_vals[-1] = post-force-close cash equity
     print(f"Trades: {len(trades)}")
     
     # Calculate metrics for enhanced chart
