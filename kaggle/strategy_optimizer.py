@@ -74,6 +74,9 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
         ("target_dte",        "target_dte",        False, int),
         # Entry: Quality
         ("max_leg_spread",    "max_leg_spread",    False, float),
+        # Entry: Delta targets (template path — per-strategy wing width control)
+        ("short_delta",       "short_delta",       False, float),
+        ("wing_delta",        "wing_delta",        False, float),
     ]
 
     param_grids = {}      # config key -> [values]

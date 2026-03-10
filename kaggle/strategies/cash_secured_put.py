@@ -73,6 +73,10 @@ CONFIG = {
     # ── Entry: Quality Filter ─────────────────────────────────────────────────
     "max_leg_spread":     0.2,  # Max bid-ask ratio per leg
 
+    # ── Entry: Delta Targets (template path) ────────────────────────────────
+    "short_delta":        0.2,  # Target |delta| for short (selling) strikes
+    "wing_delta":         None,  # Target |delta| for long wing strikes (None = N/A)
+
     # ── Exit: Time ────────────────────────────────────────────────────────────
     "max_dte_exit":       1,  # Close when DTE remaining <= N (0 = expire naturally)
     "hold_days":          21,  # Max calendar days held

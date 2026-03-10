@@ -815,12 +815,25 @@ def select_best_template(strategy_idx: int, bar_df=None, v43_pop=None, v43_ev=No
 
 def build_legs_from_template(template, chain_df, spot: float,
                               target_dte: float = None,
-                              max_leg_spread: float = 0.15):
+                              max_leg_spread: float = 0.15,
+                              spread_width: float = None,
+                              short_delta: float = 0.20,
+                              wing_delta: float = 0.10):
     """
     Build a legs dict for any StrategyTemplate by reading its LegTemplate list.
 
     For each unique (opt_type, strike_rank) in the template legs, the closest
     liquid strike is selected by delta targeting (_RANK_DELTA map).
+
+    Per-strategy overrides (from CONFIG — all discrete, two concurrent positions
+    can have different values):
+      max_leg_spread : chain quality gate (bid-ask ratio filter)
+      spread_width   : when not None, long wing strikes are placed exactly
+                       spread_width points from the short strike instead of
+                       using wing_delta targeting.  Unifies wing-width control
+                       across both the template path and find_best_legs path.
+      short_delta    : overrides _RANK_DELTA for short strike ranks (0.20 default)
+      wing_delta     : overrides _RANK_DELTA for long wing strike ranks (0.10 default)
 
     Returns a dict compatible with calculate_entry_fill_generic() and the
     existing verbose display code.  Also populates IC-compat keys
@@ -857,29 +870,74 @@ def build_legs_from_template(template, chain_df, spot: float,
     calls = chain[chain['call_put'] == 'C'].copy()
     puts  = chain[chain['call_put'] == 'P'].copy()
 
-    # ── Strike selection: one row per (opt_type, rank) ──────────────────────
+    # ── Identify which ranks are "short" (sell) vs "long" (wing/hedge) ──────
+    # Used to apply spread_width override: after SHORT strikes are placed by
+    # delta, LONG wings are placed at short_strike ± spread_width if set.
+    _short_ranks: dict = {}   # opt_type → strike of the short leg for that type
+    _leg_sides:   dict = {}   # (opt_type, rank) → 'SHORT' or 'LONG'
+    for _lg in template.legs:
+        _leg_sides[(_lg.opt_type, _lg.strike_rank)] = _lg.side
+
+    # ── Strike selection pass 1: SHORT legs by delta ─────────────────────────
     strike_cache: dict = {}   # (opt_type, rank) → row dict
     for leg in template.legs:
         key = (leg.opt_type, leg.strike_rank)
         if key in strike_cache:
             continue
+        if _leg_sides.get(key) != 'SHORT':
+            continue  # long legs handled in pass 2
         pool = calls if leg.opt_type == 'C' else puts
         if pool.empty:
             return None
-        target_delta = _RANK_DELTA.get(key, 0.20)
+        # Per-strategy short_delta overrides _RANK_DELTA for short ranks
+        target_delta = short_delta
         if 'delta' in pool.columns:
             pool = pool.copy()
             pool['_da'] = pool['delta'].abs()
             row = pool.iloc[(pool['_da'] - target_delta).abs().argsort()[:1]]
         else:
-            # Fallback: strike offset from spot
-            # Calls: higher delta → lower strike → spot * (1 - offset)
-            # Puts : higher delta → higher strike → spot * (1 + offset)
             if leg.opt_type == 'C':
                 tgt = spot * (1.0 - (0.5 - target_delta) * 0.10)
             else:
                 tgt = spot * (1.0 - (target_delta - 0.5) * 0.10)
             row = pool.iloc[(pool['strike'] - tgt).abs().argsort()[:1]]
+        if row.empty:
+            return None
+        strike_cache[key] = row.iloc[0].to_dict()
+        _short_ranks[leg.opt_type] = float(row['strike'].values[0])
+
+    # ── Strike selection pass 2: LONG legs (wings) ───────────────────────────
+    for leg in template.legs:
+        key = (leg.opt_type, leg.strike_rank)
+        if key in strike_cache:
+            continue
+        if _leg_sides.get(key) != 'LONG':
+            # No SHORT counterpart selected yet — fall back to _RANK_DELTA
+            pass
+        pool = calls if leg.opt_type == 'C' else puts
+        if pool.empty:
+            return None
+        if spread_width is not None and leg.opt_type in _short_ranks:
+            # Width-based: place long wing exactly spread_width points from short
+            s_strike = _short_ranks[leg.opt_type]
+            if leg.opt_type == 'C':
+                tgt = s_strike + float(spread_width)
+            else:
+                tgt = s_strike - float(spread_width)
+            row = pool.iloc[(pool['strike'] - tgt).abs().argsort()[:1]]
+        else:
+            # Delta-based: use wing_delta (overrides _RANK_DELTA for wing ranks)
+            target_delta = wing_delta if _leg_sides.get(key) == 'LONG' else _RANK_DELTA.get(key, 0.20)
+            if 'delta' in pool.columns:
+                pool = pool.copy()
+                pool['_da'] = pool['delta'].abs()
+                row = pool.iloc[(pool['_da'] - target_delta).abs().argsort()[:1]]
+            else:
+                if leg.opt_type == 'C':
+                    tgt = spot * (1.0 - (0.5 - target_delta) * 0.10)
+                else:
+                    tgt = spot * (1.0 - (target_delta - 0.5) * 0.10)
+                row = pool.iloc[(pool['strike'] - tgt).abs().argsort()[:1]]
         if row.empty:
             return None
         strike_cache[key] = row.iloc[0].to_dict()
@@ -2979,7 +3037,13 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
 
                              if _tmpl is not None:
                                  legs = build_legs_from_template(
-                                     _tmpl, chain_with_prices, spot, target_dte=dte)
+                                     _tmpl, chain_with_prices, spot,
+                                     target_dte=dte,
+                                     max_leg_spread=_entry_cfg.get("max_leg_spread", 0.15),
+                                     spread_width=_entry_cfg.get("spread_width"),
+                                     short_delta=_entry_cfg.get("short_delta", 0.20),
+                                     wing_delta=_entry_cfg.get("wing_delta", 0.10),
+                                 )
                                  if verbose_sim and legs is not None:
                                      print(f"  (G) Template: {_tmpl.template_id} "
                                          f"({_tmpl.v43_class}) -- {legs['n_legs']} legs")

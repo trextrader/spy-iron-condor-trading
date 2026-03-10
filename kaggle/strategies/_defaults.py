@@ -27,8 +27,17 @@ DEFAULT_CONFIG = {
     # ── Entry: Structure (overrides neural model pol[0..3] when not None) ─
     "call_offset_pct":    None,        # Call strike offset % from spot (None = use neural model)
     "put_offset_pct":     None,        # Put strike offset % from spot (None = use neural model)
-    "spread_width":       None,        # Spread width in points (None = use neural model; N/A single-leg)
+    "spread_width":       None,        # Wing width in points: distance short→long strike
+                                       #   find_best_legs path: long = short ± spread_width
+                                       #   template path: overrides delta-based long wing selection
+                                       #   (None = neural model / delta rank default)
     "target_dte":         None,        # Target DTE for entries (None = use neural model)
+
+    # ── Entry: Delta Targets (template path — overrides _RANK_DELTA per-strategy) ──
+    "short_delta":        0.20,        # Target |delta| for short strikes (OTM sell zone)
+    "wing_delta":         0.10,        # Target |delta| for long wing strikes (further OTM hedge)
+                                       #   Implicitly determines wing width in delta-space;
+                                       #   overridden by spread_width when that is not None
 
     # ── Entry: Quality Filter ─────────────────────────────────────────────
     "max_leg_spread":     0.15,        # Max bid-ask spread ratio per leg (chain quality gate)
