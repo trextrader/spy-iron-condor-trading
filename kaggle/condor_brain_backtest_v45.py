@@ -3708,7 +3708,22 @@ def main():
     # --profittargets removed: profit_target is read directly from strategy CONFIG (strategies/*.py).
     # Optimizer writes values there; they are always respected without a flag.
     parser.add_argument("--optimize", action="store_true", default=False,
-                        help="Interactive parameter optimizer mode (grid search)")
+                        help="Parameter optimizer mode (grid search by default; use --optimize-mode bayes for BO)")
+    parser.add_argument("--optimize-mode", type=str, default="grid", choices=["grid", "bayes"],
+                        help="Optimizer mode: 'grid' (interactive grid search) or 'bayes' (Bayesian, non-interactive)")
+    # Bayesian optimizer hyperparameters
+    parser.add_argument("--bo-init-trials", type=int, default=32,
+                        help="Sobol warmup trials (fast fidelity) for Bayesian optimizer (default: 32)")
+    parser.add_argument("--bo-batch-size",  type=int, default=16,
+                        help="Candidates per BO round (default: 16)")
+    parser.add_argument("--bo-rounds",      type=int, default=8,
+                        help="Number of BO rounds at medium fidelity (default: 8)")
+    parser.add_argument("--bo-min-trades",  type=int, default=5,
+                        help="Minimum trades required to avoid penalty in objective (default: 5)")
+    parser.add_argument("--bo-max-dd-cap",  type=float, default=10.0,
+                        help="Max drawdown cap for objective penalty (default: 10.0%%)")
+    parser.add_argument("--bo-min-pf",      type=float, default=1.0,
+                        help="Minimum profit factor soft constraint (default: 1.0)")
     parser.add_argument("--strategyomit", nargs='+', default=None,
                         help=("Exclude specific strategy classes from trading. "
                               "Space-separated names or indices "
@@ -4057,18 +4072,57 @@ def main():
         extra={"mode": "backtest", "data_path": DATA_PATH},
     )
 
-    # Optimizer mode: grid search over parameter combinations
+    # Optimizer mode: grid search or Bayesian optimization
     if getattr(args, "optimize", False):
-        from strategy_optimizer import run_optimizer
-        run_optimizer(
-            run_backtest, args, df, rule_signals, model, feature_cols, DEVICE,
-            ruleset, model_path=model_path, data_path=use_data_path,
-            norm_stats=norm_stats, v43_outputs=v43_outputs, bundle=bundle_v43,
-            dte_by_dow=_dte_by_dow,
-            allowed_strategy_idxs=ALLOWED_STRATEGY_IDXS,
-            allowed_template_ids=ALLOWED_TEMPLATE_IDS,
-            strategy_configs=_STRATEGY_CONFIGS,
-            friday_closeout=not getattr(args, 'no_friday_closeout', False))
+        _opt_mode = getattr(args, "optimize_mode", "grid")
+        if _opt_mode == "bayes":
+            # GPU-batched Bayesian optimizer (non-interactive, fast multi-fidelity)
+            if bundle_v43 is None or v43_outputs is None:
+                print("[optimizer] ERROR: --optimize-mode bayes requires --use-v43 and a loaded bundle.")
+                import sys; sys.exit(1)
+            if ALLOWED_TEMPLATE_IDS is None or len(ALLOWED_TEMPLATE_IDS) == 0:
+                print("[optimizer] ERROR: --optimize-mode bayes requires --strategies <template_id>")
+                print("            e.g.  --strategies iron_butterfly")
+                import sys; sys.exit(1)
+            # Build chain_df_by_date from the bundle's chain data
+            _chain_by_date = getattr(bundle_v43, 'chain_df_by_date', None)
+            if _chain_by_date is None:
+                # Fall back to per-date groupby from raw chain df
+                _cdf = getattr(bundle_v43, 'chain_df', None)
+                if _cdf is not None and 'date' in _cdf.columns:
+                    _chain_by_date = {str(k): v for k, v in _cdf.groupby('date')}
+                elif _cdf is not None:
+                    # Try using the same lookup as the main backtest loop
+                    _chain_by_date = {}
+                    for _ts_key, _rows in ts_ranges.items():
+                        _d = str(pd.Timestamp(_ts_key).date())
+                        if _d not in _chain_by_date:
+                            _chain_by_date[_d] = pd.DataFrame(_rows)
+                else:
+                    print("[optimizer] WARNING: no chain_df_by_date found in bundle; chain lookups will be empty.")
+                    _chain_by_date = {}
+            from bayes_optimize_strategy import run_bayes_optimizer
+            run_bayes_optimizer(
+                run_backtest, args,
+                v43_outputs=v43_outputs,
+                bundle=bundle_v43,
+                chain_df_by_date=_chain_by_date,
+                strategy_configs=_STRATEGY_CONFIGS,
+                allowed_template_ids=ALLOWED_TEMPLATE_IDS,
+                device=DEVICE,
+            )
+        else:
+            # Interactive grid search (original)
+            from strategy_optimizer import run_optimizer
+            run_optimizer(
+                run_backtest, args, df, rule_signals, model, feature_cols, DEVICE,
+                ruleset, model_path=model_path, data_path=use_data_path,
+                norm_stats=norm_stats, v43_outputs=v43_outputs, bundle=bundle_v43,
+                dte_by_dow=_dte_by_dow,
+                allowed_strategy_idxs=ALLOWED_STRATEGY_IDXS,
+                allowed_template_ids=ALLOWED_TEMPLATE_IDS,
+                strategy_configs=_STRATEGY_CONFIGS,
+                friday_closeout=not getattr(args, 'no_friday_closeout', False))
         import sys; sys.exit(0)
 
     # --trace: print every bar per open position (overrides HOLD_PRINT_INTERVAL)
