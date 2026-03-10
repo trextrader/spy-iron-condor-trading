@@ -1927,7 +1927,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                  use_fuzzy_sizing=False, use_trade_rules=True, use_diffusion=False, limit=None,
                  v43_outputs=None, bundle=None, verbose_sim=False, max_positions=5,
                  allowed_strategy_idxs=None, allowed_template_ids=None,
-                 dte_by_dow=None, bar_cache=None, return_bar_cache=False):
+                 dte_by_dow=None, bar_cache=None, return_bar_cache=False,
+                 friday_closeout=True):
 
     # ==========================================================================
     # PHASE 5.5: Initialize Execution Reality Engine
@@ -2247,7 +2248,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             f"  {'─'*56}\n"
             f"  [{label}]"
             f"  cash=${equity:>12,.2f}"
-            f"  unrealized={_unrealized:>+10,.2f}"
+            f"  open_pnl(all)={_unrealized:>+10,.2f}"
             f"  total=${_total_equity:>12,.2f}{_pnl_str}\n"
             f"  cur_dd={_cur_dd:>+6.2f}%"
             f"  max_dd={_max_dd_all:>+7.2f}%"
@@ -2378,49 +2379,11 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
                      print(f"   DTE at entry: {tr.dte_entry}")
                  run_backtest._mark_debug_count += 1
              
-             # Friday close-out: force-close positions on Friday 3pm+
-             # to prevent weekend gap risk -- controlled by dte_by_dow
+             # Friday close-out: force-close positions on Friday 3pm+ to prevent weekend gap risk.
+             # On by default; disable with --no-friday-closeout.
              _bar_dow = pd.Timestamp(ts).dayofweek   # 0=Mon..4=Fri
              _bar_hour = pd.Timestamp(ts).hour
-             if dte_by_dow and _bar_dow == 4 and _bar_hour >= 15:
-                 if exec_engine and market_state:
-                     exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
-                         tr.legs, marks_bid, marks_ask, marks_mid, exec_engine, market_state
-                     )
-                 else:
-                     exit_debit, exit_valid, exit_details = calculate_exit_fill(
-                         tr.legs, marks_bid, marks_ask, marks_mid
-                     )
-                 realized_pnl = ((tr.net_credit - exit_debit) * tr.qty * IC_MULTIPLIER
-                                 if exit_valid
-                                 else getattr(tr, 'unrealized_pnl_real', tr.unrealized_pnl))
-                 realized_pnl = _stop_clamp(realized_pnl, tr)  # stop-on-tick guarantee
-                 tr.exit_dt = ts
-                 tr.exit_reason = "FRIDAY_CLOSEOUT"
-                 tr.realized_pnl = realized_pnl
-                 if tr.max_loss > 0:
-                     tr.pnl_pct = tr.realized_pnl / tr.max_loss
-                 tr.is_closed = True
-                 equity += tr.realized_pnl
-                 closed_trades.append({
-                     'trade_id': tr.trade_id, 'entry_dt': tr.entry_dt, 'exit_dt': ts,
-                     'pnl': tr.realized_pnl, 'pnl_pct': tr.pnl_pct * 100,
-                     'reason': "FRIDAY_CLOSEOUT", 'max_dd': tr.max_dd_pct * 100,
-                     'exit_details': exit_details if exit_valid else None
-                 })
-                 _trace_close(tr, realized_pnl, "FRIDAY_CLOSEOUT")
-                 _dh = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
-                 print(f"\n  CLOSED [FRIDAY_CLOSEOUT] [{tr.trade_id}]  bar={i}  {str(ts)[:19]}"
-                       f"\n     Forced exit before weekend -- held {_dh:.1f}d / {tr.dte_entry:.0f}d DTE"
-                       f"\n     realized=${realized_pnl:,.2f}  equity_after=${equity:,.2f}")
-                 _scoreboard("AFTER EXIT:FRIDAY_CLOSEOUT", realized_pnl)
-                 continue
-
-             # Friday close-out: force-close positions on Friday 3pm+
-             # to prevent weekend gap risk -- controlled by dte_by_dow
-             _bar_dow = pd.Timestamp(ts).dayofweek   # 0=Mon..4=Fri
-             _bar_hour = pd.Timestamp(ts).hour
-             if dte_by_dow and _bar_dow == 4 and _bar_hour >= 15:
+             if friday_closeout and _bar_dow == 4 and _bar_hour >= 15:
                  if exec_engine and market_state:
                      exit_debit, exit_valid, exit_details = calculate_exit_fill_reality(
                          tr.legs, marks_bid, marks_ask, marks_mid, exec_engine, market_state
@@ -2728,12 +2691,18 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
              if verbose_sim and (tr._hold_bar_cnt == 1 or tr._hold_bar_cnt % HOLD_PRINT_INTERVAL == 0):
                  _dh       = (pd.Timestamp(ts) - pd.Timestamp(tr.entry_dt)).total_seconds() / 86400
                  _dte_rem  = max(0.0, tr.dte_entry - _dh)
-                 _mc_hold  = tr.net_credit * tr.qty * IC_MULTIPLIER
-                 _prem_pct = (_mc_hold and tr.unrealized_pnl / _mc_hold * 100) or 0.0
-                 _stop_thr = -(tr.net_credit * IC_STOP_LOSS_MULT * tr.qty * IC_MULTIPLIER)
-                 _stop_gap = tr.unrealized_pnl - _stop_thr   # positive = room before stop
-                 _tgt_pnl  = _mc_hold * 0.50
-                 _to_tgt   = _tgt_pnl - tr.unrealized_pnl    # positive = room to target
+                 _mc_hold    = tr.net_credit * tr.qty * IC_MULTIPLIER
+                 _prem_pct   = (_mc_hold and tr.unrealized_pnl / _mc_hold * 100) or 0.0
+                 _hold_cfg   = get_config(_STRATEGY_CONFIGS, getattr(tr, 'strategy_class', '') or '')
+                 _sl_cfg_hld = _hold_cfg.get("stop_loss_mult", IC_STOP_LOSS_MULT)
+                 _sl_dol_hld = _hold_cfg.get("stop_loss_dollar")
+                 _stop_thr   = -(abs(tr.net_credit) * _sl_cfg_hld * tr.qty * IC_MULTIPLIER)
+                 if _sl_dol_hld is not None:
+                     _stop_thr = max(_stop_thr, -abs(float(_sl_dol_hld)))
+                 _stop_gap   = tr.unrealized_pnl - _stop_thr   # positive = room before stop
+                 _cfg_pt_hld = _hold_cfg.get("profit_target")
+                 _tgt_pnl    = float(_cfg_pt_hld) if _cfg_pt_hld is not None else abs(_mc_hold) * 0.50
+                 _to_tgt     = _tgt_pnl - tr.unrealized_pnl    # positive = room to target
                  _sc_dist  = ((tr.legs.get('short_call', spot) - spot) / spot * 100
                               if tr.legs else 0.0)
                  _sp_dist  = ((spot - tr.legs.get('short_put', spot)) / spot * 100
@@ -3424,20 +3393,25 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         _scoreboard("AFTER SIM_END FORCE-CLOSE")
     open_trades = []
 
-    # ── Compute portfolio-level Max Drawdown from equity curve ────────────────
+    # ── Compute portfolio-level Max Drawdown (trade-to-trade, realized only) ──
+    # Only measures equity at each trade CLOSE event — no bar-by-bar unrealized.
+    # Filters out 'OPEN' action log entries (trade entry records, no P&L).
     _port_max_dd_pct = 0.0
-    if equity_curve:
-        _eq_vals = np.array([e['equity'] for e in equity_curve], dtype=float)
-        _eq_peak = np.maximum.accumulate(_eq_vals)
-        _eq_dd   = np.where(_eq_peak > 0, (_eq_vals - _eq_peak) / _eq_peak * 100.0, 0.0)
-        _port_max_dd_pct = float(_eq_dd.min())   # negative number (drawdown)
+    _close_events = [t for t in closed_trades if t.get('action') != 'OPEN']
+    if _close_events:
+        _realized_pnls = np.array([float(t.get('pnl', 0.0)) for t in _close_events], dtype=float)
+        _realized_equity = STARTING_EQUITY + np.cumsum(_realized_pnls)
+        _r_peak = np.maximum.accumulate(np.concatenate([[STARTING_EQUITY], _realized_equity]))
+        _r_eq   = np.concatenate([[STARTING_EQUITY], _realized_equity])
+        _r_dd   = np.where(_r_peak > 0, (_r_eq - _r_peak) / _r_peak * 100.0, 0.0)
+        _port_max_dd_pct = float(_r_dd.min())   # negative number (drawdown)
 
     _net_pnl     = equity - STARTING_EQUITY
     _net_pnl_pct = _net_pnl / STARTING_EQUITY * 100.0
 
     print(f"Simulation Complete.")
     print(f"  Final Equity : ${equity:,.2f}  ({_net_pnl_pct:+.2f}%  net PnL=${_net_pnl:+,.2f})")
-    print(f"  Max Drawdown : {_port_max_dd_pct:.2f}%")
+    print(f"  Max Drawdown : {_port_max_dd_pct:.2f}%  (trade-to-trade realized; {len(_close_events)} closed trades)")
 
     # ── V4.5 ENTRY DEBUG SUMMARY ──────────────────────────────────────────────
     if hasattr(run_backtest, '_entry_dbg'):
@@ -3713,6 +3687,10 @@ def main():
                         help="Max DTE for entries on Thursday (off by default; e.g. --dte-thu 2)")
     parser.add_argument("--dte-fri", type=int, default=None,
                         help="Max DTE for entries on Friday (off by default; e.g. --dte-fri 1)")
+    # Friday closeout: force-close all positions Friday 3pm+ to prevent weekend gap risk.
+    # On by default. Pass --no-friday-closeout to hold through weekends.
+    parser.add_argument("--no-friday-closeout", action="store_true", default=False,
+                        help="Disable automatic Friday 3pm+ position closeout (hold through weekends)")
 
     args = parser.parse_args()
 
@@ -4032,7 +4010,8 @@ def main():
             dte_by_dow=_dte_by_dow,
             allowed_strategy_idxs=ALLOWED_STRATEGY_IDXS,
             allowed_template_ids=ALLOWED_TEMPLATE_IDS,
-            strategy_configs=_STRATEGY_CONFIGS)
+            strategy_configs=_STRATEGY_CONFIGS,
+            friday_closeout=not getattr(args, 'no_friday_closeout', False))
         import sys; sys.exit(0)
 
     equity, trades = run_backtest(
@@ -4056,6 +4035,7 @@ def main():
         allowed_strategy_idxs=ALLOWED_STRATEGY_IDXS,
         allowed_template_ids=ALLOWED_TEMPLATE_IDS,
         dte_by_dow=_dte_by_dow,
+        friday_closeout=not getattr(args, 'no_friday_closeout', False),
     )
 
     # 5. Report

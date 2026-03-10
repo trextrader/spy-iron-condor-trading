@@ -19,7 +19,7 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
                   ruleset, model_path, data_path, norm_stats,
                   v43_outputs, bundle, dte_by_dow,
                   allowed_strategy_idxs, allowed_template_ids,
-                  strategy_configs):
+                  strategy_configs, friday_closeout=True):
     """Interactive grid-search optimizer.
 
     Prompts for param ranges, runs backtest for each combination,
@@ -143,6 +143,7 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
         allowed_strategy_idxs=allowed_strategy_idxs,
         allowed_template_ids=allowed_template_ids,
         dte_by_dow=dte_by_dow,
+        friday_closeout=friday_closeout,
         return_bar_cache=True,
     )
     _bm_eq, _bm_tr, _bar_cache = _bm_result
@@ -222,6 +223,7 @@ def run_optimizer(run_backtest_fn, args, df, rule_signals, model, feature_cols, 
                     allowed_strategy_idxs=allowed_strategy_idxs,
                     allowed_template_ids=allowed_template_ids,
                     dte_by_dow=dte_by_dow,
+                    friday_closeout=friday_closeout,
                     bar_cache=_bar_cache,
                 )
         except Exception as e:
