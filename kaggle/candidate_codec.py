@@ -60,16 +60,26 @@ class CandidateBatch:
 # ── Search-space constructors ────────────────────────────────────────────────
 
 def build_iron_butterfly_search_space() -> SearchSpaceSpec:
+    # Bounds calibrated for SPY iron butterfly on 2025 data (SPY ~480–600).
+    # Goal: generate simulation outputs for CN v46 training inputs.
+    # Ranges reflect realistic SPY iron butterfly behaviour:
+    #   - spread_width 5–20: $5 wings = tiny credit; $20 = max risk ~$1500/ct
+    #   - target_dte 7–21: 0DTE/1DTE chains are deep ITM/OTM — need 1DTE+
+    #   - short_delta 0.40–0.50: ATM to slight OTM; core iron butterfly zone
+    #   - stop_loss_dollar 500–1500: 1–2× typical max credit ($750–$1200 for 10ct)
+    #   - profit_target 500–2000: 50–80% of credit × 10 contracts
+    #   - max_dte_exit 0–7: close early at 1 DTE (standard) or hold to expiry
+    #   - hold_days 5–21: aligns with target_dte; no point holding longer than DTE
     return SearchSpaceSpec(
         template_id="iron_butterfly",
         params=[
-            ParamSpec("stop_loss_dollar", 300,  1500, "grid",       100, int),
-            ParamSpec("profit_target",    300,  3000, "grid",       250, int),
-            ParamSpec("max_dte_exit",     0,    14,   "grid",       2,   int),
-            ParamSpec("spread_width",     3,    25,   "grid",       2,   int),
-            ParamSpec("target_dte",       7,    28,   "grid",       7,   int),
-            ParamSpec("short_delta",      0.30, 0.50, "continuous"),
-            ParamSpec("hold_days",        3,    14,   "grid",       2,   int),
+            ParamSpec("stop_loss_dollar", 500,  1500, "grid", 250, int),   # 5 pts
+            ParamSpec("profit_target",    500,  2000, "grid", 250, int),   # 7 pts
+            ParamSpec("max_dte_exit",     0,    7,    "grid", 1,   int),   # 8 pts
+            ParamSpec("spread_width",     5,    20,   "grid", 5,   int),   # 4 pts
+            ParamSpec("target_dte",       7,    21,   "grid", 7,   int),   # 3 pts
+            ParamSpec("short_delta",      0.40, 0.50, "continuous"),       # GP free
+            ParamSpec("hold_days",        5,    21,   "grid", 4,   int),   # 5 pts
         ],
     )
 

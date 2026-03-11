@@ -111,39 +111,50 @@ def build_optimizer_context(
     abt_arr   = _to_arr('abstain',      bool)
 
     # ── CSR chain build ───────────────────────────────────────────────────
-    rights, strikes, dtes, deltas, bids, asks, mids = [], [], [], [], [], [], []
-    offsets = [0]
+    # Pre-process each UNIQUE date once (238 dates vs 18,494 bars).
+    # Then build the offset array by reusing cached arrays per bar.
+    print(f"[optimizer_prep] Pre-processing {len(set(bar_dates))} unique chain dates…")
 
-    for date_str in bar_dates:
-        chain = chain_df_by_date.get(date_str)
-        if chain is None or len(chain) == 0:
-            offsets.append(offsets[-1])
-            continue
-
+    def _chain_to_arrays(chain):
         n   = len(chain)
         cp  = chain.get('call_put', chain.get('type', pd.Series(['C'] * n, index=chain.index)))
-        right = (cp.astype(str).str.upper().str.startswith('P')).astype(np.int8).values
+        right  = (cp.astype(str).str.upper().str.startswith('P')).astype(np.int8).values
         strike = pd.to_numeric(chain['strike'], errors='coerce').fillna(0).astype(np.float32).values
-
         dte_col = 'te' if 'te' in chain.columns else ('dte' if 'dte' in chain.columns else None)
         dte = (pd.to_numeric(chain[dte_col], errors='coerce').fillna(1.0).astype(np.float32).values
                if dte_col else np.ones(n, np.float32))
-
         delta_col = 'delta' if 'delta' in chain.columns else None
         delta = (pd.to_numeric(chain[delta_col], errors='coerce').astype(np.float32).values
                  if delta_col else np.full(n, np.nan, np.float32))
-
         bid = pd.to_numeric(chain.get('bid', pd.Series([0.0]*n)), errors='coerce').fillna(0.0).astype(np.float32).values
         ask = pd.to_numeric(chain.get('ask', pd.Series([0.0]*n)), errors='coerce').fillna(0.0).astype(np.float32).values
         mid_raw = chain.get('mid')
-        if mid_raw is not None:
-            mid = pd.to_numeric(mid_raw, errors='coerce').fillna((bid+ask)/2).astype(np.float32).values
-        else:
-            mid = ((bid + ask) / 2).astype(np.float32)
+        mid = (pd.to_numeric(mid_raw, errors='coerce').fillna((bid+ask)/2).astype(np.float32).values
+               if mid_raw is not None else ((bid + ask) / 2).astype(np.float32))
+        return right, strike, dte, delta, bid, ask, mid
 
-        rights.append(right);  strikes.append(strike); dtes.append(dte)
-        deltas.append(delta);  bids.append(bid);       asks.append(ask); mids.append(mid)
-        offsets.append(offsets[-1] + n)
+    # Cache: date_str → (right, strike, dte, delta, bid, ask, mid)
+    _date_cache: dict = {}
+    for d in set(bar_dates):
+        chain = chain_df_by_date.get(d)
+        if chain is not None and len(chain) > 0:
+            _date_cache[d] = _chain_to_arrays(chain)
+
+    print(f"[optimizer_prep] {len(_date_cache)} dates with chain data  "
+          f"(0 = key mismatch; check bundle.m5_dates vs chain_df_by_date keys)")
+
+    # Build CSR: one entry per bar (reuse cached arrays)
+    rights, strikes, dtes, deltas, bids, asks, mids = [], [], [], [], [], [], []
+    offsets = [0]
+    for date_str in bar_dates:
+        arrs = _date_cache.get(date_str)
+        if arrs is None:
+            offsets.append(offsets[-1])
+            continue
+        r, s, d, da, b, a, m = arrs
+        rights.append(r);  strikes.append(s); dtes.append(d)
+        deltas.append(da); bids.append(b);    asks.append(a); mids.append(m)
+        offsets.append(offsets[-1] + len(r))
 
     if rights:
         r_flat  = np.concatenate(rights)
