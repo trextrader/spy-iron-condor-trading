@@ -84,14 +84,68 @@ def build_iron_butterfly_search_space() -> SearchSpaceSpec:
     )
 
 
+def build_iron_condor_search_space() -> SearchSpaceSpec:
+    # Bounds calibrated for SPY iron condor (OTM short strikes, class_idx=7).
+    # Short delta 0.15-0.30: OTM calls/puts for wider profit zone vs butterfly.
+    return SearchSpaceSpec(
+        template_id="iron_condor",
+        params=[
+            ParamSpec("stop_loss_dollar", 300,  1500, "grid", 250, int),   # 5 pts
+            ParamSpec("profit_target",    300,  2000, "grid", 250, int),   # 7 pts
+            ParamSpec("max_dte_exit",     0,    5,    "grid", 1,   int),   # 6 pts
+            ParamSpec("spread_width",     5,    20,   "grid", 5,   int),   # 4 pts
+            ParamSpec("target_dte",       7,    21,   "grid", 7,   int),   # 3 pts
+            ParamSpec("short_delta",      0.15, 0.30, "continuous"),       # GP free
+            ParamSpec("hold_days",        5,    21,   "grid", 4,   int),   # 5 pts
+        ],
+    )
+
+
+def build_short_call_search_space() -> SearchSpaceSpec:
+    # Bounds for naked short call (single-leg, class_idx=0).
+    # No spread_width (no wings). stop_loss is the key risk control.
+    return SearchSpaceSpec(
+        template_id="short_call",
+        params=[
+            ParamSpec("stop_loss_dollar", 200,  1000, "grid", 100, int),   # 9 pts
+            ParamSpec("profit_target",    100,  1500, "grid", 100, int),   # 15 pts
+            ParamSpec("max_dte_exit",     0,    7,    "grid", 1,   int),   # 8 pts
+            ParamSpec("target_dte",       7,    21,   "grid", 7,   int),   # 3 pts
+            ParamSpec("short_delta",      0.15, 0.35, "continuous"),       # GP free
+            ParamSpec("hold_days",        3,    21,   "grid", 3,   int),   # 7 pts
+        ],
+    )
+
+
+def build_short_put_search_space() -> SearchSpaceSpec:
+    # Bounds for naked short put (single-leg, class_idx=1). Mirror of short_call.
+    return SearchSpaceSpec(
+        template_id="short_put",
+        params=[
+            ParamSpec("stop_loss_dollar", 200,  1000, "grid", 100, int),
+            ParamSpec("profit_target",    100,  1500, "grid", 100, int),
+            ParamSpec("max_dte_exit",     0,    7,    "grid", 1,   int),
+            ParamSpec("target_dte",       7,    21,   "grid", 7,   int),
+            ParamSpec("short_delta",      0.15, 0.35, "continuous"),
+            ParamSpec("hold_days",        3,    21,   "grid", 3,   int),
+        ],
+    )
+
+
 def build_search_space(template_id: str) -> SearchSpaceSpec:
     """Return a SearchSpaceSpec for any known template (generic fallback)."""
     _builders = {
         "iron_butterfly": build_iron_butterfly_search_space,
+        "iron_condor":    build_iron_condor_search_space,
+        "short_call":     build_short_call_search_space,
+        "short_put":      build_short_put_search_space,
     }
     if template_id in _builders:
         return _builders[template_id]()
-    # Generic fallback covers most income strategies
+    # Generic fallback covers income strategies not yet given a specific builder.
+    # Includes hold_days and max_dte_exit so K candidates have varying exit timing
+    # (without these, all candidates default to hold_days=7 in the engine, making
+    # results look identical across the K batch).
     return SearchSpaceSpec(
         template_id=template_id,
         params=[
@@ -99,6 +153,9 @@ def build_search_space(template_id: str) -> SearchSpaceSpec:
             ParamSpec("profit_target",    300,  3000, "grid", 250, int),
             ParamSpec("target_dte",       7,    28,   "grid", 7,   int),
             ParamSpec("short_delta",      0.15, 0.45, "continuous"),
+            ParamSpec("spread_width",     5,    20,   "grid", 5,   int),
+            ParamSpec("hold_days",        5,    21,   "grid", 4,   int),
+            ParamSpec("max_dte_exit",     0,    5,    "grid", 1,   int),
         ],
     )
 

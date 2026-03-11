@@ -143,8 +143,9 @@ def run_bayes_optimizer(
         print("[bayes_opt] ERROR: --strategies must specify a template (e.g. --strategies iron_butterfly)")
         return
 
-    base_cfg = strategy_configs.get(template_id, {})
-    space    = build_search_space(template_id)
+    base_cfg        = strategy_configs.get(template_id, {})
+    space           = build_search_space(template_id)
+    strategy_family = _strategy_family_for_template(template_id)
     obj_spec = ObjectiveSpec(
         min_trades  = getattr(args, 'bo_min_trades',  5),
         max_dd_cap  = getattr(args, 'bo_max_dd_cap',  10.0),
@@ -159,6 +160,7 @@ def run_bayes_optimizer(
     print("=" * 68)
     print(f"  BAYESIAN OPTIMIZER  [{template_id}]")
     print(f"  search_dim={space.dim}  init={bo_init}  batch={bo_batch}  rounds={bo_rounds}")
+    print(f"  simulation_family={strategy_family}")
     print(f"  BoTorch: {'available ✓' if _BOTORCH_OK else 'NOT FOUND — using local perturbation fallback'}")
     print("=" * 68)
 
@@ -224,6 +226,7 @@ def run_bayes_optimizer(
         ctx, sobol_batch,
         base_config=base_cfg, objective_spec=obj_spec, fidelity="fast",
         strategy_idx_filter=_class_idx_for_template(template_id, strategy_configs),
+        strategy_family=strategy_family,
         verbose=False,   # suppress bar-level detail for warmup speed
     )
     elapsed_p1 = time.time() - t0
@@ -277,6 +280,7 @@ def run_bayes_optimizer(
             ctx, cand_batch,
             base_config=base_cfg, objective_spec=obj_spec, fidelity="medium",
             strategy_idx_filter=_class_idx_for_template(template_id, strategy_configs),
+            strategy_family=strategy_family,
             verbose=False,
         )
         elapsed_rnd = time.time() - t0
@@ -329,6 +333,7 @@ def run_bayes_optimizer(
         ctx, top_batch,
         base_config=base_cfg, objective_spec=obj_spec, fidelity="full",
         strategy_idx_filter=_class_idx_for_template(template_id, strategy_configs),
+        strategy_family=strategy_family,
         verbose=verbose,   # full diagnostic when --verbose flag is set
     )
     print(f"  Full-fidelity done in {time.time()-t0:.1f}s")
@@ -395,10 +400,50 @@ def run_bayes_optimizer(
     return final_rows
 
 
+# ── Strategy-family map: template_id → simulation engine family ──────────────
+# "iron_butterfly" = ATM short call+put + wings (same strike for both shorts)
+# "iron_condor"    = OTM short call+put at SEPARATE strikes + wings
+# "short_call"     = single-leg naked short call
+# "short_put"      = single-leg naked short put
+_STRATEGY_FAMILY_MAP: Dict[str, str] = {
+    "iron_butterfly":         "iron_butterfly",
+    "inverse_iron_butterfly": "iron_butterfly",
+    "short_call_butterfly":   "iron_butterfly",
+    "short_put_butterfly":    "iron_butterfly",
+    "long_call_butterfly":    "iron_butterfly",
+    "long_put_butterfly":     "iron_butterfly",
+    "iron_condor":            "iron_condor",
+    "inverse_iron_condor":    "iron_condor",
+    "short_call_condor":      "iron_condor",
+    "short_put_condor":       "iron_condor",
+    "double_diagonal":        "iron_condor",
+    "short_call":             "short_call",
+    "covered_call":           "short_call",
+    "bear_call_ladder":       "short_call",
+    "short_put":              "short_put",
+    "cash_secured_put":       "short_put",
+    "bull_put_ladder":        "short_put",
+}
+
+
+def _strategy_family_for_template(template_id: str) -> str:
+    """Return the simulation engine family for a given template."""
+    fam = _STRATEGY_FAMILY_MAP.get(template_id)
+    if fam is None:
+        print(f"[bayes_opt] NOTE: no explicit family for {template_id!r}. "
+              f"Defaulting to 'iron_butterfly' simulation. "
+              f"Add to _STRATEGY_FAMILY_MAP for correct simulation.")
+        fam = "iron_butterfly"
+    return fam
+
+
 def _class_idx_for_template(template_id: str, strategy_configs: Dict) -> int:
     """Look up the class_idx for the given template from strategy_configs."""
     cfg = strategy_configs.get(template_id, {})
-    return int(cfg.get("class_idx", 8))   # 8 = custom_multi_leg / iron_butterfly default
+    idx = int(cfg.get("class_idx", 8))   # 8 = custom_multi_leg / iron_butterfly default
+    print(f"[bayes_opt] template={template_id!r}  class_idx={idx}  "
+          f"(gate: sidx == {idx} in v43 predictions)")
+    return idx
 
 
 def _apply_best_config(template_id: str, best_row: Dict, space: SearchSpaceSpec):

@@ -237,6 +237,261 @@ def _find_best_structure_iron_bfly(
     return credit_out, ss_out, aw_out, valid_out, dte_out
 
 
+def _find_best_structure_iron_condor(
+    spot:    float,
+    right:   np.ndarray,
+    strike:  np.ndarray,
+    dte:     np.ndarray,
+    delta:   np.ndarray,
+    bid:     np.ndarray,
+    ask:     np.ndarray,
+    target_dte:   np.ndarray,  # [K]
+    short_delta:  np.ndarray,  # [K] — OTM delta target (0.15-0.30 typical)
+    spread_width: np.ndarray,  # [K]
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Find iron condor structure for K candidates: separate OTM short call and put strikes.
+
+    Returns
+    -------
+    credit       [K] float32 — net credit per share
+    ss_call      [K] float32 — short call strike
+    ss_put       [K] float32 — short put strike
+    actual_width [K] float32 — average wing width
+    valid        [K] bool
+    actual_dte   [K] float32
+    """
+    M = len(strike)
+    K = len(target_dte)
+
+    credit_out = np.full(K, np.nan, np.float32)
+    ssc_out    = np.zeros(K, np.float32)
+    ssp_out    = np.zeros(K, np.float32)
+    aw_out     = np.zeros(K, np.float32)
+    valid_out  = np.zeros(K, bool)
+    dte_out    = np.full(K, np.nan, np.float32)
+
+    if M == 0:
+        return credit_out, ssc_out, ssp_out, aw_out, valid_out, dte_out
+
+    calls_mask = right == 0
+    puts_mask  = right == 1
+    if not calls_mask.any() or not puts_mask.any():
+        return credit_out, ssc_out, ssp_out, aw_out, valid_out, dte_out
+
+    for k in range(K):
+        td = float(target_dte[k])
+        sd = float(short_delta[k])   # OTM delta target
+        sw = float(spread_width[k])
+
+        dte_diff = np.abs(dte - td)
+        best_dte = dte[np.argmin(dte_diff)]
+        exp_mask = np.abs(dte - best_dte) < 0.6
+
+        cm = calls_mask & exp_mask
+        pm = puts_mask  & exp_mask
+        if not cm.any() or not pm.any():
+            continue
+
+        call_mid     = (bid[cm] + ask[cm]) / 2.0
+        put_mid      = (bid[pm] + ask[pm]) / 2.0
+        call_strikes = strike[cm]
+        put_strikes  = strike[pm]
+        call_deltas  = np.abs(delta[cm])
+        put_deltas   = np.abs(delta[pm])
+
+        # Short call: OTM call closest to sd (call delta ~ sd, e.g. 0.20)
+        if np.isnan(call_deltas).all():
+            sc_idx = int(np.argmin(np.abs(call_strikes - spot * 1.015)))
+        else:
+            valid_d = np.isfinite(call_deltas)
+            delta_err = np.where(valid_d, np.abs(call_deltas - sd), np.inf)
+            sc_idx = int(np.argmin(delta_err))
+        sc_stk = float(call_strikes[sc_idx])
+        sc_mid = float(call_mid[sc_idx])
+
+        # Short put: OTM put closest to sd (put delta ~ sd, e.g. 0.20)
+        if np.isnan(put_deltas).all():
+            sp_idx = int(np.argmin(np.abs(put_strikes - spot * 0.985)))
+        else:
+            valid_d = np.isfinite(put_deltas)
+            delta_err = np.where(valid_d, np.abs(put_deltas - sd), np.inf)
+            sp_idx = int(np.argmin(delta_err))
+        sp_stk = float(put_strikes[sp_idx])
+        sp_mid = float(put_mid[sp_idx])
+
+        # IC validity: short call must be above short put
+        if sc_stk <= sp_stk:
+            continue
+
+        # Long call at sc_stk + sw
+        lc_target = sc_stk + sw
+        lc_dist   = np.abs(call_strikes - lc_target)
+        lc_idx    = int(np.argmin(lc_dist))
+        if float(lc_dist[lc_idx]) > max(2.0, sw * 0.40):
+            continue
+        lc_mid = float(call_mid[lc_idx])
+        actual_lc_stk = float(call_strikes[lc_idx])
+
+        # Long put at sp_stk - sw
+        lp_target = sp_stk - sw
+        lp_dist   = np.abs(put_strikes - lp_target)
+        lp_idx    = int(np.argmin(lp_dist))
+        if float(lp_dist[lp_idx]) > max(2.0, sw * 0.40):
+            continue
+        lp_mid = float(put_mid[lp_idx])
+        actual_lp_stk = float(put_strikes[lp_idx])
+
+        credit = (sc_mid + sp_mid) - (lc_mid + lp_mid)
+        actual_width = (actual_lc_stk - sc_stk + sp_stk - actual_lp_stk) / 2.0
+
+        min_credit = max(0.10, 0.05 * sw)
+        if credit < min_credit:
+            continue
+
+        credit_out[k] = credit
+        ssc_out[k]    = sc_stk
+        ssp_out[k]    = sp_stk
+        aw_out[k]     = max(actual_width, 0.0)
+        valid_out[k]  = True
+        dte_out[k]    = best_dte
+
+    return credit_out, ssc_out, ssp_out, aw_out, valid_out, dte_out
+
+
+def _find_best_structure_short_call(
+    spot:    float,
+    right:   np.ndarray,
+    strike:  np.ndarray,
+    dte:     np.ndarray,
+    delta:   np.ndarray,
+    bid:     np.ndarray,
+    ask:     np.ndarray,
+    target_dte:  np.ndarray,  # [K]
+    short_delta: np.ndarray,  # [K]
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Find short call (single-leg) structure for K candidates.
+
+    Returns
+    -------
+    credit   [K] float32 — premium received per share
+    ss_call  [K] float32 — short call strike
+    valid    [K] bool
+    dte      [K] float32
+    """
+    K = len(target_dte)
+    credit_out = np.full(K, np.nan, np.float32)
+    ss_out     = np.zeros(K, np.float32)
+    valid_out  = np.zeros(K, bool)
+    dte_out    = np.full(K, np.nan, np.float32)
+
+    if len(strike) == 0:
+        return credit_out, ss_out, valid_out, dte_out
+
+    calls_mask = right == 0
+    if not calls_mask.any():
+        return credit_out, ss_out, valid_out, dte_out
+
+    for k in range(K):
+        td = float(target_dte[k])
+        sd = float(short_delta[k])
+
+        dte_diff = np.abs(dte - td)
+        best_dte = dte[np.argmin(dte_diff)]
+        exp_mask = np.abs(dte - best_dte) < 0.6
+
+        cm = calls_mask & exp_mask
+        if not cm.any():
+            continue
+
+        call_mid     = (bid[cm] + ask[cm]) / 2.0
+        call_strikes = strike[cm]
+        call_deltas  = np.abs(delta[cm])
+
+        if np.isnan(call_deltas).all():
+            sc_idx = int(np.argmin(np.abs(call_strikes - spot * 1.015)))
+        else:
+            valid_d = np.isfinite(call_deltas)
+            delta_err = np.where(valid_d, np.abs(call_deltas - sd), np.inf)
+            sc_idx = int(np.argmin(delta_err))
+
+        sc_stk = float(call_strikes[sc_idx])
+        sc_mid = float(call_mid[sc_idx])
+
+        if sc_mid < 0.05:   # min premium filter
+            continue
+
+        credit_out[k] = sc_mid
+        ss_out[k]     = sc_stk
+        valid_out[k]  = True
+        dte_out[k]    = best_dte
+
+    return credit_out, ss_out, valid_out, dte_out
+
+
+def _find_best_structure_short_put(
+    spot:    float,
+    right:   np.ndarray,
+    strike:  np.ndarray,
+    dte:     np.ndarray,
+    delta:   np.ndarray,
+    bid:     np.ndarray,
+    ask:     np.ndarray,
+    target_dte:  np.ndarray,  # [K]
+    short_delta: np.ndarray,  # [K]
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Find short put (single-leg) structure. Returns credit, ss_put, valid, dte."""
+    K = len(target_dte)
+    credit_out = np.full(K, np.nan, np.float32)
+    ss_out     = np.zeros(K, np.float32)
+    valid_out  = np.zeros(K, bool)
+    dte_out    = np.full(K, np.nan, np.float32)
+
+    if len(strike) == 0:
+        return credit_out, ss_out, valid_out, dte_out
+
+    puts_mask = right == 1
+    if not puts_mask.any():
+        return credit_out, ss_out, valid_out, dte_out
+
+    for k in range(K):
+        td = float(target_dte[k])
+        sd = float(short_delta[k])
+
+        dte_diff = np.abs(dte - td)
+        best_dte = dte[np.argmin(dte_diff)]
+        exp_mask = np.abs(dte - best_dte) < 0.6
+
+        pm = puts_mask & exp_mask
+        if not pm.any():
+            continue
+
+        put_mid     = (bid[pm] + ask[pm]) / 2.0
+        put_strikes = strike[pm]
+        put_deltas  = np.abs(delta[pm])
+
+        if np.isnan(put_deltas).all():
+            sp_idx = int(np.argmin(np.abs(put_strikes - spot * 0.985)))
+        else:
+            valid_d = np.isfinite(put_deltas)
+            delta_err = np.where(valid_d, np.abs(put_deltas - sd), np.inf)
+            sp_idx = int(np.argmin(delta_err))
+
+        sp_stk = float(put_strikes[sp_idx])
+        sp_mid = float(put_mid[sp_idx])
+
+        if sp_mid < 0.05:
+            continue
+
+        credit_out[k] = sp_mid
+        ss_out[k]     = sp_stk
+        valid_out[k]  = True
+        dte_out[k]    = best_dte
+
+    return credit_out, ss_out, valid_out, dte_out
+
+
 _MtM_DIAG_CALLS = 0   # module-level counter; reset on each new engine call
 _MtM_DIAG_LIMIT = 5  # print first N MtM evaluations
 
@@ -249,7 +504,8 @@ def _mark_to_market(
     bid:           np.ndarray,
     ask:           np.ndarray,
     # Per-candidate open position info (only for open_mask candidates)
-    short_strike:  np.ndarray,   # [K]
+    entry_ss_call: np.ndarray,   # [K] short call strike (= short put for iron butterfly)
+    entry_ss_put:  np.ndarray,   # [K] short put strike  (separate for iron condor)
     entry_width:   np.ndarray,   # [K]
     open_mask:     np.ndarray,   # [K] bool
     entry_dte:     np.ndarray,   # [K]  actual DTE at entry (entry_dte_at_entry)
@@ -257,15 +513,15 @@ def _mark_to_market(
     diag: bool = False,
 ) -> np.ndarray:
     """
-    Estimate current debit-to-close for K open iron butterfly positions.
+    Estimate current debit-to-close for K open iron butterfly/condor positions.
     Returns debit_per_share[K]  (NaN → use fallback).
 
-    Uses entry_dte (actual DTE at entry) to find the correct expiry in the
-    current bar's chain — NOT the candidate's target_dte parameter.
+    Uses entry_ss_call and entry_ss_put for separate short strikes (iron condor),
+    or both equal to the same ATM strike (iron butterfly).
     """
     global _MtM_DIAG_CALLS
 
-    K = len(short_strike)
+    K = len(entry_ss_call)
     debit = np.full(K, np.nan, np.float32)
 
     if len(strike) == 0:
@@ -277,10 +533,9 @@ def _mark_to_market(
     for k in range(K):
         if not open_mask[k]:
             continue
-        ss  = float(short_strike[k])
+        ssc = float(entry_ss_call[k])
+        ssp = float(entry_ss_put[k])
         sw  = float(entry_width[k])
-        # Use the ACTUAL DTE at which this position was entered (decremented by
-        # elapsed days), not the candidate's target_dte parameter.
         td  = float(entry_dte[k])
 
         dte_diff  = np.abs(dte_chain - td)
@@ -296,26 +551,21 @@ def _mark_to_market(
                       f"exp_opts={exp_mask.sum()} cm={cm.sum()} pm={pm.sum()} → SKIP (no calls/puts)")
             continue
 
-        # Use mid prices (bid+ask)/2 for MtM — consistent with entry pricing.
-        # bid=0 on OTM wings is common in real data; using bid would create
-        # artificial immediate stop-loss hits (selling wings at $0 vs buying at ask).
         mid_here = (bid[exp_mask] + ask[exp_mask]) / 2.0
         r_here   = right[exp_mask]
         s_here   = strike[exp_mask]
 
-        sc_mid = _lookup_price(r_here, s_here, np.array([]), mid_here, mid_here, 0, ss,      "short")
-        sp_mid = _lookup_price(r_here, s_here, np.array([]), mid_here, mid_here, 1, ss,      "short")
-        lc_mid = _lookup_price(r_here, s_here, np.array([]), mid_here, mid_here, 0, ss + sw, "short")
-        lp_mid = _lookup_price(r_here, s_here, np.array([]), mid_here, mid_here, 1, ss - sw, "short")
+        sc_mid = _lookup_price(r_here, s_here, np.array([]), mid_here, mid_here, 0, ssc,      "short")
+        sp_mid = _lookup_price(r_here, s_here, np.array([]), mid_here, mid_here, 1, ssp,      "short")
+        lc_mid = _lookup_price(r_here, s_here, np.array([]), mid_here, mid_here, 0, ssc + sw, "short")
+        lp_mid = _lookup_price(r_here, s_here, np.array([]), mid_here, mid_here, 1, ssp - sw, "short")
 
         if diag and _MtM_DIAG_CALLS < _MtM_DIAG_LIMIT:
             call_strikes_here = strike[cm]
-            put_strikes_here  = strike[pm]
-            # also show raw bid/ask for the short strike to compare with mid
-            sc_ask_raw = _lookup_price(r_here, s_here, np.array([]), bid[exp_mask], ask[exp_mask], 0, ss, "long")
-            sc_bid_raw = _lookup_price(r_here, s_here, np.array([]), bid[exp_mask], ask[exp_mask], 0, ss, "short")
-            lc_bid_raw = _lookup_price(r_here, s_here, np.array([]), bid[exp_mask], ask[exp_mask], 0, ss + sw, "short")
-            print(f"  [MtM diag k={k}] spot={spot:.2f} ss={ss:.2f} sw={sw:.2f} td={td:.1f} best_dte={best_dte:.1f}")
+            sc_ask_raw = _lookup_price(r_here, s_here, np.array([]), bid[exp_mask], ask[exp_mask], 0, ssc, "long")
+            sc_bid_raw = _lookup_price(r_here, s_here, np.array([]), bid[exp_mask], ask[exp_mask], 0, ssc, "short")
+            lc_bid_raw = _lookup_price(r_here, s_here, np.array([]), bid[exp_mask], ask[exp_mask], 0, ssc + sw, "short")
+            print(f"  [MtM diag k={k}] spot={spot:.2f} ssc={ssc:.2f} ssp={ssp:.2f} sw={sw:.2f} td={td:.1f} best_dte={best_dte:.1f}")
             print(f"    exp_opts={exp_mask.sum()} (calls={cm.sum()} puts={pm.sum()})  "
                   f"DTE range: [{dte_chain[exp_mask].min():.1f}, {dte_chain[exp_mask].max():.1f}]")
             print(f"    call strikes (sample): {call_strikes_here[:6].tolist()}")
@@ -332,6 +582,53 @@ def _mark_to_market(
     return debit
 
 
+def _mark_to_market_single_leg(
+    right:         np.ndarray,
+    strike:        np.ndarray,
+    dte_chain:     np.ndarray,
+    bid:           np.ndarray,
+    ask:           np.ndarray,
+    entry_ss:      np.ndarray,   # [K] short strike (call or put)
+    open_mask:     np.ndarray,   # [K] bool
+    entry_dte:     np.ndarray,   # [K]
+    option_right:  int,          # 0=call, 1=put
+) -> np.ndarray:
+    """MtM for single-leg short positions (short_call or short_put)."""
+    K = len(entry_ss)
+    debit = np.full(K, np.nan, np.float32)
+
+    if len(strike) == 0:
+        return debit
+
+    leg_mask = right == option_right
+
+    for k in range(K):
+        if not open_mask[k]:
+            continue
+        ss = float(entry_ss[k])
+        td = float(entry_dte[k])
+
+        dte_diff = np.abs(dte_chain - td)
+        best_dte = dte_chain[np.argmin(dte_diff)]
+        exp_mask = np.abs(dte_chain - best_dte) < 0.6
+
+        lm = leg_mask & exp_mask
+        if not lm.any():
+            continue
+
+        mid_here = (bid[lm] + ask[lm]) / 2.0
+        stk_here = strike[lm]
+
+        dist = np.abs(stk_here - ss)
+        idx  = int(np.argmin(dist))
+        if float(dist[idx]) > 5.0:   # max 5-point miss
+            continue
+
+        debit[k] = float(mid_here[idx])   # current mid price = debit to close
+
+    return debit
+
+
 # ── Main simulation ───────────────────────────────────────────────────────────
 
 def run_backtest_optimizer_batch(
@@ -342,6 +639,7 @@ def run_backtest_optimizer_batch(
     objective_spec: ObjectiveSpec,
     fidelity:       str   = "full",   # "fast" | "medium" | "full"
     strategy_idx_filter: int = 8,     # iron_butterfly index
+    strategy_family:     str = "iron_butterfly",  # "iron_butterfly" | "iron_condor" | "short_call" | "short_put"
     entry_threshold: float = ENTRY_THRESHOLD,
     pop_threshold:   float = POP_THRESHOLD,
     cooldown_bars:   int   = MIN_BARS_COOLDOWN,
@@ -381,8 +679,9 @@ def run_backtest_optimizer_batch(
     open_mask    = np.zeros(K, bool)
     entry_credit = np.zeros(K, np.float64)   # per share
     entry_qty    = np.ones(K,  np.int32)
-    entry_ss     = np.zeros(K, np.float64)   # short strike
-    entry_width  = np.zeros(K, np.float64)   # actual width
+    entry_ss_call = np.zeros(K, np.float64)  # short call strike
+    entry_ss_put  = np.zeros(K, np.float64)  # short put strike (=call for IB, separate for IC)
+    entry_width  = np.zeros(K, np.float64)   # actual width (0 for single-leg)
     entry_bar    = np.full(K, -999, np.int32)
     entry_dte_at_entry = np.zeros(K, np.float64)
     last_entry   = np.full(K, -999, np.int32)
@@ -393,7 +692,8 @@ def run_backtest_optimizer_batch(
 
     # ── Verbose: print candidate param summary ────────────────────────────
     if verbose:
-        print(f"\n[engine] run_backtest_optimizer_batch  K={K}  fidelity={fidelity}  T_end={T_end}/{ctx.T}")
+        print(f"\n[engine] run_backtest_optimizer_batch  K={K}  fidelity={fidelity}  "
+              f"T_end={T_end}/{ctx.T}  strategy_family={strategy_family}")
         print(f"[engine] Candidate param ranges across K={K}:")
         for name, arr in candidates.params.items():
             print(f"  {name:>20s}:  min={arr.min():.3g}  max={arr.max():.3g}  "
@@ -418,6 +718,18 @@ def run_backtest_optimizer_batch(
     # Reset MtM diagnostic counter for this batch run
     global _MtM_DIAG_CALLS
     _MtM_DIAG_CALLS = 0
+
+    # ── Gate-eligible bar count (always printed — critical diagnostic) ─────
+    gate_eligible = int((sidx_np[:T_end] == strategy_idx_filter).sum())
+    non_abstain   = int((~abstain_np[:T_end]).sum())
+    print(f"[engine] strategy_family={strategy_family}  "
+          f"strategy_idx_filter={strategy_idx_filter}  "
+          f"gate_eligible_bars={gate_eligible}/{T_end}  "
+          f"non_abstain={non_abstain}/{T_end}")
+    if gate_eligible == 0:
+        print(f"[engine] WARNING: 0 bars match sidx=={strategy_idx_filter}. "
+              f"No trades will be entered. v43 model may not predict this class frequently. "
+              f"Check --strategies argument vs v43 model training distribution.")
 
     # ── Verbose: progress tracking ────────────────────────────────────────
     _progress_interval = max(1, T_end // 10)   # print every 10%
@@ -474,15 +786,29 @@ def run_backtest_optimizer_batch(
             if verbose and _MtM_DIAG_CALLS < _MtM_DIAG_LIMIT and open_mask.any():
                 for _dk in np.where(open_mask)[0][:3]:
                     print(f"  [MtM ctx k={_dk}] entry_credit={entry_credit[_dk]:.4f}  "
-                          f"entry_ss={entry_ss[_dk]:.2f}  entry_width={entry_width[_dk]:.2f}  "
-                          f"entry_dte={entry_dte_at_entry[_dk]:.1f}  current_dte={current_dte[_dk]:.4f}  "
+                          f"entry_ss_call={entry_ss_call[_dk]:.2f}  "
+                          f"entry_ss_put={entry_ss_put[_dk]:.2f}  "
+                          f"entry_width={entry_width[_dk]:.2f}  "
+                          f"entry_dte={entry_dte_at_entry[_dk]:.1f}  "
+                          f"current_dte={current_dte[_dk]:.4f}  "
                           f"days_held={days_held[_dk]:.4f}")
             if has_chain:
-                debit_per_share = _mark_to_market(
-                    spot, r_sl, s_sl, d_sl, b_sl, a_sl,
-                    entry_ss, entry_width, open_mask, current_dte,
-                    diag=verbose,
-                )
+                if strategy_family in ("short_call",):
+                    debit_per_share = _mark_to_market_single_leg(
+                        r_sl, s_sl, d_sl, b_sl, a_sl,
+                        entry_ss_call, open_mask, current_dte, option_right=0,
+                    )
+                elif strategy_family in ("short_put",):
+                    debit_per_share = _mark_to_market_single_leg(
+                        r_sl, s_sl, d_sl, b_sl, a_sl,
+                        entry_ss_put, open_mask, current_dte, option_right=1,
+                    )
+                else:  # iron_butterfly, iron_condor, generic 4-leg
+                    debit_per_share = _mark_to_market(
+                        spot, r_sl, s_sl, d_sl, b_sl, a_sl,
+                        entry_ss_call, entry_ss_put, entry_width,
+                        open_mask, current_dte, diag=verbose,
+                    )
             else:
                 debit_per_share = np.full(K, np.nan, np.float32)
 
@@ -492,13 +818,19 @@ def run_backtest_optimizer_batch(
                 _chain_debit_hits += int(_chain_ok.sum())
                 _chain_debit_miss += int((~_chain_ok & open_mask).sum())
 
-            # Fallback: intrinsic value when chain not available
-            intrinsic_call = np.maximum(spot - entry_ss, 0.0)
-            intrinsic_put  = np.maximum(entry_ss - spot, 0.0)
-            intrinsic_wing_call = np.maximum(spot - (entry_ss + entry_width), 0.0)
-            intrinsic_wing_put  = np.maximum((entry_ss - entry_width) - spot, 0.0)
-            intrinsic_debit = (intrinsic_call + intrinsic_put
-                                - intrinsic_wing_call - intrinsic_wing_put)
+            # Fallback: intrinsic value when chain not available.
+            # Strategy-aware: single-leg vs 4-leg structures have different payoffs.
+            if strategy_family in ("short_call",):
+                intrinsic_debit = np.maximum(spot - entry_ss_call, 0.0)
+            elif strategy_family in ("short_put",):
+                intrinsic_debit = np.maximum(entry_ss_put - spot, 0.0)
+            else:  # 4-leg (iron_butterfly or iron_condor)
+                intrinsic_call = np.maximum(spot - entry_ss_call, 0.0)
+                intrinsic_put  = np.maximum(entry_ss_put - spot, 0.0)
+                intrinsic_wing_call = np.maximum(spot - (entry_ss_call + entry_width), 0.0)
+                intrinsic_wing_put  = np.maximum((entry_ss_put - entry_width) - spot, 0.0)
+                intrinsic_debit = (intrinsic_call + intrinsic_put
+                                    - intrinsic_wing_call - intrinsic_wing_put)
             debit_per_share = np.where(
                 np.isfinite(debit_per_share),
                 debit_per_share,
@@ -617,15 +949,62 @@ def run_backtest_optimizer_batch(
         if not eligible.any():
             continue
 
-        # Find structure for all eligible candidates simultaneously
+        # Find structure for all eligible candidates (strategy-family dispatch)
         td_elig  = np.where(eligible, target_dte_arr,   21.0).astype(np.float32)
-        sd_elig  = np.where(eligible, short_delta_arr,   0.45).astype(np.float32)
+        sd_elig  = np.where(eligible, short_delta_arr,   0.30).astype(np.float32)
         sw_elig  = np.where(eligible, spread_width_arr,  5.0).astype(np.float32)
 
-        credit, ss, aw, valid, struct_dte = _find_best_structure_iron_bfly(
-            spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
-            td_elig, sd_elig, sw_elig,
-        )
+        # Initialise per-bar outputs (NaN/zero → invalid until structure found)
+        credit     = np.full(K, np.nan, np.float32)
+        ss_call    = np.zeros(K, np.float32)
+        ss_put     = np.zeros(K, np.float32)
+        aw         = np.zeros(K, np.float32)
+        valid      = np.zeros(K, bool)
+        struct_dte = np.full(K, np.nan, np.float32)
+
+        if strategy_family == "iron_butterfly":
+            credit, ss_call, aw, valid, struct_dte = _find_best_structure_iron_bfly(
+                spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
+                td_elig, sd_elig, sw_elig,
+            )
+            ss_put = ss_call.copy()   # IB: same strike for both shorts
+
+        elif strategy_family == "iron_condor":
+            credit, ss_call, ss_put, aw, valid, struct_dte = _find_best_structure_iron_condor(
+                spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
+                td_elig, sd_elig, sw_elig,
+            )
+
+        elif strategy_family == "short_call":
+            credit, ss_call, valid, struct_dte = _find_best_structure_short_call(
+                spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
+                td_elig, sd_elig,
+            )
+            # No wings: width = 0, put strike unused (set to call strike as sentinel)
+            aw     = np.zeros(K, np.float32)
+            ss_put = ss_call.copy()
+
+        elif strategy_family == "short_put":
+            credit, ss_put, valid, struct_dte = _find_best_structure_short_put(
+                spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
+                td_elig, sd_elig,
+            )
+            aw      = np.zeros(K, np.float32)
+            ss_call = ss_put.copy()
+
+        else:
+            # Unknown family → fall back to iron butterfly (logs a warning once)
+            if not hasattr(run_backtest_optimizer_batch, '_warned_family'):
+                run_backtest_optimizer_batch._warned_family = set()
+            if strategy_family not in run_backtest_optimizer_batch._warned_family:
+                print(f"[engine] WARNING: unknown strategy_family={strategy_family!r}. "
+                      f"Falling back to iron_butterfly simulation.")
+                run_backtest_optimizer_batch._warned_family.add(strategy_family)
+            credit, ss_call, aw, valid, struct_dte = _find_best_structure_iron_bfly(
+                spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
+                td_elig, sd_elig, sw_elig,
+            )
+            ss_put = ss_call.copy()
 
         can_enter = eligible & valid
 
@@ -633,8 +1012,11 @@ def run_backtest_optimizer_batch(
             # Quantity: 1 contract (simplified, matches minimum)
             qty = np.ones(K, np.int32)
 
-            # Margin estimate
-            margin_per_ct = np.maximum(aw - credit, 0) * IC_MULTIPLIER
+            # Margin estimate: 4-leg → width − credit; single-leg → premium × 20% spot equivalent
+            if strategy_family in ("short_call", "short_put"):
+                margin_per_ct = credit * IC_MULTIPLIER * 2.0   # simplified naked margin
+            else:
+                margin_per_ct = np.maximum(aw - credit, 0) * IC_MULTIPLIER
             margin_per_ct = np.where(can_enter, margin_per_ct, 0.0)
 
             # Simple capital check: equity × 40% ceiling
@@ -642,27 +1024,29 @@ def run_backtest_optimizer_batch(
             capital_ok    = can_enter & (margin_per_ct <= max_deploy)
 
             if capital_ok.any():
-                entry_credit = np.where(capital_ok, credit.astype(np.float64), entry_credit)
-                entry_qty    = np.where(capital_ok, qty,                         entry_qty)
-                entry_ss     = np.where(capital_ok, ss.astype(np.float64),       entry_ss)
-                entry_width  = np.where(capital_ok, aw.astype(np.float64),       entry_width)
-                entry_bar    = np.where(capital_ok, i,                            entry_bar)
-
-                # Use DTE from the SELECTED EXPIRY returned by _find_best_structure_iron_bfly
-                # (not a separate argmin that may pick DTE=1 when te column is all-NaN)
+                entry_credit  = np.where(capital_ok, credit.astype(np.float64),   entry_credit)
+                entry_qty     = np.where(capital_ok, qty,                           entry_qty)
+                entry_ss_call = np.where(capital_ok, ss_call.astype(np.float64),   entry_ss_call)
+                entry_ss_put  = np.where(capital_ok, ss_put.astype(np.float64),    entry_ss_put)
+                entry_width   = np.where(capital_ok, aw.astype(np.float64),        entry_width)
+                entry_bar     = np.where(capital_ok, i,                             entry_bar)
                 entry_dte_at_entry = np.where(capital_ok,
                                               struct_dte.astype(np.float64),
                                               entry_dte_at_entry)
-                open_mask          = np.where(capital_ok, True,  open_mask)
-                last_entry         = np.where(capital_ok, i,     last_entry)
+                open_mask  = np.where(capital_ok, True,  open_mask)
+                last_entry = np.where(capital_ok, i,     last_entry)
 
                 if verbose:
                     n_entered = int(capital_ok.sum())
                     _total_entries += n_entered
                     dte_entered = struct_dte[capital_ok]
-                    print(f"  [engine]   bar={i:>5}  ENTRY: {n_entered} candidate(s)  spot={spot:.2f}  "
+                    _ssc = ss_call[capital_ok]
+                    _ssp = ss_put[capital_ok]
+                    print(f"  [engine]   bar={i:>5}  ENTRY: {n_entered} candidate(s)  "
+                          f"spot={spot:.2f}  family={strategy_family}  "
                           f"credits=[{credit[capital_ok].min():.2f}–{credit[capital_ok].max():.2f}]  "
-                          f"ss=[{ss[capital_ok].min():.0f}–{ss[capital_ok].max():.0f}]  "
+                          f"ss_call=[{_ssc.min():.0f}–{_ssc.max():.0f}]  "
+                          f"ss_put=[{_ssp.min():.0f}–{_ssp.max():.0f}]  "
                           f"actual_dte=[{dte_entered.min():.2f}–{dte_entered.max():.2f}]")
 
     # ── Force-close any remaining open positions at end ───────────────────
