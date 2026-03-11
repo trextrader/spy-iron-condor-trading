@@ -124,7 +124,7 @@ def _find_best_structure_iron_bfly(
     target_dte:   np.ndarray,  # [K]
     short_delta:  np.ndarray,  # [K]
     spread_width: np.ndarray,  # [K]
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Find best iron butterfly structure for K candidates simultaneously.
 
@@ -134,6 +134,7 @@ def _find_best_structure_iron_bfly(
     short_strike [K] float32 — short call/put strike chosen
     actual_width [K] float32 — actual spread width in the chain
     valid        [K] bool    — True if structure is tradeable
+    actual_dte   [K] float32 — DTE of the selected expiry (from chain, NOT target_dte)
     """
     M = len(strike)
     K = len(target_dte)
@@ -142,16 +143,17 @@ def _find_best_structure_iron_bfly(
     ss_out      = np.zeros(K, np.float32)
     aw_out      = np.zeros(K, np.float32)
     valid_out   = np.zeros(K, bool)
+    dte_out     = np.full(K, np.nan, np.float32)   # actual selected DTE
 
     if M == 0:
-        return credit_out, ss_out, aw_out, valid_out
+        return credit_out, ss_out, aw_out, valid_out, dte_out
 
     calls_mask = right == 0
     puts_mask  = right == 1
 
     # Calls and puts available?
     if not calls_mask.any() or not puts_mask.any():
-        return credit_out, ss_out, aw_out, valid_out
+        return credit_out, ss_out, aw_out, valid_out, dte_out
 
     for k in range(K):
         td    = float(target_dte[k])
@@ -227,8 +229,9 @@ def _find_best_structure_iron_bfly(
         ss_out[k]      = short_stk
         aw_out[k]      = max(actual_width, 0.0)
         valid_out[k]   = True
+        dte_out[k]     = best_dte   # actual DTE of selected expiry from chain
 
-    return credit_out, ss_out, aw_out, valid_out
+    return credit_out, ss_out, aw_out, valid_out, dte_out
 
 
 def _mark_to_market(
@@ -544,7 +547,7 @@ def run_backtest_optimizer_batch(
         sd_elig  = np.where(eligible, short_delta_arr,   0.45).astype(np.float32)
         sw_elig  = np.where(eligible, spread_width_arr,  5.0).astype(np.float32)
 
-        credit, ss, aw, valid = _find_best_structure_iron_bfly(
+        credit, ss, aw, valid, struct_dte = _find_best_structure_iron_bfly(
             spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
             td_elig, sd_elig, sw_elig,
         )
@@ -570,24 +573,22 @@ def run_backtest_optimizer_batch(
                 entry_width  = np.where(capital_ok, aw.astype(np.float64),       entry_width)
                 entry_bar    = np.where(capital_ok, i,                            entry_bar)
 
-                # Estimate DTE at entry from chain
-                dte_at_entry = np.full(K, 21.0, np.float64)
-                for k in range(K):
-                    if capital_ok[k]:
-                        td_k  = float(target_dte_arr[k])
-                        best_i = int(np.argmin(np.abs(d_sl - td_k)))
-                        dte_at_entry[k] = float(d_sl[best_i])
-
-                entry_dte_at_entry = np.where(capital_ok, dte_at_entry, entry_dte_at_entry)
+                # Use DTE from the SELECTED EXPIRY returned by _find_best_structure_iron_bfly
+                # (not a separate argmin that may pick DTE=1 when te column is all-NaN)
+                entry_dte_at_entry = np.where(capital_ok,
+                                              struct_dte.astype(np.float64),
+                                              entry_dte_at_entry)
                 open_mask          = np.where(capital_ok, True,  open_mask)
                 last_entry         = np.where(capital_ok, i,     last_entry)
 
                 if verbose:
                     n_entered = int(capital_ok.sum())
                     _total_entries += n_entered
+                    dte_entered = struct_dte[capital_ok]
                     print(f"  [engine]   bar={i:>5}  ENTRY: {n_entered} candidate(s)  spot={spot:.2f}  "
                           f"credits=[{credit[capital_ok].min():.2f}–{credit[capital_ok].max():.2f}]  "
-                          f"ss=[{ss[capital_ok].min():.0f}–{ss[capital_ok].max():.0f}]")
+                          f"ss=[{ss[capital_ok].min():.0f}–{ss[capital_ok].max():.0f}]  "
+                          f"actual_dte=[{dte_entered.min():.2f}–{dte_entered.max():.2f}]")
 
     # ── Force-close any remaining open positions at end ───────────────────
     if open_mask.any():
