@@ -234,6 +234,10 @@ def _find_best_structure_iron_bfly(
     return credit_out, ss_out, aw_out, valid_out, dte_out
 
 
+_MtM_DIAG_CALLS = 0   # module-level counter; reset on each new engine call
+_MtM_DIAG_LIMIT = 5  # print first N MtM evaluations
+
+
 def _mark_to_market(
     spot:          float,
     right:         np.ndarray,
@@ -245,12 +249,19 @@ def _mark_to_market(
     short_strike:  np.ndarray,   # [K]
     entry_width:   np.ndarray,   # [K]
     open_mask:     np.ndarray,   # [K] bool
-    target_dte:    np.ndarray,   # [K]  (to find right expiry in chain)
+    entry_dte:     np.ndarray,   # [K]  actual DTE at entry (entry_dte_at_entry)
+    *,
+    diag: bool = False,
 ) -> np.ndarray:
     """
     Estimate current debit-to-close for K open iron butterfly positions.
     Returns debit_per_share[K]  (NaN → use fallback).
+
+    Uses entry_dte (actual DTE at entry) to find the correct expiry in the
+    current bar's chain — NOT the candidate's target_dte parameter.
     """
+    global _MtM_DIAG_CALLS
+
     K = len(short_strike)
     debit = np.full(K, np.nan, np.float32)
 
@@ -265,7 +276,9 @@ def _mark_to_market(
             continue
         ss  = float(short_strike[k])
         sw  = float(entry_width[k])
-        td  = float(target_dte[k])
+        # Use the ACTUAL DTE at which this position was entered (decremented by
+        # elapsed days), not the candidate's target_dte parameter.
+        td  = float(entry_dte[k])
 
         dte_diff  = np.abs(dte_chain - td)
         best_dte  = dte_chain[np.argmin(dte_diff)]
@@ -275,6 +288,9 @@ def _mark_to_market(
         pm = puts_mask  & exp_mask
 
         if not cm.any() or not pm.any():
+            if diag and _MtM_DIAG_CALLS < _MtM_DIAG_LIMIT:
+                print(f"  [MtM diag k={k}] td={td:.1f} best_dte={best_dte:.1f} "
+                      f"exp_opts={exp_mask.sum()} cm={cm.sum()} pm={pm.sum()} → SKIP (no calls/puts)")
             continue
 
         # Short call ask (cost to buy back)
@@ -285,6 +301,18 @@ def _mark_to_market(
         lc_bid = _lookup_price(right[exp_mask], strike[exp_mask], np.array([]), bid[exp_mask], ask[exp_mask], 0, ss + sw, "short")
         # Long put bid
         lp_bid = _lookup_price(right[exp_mask], strike[exp_mask], np.array([]), bid[exp_mask], ask[exp_mask], 1, ss - sw, "short")
+
+        if diag and _MtM_DIAG_CALLS < _MtM_DIAG_LIMIT:
+            call_strikes_here = strike[cm]
+            put_strikes_here  = strike[pm]
+            print(f"  [MtM diag k={k}] spot={spot:.2f} ss={ss:.2f} sw={sw:.2f} td={td:.1f} best_dte={best_dte:.1f}")
+            print(f"    exp_opts={exp_mask.sum()} (calls={cm.sum()} puts={pm.sum()})  "
+                  f"DTE range: [{dte_chain[exp_mask].min():.1f}, {dte_chain[exp_mask].max():.1f}]")
+            print(f"    call strikes (sample): {call_strikes_here[:6].tolist()}")
+            print(f"    put  strikes (sample): {put_strikes_here[:6].tolist()}")
+            print(f"    SC_ask={sc_ask:.4f}  SP_ask={sp_ask:.4f}  LC_bid={lc_bid:.4f}  LP_bid={lp_bid:.4f}")
+            print(f"    → debit={sc_ask+sp_ask-lc_bid-lp_bid:.4f}")
+            _MtM_DIAG_CALLS += 1
 
         if any(np.isnan(v) for v in [sc_ask, sp_ask, lc_bid, lp_bid]):
             continue
@@ -377,6 +405,10 @@ def run_backtest_optimizer_batch(
     ask_np          = ctx.opt_ask.cpu().numpy()
     ts_np           = ctx.timestamps.cpu().numpy()
 
+    # Reset MtM diagnostic counter for this batch run
+    global _MtM_DIAG_CALLS
+    _MtM_DIAG_CALLS = 0
+
     # ── Verbose: progress tracking ────────────────────────────────────────
     _progress_interval = max(1, T_end // 10)   # print every 10%
     _gate_fires   = 0   # bars that passed ALL gate checks
@@ -424,10 +456,22 @@ def run_backtest_optimizer_batch(
             dte_remaining = np.where(open_mask, entry_dte_at_entry - days_held, 0.0)
 
             # Estimate current debit via chain lookup
+            # Pass entry_dte_at_entry (actual DTE when entered, decremented by
+            # days_held) so MtM finds the SAME expiry we entered, not target param.
+            current_dte = np.where(open_mask,
+                                   entry_dte_at_entry - days_held,
+                                   entry_dte_at_entry)
+            if verbose and _MtM_DIAG_CALLS < _MtM_DIAG_LIMIT and open_mask.any():
+                for _dk in np.where(open_mask)[0][:3]:
+                    print(f"  [MtM ctx k={_dk}] entry_credit={entry_credit[_dk]:.4f}  "
+                          f"entry_ss={entry_ss[_dk]:.2f}  entry_width={entry_width[_dk]:.2f}  "
+                          f"entry_dte={entry_dte_at_entry[_dk]:.1f}  current_dte={current_dte[_dk]:.4f}  "
+                          f"days_held={days_held[_dk]:.4f}")
             if has_chain:
                 debit_per_share = _mark_to_market(
                     spot, r_sl, s_sl, d_sl, b_sl, a_sl,
-                    entry_ss, entry_width, open_mask, target_dte_arr,
+                    entry_ss, entry_width, open_mask, current_dte,
+                    diag=verbose,
                 )
             else:
                 debit_per_share = np.full(K, np.nan, np.float32)
