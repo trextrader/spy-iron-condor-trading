@@ -4155,6 +4155,40 @@ def main():
                               f"{_trades:>7}  applied")
                     else:
                         print(f"  {_tmpl:<32}  {'':>8}  {'':>7}  {'':>6}  {'':>7}  no results")
+
+                # ── Detailed optimized params table ──────────────────────────
+                _BO_PARAM_KEYS = [
+                    "stop_loss_dollar", "profit_target", "spread_width",
+                    "target_dte", "hold_days", "max_dte_exit", "short_delta",
+                ]
+                # Collect only params that appear in at least one result
+                _present_keys = [k for k in _BO_PARAM_KEYS
+                                  if any(_r and k in _r for _, _r, _ in _autoall_summary)]
+                _COL_W = 11  # column width for each param
+                _STRAT_W = 32
+                _hdr_params = "  ".join(f"{k[:_COL_W]:>{_COL_W}}" for k in _present_keys)
+                _sep = "─" * (_STRAT_W + 2 + len(_present_keys) * (_COL_W + 2))
+                print(f"\n[autoall] {'═'*len(_sep)}")
+                print(f"[autoall] OPTIMIZED PARAMETERS BY STRATEGY")
+                print(f"[autoall] {'═'*len(_sep)}")
+                print(f"  {'STRATEGY':<{_STRAT_W}}  {_hdr_params}")
+                print(f"  {_sep}")
+                for _tmpl, _r, _err in _autoall_summary:
+                    if _err or not _r:
+                        _vals = "  ".join(f"{'N/A':>{_COL_W}}" for _ in _present_keys)
+                        print(f"  {_tmpl:<{_STRAT_W}}  {_vals}")
+                    else:
+                        _vals = []
+                        for _pk in _present_keys:
+                            _v = _r.get(_pk, "—")
+                            if _pk == "short_delta" and _v != "—":
+                                _vals.append(f"{float(_v):>{_COL_W}.4f}")
+                            elif isinstance(_v, float):
+                                _vals.append(f"{_v:>{_COL_W}.2f}")
+                            else:
+                                _vals.append(f"{_v!s:>{_COL_W}}")
+                        print(f"  {_tmpl:<{_STRAT_W}}  {'  '.join(_vals)}")
+                print(f"  {_sep}")
             else:
                 run_bayes_optimizer(
                     run_backtest, args,
