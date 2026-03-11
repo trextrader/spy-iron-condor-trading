@@ -4164,30 +4164,49 @@ def main():
                 # Collect only params that appear in at least one result
                 _present_keys = [k for k in _BO_PARAM_KEYS
                                   if any(_r and k in _r for _, _r, _ in _autoall_summary)]
-                _COL_W = 11  # column width for each param
+                # Fixed perf columns always shown
+                _PERF_COLS  = [("wins", 6), ("losses", 6), ("net_pnl", 10), ("net%", 7), ("dd%", 6)]
+                _COL_W  = 11   # param column width
                 _STRAT_W = 32
                 _hdr_params = "  ".join(f"{k[:_COL_W]:>{_COL_W}}" for k in _present_keys)
-                _sep = "─" * (_STRAT_W + 2 + len(_present_keys) * (_COL_W + 2))
-                print(f"\n[autoall] {'═'*len(_sep)}")
+                _hdr_perf   = "  ".join(f"{h:>{w}}" for h, w in _PERF_COLS)
+                _total_w = (_STRAT_W + 2
+                            + len(_present_keys) * (_COL_W + 2)
+                            + sum(w + 2 for _, w in _PERF_COLS))
+                _sep = "─" * _total_w
+                print(f"\n[autoall] {'═'*_total_w}")
                 print(f"[autoall] OPTIMIZED PARAMETERS BY STRATEGY")
-                print(f"[autoall] {'═'*len(_sep)}")
-                print(f"  {'STRATEGY':<{_STRAT_W}}  {_hdr_params}")
+                print(f"[autoall] {'═'*_total_w}")
+                print(f"  {'STRATEGY':<{_STRAT_W}}  {_hdr_params}  {_hdr_perf}")
                 print(f"  {_sep}")
                 for _tmpl, _r, _err in _autoall_summary:
                     if _err or not _r:
-                        _vals = "  ".join(f"{'N/A':>{_COL_W}}" for _ in _present_keys)
-                        print(f"  {_tmpl:<{_STRAT_W}}  {_vals}")
+                        _pv  = "  ".join(f"{'N/A':>{_COL_W}}" for _ in _present_keys)
+                        _pfv = "  ".join(f"{'N/A':>{w}}" for _, w in _PERF_COLS)
+                        print(f"  {_tmpl:<{_STRAT_W}}  {_pv}  {_pfv}")
                     else:
-                        _vals = []
+                        _pvals = []
                         for _pk in _present_keys:
                             _v = _r.get(_pk, "—")
                             if _pk == "short_delta" and _v != "—":
-                                _vals.append(f"{float(_v):>{_COL_W}.4f}")
+                                _pvals.append(f"{float(_v):>{_COL_W}.4f}")
                             elif isinstance(_v, float):
-                                _vals.append(f"{_v:>{_COL_W}.2f}")
+                                _pvals.append(f"{_v:>{_COL_W}.2f}")
                             else:
-                                _vals.append(f"{_v!s:>{_COL_W}}")
-                        print(f"  {_tmpl:<{_STRAT_W}}  {'  '.join(_vals)}")
+                                _pvals.append(f"{_v!s:>{_COL_W}}")
+                        _w  = int(_r.get("wins",   0))
+                        _l  = int(_r.get("losses", 0))
+                        _np = float(_r.get("net_pnl", 0.0))
+                        _pc = float(_r.get("net_pct",  0.0))
+                        _dd = float(_r.get("max_dd",   0.0))
+                        _pfvals = [
+                            f"{_w:>6}",
+                            f"{_l:>6}",
+                            f"{_np:>+10.0f}",
+                            f"{_pc:>+7.2f}",
+                            f"{_dd:>6.2f}",
+                        ]
+                        print(f"  {_tmpl:<{_STRAT_W}}  {'  '.join(_pvals)}  {'  '.join(_pfvals)}")
                 print(f"  {_sep}")
             else:
                 run_bayes_optimizer(
