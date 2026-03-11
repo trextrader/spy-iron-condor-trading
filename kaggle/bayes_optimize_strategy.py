@@ -354,48 +354,57 @@ def run_bayes_optimizer(
     print(f"\n[bayes_opt] Final results → {final_csv}")
 
     # ── 6. Print leaderboard ──────────────────────────────────────────────
+    n_results = len(final_rows)
     print()
     print("=" * 68)
-    print(f"  TOP 10 RESULTS  [{template_id}]  (full fidelity)")
+    print(f"  TOP {n_results} RESULTS  [{template_id}]  (full fidelity)")
     print("=" * 68)
-    _header_keys = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "objective", "wins", "losses"]
-    print("  " + "  ".join(f"{k:>16}" for k in _header_keys))
-    for row in final_rows[:10]:
+    # Data keys for row lookup; display labels shown in header (rename wins/losses)
+    _data_keys = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "objective", "wins", "losses"]
+    _hdr_labels = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "objective", "#wins", "#losses"]
+    print("  " + f"{'#':>4}  " + "  ".join(f"{h:>16}" for h in _hdr_labels))
+    for idx, row in enumerate(final_rows, 1):
         vals = []
-        for k in _header_keys:
+        for k in _data_keys:
             v = row.get(k, "?")
             if isinstance(v, float):
                 vals.append(f"{v:>16.3f}")
             else:
                 vals.append(f"{str(v):>16}")
-        print("  " + "".join(vals))
+        print(f"  {idx:>4}  " + "".join(vals))
 
-    # ── 7. Offer to apply best config ────────────────────────────────────
+    # ── 7. Offer to apply a config (numbered selection) ───────────────────
     if final_rows:
-        best = final_rows[0]
         print()
-        print(f"  Best config (rank 1):  obj={best['objective']:.4f}  "
-              f"net={best['net_pct']:+.1f}%  dd={best['max_dd']:.1f}%")
-        print()
-
-        # Guard: never apply when all candidates got the "no trades" penalty
         all_penalty = all(r.get("objective", -100) <= -100 for r in final_rows)
         if all_penalty:
             print("  [WARN] All candidates scored -100 (no trades executed — chain data missing?).")
             print("         Skipping apply to avoid overwriting strategy file with invalid params.")
         elif sys.stdin.isatty():
-            # Only prompt when running interactively in a real terminal
-            print("  Apply best config to strategy file? [y/N]: ", end="", flush=True)
+            print(f"  Apply which config? [1–{n_results}, Enter to skip]: ", end="", flush=True)
             try:
-                ans = input().strip().lower()
+                ans = input().strip()
             except EOFError:
                 ans = ""
-            if ans == "y":
-                _apply_best_config(template_id, best, space)
+            if ans.isdigit():
+                sel = int(ans) - 1   # convert to 0-indexed
+                if 0 <= sel < n_results:
+                    chosen = final_rows[sel]
+                    print(f"  Applying rank {sel + 1}:  obj={chosen['objective']:.4f}  "
+                          f"net={chosen['net_pct']:+.1f}%  dd={chosen['max_dd']:.1f}%")
+                    _apply_best_config(template_id, chosen, space)
+                else:
+                    print(f"  '{ans}' out of range 1–{n_results}. Skipped.")
+            elif ans == "":
+                print("  Skipped.")
+            else:
+                print(f"  Unrecognised input '{ans}'. Skipped.")
         else:
-            # Non-interactive mode: print the best config but don't apply automatically
-            print("  [non-interactive] Best config NOT auto-applied.")
-            print("  To apply manually, run with an interactive terminal.")
+            # Non-interactive (e.g. piped / notebook): print best but don't auto-apply
+            best = final_rows[0]
+            print(f"  [non-interactive] Best config (rank 1) NOT auto-applied.")
+            print(f"  obj={best['objective']:.4f}  net={best['net_pct']:+.1f}%  dd={best['max_dd']:.1f}%")
+            print("  Re-run in an interactive terminal and enter a rank number to apply.")
 
     return final_rows
 
