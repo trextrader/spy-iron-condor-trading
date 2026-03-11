@@ -171,10 +171,16 @@ def _find_best_structure_iron_bfly(
         if not cm.any() or not pm.any():
             continue
 
+        # Use mid prices (bid+ask)/2 for all leg pricing.
+        # Using bid/ask creates artificial round-trip slippage when OTM wings
+        # have bid=0 (common in real data) — buying at ask but selling at $0.
+        # Mid pricing is the standard backtesting convention.
+        call_mid = (bid[cm] + ask[cm]) / 2.0
+        put_mid  = (bid[pm] + ask[pm]) / 2.0
+
         # ── 2. Short strike: closest abs(delta) to sd (or ATM) ─────────
         call_strikes = strike[cm]
         call_deltas  = np.abs(delta[cm])
-        call_bids    = bid[cm]
 
         if np.isnan(call_deltas).all():
             atm_idx = int(np.argmin(np.abs(call_strikes - spot)))
@@ -183,28 +189,25 @@ def _find_best_structure_iron_bfly(
             delta_err = np.where(valid_d, np.abs(call_deltas - sd), np.inf)
             atm_idx   = int(np.argmin(delta_err))
 
-        short_stk     = float(call_strikes[atm_idx])
-        short_call_bid = float(call_bids[atm_idx])
+        short_stk      = float(call_strikes[atm_idx])
+        short_call_mid = float(call_mid[atm_idx])
 
         # ── 3. Short put: same strike ───────────────────────────────────
         put_strikes = strike[pm]
-        put_bids    = bid[pm]
-        put_asks    = ask[pm]
 
         sp_dist = np.abs(put_strikes - short_stk)
         sp_idx  = int(np.argmin(sp_dist))
         if float(sp_dist[sp_idx]) > max(2.0, sw * 0.25):
             continue                                     # no put near short strike
-        short_put_bid = float(put_bids[sp_idx])
+        short_put_mid = float(put_mid[sp_idx])
 
         # ── 4. Long call at short_stk + sw ─────────────────────────────
-        call_asks = ask[cm]
         lc_target = short_stk + sw
         lc_dist   = np.abs(call_strikes - lc_target)
         lc_idx    = int(np.argmin(lc_dist))
         if float(lc_dist[lc_idx]) > max(2.0, sw * 0.40):
             continue
-        long_call_ask = float(call_asks[lc_idx])
+        long_call_mid = float(call_mid[lc_idx])
         actual_lc_stk = float(call_strikes[lc_idx])
 
         # ── 5. Long put at short_stk − sw ──────────────────────────────
@@ -213,11 +216,11 @@ def _find_best_structure_iron_bfly(
         lp_idx    = int(np.argmin(lp_dist))
         if float(lp_dist[lp_idx]) > max(2.0, sw * 0.40):
             continue
-        long_put_ask  = float(put_asks[lp_idx])
+        long_put_mid  = float(put_mid[lp_idx])
         actual_lp_stk = float(put_strikes[lp_idx])
 
-        # ── 6. Net credit ───────────────────────────────────────────────
-        credit = (short_call_bid + short_put_bid) - (long_call_ask + long_put_ask)
+        # ── 6. Net credit (all at mid) ──────────────────────────────────
+        credit = (short_call_mid + short_put_mid) - (long_call_mid + long_put_mid)
 
         actual_width = (actual_lc_stk - short_stk + short_stk - actual_lp_stk) / 2.0
 
@@ -293,31 +296,38 @@ def _mark_to_market(
                       f"exp_opts={exp_mask.sum()} cm={cm.sum()} pm={pm.sum()} → SKIP (no calls/puts)")
             continue
 
-        # Short call ask (cost to buy back)
-        sc_ask = _lookup_price(right[exp_mask], strike[exp_mask], np.array([]), bid[exp_mask], ask[exp_mask], 0, ss, "long")
-        # Short put ask
-        sp_ask = _lookup_price(right[exp_mask], strike[exp_mask], np.array([]), bid[exp_mask], ask[exp_mask], 1, ss, "long")
-        # Long call bid (sell back)
-        lc_bid = _lookup_price(right[exp_mask], strike[exp_mask], np.array([]), bid[exp_mask], ask[exp_mask], 0, ss + sw, "short")
-        # Long put bid
-        lp_bid = _lookup_price(right[exp_mask], strike[exp_mask], np.array([]), bid[exp_mask], ask[exp_mask], 1, ss - sw, "short")
+        # Use mid prices (bid+ask)/2 for MtM — consistent with entry pricing.
+        # bid=0 on OTM wings is common in real data; using bid would create
+        # artificial immediate stop-loss hits (selling wings at $0 vs buying at ask).
+        mid_here = (bid[exp_mask] + ask[exp_mask]) / 2.0
+        r_here   = right[exp_mask]
+        s_here   = strike[exp_mask]
+
+        sc_mid = _lookup_price(r_here, s_here, np.array([]), mid_here, mid_here, 0, ss,      "short")
+        sp_mid = _lookup_price(r_here, s_here, np.array([]), mid_here, mid_here, 1, ss,      "short")
+        lc_mid = _lookup_price(r_here, s_here, np.array([]), mid_here, mid_here, 0, ss + sw, "short")
+        lp_mid = _lookup_price(r_here, s_here, np.array([]), mid_here, mid_here, 1, ss - sw, "short")
 
         if diag and _MtM_DIAG_CALLS < _MtM_DIAG_LIMIT:
             call_strikes_here = strike[cm]
             put_strikes_here  = strike[pm]
+            # also show raw bid/ask for the short strike to compare with mid
+            sc_ask_raw = _lookup_price(r_here, s_here, np.array([]), bid[exp_mask], ask[exp_mask], 0, ss, "long")
+            sc_bid_raw = _lookup_price(r_here, s_here, np.array([]), bid[exp_mask], ask[exp_mask], 0, ss, "short")
+            lc_bid_raw = _lookup_price(r_here, s_here, np.array([]), bid[exp_mask], ask[exp_mask], 0, ss + sw, "short")
             print(f"  [MtM diag k={k}] spot={spot:.2f} ss={ss:.2f} sw={sw:.2f} td={td:.1f} best_dte={best_dte:.1f}")
             print(f"    exp_opts={exp_mask.sum()} (calls={cm.sum()} puts={pm.sum()})  "
                   f"DTE range: [{dte_chain[exp_mask].min():.1f}, {dte_chain[exp_mask].max():.1f}]")
             print(f"    call strikes (sample): {call_strikes_here[:6].tolist()}")
-            print(f"    put  strikes (sample): {put_strikes_here[:6].tolist()}")
-            print(f"    SC_ask={sc_ask:.4f}  SP_ask={sp_ask:.4f}  LC_bid={lc_bid:.4f}  LP_bid={lp_bid:.4f}")
-            print(f"    → debit={sc_ask+sp_ask-lc_bid-lp_bid:.4f}")
+            print(f"    SC bid/ask/mid: {sc_bid_raw:.3f}/{sc_ask_raw:.3f}/{sc_mid:.3f}  LC bid={lc_bid_raw:.3f} lc_mid={lc_mid:.3f}")
+            print(f"    SC_mid={sc_mid:.4f}  SP_mid={sp_mid:.4f}  LC_mid={lc_mid:.4f}  LP_mid={lp_mid:.4f}")
+            print(f"    → debit(mid)={sc_mid+sp_mid-lc_mid-lp_mid:.4f}")
             _MtM_DIAG_CALLS += 1
 
-        if any(np.isnan(v) for v in [sc_ask, sp_ask, lc_bid, lp_bid]):
+        if any(np.isnan(v) for v in [sc_mid, sp_mid, lc_mid, lp_mid]):
             continue
 
-        debit[k] = (sc_ask + sp_ask) - (lc_bid + lp_bid)
+        debit[k] = (sc_mid + sp_mid) - (lc_mid + lp_mid)
 
     return debit
 
