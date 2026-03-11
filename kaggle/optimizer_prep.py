@@ -87,7 +87,14 @@ def build_optimizer_context(
         ts_series = pd.to_datetime(m5['timestamp'])
     else:
         ts_series = pd.to_datetime(m5.index)
-    ts_int = ts_series.astype(np.int64) // 10 ** 9  # unix seconds
+    # Use .asi8 for DatetimeIndex (nanoseconds, always numpy int64 array);
+    # .astype(np.int64) on a DatetimeIndex may return a pandas Index in some
+    # pandas versions, which has no numpy .values on the result of //.
+    if isinstance(ts_series, pd.DatetimeIndex):
+        ts_arr = ts_series.asi8 // 10 ** 9          # int64 numpy array, unix-sec
+    else:
+        ts_arr = ts_series.astype(np.int64).values // 10 ** 9  # Series → numpy
+    ts_int = ts_arr   # kept as alias for OptimizerContext construction below
 
     # Use bundle.m5_dates when available — same key format as chain_df_by_date
     # (chain is indexed by these exact strings, so we must match precisely)
@@ -196,7 +203,7 @@ def build_optimizer_context(
     # ── Verbose tensor summary ────────────────────────────────────────────
     _mb = lambda arr: arr.nbytes / 1024 / 1024
     print(f"[optimizer_prep] Tensor summary:")
-    print(f"  timestamps    shape=({T},)        dtype=int64    {ts_int.values.nbytes/1e6:.2f} MB")
+    print(f"  timestamps    shape=({T},)        dtype=int64    {ts_arr.nbytes/1e6:.2f} MB")
     print(f"  spot          shape=({T},)        dtype=float32  {spot_arr.nbytes/1e6:.2f} MB")
     print(f"  gate_entry    shape=({T},)        dtype=float32  {entry_sig.nbytes/1e6:.2f} MB")
     print(f"  gate_pop      shape=({T},)        dtype=float32  {pop_sig.nbytes/1e6:.2f} MB")
@@ -207,7 +214,7 @@ def build_optimizer_context(
     print(f"  option_dte    shape=({chain_N},)  dtype=float32  {d_flat.nbytes/1e6:.2f} MB")
     print(f"  option_delta  shape=({chain_N},)  dtype=float32  {da_flat.nbytes/1e6:.2f} MB")
     print(f"  opt_bid/ask   shape=({chain_N},)  dtype=float32  {bi_flat.nbytes/1e6:.2f} MB each")
-    total_mb = (ts_int.values.nbytes + spot_arr.nbytes + entry_sig.nbytes + pop_sig.nbytes
+    total_mb = (ts_arr.nbytes + spot_arr.nbytes + entry_sig.nbytes + pop_sig.nbytes
                 + sidx_arr.nbytes + offsets_arr.nbytes + r_flat.nbytes + s_flat.nbytes
                 + d_flat.nbytes + da_flat.nbytes + bi_flat.nbytes + as_flat.nbytes + mi_flat.nbytes) / 1e6
     print(f"  → Total context: {total_mb:.1f} MB on {dev}")
@@ -225,7 +232,7 @@ def build_optimizer_context(
     return OptimizerContext(
         device        = dev,
         T             = T,
-        timestamps    = torch.from_numpy(ts_int.values.astype(np.int64)).to(dev),
+        timestamps    = torch.from_numpy(ts_arr).to(dev),
         spot          = torch.from_numpy(spot_arr).to(dev),
         gate_entry    = torch.from_numpy(entry_sig).to(dev),
         gate_pop      = torch.from_numpy(pop_sig).to(dev),
