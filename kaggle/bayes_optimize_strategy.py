@@ -424,23 +424,71 @@ def run_bayes_optimizer(
 # "short_call"     = single-leg naked short call
 # "short_put"      = single-leg naked short put
 _STRATEGY_FAMILY_MAP: Dict[str, str] = {
-    "iron_butterfly":         "iron_butterfly",
-    "inverse_iron_butterfly": "iron_butterfly",
-    "short_call_butterfly":   "iron_butterfly",
-    "short_put_butterfly":    "iron_butterfly",
-    "long_call_butterfly":    "iron_butterfly",
-    "long_put_butterfly":     "iron_butterfly",
-    "iron_condor":            "iron_condor",
-    "inverse_iron_condor":    "iron_condor",
-    "short_call_condor":      "iron_condor",
-    "short_put_condor":       "iron_condor",
-    "double_diagonal":        "iron_condor",
-    "short_call":             "short_call",
-    "covered_call":           "short_call",
-    "bear_call_ladder":       "short_call",
-    "short_put":              "short_put",
-    "cash_secured_put":       "short_put",
-    "bull_put_ladder":        "short_put",
+    # ── Iron butterfly (ATM same-strike shorts / straddle-based) ──────────
+    "iron_butterfly":           "iron_butterfly",
+    "inverse_iron_butterfly":   "iron_butterfly",   # long straddle + short wings
+    "short_call_butterfly":     "iron_butterfly",
+    "short_put_butterfly":      "iron_butterfly",
+    "long_call_butterfly":      "iron_butterfly",
+    "long_put_butterfly":       "iron_butterfly",
+    "short_straddle":           "iron_butterfly",   # ATM call + put shorts
+    "straddle_long":            "iron_butterfly",   # ATM call + put longs
+    "covered_short_straddle":   "iron_butterfly",   # ATM straddle-like exposure
+    "short_guts":               "iron_butterfly",   # ITM straddle short
+    "guts":                     "iron_butterfly",   # ITM straddle long
+    "strap":                    "iron_butterfly",   # 1P + 2C ATM
+    "strip":                    "iron_butterfly",   # 2P + 1C ATM
+
+    # ── Iron condor (OTM separate call/put shorts / strangle-based) ───────
+    "iron_condor":              "iron_condor",
+    "inverse_iron_condor":      "iron_condor",      # debit condor (OTM body)
+    "short_call_condor":        "iron_condor",
+    "short_put_condor":         "iron_condor",
+    "long_call_condor":         "iron_condor",
+    "long_put_condor":          "iron_condor",
+    "double_diagonal":          "iron_condor",
+    "diagonal_call":            "iron_condor",      # vertical + time spread → IC approx
+    "diagonal_put":             "iron_condor",
+    "calendar_call":            "iron_condor",      # time spread → IC approx
+    "calendar_put":             "iron_condor",
+    "collar":                   "iron_condor",      # long put + short call
+    "jade_lizard":              "iron_condor",      # short put + short call spread
+    "reverse_jade_lizard":      "iron_condor",      # long call + long put spread
+    "covered_short_strangle":   "iron_condor",      # OTM call + put shorts
+    "short_strangle":           "iron_condor",      # OTM call + put shorts
+    "strangle_long":            "iron_condor",      # OTM call + put longs
+
+    # ── Short call (call-side / directional single-leg approx) ────────────
+    "short_call":               "short_call",
+    "covered_call":             "short_call",
+    "bear_call_ladder":         "short_call",
+    "bull_call_ladder":         "short_call",       # debit call ladder
+    "long_call":                "short_call",
+    "call_ratio_backspread":    "short_call",       # sell 1, buy 2 calls
+    "call_ratio_spread":        "short_call",       # buy 1, sell 2 calls
+    "call_broken_wing":         "short_call",       # asymmetric call butterfly
+    "inverse_call_broken_wing": "short_call",       # inverted call BWB
+    "bear_call_spread_credit":  "short_call",       # sell call spread
+    "bull_call_spread":         "short_call",       # buy call spread
+    "long_combo":               "short_call",       # long call + short put (synthetic long)
+    "short_combo":              "short_call",       # short call + long put (synthetic short)
+    "long_synthetic_future":    "short_call",       # = long_combo
+    "short_synthetic_future":   "short_call",       # = short_combo
+
+    # ── Short put (put-side / directional single-leg approx) ──────────────
+    "short_put":                "short_put",
+    "cash_secured_put":         "short_put",
+    "bull_put_ladder":          "short_put",
+    "bear_put_ladder":          "short_put",        # debit put ladder
+    "long_put":                 "short_put",
+    "put_ratio_backspread":     "short_put",        # sell 1, buy 2 puts
+    "put_ratio_spread":         "short_put",        # buy 1, sell 2 puts
+    "put_broken_wing":          "short_put",        # asymmetric put butterfly
+    "inverse_put_broken_wing":  "short_put",        # inverted put BWB
+    "bear_put_spread":          "short_put",        # buy put spread
+    "bull_put_spread_credit":   "short_put",        # sell put spread
+    "protective_put":           "short_put",        # long stock + long put
+    "synthetic_put":            "short_put",        # long call + short stock
 }
 
 
@@ -448,10 +496,10 @@ def _strategy_family_for_template(template_id: str) -> str:
     """Return the simulation engine family for a given template."""
     fam = _STRATEGY_FAMILY_MAP.get(template_id)
     if fam is None:
-        print(f"[bayes_opt] NOTE: no explicit family for {template_id!r}. "
-              f"Defaulting to 'iron_butterfly' simulation. "
-              f"Add to _STRATEGY_FAMILY_MAP for correct simulation.")
-        fam = "iron_butterfly"
+        raise KeyError(
+            f"[bayes_opt] No simulation family for {template_id!r}. "
+            f"Add it to _STRATEGY_FAMILY_MAP in bayes_optimize_strategy.py."
+        )
     return fam
 
 
