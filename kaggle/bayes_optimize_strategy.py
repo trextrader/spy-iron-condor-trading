@@ -173,9 +173,12 @@ def run_bayes_optimizer(
     for p in space.params:
         cur = base_cfg.get(p.name, "N/A")
         if p.kind == "grid":
-            grid_pts = [round(p.lo + i * p.step, 4)
-                        for i in range(p.n_grid)]
-            range_str = f"grid {grid_pts}  (step={p.step})"
+            # Show full list only when ≤10 pts; otherwise show compact range summary
+            if p.n_grid <= 10:
+                grid_pts = [round(p.lo + i * p.step, 4) for i in range(p.n_grid)]
+                range_str = f"grid {grid_pts}  (step={p.step})"
+            else:
+                range_str = f"grid [{p.lo}–{p.hi}]  step={p.step}  ({p.n_grid} pts)"
         else:
             range_str = f"continuous [{p.lo}, {p.hi}]"
         print(f"  {p.name:<22}  {'OPTIMIZED':<10}  {str(cur):<10}  {range_str}")
@@ -358,6 +361,9 @@ def run_bayes_optimizer(
     print()
     print("=" * 68)
     print(f"  TOP {n_results} RESULTS  [{template_id}]  (full fidelity)")
+    if n_results < 10:
+        print(f"  NOTE: only {n_results} candidates evaluated total. "
+              f"Use --bo-init-trials 10+ to see 10 results.")
     print("=" * 68)
     # Data keys for row lookup; display labels shown in header (rename wins/losses)
     _data_keys = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "objective", "wins", "losses"]
