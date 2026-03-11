@@ -54,10 +54,10 @@ CONFIG = {
 
     # ── Exit: Stop-Loss ───────────────────────────────────────────────────
     "stop_loss_mult":     2.0,   # Close when loss >= N * |credit| * qty * 100
-    "stop_loss_dollar":   750,  # Hard dollar cap per trade (None = use multiplier only)
+    "stop_loss_dollar":   750,  # Hard dollar cap per trade (BO range 500–1500, step 250)
 
     # ── Exit: Profit Target ───────────────────────────────────────────────
-    "profit_target":      1500,    # Dollar target (None = use 50% of credit)
+    "profit_target":      1000,   # Dollar target (BO range 500–2000, step 250)
 
     # ── Template Preference ───────────────────────────────────────────────
     "fallback_template":  None,        # If no template eligible, use this template_id
@@ -73,8 +73,8 @@ CONFIG = {
     # ── Entry: Structure (overrides neural model when not None) ──────────────
     "call_offset_pct":    0.0,  # % OTM for call strike (None = neural model)
     "put_offset_pct":     0.0,  # % OTM for put strike  (None = neural model)
-    "spread_width":       5,  # Spread width points   (None = neural model / N/A)
-    "target_dte":         7,  # Target DTE at entry   (None = neural model)
+    "spread_width":       10,  # Spread width points   (BO range 5–20, step 5)
+    "target_dte":         14,  # Target DTE at entry   (BO range 7–21, step 7)
 
     # ── Entry: Quality Filter ─────────────────────────────────────────────────
     "max_leg_spread":     0.15,  # Max bid-ask ratio per leg

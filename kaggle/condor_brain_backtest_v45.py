@@ -330,7 +330,7 @@ V43_STRATEGY_NAMES    = [      # matches IDX_TO_STRATEGY_TYPE in schema_v43.py
     "custom_multi_leg", "abstain",
 ]
 V43_SEQ_LEN           = 64     # inference lookback window (matches training)
-V43_BATCH_SIZE        = 32     # GPU inference batch size
+V43_BATCH_SIZE        = 256    # GPU inference batch size (T4: 32→256 cuts inference ~8x)
 # Default IC structural params for v43 mode
 # Model controls WHEN to trade; config controls HOW (overridden by Phase 2 grid)
 V43_DEFAULT_CALL_OFF  = 1.5    # % OTM for short call
