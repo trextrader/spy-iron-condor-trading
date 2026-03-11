@@ -128,6 +128,7 @@ def run_bayes_optimizer(
     allowed_template_ids,
     device: Optional[torch.device] = None,
     verbose: bool = False,
+    auto_apply: bool = False,  # If True: skip prompt and auto-apply rank-1 config
 ):
     """
     Entry point called from condor_brain_backtest_v45.py when
@@ -386,6 +387,12 @@ def run_bayes_optimizer(
         if all_penalty:
             print("  [WARN] All candidates scored -100 (no trades executed — chain data missing?).")
             print("         Skipping apply to avoid overwriting strategy file with invalid params.")
+        elif auto_apply:
+            # autoall mode: silently apply rank 1 without prompting
+            chosen = final_rows[0]
+            print(f"  [autoall] Auto-applying rank 1:  obj={chosen['objective']:.4f}  "
+                  f"net={chosen['net_pct']:+.1f}%  dd={chosen['max_dd']:.1f}%")
+            _apply_best_config(template_id, chosen, space)
         elif sys.stdin.isatty():
             print(f"  Apply which config? [1–{n_results}, Enter to skip]: ", end="", flush=True)
             try:

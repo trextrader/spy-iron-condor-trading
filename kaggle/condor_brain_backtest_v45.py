@@ -3783,6 +3783,12 @@ def main():
     if _strat_filter_raw == "all":
         ALLOWED_STRATEGY_IDXS = None
         ALLOWED_TEMPLATE_IDS = None
+    elif _strat_filter_raw == "autoall":
+        # Run BO optimizer sequentially over every loaded strategy template,
+        # auto-applying rank-1 result to each strategy file without prompting.
+        ALLOWED_STRATEGY_IDXS = None   # no filter during any backtest phase
+        ALLOWED_TEMPLATE_IDS  = set(_STRATEGY_CONFIGS.keys())
+        print(f"[strategies] autoall mode — {len(ALLOWED_TEMPLATE_IDS)} templates queued for sequential BO")
     else:
         ALLOWED_STRATEGY_IDXS = set()
         ALLOWED_TEMPLATE_IDS = set()
@@ -4080,9 +4086,11 @@ def main():
             if bundle_v43 is None or v43_outputs is None:
                 print("[optimizer] ERROR: --optimize-mode bayes requires --use-v43 and a loaded bundle.")
                 import sys; sys.exit(1)
-            if ALLOWED_TEMPLATE_IDS is None or len(ALLOWED_TEMPLATE_IDS) == 0:
-                print("[optimizer] ERROR: --optimize-mode bayes requires --strategies <template_id>")
+            _autoall = (_strat_filter_raw == "autoall")
+            if not _autoall and (ALLOWED_TEMPLATE_IDS is None or len(ALLOWED_TEMPLATE_IDS) == 0):
+                print("[optimizer] ERROR: --optimize-mode bayes requires --strategies <template_id> or autoall")
                 print("            e.g.  --strategies iron_butterfly")
+                print("            e.g.  --strategies autoall   (optimize all 58 templates sequentially)")
                 import sys; sys.exit(1)
             # Build chain_df_by_date from the bundle's chain data
             _chain_by_date = getattr(bundle_v43, 'chain_df_by_date', None)
@@ -4102,16 +4110,63 @@ def main():
                     print("[optimizer] WARNING: no chain_df_by_date found in bundle; chain lookups will be empty.")
                     _chain_by_date = {}
             from bayes_optimize_strategy import run_bayes_optimizer
-            run_bayes_optimizer(
-                run_backtest, args,
-                v43_outputs=v43_outputs,
-                bundle=bundle_v43,
-                chain_df_by_date=_chain_by_date,
-                strategy_configs=_STRATEGY_CONFIGS,
-                allowed_template_ids=ALLOWED_TEMPLATE_IDS,
-                device=DEVICE,
-                verbose=getattr(args, 'verbose', False),
-            )
+            if _autoall:
+                # ── Sequential autoall: optimize every template, auto-apply rank 1 ──
+                _all_templates = sorted(_STRATEGY_CONFIGS.keys())
+                _n_total = len(_all_templates)
+                print(f"\n[autoall] Starting sequential BO for {_n_total} strategy templates")
+                print(f"[autoall] Each template: bo_init={getattr(args,'bo_init_trials',32)}  "
+                      f"batch={getattr(args,'bo_batch_size',16)}  rounds={getattr(args,'bo_rounds',8)}")
+                print(f"[autoall] Templates ({_n_total}): {_all_templates}\n")
+                _autoall_summary = []
+                for _ti, _tmpl in enumerate(_all_templates, 1):
+                    print(f"\n[autoall] ─── {_ti}/{_n_total}: {_tmpl} ───────────────────────────────")
+                    try:
+                        _rows = run_bayes_optimizer(
+                            run_backtest, args,
+                            v43_outputs=v43_outputs,
+                            bundle=bundle_v43,
+                            chain_df_by_date=_chain_by_date,
+                            strategy_configs=_STRATEGY_CONFIGS,
+                            allowed_template_ids={_tmpl},
+                            device=DEVICE,
+                            verbose=getattr(args, 'verbose', False),
+                            auto_apply=True,
+                        )
+                        _best = _rows[0] if _rows else None
+                        _autoall_summary.append((_tmpl, _best, None))
+                    except Exception as _exc:
+                        import traceback as _tb
+                        print(f"[autoall] ERROR for {_tmpl}: {_exc}")
+                        _tb.print_exc()
+                        _autoall_summary.append((_tmpl, None, str(_exc)))
+                # ── Final summary table ──────────────────────────────────────────
+                print(f"\n[autoall] {'═'*68}")
+                print(f"[autoall] COMPLETE — {_n_total} strategies optimized")
+                print(f"[autoall] {'═'*68}")
+                print(f"  {'STRATEGY':<32}  {'obj':>8}  {'net%':>7}  {'dd%':>6}  {'trades':>7}  {'status'}")
+                for _tmpl, _r, _err in _autoall_summary:
+                    if _err:
+                        print(f"  {_tmpl:<32}  {'':>8}  {'':>7}  {'':>6}  {'':>7}  ERROR: {_err[:40]}")
+                    elif _r:
+                        _trades = int(_r.get('wins', 0)) + int(_r.get('losses', 0))
+                        print(f"  {_tmpl:<32}  {_r.get('objective',0):>8.3f}  "
+                              f"{_r.get('net_pct',0):>7.2f}  {_r.get('max_dd',0):>6.2f}  "
+                              f"{_trades:>7}  applied")
+                    else:
+                        print(f"  {_tmpl:<32}  {'':>8}  {'':>7}  {'':>6}  {'':>7}  no results")
+            else:
+                run_bayes_optimizer(
+                    run_backtest, args,
+                    v43_outputs=v43_outputs,
+                    bundle=bundle_v43,
+                    chain_df_by_date=_chain_by_date,
+                    strategy_configs=_STRATEGY_CONFIGS,
+                    allowed_template_ids=ALLOWED_TEMPLATE_IDS,
+                    device=DEVICE,
+                    verbose=getattr(args, 'verbose', False),
+                    auto_apply=False,
+                )
         else:
             # Interactive grid search (original)
             from strategy_optimizer import run_optimizer
