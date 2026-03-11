@@ -209,10 +209,6 @@ def run_bayes_optimizer(
     X_obs_list: List[np.ndarray] = []   # [D] normalised
     Y_obs_list: List[float]      = []   # scalar objective (full fidelity)
 
-    # Seed GP with current base config
-    x0 = encode_config(base_cfg, space)
-    X_obs_list.append(x0)
-
     # ── 3. Phase 1: Sobol warmup (fast fidelity) ─────────────────────────
     print(f"\n[Phase 1] Sobol warmup — {bo_init} candidates at FAST fidelity")
     sobol_batch = sobol_candidates(bo_init, space, seed=42)
@@ -259,7 +255,7 @@ def run_bayes_optimizer(
     # ── 4. Phase 2: BO rounds (medium fidelity) ──────────────────────────
     print(f"\n[Phase 2] BO rounds — {bo_rounds} rounds × {bo_batch} candidates at MEDIUM fidelity")
 
-    best_x = X_obs_list[1 + int(np.nanargmax(res_p1.objective))]  # best from warmup
+    best_x = X_obs_list[int(np.nanargmax(res_p1.objective))]  # best from warmup
 
     for rnd in range(bo_rounds):
         seed_rnd = 1000 + rnd
