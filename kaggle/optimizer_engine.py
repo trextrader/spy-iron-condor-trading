@@ -340,6 +340,15 @@ def run_backtest_optimizer_batch(
     gross_win    = np.zeros(K, np.float64)
     gross_loss   = np.zeros(K, np.float64)
 
+    # ── Verbose: print candidate param summary ────────────────────────────
+    if verbose:
+        print(f"\n[engine] run_backtest_optimizer_batch  K={K}  fidelity={fidelity}  T_end={T_end}/{ctx.T}")
+        print(f"[engine] Candidate param ranges across K={K}:")
+        for name, arr in candidates.params.items():
+            print(f"  {name:>20s}:  min={arr.min():.3g}  max={arr.max():.3g}  "
+                  f"unique={len(np.unique(arr))}")
+        print(f"[engine] Pulling {ctx.T} bars from {ctx.device} → CPU numpy…")
+
     # Pull ctx arrays to CPU numpy for speed (avoid .item() in tight loop)
     spot_np         = ctx.spot.cpu().numpy()
     gate_e_np       = ctx.gate_entry.cpu().numpy()
@@ -354,6 +363,13 @@ def run_backtest_optimizer_batch(
     bid_np          = ctx.opt_bid.cpu().numpy()
     ask_np          = ctx.opt_ask.cpu().numpy()
     ts_np           = ctx.timestamps.cpu().numpy()
+
+    # ── Verbose: progress tracking ────────────────────────────────────────
+    _progress_interval = max(1, T_end // 10)   # print every 10%
+    _gate_fires   = 0   # bars that passed ALL gate checks
+    _total_entries= 0   # total entry events across all K
+    _chain_debit_hits = 0   # MtM resolved via chain (not intrinsic fallback)
+    _chain_debit_miss = 0   # MtM fell back to intrinsic value
 
     for i in range(T_end):
         spot   = float(spot_np[i])
@@ -394,6 +410,12 @@ def run_backtest_optimizer_batch(
                 )
             else:
                 debit_per_share = np.full(K, np.nan, np.float32)
+
+            # Track chain vs intrinsic coverage for diagnostic
+            if verbose:
+                _chain_ok = np.isfinite(debit_per_share) & open_mask
+                _chain_debit_hits += int(_chain_ok.sum())
+                _chain_debit_miss += int((~_chain_ok & open_mask).sum())
 
             # Fallback: intrinsic value when chain not available
             intrinsic_call = np.maximum(spot - entry_ss, 0.0)
@@ -453,11 +475,21 @@ def run_backtest_optimizer_batch(
         if not has_chain:
             continue
 
+        # Verbose progress print every 10%
+        if verbose and (i % _progress_interval == 0):
+            n_open = int(open_mask.sum())
+            pct    = 100.0 * i / T_end
+            print(f"  [engine] {pct:>5.1f}%  bar={i:>5}/{T_end}  "
+                  f"open={n_open}/{K}  gate_fires={_gate_fires}  "
+                  f"total_entries={_total_entries}")
+
         # Gate checks (vectorised over K but all use same bar signal)
         gate_ok = (es > entry_threshold) and (pop > pop_threshold) and \
                   (not abt) and (sidx == strategy_idx_filter)
         if not gate_ok:
             continue
+
+        _gate_fires += 1
 
         # Cooldown check per candidate
         cooldown_ok = (i - last_entry) >= cooldown_bars
@@ -512,7 +544,10 @@ def run_backtest_optimizer_batch(
 
                 if verbose:
                     n_entered = int(capital_ok.sum())
-                    print(f"  [engine] bar={i:>5}  {n_entered} candidate(s) entered  spot={spot:.2f}")
+                    _total_entries += n_entered
+                    print(f"  [engine]   bar={i:>5}  ENTRY: {n_entered} candidate(s)  spot={spot:.2f}  "
+                          f"credits=[{credit[capital_ok].min():.2f}–{credit[capital_ok].max():.2f}]  "
+                          f"ss=[{ss[capital_ok].min():.0f}–{ss[capital_ok].max():.0f}]")
 
     # ── Force-close any remaining open positions at end ───────────────────
     if open_mask.any():
@@ -527,6 +562,30 @@ def run_backtest_optimizer_batch(
         losses = np.where(new_losses, losses + 1, losses)
         gross_win  = np.where(new_wins,   gross_win  + pnl,       gross_win)
         gross_loss = np.where(new_losses, gross_loss + np.abs(pnl), gross_loss)
+
+    # ── Verbose: final diagnostics ────────────────────────────────────────
+    if verbose:
+        print(f"\n[engine] Simulation complete  fidelity={fidelity}  bars={T_end}")
+        print(f"[engine] Gate stats:  fires={_gate_fires}  total_entries={_total_entries}")
+        if (_chain_debit_hits + _chain_debit_miss) > 0:
+            chain_cov = 100.0 * _chain_debit_hits / (_chain_debit_hits + _chain_debit_miss)
+            print(f"[engine] MtM coverage:  chain={_chain_debit_hits} ({chain_cov:.1f}%)  "
+                  f"intrinsic_fallback={_chain_debit_miss} ({100-chain_cov:.1f}%)")
+            if chain_cov < 50.0:
+                print(f"  [WARN] >50% MtM used intrinsic fallback — P&L accuracy may be low")
+        print(f"[engine] Per-candidate summary (K={K}):")
+        print(f"  {'k':>4}  {'trades':>6}  {'wins':>5}  {'losses':>6}  {'net_pct':>8}  "
+              f"{'max_dd':>7}  {'pf':>6}  {'obj':>8}")
+        total_c = wins + losses
+        wr_c    = wins / np.maximum(total_c, 1)
+        pf_c    = gross_win / np.where(gross_loss > 0, gross_loss, 1e-9)
+        obj_c   = objective_spec.compute(
+            (equity - STARTING_EQUITY) / STARTING_EQUITY * 100.0, max_dd, total_c, pf_c)
+        for k in range(K):
+            flag = " *** BEST" if k == int(np.nanargmax(obj_c)) else ""
+            print(f"  {k:>4}  {total_c[k]:>6}  {wins[k]:>5}  {losses[k]:>6}  "
+                  f"{(equity[k]-STARTING_EQUITY)/STARTING_EQUITY*100:>8.2f}%  "
+                  f"{max_dd[k]:>6.2f}%  {pf_c[k]:>6.2f}  {obj_c[k]:>8.3f}{flag}")
 
     # ── Metrics ───────────────────────────────────────────────────────────
     net_pnl  = equity - STARTING_EQUITY

@@ -4110,6 +4110,7 @@ def main():
                 strategy_configs=_STRATEGY_CONFIGS,
                 allowed_template_ids=ALLOWED_TEMPLATE_IDS,
                 device=DEVICE,
+                verbose=getattr(args, 'verbose', False),
             )
         else:
             # Interactive grid search (original)

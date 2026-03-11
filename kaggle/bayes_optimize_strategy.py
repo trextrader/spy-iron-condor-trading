@@ -127,6 +127,7 @@ def run_bayes_optimizer(
     strategy_configs: Dict,
     allowed_template_ids,
     device: Optional[torch.device] = None,
+    verbose: bool = False,
 ):
     """
     Entry point called from condor_brain_backtest_v45.py when
@@ -164,6 +165,10 @@ def run_bayes_optimizer(
     # ── 1. Build immutable context ────────────────────────────────────────
     print("[bayes_opt] Building OptimizerContext (CSR tensor prep)…")
     ctx = build_optimizer_context(v43_outputs, bundle, chain_df_by_date, device)
+    print(f"[bayes_opt] Fidelity bar counts:")
+    print(f"  fast   (25%): {ctx.fast_end:>6} bars")
+    print(f"  medium (60%): {ctx.medium_end:>6} bars")
+    print(f"  full  (100%): {ctx.T:>6} bars")
 
     # ── 2. Output CSV ─────────────────────────────────────────────────────
     os.makedirs("reports", exist_ok=True)
@@ -184,13 +189,33 @@ def run_bayes_optimizer(
     sobol_batch = sobol_candidates(bo_init, space, seed=42)
     configs_p1  = candidates_to_configs(sobol_batch, base_cfg)
 
+    # Print first 3 Sobol candidates so user can see the decoded param spread
+    print(f"  First 3 Sobol candidates (sample of search coverage):")
+    p1_cfgs_preview = candidates_to_configs(sobol_batch, base_cfg)
+    for ki in range(min(3, bo_init)):
+        cfg_preview = {k: v for k, v in p1_cfgs_preview[ki].items() if k in [p.name for p in space.params]}
+        print(f"    cand[{ki}]: " + "  ".join(f"{k}={v}" for k, v in cfg_preview.items()))
+
     t0 = time.time()
     res_p1 = run_backtest_optimizer_batch(
         ctx, sobol_batch,
         base_config=base_cfg, objective_spec=obj_spec, fidelity="fast",
         strategy_idx_filter=_class_idx_for_template(template_id, strategy_configs),
+        verbose=False,   # suppress bar-level detail for warmup speed
     )
-    print(f"  done in {time.time()-t0:.1f}s  best_obj={np.nanmax(res_p1.objective):.3f}")
+    elapsed_p1 = time.time() - t0
+    best_k_p1  = int(np.nanargmax(res_p1.objective))
+    print(f"  done in {elapsed_p1:.1f}s  best_obj={res_p1.objective[best_k_p1]:.3f}  "
+          f"(cand[{best_k_p1}]: trades={res_p1.total[best_k_p1]}  "
+          f"net={res_p1.net_pct[best_k_p1]:+.1f}%  dd={res_p1.max_dd[best_k_p1]:.2f}%)")
+    print(f"  Phase 1 full results:")
+    print(f"  {'k':>3}  {'obj':>8}  {'trades':>6}  {'wins':>5}  {'loss':>5}  "
+          f"{'net%':>7}  {'dd%':>6}")
+    for ki in range(bo_init):
+        marker = " <-- best" if ki == best_k_p1 else ""
+        print(f"  {ki:>3}  {res_p1.objective[ki]:>8.3f}  {res_p1.total[ki]:>6}  "
+              f"{res_p1.wins[ki]:>5}  {res_p1.losses[ki]:>5}  "
+              f"{res_p1.net_pct[ki]:>7.2f}  {res_p1.max_dd[ki]:>6.2f}{marker}")
 
     for k in range(bo_init):
         row = _make_row(0, configs_p1[k], res_p1, k)
@@ -229,14 +254,23 @@ def run_bayes_optimizer(
             ctx, cand_batch,
             base_config=base_cfg, objective_spec=obj_spec, fidelity="medium",
             strategy_idx_filter=_class_idx_for_template(template_id, strategy_configs),
+            verbose=False,
         )
+        elapsed_rnd = time.time() - t0
         best_k   = int(np.nanargmax(res_rnd.objective))
         best_obj = float(res_rnd.objective[best_k])
         print(f"  Round {rnd+1:>2}/{bo_rounds}  best_obj={best_obj:.3f}  "
               f"net_pct={res_rnd.net_pct[best_k]:+.1f}%  "
               f"dd={res_rnd.max_dd[best_k]:.1f}%  "
               f"trades={res_rnd.total[best_k]}  "
-              f"({time.time()-t0:.1f}s)")
+              f"({elapsed_rnd:.1f}s)")
+        print(f"    All {bo_batch} candidates this round:")
+        print(f"    {'k':>3}  {'obj':>8}  {'trades':>6}  {'wins':>5}  {'loss':>5}  {'net%':>7}  {'dd%':>6}")
+        for ki in range(bo_batch):
+            marker = " <--" if ki == best_k else ""
+            print(f"    {ki:>3}  {res_rnd.objective[ki]:>8.3f}  {res_rnd.total[ki]:>6}  "
+                  f"{res_rnd.wins[ki]:>5}  {res_rnd.losses[ki]:>5}  "
+                  f"{res_rnd.net_pct[ki]:>7.2f}  {res_rnd.max_dd[ki]:>6.2f}{marker}")
 
         for k in range(bo_batch):
             row = _make_row(0, configs_rnd[k], res_rnd, k)
@@ -270,6 +304,7 @@ def run_bayes_optimizer(
         ctx, top_batch,
         base_config=base_cfg, objective_spec=obj_spec, fidelity="full",
         strategy_idx_filter=_class_idx_for_template(template_id, strategy_configs),
+        verbose=verbose,   # full diagnostic when --verbose flag is set
     )
     print(f"  Full-fidelity done in {time.time()-t0:.1f}s")
 

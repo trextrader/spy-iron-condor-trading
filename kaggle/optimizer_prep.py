@@ -113,7 +113,8 @@ def build_optimizer_context(
     # ── CSR chain build ───────────────────────────────────────────────────
     # Pre-process each UNIQUE date once (238 dates vs 18,494 bars).
     # Then build the offset array by reusing cached arrays per bar.
-    print(f"[optimizer_prep] Pre-processing {len(set(bar_dates))} unique chain dates…")
+    n_unique = len(set(bar_dates))
+    print(f"[optimizer_prep] Pre-processing {n_unique} unique chain dates…")
 
     def _chain_to_arrays(chain):
         n   = len(chain)
@@ -176,7 +177,37 @@ def build_optimizer_context(
     offsets_arr = np.array(offsets, dtype=np.int64)
     dev = device
 
-    print(f"[optimizer_prep] T={T} bars  chain_N={len(r_flat):,}  device={dev}")
+    chain_N = len(r_flat)
+    print(f"[optimizer_prep] T={T} bars  chain_N={chain_N:,}  device={dev}")
+
+    # ── Verbose tensor summary ────────────────────────────────────────────
+    _mb = lambda arr: arr.nbytes / 1024 / 1024
+    print(f"[optimizer_prep] Tensor summary:")
+    print(f"  timestamps    shape=({T},)        dtype=int64    {ts_int.values.nbytes/1e6:.2f} MB")
+    print(f"  spot          shape=({T},)        dtype=float32  {spot_arr.nbytes/1e6:.2f} MB")
+    print(f"  gate_entry    shape=({T},)        dtype=float32  {entry_sig.nbytes/1e6:.2f} MB")
+    print(f"  gate_pop      shape=({T},)        dtype=float32  {pop_sig.nbytes/1e6:.2f} MB")
+    print(f"  strategy_idx  shape=({T},)        dtype=int16    {sidx_arr.nbytes/1e6:.2f} MB")
+    print(f"  bar_offsets   shape=({T+1},)      dtype=int64    {offsets_arr.nbytes/1e6:.2f} MB")
+    print(f"  option_right  shape=({chain_N},)  dtype=int8     {r_flat.nbytes/1e6:.2f} MB")
+    print(f"  option_strike shape=({chain_N},)  dtype=float32  {s_flat.nbytes/1e6:.2f} MB")
+    print(f"  option_dte    shape=({chain_N},)  dtype=float32  {d_flat.nbytes/1e6:.2f} MB")
+    print(f"  option_delta  shape=({chain_N},)  dtype=float32  {da_flat.nbytes/1e6:.2f} MB")
+    print(f"  opt_bid/ask   shape=({chain_N},)  dtype=float32  {bi_flat.nbytes/1e6:.2f} MB each")
+    total_mb = (ts_int.values.nbytes + spot_arr.nbytes + entry_sig.nbytes + pop_sig.nbytes
+                + sidx_arr.nbytes + offsets_arr.nbytes + r_flat.nbytes + s_flat.nbytes
+                + d_flat.nbytes + da_flat.nbytes + bi_flat.nbytes + as_flat.nbytes + mi_flat.nbytes) / 1e6
+    print(f"  → Total context: {total_mb:.1f} MB on {dev}")
+    if chain_N > 0:
+        avg_opts = chain_N / max(n_unique, 1)
+        print(f"  → Avg options/date: {avg_opts:.0f}  "
+              f"(calls: {(r_flat==0).sum():,}  puts: {(r_flat==1).sum():,})")
+        print(f"  → DTE range in chain: [{d_flat.min():.1f}, {d_flat.max():.1f}]  "
+              f"delta NaN frac: {np.isnan(da_flat).mean()*100:.1f}%")
+        print(f"  → Strike range: [{s_flat.min():.2f}, {s_flat.max():.2f}]")
+        print(f"  → Bid range: [{bi_flat[bi_flat>0].min() if (bi_flat>0).any() else 0:.2f}, {bi_flat.max():.2f}]")
+    else:
+        print("  [WARN] chain_N=0 — no options data reached the tensor! Check bar_dates vs chain_df_by_date keys.")
 
     return OptimizerContext(
         device        = dev,
