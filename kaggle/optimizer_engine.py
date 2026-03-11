@@ -527,6 +527,27 @@ def run_backtest_optimizer_batch(
             exp_exit  = open_mask & (dte_remaining <= 0)
             exit_mask = sl_hit | pt_hit | dte_exit | hd_exit | exp_exit
 
+            # ── Exit diagnostic: daily samples + any exit trigger ────────────
+            _exit_diag_entry = int(entry_bar[open_mask][0]) if open_mask.any() else -1
+            _print_exit_row = (
+                verbose and open_mask.any()
+                and (exit_mask.any()                          # any exit fires
+                     or (i - _exit_diag_entry) % 78 == 0     # daily sample (78 bars/day)
+                     or i <= _exit_diag_entry + 5)            # first 5 bars always
+            )
+            if _print_exit_row:
+                for _ek in np.where(open_mask)[0][:2]:
+                    print(f"  [exit diag bar={i} k={_ek}] "
+                          f"days_held={days_held[_ek]:.3f}  "
+                          f"dte_rem={dte_remaining[_ek]:.3f}  "
+                          f"unrealized={unrealized[_ek]:.2f}  "
+                          f"hold_days={hold_days_arr[_ek]:.1f}  "
+                          f"stop_loss={stop_loss_arr[_ek]:.0f}  "
+                          f"max_dte_exit={max_dte_exit_arr[_ek]:.0f}  "
+                          f"sl={sl_hit[_ek]}  pt={pt_hit[_ek]}  "
+                          f"dte_ex={dte_exit[_ek]}  hd={hd_exit[_ek]}  "
+                          f"exp={exp_exit[_ek]}  EXIT={exit_mask[_ek]}")
+
             # Realise P&L for exiting positions
             if exit_mask.any():
                 pnl = np.where(exit_mask, unrealized, 0.0)
