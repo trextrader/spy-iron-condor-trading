@@ -81,31 +81,46 @@ def build_optimizer_context(
     T  = len(m5)
 
     # ── Timestamps ────────────────────────────────────────────────────────
-    if isinstance(m5.index, pd.DatetimeIndex):
-        ts_series = m5.index
+    # m5_df_raw is a plain feature DataFrame (RangeIndex, no timestamp col).
+    # Prefer bundle.m5_timestamps (datetime64 array) as the authoritative source.
+    # Fall back to m5.index / column only if bundle timestamps unavailable.
+    ts_arr = None
+    ts_series = None  # only set when ts_arr cannot be built directly
+
+    if hasattr(bundle, 'm5_timestamps') and bundle.m5_timestamps is not None:
+        # Direct datetime64 → unix-seconds (most reliable path)
+        _ts = np.asarray(bundle.m5_timestamps[:T], dtype='datetime64[s]')
+        ts_arr = _ts.view(np.int64)                 # int64 unix-sec numpy array
+    elif isinstance(m5.index, pd.DatetimeIndex):
+        ts_arr = m5.index[:T].asi8 // 10 ** 9      # DatetimeIndex → unix-sec
     elif 'timestamp' in m5.columns:
         ts_series = pd.to_datetime(m5['timestamp'])
+        ts_arr = ts_series.values.astype('datetime64[s]').view(np.int64)
     else:
-        ts_series = pd.to_datetime(m5.index)
-    # Use .asi8 for DatetimeIndex (nanoseconds, always numpy int64 array);
-    # .astype(np.int64) on a DatetimeIndex may return a pandas Index in some
-    # pandas versions, which has no numpy .values on the result of //.
-    if isinstance(ts_series, pd.DatetimeIndex):
-        ts_arr = ts_series.asi8 // 10 ** 9          # int64 numpy array, unix-sec
-    else:
-        ts_arr = ts_series.astype(np.int64).values // 10 ** 9  # Series → numpy
+        # Last resort: integer RangeIndex — pd.to_datetime(RangeIndex) treats
+        # values as nanoseconds from epoch, yielding 0 for all small indices.
+        # Instead, use bar index × 300 s (5-min bars) as synthetic clock.
+        print("[optimizer_prep] WARN: no timestamp source — using bar-index × 300s")
+        ts_arr = np.arange(T, dtype=np.int64) * 300
+
     ts_int = ts_arr   # kept as alias for OptimizerContext construction below
 
     # Use bundle.m5_dates when available — same key format as chain_df_by_date
     # (chain is indexed by these exact strings, so we must match precisely)
     if hasattr(bundle, 'm5_dates') and bundle.m5_dates is not None:
         bar_dates = [str(d) for d in bundle.m5_dates[:T]]
-    else:
+    elif ts_series is not None:
         bar_dates = [str(t.date()) for t in ts_series]
+    else:
+        bar_dates = [str(pd.Timestamp(t, unit='s').date()) for t in ts_arr]
 
     # ── Spot ──────────────────────────────────────────────────────────────
-    close_col = 'close' if 'close' in m5.columns else m5.columns[0]
-    spot_arr  = m5[close_col].astype(np.float32).values
+    if 'close' in m5.columns:
+        spot_arr = m5['close'].astype(np.float32).values
+    elif hasattr(bundle, 'm5_spot') and bundle.m5_spot is not None:
+        spot_arr = np.asarray(bundle.m5_spot[:T], dtype=np.float32)
+    else:
+        spot_arr = m5.iloc[:, 0].astype(np.float32).values
 
     # ── V43 gate signals (clip to T in case of slight mismatch) ──────────
     def _to_arr(key, dtype):
