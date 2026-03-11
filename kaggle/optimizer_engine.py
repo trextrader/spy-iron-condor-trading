@@ -70,11 +70,21 @@ class ObjectiveSpec:
 
     def compute(self, net_pct: np.ndarray, max_dd: np.ndarray,
                 total: np.ndarray, pf: np.ndarray) -> np.ndarray:
-        """Return objective[K] — higher is better."""
-        obj = net_pct / (max_dd + 0.25)
+        """Return objective[K] — higher is better.
+
+        Objective = net_pct / (effective_dd + 2.0)
+          - effective_dd = max(max_dd, 1.0)  — floor prevents denominator gaming
+            when a candidate has 0% drawdown (all-win streaks get no free lunch)
+          - Additional penalties for insufficient trades or extreme drawdown
+        """
+        # Clamp max_dd to minimum 1.0% so 0-drawdown strategies aren't
+        # artificially rewarded with a near-zero denominator
+        eff_dd = np.maximum(max_dd, 1.0)
+        obj = net_pct / (eff_dd + 2.0)
+
         # Hard constraint: insufficient trades → big negative penalty
         obj = np.where(total < self.min_trades, -100.0 + net_pct * 0.01, obj)
-        # Soft constraint: drawdown cap
+        # Soft constraint: extreme drawdown cap
         obj = np.where(max_dd > self.max_dd_cap, obj * 0.5, obj)
         return obj
 
@@ -592,7 +602,10 @@ def run_backtest_optimizer_batch(
     net_pct  = net_pnl / STARTING_EQUITY * 100.0
     total    = wins + losses
     wr       = wins / np.maximum(total, 1).astype(np.float64)
-    pf       = gross_win / np.where(gross_loss > 0, gross_loss, 1e-9)
+    # Profit factor: cap at 999.0 when gross_loss=0 (avoid quadrillion display)
+    pf       = np.where(gross_loss > 0,
+                        gross_win / gross_loss,
+                        np.where(gross_win > 0, 999.0, 1.0))
     objective = objective_spec.compute(net_pct, max_dd, total, pf)
 
     wall_sec = time.time() - t0
