@@ -116,14 +116,27 @@ def build_optimizer_context(
     n_unique = len(set(bar_dates))
     print(f"[optimizer_prep] Pre-processing {n_unique} unique chain dates…")
 
-    def _chain_to_arrays(chain):
+    def _chain_to_arrays(chain, date_str: str = None):
         n   = len(chain)
         cp  = chain.get('call_put', chain.get('type', pd.Series(['C'] * n, index=chain.index)))
         right  = (cp.astype(str).str.upper().str.startswith('P')).astype(np.int8).values
         strike = pd.to_numeric(chain['strike'], errors='coerce').fillna(0).astype(np.float32).values
+
+        # ── DTE resolution (calendar days to expiry) ───────────────────────────
+        # Priority: 'te' col → 'dte' col → compute from 'expiration' → fallback
         dte_col = 'te' if 'te' in chain.columns else ('dte' if 'dte' in chain.columns else None)
-        dte = (pd.to_numeric(chain[dte_col], errors='coerce').fillna(1.0).astype(np.float32).values
-               if dte_col else np.ones(n, np.float32))
+        if dte_col:
+            dte = pd.to_numeric(chain[dte_col], errors='coerce').fillna(0.0).astype(np.float32).values
+        elif 'expiration' in chain.columns and date_str is not None:
+            # Same logic as backtest_v45_data.py::prepare_chain_for_backtester line 646-653
+            try:
+                exp_dates = pd.to_datetime(chain['expiration'])
+                bar_date  = pd.to_datetime(date_str)
+                dte = (exp_dates - bar_date).dt.days.clip(lower=0).astype(np.float32).values
+            except Exception:
+                dte = np.zeros(n, np.float32)
+        else:
+            dte = np.zeros(n, np.float32)   # unknown DTE — will be excluded by target_dte search
         delta_col = 'delta' if 'delta' in chain.columns else None
         delta = (pd.to_numeric(chain[delta_col], errors='coerce').astype(np.float32).values
                  if delta_col else np.full(n, np.nan, np.float32))
@@ -139,7 +152,7 @@ def build_optimizer_context(
     for d in set(bar_dates):
         chain = chain_df_by_date.get(d)
         if chain is not None and len(chain) > 0:
-            _date_cache[d] = _chain_to_arrays(chain)
+            _date_cache[d] = _chain_to_arrays(chain, date_str=d)
 
     print(f"[optimizer_prep] {len(_date_cache)} dates with chain data  "
           f"(0 = key mismatch; check bundle.m5_dates vs chain_df_by_date keys)")
