@@ -162,6 +162,29 @@ def run_bayes_optimizer(
     print(f"  BoTorch: {'available ✓' if _BOTORCH_OK else 'NOT FOUND — using local perturbation fallback'}")
     print("=" * 68)
 
+    # ── Print full parameter manifest ────────────────────────────────────
+    opt_names = {p.name for p in space.params}
+    print(f"\n[bayes_opt] Parameter manifest for [{template_id}]:")
+    print(f"  {'PARAMETER':<22}  {'STATUS':<10}  {'CURRENT':<10}  {'RANGE / GRID'}")
+    print(f"  {'-'*22}  {'-'*10}  {'-'*10}  {'-'*30}")
+    # Optimised params first (with ranges)
+    for p in space.params:
+        cur = base_cfg.get(p.name, "N/A")
+        if p.kind == "grid":
+            grid_pts = [round(p.lo + i * p.step, 4)
+                        for i in range(p.n_grid)]
+            range_str = f"grid {grid_pts}  (step={p.step})"
+        else:
+            range_str = f"continuous [{p.lo}, {p.hi}]"
+        print(f"  {p.name:<22}  {'OPTIMIZED':<10}  {str(cur):<10}  {range_str}")
+    # Fixed params (in base_cfg but NOT in search space)
+    fixed_shown = set()
+    for k, v in base_cfg.items():
+        if k not in opt_names and not k.startswith('_') and k not in fixed_shown:
+            print(f"  {k:<22}  {'fixed':<10}  {str(v):<10}")
+            fixed_shown.add(k)
+    print()
+
     # ── 1. Build immutable context ────────────────────────────────────────
     print("[bayes_opt] Building OptimizerContext (CSR tensor prep)…")
     ctx = build_optimizer_context(v43_outputs, bundle, chain_df_by_date, device)
@@ -286,7 +309,9 @@ def run_bayes_optimizer(
         _save_results(sorted(all_rows, key=lambda r: -r["objective"])[:100], csv_path)
 
     # ── 5. Phase 3: Full-fidelity eval of top-k ───────────────────────────
-    top_k = min(bo_batch, len(all_rows))
+    # Evaluate at least 10 candidates at full fidelity (or all available if <10)
+    # so the TOP 10 leaderboard is always populated.
+    top_k = min(max(bo_batch, 10), len(all_rows))
     sorted_rows = sorted(all_rows, key=lambda r: -r["objective"])[:top_k]
     print(f"\n[Phase 3] Full-fidelity re-evaluation of top {top_k} candidates")
 
