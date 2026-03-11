@@ -380,6 +380,14 @@ def run_backtest_optimizer_batch(
     _total_entries= 0   # total entry events across all K
     _chain_debit_hits = 0   # MtM resolved via chain (not intrinsic fallback)
     _chain_debit_miss = 0   # MtM fell back to intrinsic value
+    # Exit-type counters (summed across all K candidates)
+    _exit_sl  = 0   # stop-loss hits
+    _exit_pt  = 0   # profit-target hits
+    _exit_dte = 0   # DTE-threshold exits
+    _exit_hd  = 0   # hold-days exits
+    _exit_exp = 0   # expiry exits
+    # Hold-time samples (calendar days held at exit) — first 20 exits logged
+    _hold_samples: list = []
 
     for i in range(T_end):
         spot   = float(spot_np[i])
@@ -477,6 +485,28 @@ def run_backtest_optimizer_batch(
                 losses  = np.where(new_losses, losses + 1, losses)
                 gross_win  = np.where(new_wins,   gross_win  + pnl, gross_win)
                 gross_loss = np.where(new_losses, gross_loss + np.abs(pnl), gross_loss)
+
+                # Exit-type accounting (verbose)
+                if verbose:
+                    _exit_sl  += int(sl_hit.sum())
+                    _exit_pt  += int(pt_hit.sum())
+                    _exit_dte += int((dte_exit & ~sl_hit & ~pt_hit).sum())
+                    _exit_hd  += int((hd_exit  & ~sl_hit & ~pt_hit & ~dte_exit).sum())
+                    _exit_exp += int((exp_exit  & ~sl_hit & ~pt_hit & ~dte_exit & ~hd_exit).sum())
+                    # Sample hold times from first 20 exits
+                    if len(_hold_samples) < 20:
+                        for _k in range(K):
+                            if exit_mask[_k] and len(_hold_samples) < 20:
+                                _hold_samples.append({
+                                    "k": _k, "bar": i,
+                                    "days_held": round(float(days_held[_k]), 2),
+                                    "dte_rem": round(float(dte_remaining[_k]), 2),
+                                    "unrealized": round(float(unrealized[_k]), 2),
+                                    "reason": ("SL" if sl_hit[_k] else
+                                               "PT" if pt_hit[_k] else
+                                               "DTE" if dte_exit[_k] else
+                                               "HD" if hd_exit[_k] else "EXP"),
+                                })
 
                 # Clear exited positions
                 open_mask = np.where(exit_mask, False, open_mask)
@@ -577,6 +607,22 @@ def run_backtest_optimizer_batch(
     if verbose:
         print(f"\n[engine] Simulation complete  fidelity={fidelity}  bars={T_end}")
         print(f"[engine] Gate stats:  fires={_gate_fires}  total_entries={_total_entries}")
+        _total_exits = _exit_sl + _exit_pt + _exit_dte + _exit_hd + _exit_exp
+        if _total_exits > 0:
+            print(f"[engine] Exit breakdown (all K candidates combined):")
+            print(f"  stop_loss={_exit_sl}  profit_target={_exit_pt}  dte_exit={_exit_dte}  "
+                  f"hold_days={_exit_hd}  expiry={_exit_exp}  total={_total_exits}")
+        if _hold_samples:
+            avg_days = sum(s['days_held'] for s in _hold_samples) / len(_hold_samples)
+            avg_dte  = sum(s['dte_rem']   for s in _hold_samples) / len(_hold_samples)
+            reasons  = [s['reason'] for s in _hold_samples]
+            print(f"[engine] Hold-time samples (first {len(_hold_samples)} exits):")
+            print(f"  avg_days_held={avg_days:.2f}  avg_dte_remaining={avg_dte:.2f}")
+            print(f"  exit_reasons: {', '.join(reasons)}")
+            print(f"  [detail] k  days_held  dte_rem  unrealized  reason")
+            for s in _hold_samples[:10]:
+                print(f"           {s['k']:>2}  {s['days_held']:>9.2f}  {s['dte_rem']:>7.2f}  "
+                      f"{s['unrealized']:>10.2f}  {s['reason']}")
         if (_chain_debit_hits + _chain_debit_miss) > 0:
             chain_cov = 100.0 * _chain_debit_hits / (_chain_debit_hits + _chain_debit_miss)
             print(f"[engine] MtM coverage:  chain={_chain_debit_hits} ({chain_cov:.1f}%)  "
@@ -588,7 +634,9 @@ def run_backtest_optimizer_batch(
               f"{'max_dd':>7}  {'pf':>6}  {'obj':>8}")
         total_c = wins + losses
         wr_c    = wins / np.maximum(total_c, 1)
-        pf_c    = gross_win / np.where(gross_loss > 0, gross_loss, 1e-9)
+        # Capped profit factor: avoid quadrillion display when gross_loss=0
+        pf_c    = np.where(gross_loss > 0, gross_win / gross_loss,
+                           np.where(gross_win > 0, 999.0, 1.0))
         obj_c   = objective_spec.compute(
             (equity - STARTING_EQUITY) / STARTING_EQUITY * 100.0, max_dd, total_c, pf_c)
         for k in range(K):
