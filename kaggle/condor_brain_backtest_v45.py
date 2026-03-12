@@ -3718,8 +3718,8 @@ def main():
                         help="Candidates per BO round (default: 16)")
     parser.add_argument("--bo-rounds",      type=int, default=8,
                         help="Number of BO rounds at medium fidelity (default: 8)")
-    parser.add_argument("--bo-min-trades",  type=int, default=5,
-                        help="Minimum trades required to avoid penalty in objective (default: 5)")
+    parser.add_argument("--bo-min-trades",  type=int, default=12,
+                        help="Minimum trades required to avoid penalty in objective (default: 12)")
     parser.add_argument("--bo-max-dd-cap",  type=float, default=10.0,
                         help="Max drawdown cap for objective penalty (default: 10.0%%)")
     parser.add_argument("--bo-min-pf",      type=float, default=1.0,

@@ -237,7 +237,7 @@ def run_bayes_optimizer(
     bo_rounds = policy.bo_rounds
 
     obj_spec = ObjectiveSpec(
-        min_trades  = getattr(args, 'bo_min_trades',  5),
+        min_trades  = getattr(args, 'bo_min_trades',  12),
         max_dd_cap  = getattr(args, 'bo_max_dd_cap',  10.0),
         min_pf      = getattr(args, 'bo_min_pf',      1.0),
     )
