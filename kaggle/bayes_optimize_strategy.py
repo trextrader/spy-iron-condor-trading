@@ -310,6 +310,16 @@ def run_bayes_optimizer(
 
     _save_results(sorted(all_rows, key=lambda r: -r["objective"])[:100], csv_path)
 
+    # ── Early exit: dead strategy (gate never fires) ──────────────────────
+    _p1_best = float(np.nanmax(res_p1.objective))
+    _p1_trades = int(np.nanmax(res_p1.total))
+    if _p1_trades == 0:
+        print(f"\n[bayes_opt] SKIP — gate_eligible_bars=0 in Phase 1 fast fidelity.")
+        print(f"[bayes_opt] v43 model does not predict class_idx="
+              f"{_class_idx_for_template(template_id, strategy_configs)} on this dataset.")
+        print(f"[bayes_opt] Skipping Phases 2 & 3 — no trades possible for [{template_id}].\n")
+        return []
+
     # ── 4. Phase 2: BO rounds (medium fidelity) ──────────────────────────
     print(f"\n[Phase 2] BO rounds — {bo_rounds} rounds × {bo_batch} candidates at MEDIUM fidelity")
 
