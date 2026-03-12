@@ -269,7 +269,9 @@ def run_bayes_optimizer(
 
     # ── 3. Phase 1: Sobol warmup (fast fidelity) ─────────────────────────
     print(f"\n[Phase 1] Sobol warmup — {bo_init} candidates at FAST fidelity")
-    sobol_batch = sobol_candidates(bo_init, space, seed=42)
+    sobol_seed  = abs(hash(template_id)) % 99991
+    sobol_batch = sobol_candidates(bo_init, space, seed=sobol_seed)
+    print(f"  [seed] Sobol seed={sobol_seed} (from template_id='{template_id}')")
     configs_p1  = candidates_to_configs(sobol_batch, base_cfg)
 
     # Print first 3 Sobol candidates so user can see the decoded param spread
@@ -326,7 +328,7 @@ def run_bayes_optimizer(
     best_x = X_obs_list[int(np.nanargmax(res_p1.objective))]  # best from warmup
 
     for rnd in range(bo_rounds):
-        seed_rnd = 1000 + rnd
+        seed_rnd = (abs(hash(template_id)) % 99991) + rnd * 1000
         if _BOTORCH_OK and len(Y_obs_list) >= 4:
             try:
                 X_t = torch.tensor(np.array(X_obs_list), dtype=torch.float32)
