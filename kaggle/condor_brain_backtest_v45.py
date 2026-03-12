@@ -3724,6 +3724,13 @@ def main():
                         help="Max drawdown cap for objective penalty (default: 10.0%%)")
     parser.add_argument("--bo-min-pf",      type=float, default=1.0,
                         help="Minimum profit factor soft constraint (default: 1.0)")
+    parser.add_argument("--optimize-intensity", type=str, default="med",
+                        choices=["min", "min-med", "med", "med-max", "max"],
+                        help=(
+                            "Optimizer intensity: controls param breadth, step granularity, "
+                            "and BO budget. min=fast/coarse, med=balanced (default), "
+                            "max=finest/all params. Overrides --bo-init-trials/batch/rounds."
+                        ))
     parser.add_argument("--strategyomit", nargs='+', default=None,
                         help=("Exclude specific strategy classes from trading. "
                               "Space-separated names or indices "
@@ -4132,6 +4139,7 @@ def main():
                             device=DEVICE,
                             verbose=getattr(args, 'verbose', False),
                             auto_apply=True,
+                            intensity_name=getattr(args, 'optimize_intensity', 'med'),
                         )
                         _best = _rows[0] if _rows else None
                         _autoall_summary.append((_tmpl, _best, None))
@@ -4219,6 +4227,7 @@ def main():
                     device=DEVICE,
                     verbose=getattr(args, 'verbose', False),
                     auto_apply=False,
+                    intensity_name=getattr(args, 'optimize_intensity', 'med'),
                 )
         else:
             # Interactive grid search (original)

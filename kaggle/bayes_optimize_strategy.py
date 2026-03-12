@@ -38,6 +38,9 @@ from candidate_codec    import (SearchSpaceSpec, CandidateBatch, build_search_sp
                                  sobol_candidates, perturb_best, candidates_to_configs)
 from optimizer_engine   import (run_backtest_optimizer_batch, ObjectiveSpec,
                                  BatchEvalResult, ENTRY_THRESHOLD, POP_THRESHOLD)
+from optimization_intensity      import get_intensity_policy, IntensityPolicy
+from adaptive_search_space_builder import (build_adaptive_search_space,
+                                            AdaptiveParamManifestRow)
 
 
 # ── BoTorch availability ──────────────────────────────────────────────────────
@@ -118,6 +121,72 @@ def _fit_gp_and_suggest(
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
+def _print_adaptive_manifest(
+    *,
+    template_id: str,
+    strategy_family: str,
+    policy: IntensityPolicy,
+    manifest_rows: List[AdaptiveParamManifestRow],
+    search_dim: int,
+) -> None:
+    """Print the BO banner + parameter manifest for an adaptive run."""
+    botorch_str = "available ✓" if _BOTORCH_OK else "NOT FOUND — using local perturbation fallback"
+
+    # Build granularity summary from optimized rows
+    seen_kinds: set = set()
+    gran_parts: List[str] = []
+    for row in manifest_rows:
+        if row.status != "OPTIMIZED" or not row.kind or row.inferred_step is None:
+            continue
+        if row.kind in seen_kinds:
+            continue
+        seen_kinds.add(row.kind)
+        label = {"dollar": "dollar", "integer": "int", "width": "width",
+                 "delta": "delta", "percent": "pct", "continuous": "cont"}.get(row.kind, row.kind)
+        s = row.inferred_step
+        s_str = str(int(s)) if float(s).is_integer() else f"{s:g}"
+        gran_parts.append(f"{s_str}-{label}")
+    gran_summary = " / ".join(gran_parts) if gran_parts else "auto"
+
+    print()
+    print("=" * 72)
+    print(f"  BAYESIAN OPTIMIZER  [{template_id}]")
+    print(f"  intensity={policy.name}  search_dim={search_dim}  "
+          f"init={policy.bo_init_trials}  batch={policy.bo_batch_size}  rounds={policy.bo_rounds}")
+    print(f"  granularity={gran_summary}  simulation_family={strategy_family}")
+    print(f"  fidelity={policy.fidelity_schedule}  BoTorch: {botorch_str}")
+    print("=" * 72)
+
+    print(f"\n[bayes_opt] Parameter manifest for [{template_id}]:")
+    print(f"  {'PARAMETER':<22}  {'PRIORITY':<8}  {'STATUS':<14}  {'CURRENT':<10}  RANGE / GRID")
+    print(f"  {'-'*22}  {'-'*8}  {'-'*14}  {'-'*10}  {'-'*38}")
+
+    for row in manifest_rows:
+        pr_str = "" if row.priority_rank is None else str(row.priority_rank)
+        cur_str = str(row.current_value)[:10]
+
+        if row.status == "OPTIMIZED":
+            if row.kind in {"delta", "percent", "continuous"}:
+                step_s = f"  step≈{row.inferred_step:g}" if row.inferred_step else ""
+                rng = f"continuous [{row.lo:g}, {row.hi:g}]{step_s}"
+            elif row.grid is not None:
+                def _fv(x):
+                    return str(int(x)) if float(x).is_integer() else f"{x:g}"
+                if len(row.grid) <= 10:
+                    rng = f"grid [{', '.join(_fv(x) for x in row.grid)}]"
+                else:
+                    head = ", ".join(_fv(x) for x in row.grid[:6])
+                    s_s = f"(step={int(row.inferred_step)})" if row.inferred_step and float(row.inferred_step).is_integer() else f"(step={row.inferred_step:g})" if row.inferred_step else ""
+                    rng = f"grid [{head}, ...]  {s_s}  ({len(row.grid)} pts)"
+            else:
+                rng = f"[{row.lo:g}, {row.hi:g}]"
+        else:
+            rng = f"note: {row.notes}" if row.notes else ""
+
+        print(f"  {row.param_name:<22}  {pr_str:<8}  {row.status:<14}  {cur_str:<10}  {rng}")
+    print()
+
+
 def run_bayes_optimizer(
     run_backtest_fn,           # original run_backtest for parity / full eval fallback
     args,                      # parsed argparse Namespace
@@ -128,7 +197,8 @@ def run_bayes_optimizer(
     allowed_template_ids,
     device: Optional[torch.device] = None,
     verbose: bool = False,
-    auto_apply: bool = False,  # If True: skip prompt and auto-apply rank-1 config
+    auto_apply: bool = False,      # If True: skip prompt and auto-apply rank-1 config
+    intensity_name: str = "med",   # Optimizer intensity level
 ):
     """
     Entry point called from condor_brain_backtest_v45.py when
@@ -145,51 +215,39 @@ def run_bayes_optimizer(
         return
 
     base_cfg        = strategy_configs.get(template_id, {})
-    space           = build_search_space(template_id)
     strategy_family = _strategy_family_for_template(template_id)
+
+    # ── Build adaptive search space (intensity-aware) ─────────────────────
+    # Preserve calibrated expert bounds from candidate_codec as explicit_param_bounds;
+    # intensity policy controls step sizes and which params are included.
+    _old_space = build_search_space(template_id)
+    _explicit_bounds = {p.name: (p.lo, p.hi) for p in _old_space.params}
+
+    space, manifest_rows, policy = build_adaptive_search_space(
+        strategy_id=template_id,
+        strategy_config=base_cfg,
+        intensity_name=intensity_name,
+        explicit_param_bounds=_explicit_bounds,
+    )
+
+    # BO budget comes from policy (overrides manual --bo-* args when intensity is set)
+    bo_init   = policy.bo_init_trials
+    bo_batch  = policy.bo_batch_size
+    bo_rounds = policy.bo_rounds
+
     obj_spec = ObjectiveSpec(
         min_trades  = getattr(args, 'bo_min_trades',  5),
         max_dd_cap  = getattr(args, 'bo_max_dd_cap',  10.0),
         min_pf      = getattr(args, 'bo_min_pf',      1.0),
     )
 
-    bo_init   = getattr(args, 'bo_init_trials', 32)
-    bo_batch  = getattr(args, 'bo_batch_size',  16)
-    bo_rounds = getattr(args, 'bo_rounds',       8)
-
-    print()
-    print("=" * 68)
-    print(f"  BAYESIAN OPTIMIZER  [{template_id}]")
-    print(f"  search_dim={space.dim}  init={bo_init}  batch={bo_batch}  rounds={bo_rounds}")
-    print(f"  simulation_family={strategy_family}")
-    print(f"  BoTorch: {'available ✓' if _BOTORCH_OK else 'NOT FOUND — using local perturbation fallback'}")
-    print("=" * 68)
-
-    # ── Print full parameter manifest ────────────────────────────────────
-    opt_names = {p.name for p in space.params}
-    print(f"\n[bayes_opt] Parameter manifest for [{template_id}]:")
-    print(f"  {'PARAMETER':<22}  {'STATUS':<10}  {'CURRENT':<10}  {'RANGE / GRID'}")
-    print(f"  {'-'*22}  {'-'*10}  {'-'*10}  {'-'*30}")
-    # Optimised params first (with ranges)
-    for p in space.params:
-        cur = base_cfg.get(p.name, "N/A")
-        if p.kind == "grid":
-            # Show full list only when ≤10 pts; otherwise show compact range summary
-            if p.n_grid <= 10:
-                grid_pts = [round(p.lo + i * p.step, 4) for i in range(p.n_grid)]
-                range_str = f"grid {grid_pts}  (step={p.step})"
-            else:
-                range_str = f"grid [{p.lo}–{p.hi}]  step={p.step}  ({p.n_grid} pts)"
-        else:
-            range_str = f"continuous [{p.lo}, {p.hi}]"
-        print(f"  {p.name:<22}  {'OPTIMIZED':<10}  {str(cur):<10}  {range_str}")
-    # Fixed params (in base_cfg but NOT in search space)
-    fixed_shown = set()
-    for k, v in base_cfg.items():
-        if k not in opt_names and not k.startswith('_') and k not in fixed_shown:
-            print(f"  {k:<22}  {'fixed':<10}  {str(v):<10}")
-            fixed_shown.add(k)
-    print()
+    _print_adaptive_manifest(
+        template_id=template_id,
+        strategy_family=strategy_family,
+        policy=policy,
+        manifest_rows=manifest_rows,
+        search_dim=space.dim,
+    )
 
     # ── 1. Build immutable context ────────────────────────────────────────
     print("[bayes_opt] Building OptimizerContext (CSR tensor prep)…")
