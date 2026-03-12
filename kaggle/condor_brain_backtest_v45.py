@@ -4162,8 +4162,10 @@ def main():
                         _tb.print_exc()
                         _autoall_summary.append((_tmpl, None, str(_exc)))
                 # ── Final summary table ──────────────────────────────────────────
+                _n_skipped = sum(1 for _, _, _e in _autoall_summary if _e and _e.startswith("skipped:"))
+                _n_optimized = _n_total - _n_skipped
                 print(f"\n[autoall] {'═'*68}")
-                print(f"[autoall] COMPLETE — {_n_total} strategies optimized")
+                print(f"[autoall] COMPLETE — {_n_optimized}/{_n_total} strategies optimized  ({_n_skipped} skipped)")
                 print(f"[autoall] {'═'*68}")
                 print(f"  {'STRATEGY':<32}  {'obj':>8}  {'net%':>7}  {'dd%':>6}  {'trades':>7}  {'status'}")
                 for _tmpl, _r, _err in _autoall_summary:
