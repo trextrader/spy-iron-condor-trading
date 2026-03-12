@@ -3795,7 +3795,15 @@ def main():
         # auto-applying rank-1 result to each strategy file without prompting.
         ALLOWED_STRATEGY_IDXS = None   # no filter during any backtest phase
         ALLOWED_TEMPLATE_IDS  = set(_STRATEGY_CONFIGS.keys())
+        # Dead under v43 model (class_idx=6, butterfly_call never predicted): skip entirely.
+        _AUTOALL_SKIP_TEMPLATES = frozenset({
+            "call_broken_wing",
+            "long_call_butterfly",
+            "short_call_butterfly",
+            "short_put_butterfly",
+        })
         print(f"[strategies] autoall mode — {len(ALLOWED_TEMPLATE_IDS)} templates queued for sequential BO")
+        print(f"[strategies] autoall skip (class_idx=6): {sorted(_AUTOALL_SKIP_TEMPLATES)}")
     else:
         ALLOWED_STRATEGY_IDXS = set()
         ALLOWED_TEMPLATE_IDS = set()
@@ -4127,6 +4135,11 @@ def main():
                 print(f"[autoall] Templates ({_n_total}): {_all_templates}\n")
                 _autoall_summary = []
                 for _ti, _tmpl in enumerate(_all_templates, 1):
+                    # ── Dead strategy: skip before spending any GPU time ──────────────────────
+                    if _tmpl in _AUTOALL_SKIP_TEMPLATES:
+                        print(f"\n[autoall] SKIP [{_ti}/{_n_total}: {_tmpl}] — class_idx=6 never predicted by v43.")
+                        _autoall_summary.append((_tmpl, None, "skipped:class_idx=6"))
+                        continue
                     print(f"\n[autoall] ─── {_ti}/{_n_total}: {_tmpl} ───────────────────────────────")
                     try:
                         _rows = run_bayes_optimizer(
@@ -4154,7 +4167,10 @@ def main():
                 print(f"[autoall] {'═'*68}")
                 print(f"  {'STRATEGY':<32}  {'obj':>8}  {'net%':>7}  {'dd%':>6}  {'trades':>7}  {'status'}")
                 for _tmpl, _r, _err in _autoall_summary:
-                    if _err:
+                    if _err and _err.startswith("skipped:"):
+                        _reason = _err.split(":", 1)[1]
+                        print(f"  {_tmpl:<32}  {'SKIPPED':<8}  — {_reason}")
+                    elif _err:
                         print(f"  {_tmpl:<32}  {'':>8}  {'':>7}  {'':>6}  {'':>7}  ERROR: {_err[:40]}")
                     elif _r:
                         _trades = int(_r.get('wins', 0)) + int(_r.get('losses', 0))
@@ -4188,6 +4204,8 @@ def main():
                 print(f"  {'STRATEGY':<{_STRAT_W}}  {_hdr_params}  {_hdr_perf}")
                 print(f"  {_sep}")
                 for _tmpl, _r, _err in _autoall_summary:
+                    if _err and _err.startswith("skipped:"):
+                        continue  # don't show in params table
                     if _err or not _r:
                         _pv  = "  ".join(f"{'N/A':>{_COL_W}}" for _ in _present_keys)
                         _pfv = "  ".join(f"{'N/A':>{w}}" for _, w in _PERF_COLS)
