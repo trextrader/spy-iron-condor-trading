@@ -4207,20 +4207,21 @@ def main():
                 print(f"[autoall] Total wall time: {_fmt_sec(_autoall_total_s)}  "
                       f"(avg {_fmt_sec(sum(_strat_times)/len(_strat_times) if _strat_times else 0)}/strategy)")
                 print(f"[autoall] {'═'*68}")
-                print(f"  {'STRATEGY':<32}  {'obj':>8}  {'net%':>7}  {'dd%':>6}  {'trades':>7}  {'status'}")
+                print(f"  {'STRATEGY':<32}  {'obj':>8}  {'net%':>7}  {'dd%':>6}  {'wins':>6}  {'losses':>7}  {'status'}")
                 for _tmpl, _r, _err in _autoall_summary:
                     if _err and _err.startswith("skipped:"):
                         _reason = _err.split(":", 1)[1]
                         print(f"  {_tmpl:<32}  {'SKIPPED':<8}  — {_reason}")
                     elif _err:
-                        print(f"  {_tmpl:<32}  {'':>8}  {'':>7}  {'':>6}  {'':>7}  ERROR: {_err[:40]}")
+                        print(f"  {_tmpl:<32}  {'':>8}  {'':>7}  {'':>6}  {'':>6}  {'':>7}  ERROR: {_err[:40]}")
                     elif _r:
-                        _trades = int(_r.get('wins', 0)) + int(_r.get('losses', 0))
+                        _w = int(_r.get('wins',   0))
+                        _l = int(_r.get('losses', 0))
                         print(f"  {_tmpl:<32}  {_r.get('objective',0):>8.3f}  "
                               f"{_r.get('net_pct',0):>7.2f}  {_r.get('max_dd',0):>6.2f}  "
-                              f"{_trades:>7}  applied")
+                              f"{_w:>6}  {_l:>7}  applied")
                     else:
-                        print(f"  {_tmpl:<32}  {'':>8}  {'':>7}  {'':>6}  {'':>7}  no results")
+                        print(f"  {_tmpl:<32}  {'':>8}  {'':>7}  {'':>6}  {'':>6}  {'':>7}  no results")
 
                 # ── Detailed optimized params table ──────────────────────────
                 _BO_PARAM_KEYS = [
