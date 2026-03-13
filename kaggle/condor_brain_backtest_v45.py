@@ -3721,6 +3721,8 @@ def main():
     parser.add_argument("--optimize-mode", type=str, default="grid", choices=["grid", "bayes"],
                         help="Optimizer mode: 'grid' (interactive grid search) or 'bayes' (Bayesian, non-interactive)")
     # Bayesian optimizer hyperparameters
+    parser.add_argument("--v43-batch-size", type=int, default=None,
+                        help="GPU inference batch size for v43 model (default: 256 for T4, try 1024 on A100)")
     parser.add_argument("--bo-init-trials", type=int, default=32,
                         help="Sobol warmup trials (fast fidelity) for Bayesian optimizer (default: 32)")
     parser.add_argument("--bo-batch-size",  type=int, default=16,
@@ -4074,9 +4076,10 @@ def main():
         bundle_v43.preload_to_gpu(DEVICE)
         _infer_bars = bundle_v43.n_bars if not args.limit else min(bundle_v43.n_bars, args.limit + args.v43_seq_len)
         print(f"[Phase 7] Running batch inference ({_infer_bars:,} M5 bars, seq_len={args.v43_seq_len})...")
+        _v43_bs = getattr(args, 'v43_batch_size', None) or V43_BATCH_SIZE
         v43_outputs = run_v43_batch_inference(
             bundle_v43, v43_model_obj, DEVICE,
-            seq_len=args.v43_seq_len, batch_size=V43_BATCH_SIZE, verbose=True,
+            seq_len=args.v43_seq_len, batch_size=_v43_bs, verbose=True,
             max_bars=args.limit or 0,
         )
         print(f"[Phase 7] Done. Non-abstain: {(~v43_outputs['abstain']).sum():,} | "
