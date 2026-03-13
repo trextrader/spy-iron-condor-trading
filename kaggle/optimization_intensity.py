@@ -56,7 +56,7 @@ INTENSITY_POLICIES: Dict[str, IntensityPolicy] = {
     "med": IntensityPolicy(
         name="med",
         breadth_top_n=11,
-        bo_init_trials=24,
+        bo_init_trials=32,    # 4× min (was 24)
         bo_batch_size=12,
         bo_rounds=4,
         fidelity_schedule=["fast", "medium"],
@@ -64,7 +64,7 @@ INTENSITY_POLICIES: Dict[str, IntensityPolicy] = {
     "med-max": IntensityPolicy(
         name="med-max",
         breadth_top_n=13,
-        bo_init_trials=32,
+        bo_init_trials=40,    # 5× min (was 32)
         bo_batch_size=16,
         bo_rounds=6,
         fidelity_schedule=["fast", "medium", "full"],
