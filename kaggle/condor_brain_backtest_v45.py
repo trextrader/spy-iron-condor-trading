@@ -4130,9 +4130,22 @@ def main():
                 # ── Sequential autoall: optimize every template, auto-apply rank 1 ──
                 _all_templates = sorted(_STRATEGY_CONFIGS.keys())
                 _n_total = len(_all_templates)
+                # Minimum objective threshold before auto-applying results.
+                # min/min-med are feasibility filters — don't overwrite good params
+                # with noise from low eval-count searches.
+                _intensity_apply_floor = {
+                    "min":     0.20,
+                    "min-med": 0.15,
+                    "med":     0.0,
+                    "med-max": 0.0,
+                    "max":     0.0,
+                }
+                _apply_floor = _intensity_apply_floor.get(
+                    getattr(args, 'optimize_intensity', 'med'), 0.0)
                 print(f"\n[autoall] Starting sequential BO for {_n_total} strategy templates")
                 print(f"[autoall] Each template: bo_init={getattr(args,'bo_init_trials',32)}  "
                       f"batch={getattr(args,'bo_batch_size',16)}  rounds={getattr(args,'bo_rounds',8)}")
+                print(f"[autoall] min_apply_obj={_apply_floor}  (intensity={getattr(args,'optimize_intensity','med')})")
                 print(f"[autoall] Templates ({_n_total}): {_all_templates}\n")
                 _autoall_summary = []
                 for _ti, _tmpl in enumerate(_all_templates, 1):
@@ -4154,6 +4167,7 @@ def main():
                             verbose=getattr(args, 'verbose', False),
                             auto_apply=True,
                             intensity_name=getattr(args, 'optimize_intensity', 'med'),
+                            min_apply_obj=_apply_floor,
                         )
                         _best = _rows[0] if _rows else None
                         _autoall_summary.append((_tmpl, _best, None))

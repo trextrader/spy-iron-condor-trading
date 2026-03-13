@@ -200,6 +200,7 @@ def run_bayes_optimizer(
     verbose: bool = False,
     auto_apply: bool = False,      # If True: skip prompt and auto-apply rank-1 config
     intensity_name: str = "med",   # Optimizer intensity level
+    min_apply_obj: float = 0.0,    # Auto-apply only if rank-1 obj >= this threshold
 ):
     """
     Entry point called from condor_brain_backtest_v45.py when
@@ -464,11 +465,16 @@ def run_bayes_optimizer(
             print("  [WARN] All candidates scored -100 (no trades executed — chain data missing?).")
             print("         Skipping apply to avoid overwriting strategy file with invalid params.")
         elif auto_apply:
-            # autoall mode: silently apply rank 1 without prompting
+            # autoall mode: silently apply rank 1 without prompting,
+            # but only if the result clears the minimum objective threshold.
             chosen = final_rows[0]
-            print(f"  [autoall] Auto-applying rank 1:  obj={chosen['objective']:.4f}  "
-                  f"net={chosen['net_pct']:+.1f}%  dd={chosen['max_dd']:.1f}%")
-            _apply_best_config(template_id, chosen, space)
+            if chosen['objective'] < min_apply_obj:
+                print(f"  [autoall] Skipping apply — obj={chosen['objective']:.4f} < "
+                      f"min_apply_obj={min_apply_obj:.2f}  (existing params preserved)")
+            else:
+                print(f"  [autoall] Auto-applying rank 1:  obj={chosen['objective']:.4f}  "
+                      f"net={chosen['net_pct']:+.1f}%  dd={chosen['max_dd']:.1f}%")
+                _apply_best_config(template_id, chosen, space)
         elif sys.stdin.isatty():
             print(f"  Apply which config? [1–{n_results}, Enter to skip]: ", end="", flush=True)
             try:
