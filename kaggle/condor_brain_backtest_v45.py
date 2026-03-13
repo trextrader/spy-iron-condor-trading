@@ -167,6 +167,14 @@ try:
 except Exception as _cfg_err:
     print(f"[strategies] Config scan failed: {_cfg_err}")
 
+# Templates that are dead under the v43 model (class_idx=6, butterfly_call never
+# predicted) and should be skipped unconditionally in autoall BO mode.
+_AUTOALL_SKIP_TEMPLATES = frozenset({
+    "call_broken_wing",
+    "long_call_butterfly",
+    "short_call_butterfly",
+    "short_put_butterfly",
+})
 
 try:
     from torch.utils.tensorboard import SummaryWriter # Added for TB support
@@ -3795,13 +3803,6 @@ def main():
         # auto-applying rank-1 result to each strategy file without prompting.
         ALLOWED_STRATEGY_IDXS = None   # no filter during any backtest phase
         ALLOWED_TEMPLATE_IDS  = set(_STRATEGY_CONFIGS.keys())
-        # Dead under v43 model (class_idx=6, butterfly_call never predicted): skip entirely.
-        _AUTOALL_SKIP_TEMPLATES = frozenset({
-            "call_broken_wing",
-            "long_call_butterfly",
-            "short_call_butterfly",
-            "short_put_butterfly",
-        })
         print(f"[strategies] autoall mode — {len(ALLOWED_TEMPLATE_IDS)} templates queued for sequential BO")
         print(f"[strategies] autoall skip (class_idx=6): {sorted(_AUTOALL_SKIP_TEMPLATES)}")
     else:
