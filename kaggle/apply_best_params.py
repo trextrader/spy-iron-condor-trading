@@ -1,7 +1,7 @@
 """
 apply_best_params.py
 ====================
-Reads all 4 optimizer sweep report files, picks the best objective per strategy
+Reads all optimizer sweep report files, picks the best objective per strategy
 across all sweeps, then applies those best params directly to the strategy .py files.
 
 Usage:
@@ -28,9 +28,10 @@ STRATEGIES_DIR = os.path.join(os.path.dirname(__file__), "strategies")
 
 SWEEP_FILES = {
     "min":     "GPU_Optimization_Sweep_min.txt",
+    "min_v2":  "GPU_Optimization_Sweep_min_v2.txt",
+    "min-med": "GPU_Optimization_Sweep_min-med.txt",
     "med":     "GPU_Optimization_Sweep_med.txt",
     "med-max": "GPU_Optimization_Sweep_med-max.txt",
-    "min_v2":  "GPU_Optimization_Sweep_min_v2.txt",
 }
 
 # Params that must be written as int

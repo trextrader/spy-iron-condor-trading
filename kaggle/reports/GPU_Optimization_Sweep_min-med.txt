@@ -1,0 +1,124 @@
+[autoall] ════════════════════════════════════════════════════════════════════
+[autoall] COMPLETE — 54/58 strategies optimized  (4 skipped)
+[autoall] Total wall time: 1h 23m 55s  (avg 1m 33s/strategy)
+[autoall] ════════════════════════════════════════════════════════════════════
+  STRATEGY                               obj     net%     dd%   trades  status
+  bear_call_ladder                    -0.038    -0.26    2.72       26  applied
+  bear_call_spread_credit             -0.179    -1.61    4.30       95  applied
+  bear_put_ladder                      0.503     4.11    6.19       19  applied
+  bear_put_spread                     -0.014    -0.09    2.58       21  applied
+  bull_call_ladder                     0.114     0.34    1.03       19  applied
+  bull_call_spread                    -0.100    -0.87    4.08       38  applied
+  bull_put_ladder                      0.414     1.68    2.04       28  applied
+  bull_put_spread_credit               0.670     3.38    3.05       50  applied
+  calendar_call                        0.407     2.08    3.10       51  applied
+  calendar_put                         0.951     3.81    2.00       29  applied
+  call_broken_wing                  SKIPPED   — class_idx=6
+  call_ratio_backspread                0.092     0.35    1.83       49  applied
+  call_ratio_spread                    0.092     0.35    1.86       49  applied
+  cash_secured_put                     0.288     1.73    4.01       17  applied
+  collar                               0.250     0.75    0.30       29  applied
+  covered_call                         0.100     0.32    1.22       47  applied
+  covered_short_straddle               0.264     0.79    0.67       46  applied
+  covered_short_strangle               0.063     0.19    0.42       24  applied
+  diagonal_call                        0.087     0.26    0.92       91  applied
+  diagonal_put                        -0.028    -0.12    0.29       47  applied
+  double_diagonal                      0.089     0.27    1.04      120  applied
+  guts                                 0.665     1.99    0.53       50  applied
+  inverse_call_broken_wing             0.261     1.01    1.87       25  applied
+  inverse_iron_butterfly               0.624     2.16    1.47      121  applied
+  inverse_iron_condor                  0.345     1.30    1.77       49  applied
+  inverse_put_broken_wing              0.605     3.72    4.15       52  applied
+  iron_butterfly                       0.352     1.29    1.67      197  applied
+  iron_condor                          0.162     0.49    0.28       53  applied
+  jade_lizard                          0.452     1.41    1.13       95  applied
+  long_call                            0.150     0.75    3.02       47  applied
+  long_call_butterfly               SKIPPED   — class_idx=6
+  long_call_condor                     0.905     3.51    1.88       24  applied
+  long_combo                           0.198     0.83    2.18       28  applied
+  long_put                             0.404     2.91    5.19       20  applied
+  long_put_butterfly                   0.694     2.36    1.40       50  applied
+  long_put_condor                      0.246     0.74    0.48       95  applied
+  long_synthetic_future               -0.001    -0.00    0.87       25  applied
+  protective_put                       0.132     1.09    6.27       24  applied
+  put_broken_wing                      0.504     4.11    6.14       19  applied
+  put_ratio_backspread                 0.538     3.60    4.70       53  applied
+  put_ratio_spread                     0.477     3.25    4.80       41  applied
+  reverse_jade_lizard                  0.271     1.15    2.25      120  applied
+  short_call                          -0.101    -0.76    3.26       60  applied
+  short_call_butterfly              SKIPPED   — class_idx=6
+  short_call_condor                    0.993     3.88    1.91       49  applied
+  short_combo                          0.151     0.52    1.43       46  applied
+  short_guts                           0.045     0.14    0.38       25  applied
+  short_put                            0.080     0.37    2.65       29  applied
+  short_put_butterfly               SKIPPED   — class_idx=6
+  short_put_condor                     0.085     0.54    4.39       51  applied
+  short_straddle                       0.165     0.50    0.31       19  applied
+  short_strangle                       0.020     0.06    0.27       21  applied
+  short_synthetic_future               0.055     0.27    2.83       31  applied
+  straddle_long                        0.033     0.10    0.27       51  applied
+  strangle_long                        0.204     0.61    0.55       21  applied
+  strap                                0.240     0.72    0.32      121  applied
+  strip                                0.720     2.16    0.53       50  applied
+  synthetic_put                        0.433     3.59    6.30       48  applied
+
+[autoall] ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+[autoall] OPTIMIZED PARAMETERS BY STRATEGY
+[autoall] ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+  STRATEGY                          stop_loss_d  profit_targ  spread_widt   target_dte    hold_days  max_dte_exi  short_delta    wins  losses     net_pnl     net%     dd%
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  bear_call_ladder                      1500.00      1000.00        13.00           17           21            2       0.3294      17       9        -257    -0.26    2.72
+  bear_call_spread_credit               1000.00      3000.00         5.00            7            5            4       0.3844      51      44       -1611    -1.61    4.30
+  bear_put_ladder                       1000.00      2600.00         5.00           28           21            1       0.4500      14       5       +4115    +4.11    6.19
+  bear_put_spread                        400.00       900.00        17.00           18           21            4       0.1500      16       5         -91    -0.09    2.58
+  bull_call_ladder                       400.00      2200.00        21.00           23           19            1       0.2560      12       7        +345    +0.34    1.03
+  bull_call_spread                       500.00      2700.00         9.00           13           17            5       0.3978      22      16        -867    -0.87    4.08
+  bull_put_ladder                        400.00      3000.00        21.00           19           13            5       0.1500      23       5       +1675    +1.68    2.04
+  bull_put_spread_credit                 400.00      1100.00        19.00            8            9            1       0.2135      40      10       +3382    +3.38    3.05
+  calendar_call                          600.00       400.00        11.00            7            5            0       0.2351      28      23       +2076    +2.08    3.10
+  calendar_put                          1500.00       400.00        21.00           13           21            0       0.2351      20       9       +3808    +3.81    2.00
+  call_ratio_backspread                  600.00      1000.00        17.00            8           11            1       0.2691      35      14        +351    +0.35    1.83
+  call_ratio_spread                      700.00      1300.00        17.00            8           17            1       0.2756      34      15        +354    +0.35    1.86
+  cash_secured_put                       600.00      2600.00           18           23           20            4       0.2734      13       4       +1730    +1.73    4.01
+  collar                                 500.00       900.00           18           14           21            3       0.4500      14      15        +750    +0.75    0.30
+  covered_call                           800.00       400.00           18            7           16            0       0.2506      34      13        +322    +0.32    1.22
+  covered_short_straddle                 400.00      3000.00           18            7           21            0       0.1500      14      32        +792    +0.79    0.67
+  covered_short_strangle                 800.00       900.00           18           20           14            0       0.1500      16       8        +190    +0.19    0.42
+  diagonal_call                          400.00      3000.00        13.00            7           21            5       0.4060      53      38        +260    +0.26    0.92
+  diagonal_put                          1500.00       400.00         5.00            7            5            5       0.1525      30      17        -118    -0.12    0.29
+  double_diagonal                        400.00       500.00        11.00            7           12            5       0.4082      73      47        +270    +0.27    1.04
+  guts                                   400.00      3000.00           18            7            8            1       0.3417      23      27       +1994    +1.99    0.53
+  inverse_call_broken_wing               400.00      1600.00        19.00           17           21            0       0.3014      17       8       +1009    +1.01    1.87
+  inverse_iron_butterfly                 700.00       400.00        15.00            7            8            5       0.3515      82      39       +2162    +2.16    1.47
+  inverse_iron_condor                    600.00      2900.00        17.00           11           10            4       0.2194      34      15       +1298    +1.30    1.77
+  inverse_put_broken_wing               1500.00       400.00        15.00            8           10            1       0.3081      42      10       +3718    +3.72    4.15
+  iron_butterfly                         600.00       500.00        15.00            7           21            6       0.4000     122      75       +1294    +1.29    1.67
+  iron_condor                            500.00      1100.00         5.00            7           21            5       0.2235      37      16        +486    +0.49    0.28
+  jade_lizard                            600.00       500.00        15.00            8            5            5       0.2683      64      31       +1412    +1.41    1.13
+  long_call                             1500.00      3000.00            9            7           12            0       0.2351      30      17        +752    +0.75    3.02
+  long_call_condor                      1200.00      3000.00        17.00           15           20            0       0.3022      18       6       +3512    +3.51    1.88
+  long_combo                             400.00      3000.00           18           19           15            3       0.3881      15      13        +826    +0.83    2.18
+  long_put                               400.00      1200.00           18           22           21            0       0.2351      12       8       +2906    +2.91    5.19
+  long_put_butterfly                     400.00      3000.00         9.00            7            5            0       0.4500      26      24       +2360    +2.36    1.40
+  long_put_condor                        400.00      2700.00         7.00            8            7            5       0.2816      58      37        +738    +0.74    0.48
+  long_synthetic_future                  900.00      2600.00           18           18           15            3       0.1500      21       4          -4    -0.00    0.87
+  protective_put                        1500.00       400.00           20           28           21            0       0.2351      19       5       +1094    +1.09    6.27
+  put_broken_wing                       1100.00      3000.00        21.00           28           21            0       0.4500      14       5       +4108    +4.11    6.14
+  put_ratio_backspread                   400.00      2100.00        13.00            8            8            0       0.4500      35      18       +3602    +3.60    4.70
+  put_ratio_spread                       400.00      1200.00        13.00           11           18            0       0.4500      24      17       +3246    +3.25    4.80
+  reverse_jade_lizard                    400.00      3000.00        21.00            7            5            5       0.4500      80      40       +1151    +1.15    2.25
+  short_call                             200.00      1000.00         None           21            7            7       0.3177      33      27        -758    -0.76    3.26
+  short_call_condor                     1500.00       400.00        21.00            7           11            0       0.3491      32      17       +3878    +3.88    1.91
+  short_combo                           1000.00       400.00           18            7           12            0       0.1500      40       6        +518    +0.52    1.43
+  short_guts                             700.00      1900.00           18           18           18            4       0.2234      15      10        +136    +0.14    0.38
+  short_put                             1000.00      1500.00         None            7           21            0       0.1500      26       3        +372    +0.37    2.65
+  short_put_condor                      1000.00      1600.00        19.00            8           18            3       0.3136      35      16        +543    +0.54    4.39
+  short_straddle                         500.00      2400.00            7           13           13            2       0.4500      10       9        +495    +0.50    0.31
+  short_strangle                         400.00      1700.00           13           24           13            1       0.3246      13       8         +59    +0.06    0.27
+  short_synthetic_future                 500.00      2600.00           18           13           14            2       0.2879      20      11        +266    +0.27    2.83
+  straddle_long                         1300.00      2600.00            7            7            7            5       0.1500      25      26        +100    +0.10    0.27
+  strangle_long                          800.00      2700.00           13           14           15            1       0.3365      13       8        +614    +0.61    0.55
+  strap                                  400.00       400.00           18            7           17            5       0.2527      77      44        +720    +0.72    0.32
+  strip                                  400.00      1100.00           18            7            5            1       0.3421      23      27       +2161    +2.16    0.53
+  synthetic_put                          900.00      3000.00           18            7           21            0       0.2351      35      13       +3594    +3.59    6.30
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

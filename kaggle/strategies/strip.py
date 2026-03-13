@@ -50,10 +50,10 @@ CONFIG = {
 
     # ── Exit: Stop-Loss ───────────────────────────────────────────────────
     "stop_loss_mult":     1.5,   # Close when loss >= N * |credit| * qty * 100
-    "stop_loss_dollar":   300,  # Hard dollar cap per trade (None = use multiplier only)
+    "stop_loss_dollar":   400,  # Hard dollar cap per trade (None = use multiplier only)
 
     # ── Exit: Profit Target ───────────────────────────────────────────────
-    "profit_target":      300,    # Dollar target (None = use 50% of credit)
+    "profit_target":      1100,    # Dollar target (None = use 50% of credit)
 
     # ── Template Preference ───────────────────────────────────────────────
     "fallback_template":  None,        # If no template eligible, use this template_id
@@ -76,10 +76,10 @@ CONFIG = {
     "max_leg_spread":     0.15,  # Max bid-ask ratio per leg
 
     # ── Entry: Delta Targets (template path) ────────────────────────────────
-    "short_delta":        0.3337,  # Target |delta| for short (selling) strikes
+    "short_delta":        0.3421,  # Target |delta| for short (selling) strikes
     "wing_delta":         None,  # Target |delta| for long wing strikes (None = N/A)
 
     # ── Exit: Time ────────────────────────────────────────────────────────────
     "max_dte_exit":       1,  # Close when DTE remaining <= N (0 = expire naturally)
-    "hold_days":          9,  # Max calendar days held
+    "hold_days":          5,  # Max calendar days held
 }
