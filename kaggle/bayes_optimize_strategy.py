@@ -265,8 +265,10 @@ def run_bayes_optimizer(
     print(f"[bayes_opt] Results → {csv_path}")
 
     all_rows: List[Dict] = []
-    X_obs_list: List[np.ndarray] = []   # [D] normalised
-    Y_obs_list: List[float]      = []   # scalar objective (full fidelity)
+    X_obs_fast: List[np.ndarray] = []   # Phase 1: fast fidelity (25% bars)
+    Y_obs_fast: List[float]      = []
+    X_obs_med:  List[np.ndarray] = []   # Phase 2: medium fidelity (60% bars)
+    Y_obs_med:  List[float]      = []
 
     # ── 3. Phase 1: Sobol warmup (fast fidelity) ─────────────────────────
     print(f"\n[Phase 1] Sobol warmup — {bo_init} candidates at FAST fidelity")
@@ -308,8 +310,8 @@ def run_bayes_optimizer(
         row = _make_row(0, configs_p1[k], res_p1, k)
         all_rows.append(row)
         x_enc = encode_config(configs_p1[k], space)
-        X_obs_list.append(x_enc)
-        Y_obs_list.append(float(res_p1.objective[k]))
+        X_obs_fast.append(x_enc)
+        Y_obs_fast.append(float(res_p1.objective[k]))
 
     _save_results(sorted(all_rows, key=lambda r: -r["objective"])[:100], csv_path)
 
@@ -326,14 +328,14 @@ def run_bayes_optimizer(
     # ── 4. Phase 2: BO rounds (medium fidelity) ──────────────────────────
     print(f"\n[Phase 2] BO rounds — {bo_rounds} rounds × {bo_batch} candidates at MEDIUM fidelity")
 
-    best_x = X_obs_list[int(np.nanargmax(res_p1.objective))]  # best from warmup
+    best_x = X_obs_fast[int(np.nanargmax(res_p1.objective))]  # best from warmup
 
     for rnd in range(bo_rounds):
         seed_rnd = (int(hashlib.md5(template_id.encode()).hexdigest(), 16) % 99991) + rnd * 1000
-        if _BOTORCH_OK and len(Y_obs_list) >= 4:
+        if _BOTORCH_OK and len(Y_obs_med) >= 4:
             try:
-                X_t = torch.tensor(np.array(X_obs_list), dtype=torch.float32)
-                Y_t = torch.tensor(Y_obs_list, dtype=torch.float32).unsqueeze(-1)
+                X_t = torch.tensor(np.array(X_obs_med), dtype=torch.float32)
+                Y_t = torch.tensor(Y_obs_med, dtype=torch.float32).unsqueeze(-1)
                 # Normalise Y
                 y_mean, y_std = Y_t.mean(), Y_t.std().clamp_min(1e-6)
                 Y_norm = (Y_t - y_mean) / y_std
@@ -374,12 +376,16 @@ def run_bayes_optimizer(
             row = _make_row(0, configs_rnd[k], res_rnd, k)
             all_rows.append(row)
             x_enc = encode_config(configs_rnd[k], space)
-            X_obs_list.append(x_enc)
-            Y_obs_list.append(float(res_rnd.objective[k]))
+            X_obs_med.append(x_enc)
+            Y_obs_med.append(float(res_rnd.objective[k]))
 
         # Update best_x
-        best_global_idx = int(np.nanargmax(Y_obs_list))
-        best_x = X_obs_list[best_global_idx]
+        if Y_obs_med:
+            best_global_idx = int(np.nanargmax(Y_obs_med))
+            best_x = X_obs_med[best_global_idx]
+        else:
+            # No medium obs yet (GP fallback before first round completes)
+            best_x = X_obs_fast[int(np.nanargmax(Y_obs_fast))]
 
         _save_results(sorted(all_rows, key=lambda r: -r["objective"])[:100], csv_path)
 
