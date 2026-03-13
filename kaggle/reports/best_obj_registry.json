@@ -1,0 +1,218 @@
+{
+  "bear_call_ladder": {
+    "obj": 0.501,
+    "sweep": "min"
+  },
+  "bear_call_spread_credit": {
+    "obj": 0.514,
+    "sweep": "min"
+  },
+  "bear_put_ladder": {
+    "obj": 0.807,
+    "sweep": "med"
+  },
+  "bear_put_spread": {
+    "obj": 0.594,
+    "sweep": "med"
+  },
+  "bull_call_ladder": {
+    "obj": 0.466,
+    "sweep": "min"
+  },
+  "bull_call_spread": {
+    "obj": 0.058,
+    "sweep": "med-max"
+  },
+  "bull_put_ladder": {
+    "obj": 0.522,
+    "sweep": "med-max"
+  },
+  "bull_put_spread_credit": {
+    "obj": 0.793,
+    "sweep": "med"
+  },
+  "calendar_call": {
+    "obj": 0.991,
+    "sweep": "med-max"
+  },
+  "calendar_put": {
+    "obj": 0.951,
+    "sweep": "min-med"
+  },
+  "call_ratio_backspread": {
+    "obj": 0.374,
+    "sweep": "min"
+  },
+  "call_ratio_spread": {
+    "obj": 0.239,
+    "sweep": "min"
+  },
+  "cash_secured_put": {
+    "obj": 0.362,
+    "sweep": "min"
+  },
+  "collar": {
+    "obj": 0.488,
+    "sweep": "med"
+  },
+  "covered_call": {
+    "obj": 0.458,
+    "sweep": "med-max"
+  },
+  "covered_short_straddle": {
+    "obj": 0.733,
+    "sweep": "med"
+  },
+  "covered_short_strangle": {
+    "obj": 0.527,
+    "sweep": "med-max"
+  },
+  "diagonal_call": {
+    "obj": 1.224,
+    "sweep": "min"
+  },
+  "diagonal_put": {
+    "obj": 0.431,
+    "sweep": "med-max"
+  },
+  "double_diagonal": {
+    "obj": 0.93,
+    "sweep": "med"
+  },
+  "guts": {
+    "obj": 0.73,
+    "sweep": "med-max"
+  },
+  "inverse_call_broken_wing": {
+    "obj": 0.261,
+    "sweep": "min-med"
+  },
+  "inverse_iron_butterfly": {
+    "obj": 1.314,
+    "sweep": "med-max"
+  },
+  "inverse_iron_condor": {
+    "obj": 1.308,
+    "sweep": "med-max"
+  },
+  "inverse_put_broken_wing": {
+    "obj": 0.605,
+    "sweep": "min-med"
+  },
+  "iron_butterfly": {
+    "obj": 1.479,
+    "sweep": "med-max"
+  },
+  "iron_condor": {
+    "obj": 1.272,
+    "sweep": "med"
+  },
+  "jade_lizard": {
+    "obj": 1.944,
+    "sweep": "med-max"
+  },
+  "long_call": {
+    "obj": 0.15,
+    "sweep": "min-med"
+  },
+  "long_call_condor": {
+    "obj": 1.348,
+    "sweep": "med-max"
+  },
+  "long_combo": {
+    "obj": 0.499,
+    "sweep": "med"
+  },
+  "long_put": {
+    "obj": 0.404,
+    "sweep": "min-med"
+  },
+  "long_put_butterfly": {
+    "obj": 1.238,
+    "sweep": "med-max"
+  },
+  "long_put_condor": {
+    "obj": 1.175,
+    "sweep": "med-max"
+  },
+  "long_synthetic_future": {
+    "obj": 0.139,
+    "sweep": "med"
+  },
+  "protective_put": {
+    "obj": 0.404,
+    "sweep": "med-max"
+  },
+  "put_broken_wing": {
+    "obj": 0.621,
+    "sweep": "med-max"
+  },
+  "put_ratio_backspread": {
+    "obj": 0.881,
+    "sweep": "med-max"
+  },
+  "put_ratio_spread": {
+    "obj": 0.641,
+    "sweep": "med-max"
+  },
+  "reverse_jade_lizard": {
+    "obj": 1.915,
+    "sweep": "med-max"
+  },
+  "short_call": {
+    "obj": 0.563,
+    "sweep": "med-max"
+  },
+  "short_call_condor": {
+    "obj": 1.139,
+    "sweep": "med-max"
+  },
+  "short_combo": {
+    "obj": 0.364,
+    "sweep": "med-max"
+  },
+  "short_guts": {
+    "obj": 0.713,
+    "sweep": "med"
+  },
+  "short_put": {
+    "obj": 0.591,
+    "sweep": "med"
+  },
+  "short_put_condor": {
+    "obj": 1.139,
+    "sweep": "med-max"
+  },
+  "short_straddle": {
+    "obj": 0.201,
+    "sweep": "min"
+  },
+  "short_strangle": {
+    "obj": 0.291,
+    "sweep": "med"
+  },
+  "short_synthetic_future": {
+    "obj": 0.139,
+    "sweep": "med"
+  },
+  "straddle_long": {
+    "obj": 0.306,
+    "sweep": "med"
+  },
+  "strangle_long": {
+    "obj": 0.517,
+    "sweep": "med-max"
+  },
+  "strap": {
+    "obj": 0.729,
+    "sweep": "med"
+  },
+  "strip": {
+    "obj": 0.72,
+    "sweep": "min-med"
+  },
+  "synthetic_put": {
+    "obj": 0.662,
+    "sweep": "med-max"
+  }
+}

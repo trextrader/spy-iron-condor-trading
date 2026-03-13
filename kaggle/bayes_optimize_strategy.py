@@ -24,6 +24,7 @@ import csv
 import datetime
 import hashlib
 import io
+import json
 import contextlib
 import os
 import time
@@ -42,6 +43,32 @@ from optimizer_engine   import (run_backtest_optimizer_batch, ObjectiveSpec,
 from optimization_intensity      import get_intensity_policy, IntensityPolicy
 from adaptive_search_space_builder import (build_adaptive_search_space,
                                             AdaptiveParamManifestRow)
+
+
+# ── Cross-sweep best-objective registry ──────────────────────────────────────
+# Prevents any single sweep from overwriting a better result found in a prior
+# sweep.  Updated by apply_best_params.py (authoritative) and by auto-apply
+# when a new run genuinely beats the stored best.
+_REGISTRY_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "reports", "best_obj_registry.json"
+)
+
+
+def _load_best_registry() -> dict:
+    """Return {strategy_name: {"obj": float, "intensity": str}} or {} if missing."""
+    if os.path.exists(_REGISTRY_PATH):
+        try:
+            with open(_REGISTRY_PATH, "r") as _f:
+                return json.load(_f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_best_registry(registry: dict) -> None:
+    os.makedirs(os.path.dirname(_REGISTRY_PATH), exist_ok=True)
+    with open(_REGISTRY_PATH, "w") as _f:
+        json.dump(registry, _f, indent=2, sort_keys=True)
 
 
 # ── BoTorch availability ──────────────────────────────────────────────────────
@@ -466,15 +493,25 @@ def run_bayes_optimizer(
             print("         Skipping apply to avoid overwriting strategy file with invalid params.")
         elif auto_apply:
             # autoall mode: silently apply rank 1 without prompting,
-            # but only if the result clears the minimum objective threshold.
+            # but only if it clears the intensity floor AND beats the all-time
+            # best objective stored in best_obj_registry.json.
             chosen = final_rows[0]
-            if chosen['objective'] < min_apply_obj:
-                print(f"  [autoall] Skipping apply — obj={chosen['objective']:.4f} < "
+            _new_obj = chosen['objective']
+            _registry = _load_best_registry()
+            _prev_best = _registry.get(template_id, {}).get("obj", 0.0)
+            if _new_obj < min_apply_obj:
+                print(f"  [autoall] Skipping apply — obj={_new_obj:.4f} < "
                       f"min_apply_obj={min_apply_obj:.2f}  (existing params preserved)")
+            elif _new_obj <= _prev_best:
+                print(f"  [autoall] Skipping apply — obj={_new_obj:.4f} ≤ "
+                      f"registry best {_prev_best:.4f}  (existing params preserved)")
             else:
-                print(f"  [autoall] Auto-applying rank 1:  obj={chosen['objective']:.4f}  "
-                      f"net={chosen['net_pct']:+.1f}%  dd={chosen['max_dd']:.1f}%")
+                print(f"  [autoall] Auto-applying rank 1:  obj={_new_obj:.4f}  "
+                      f"net={chosen['net_pct']:+.1f}%  dd={chosen['max_dd']:.1f}%"
+                      + (f"  [NEW BEST vs {_prev_best:.4f}]" if _prev_best > 0 else ""))
                 _apply_best_config(template_id, chosen, space)
+                _registry[template_id] = {"obj": _new_obj, "intensity": intensity_name}
+                _save_best_registry(_registry)
         elif sys.stdin.isatty():
             print(f"  Apply which config? [1–{n_results}, Enter to skip]: ", end="", flush=True)
             try:

@@ -11,6 +11,7 @@ Report files expected in: kaggle/reports/
 Strategy files expected in: kaggle/strategies/
 """
 
+import json
 import os
 import re
 import sys
@@ -315,7 +316,17 @@ def main():
         ok, msg = _apply_params(strat, entry["params"], obj, entry["sweep"])
         results.append((strat, entry["sweep"], obj, entry["net_pct"], entry["dd_pct"], msg))
 
-    # ── Step 5: Print summary table ──────────────────────────────────────────
+    # ── Step 5: Write best_obj_registry.json ─────────────────────────────────
+    registry = {}
+    for strat, entry in best.items():
+        if entry["obj"] > 0:
+            registry[strat] = {"obj": entry["obj"], "sweep": entry["sweep"]}
+    registry_path = os.path.join(REPORTS_DIR, "best_obj_registry.json")
+    with open(registry_path, "w") as f:
+        json.dump(registry, f, indent=2, sort_keys=True)
+    print(f"\n[registry] Saved {registry_path}  ({len(registry)} strategies)")
+
+    # ── Step 6: Print summary table ──────────────────────────────────────────
     print()
     sep = "-" * 93
     print("=" * 95)
