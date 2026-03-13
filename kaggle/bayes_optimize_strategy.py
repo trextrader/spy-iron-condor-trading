@@ -133,12 +133,20 @@ def _fit_gp_and_suggest(
     bounds = torch.zeros(2, space.dim, **tkw)
     bounds[1] = 1.0
 
+    import time as _time
+    _t0 = _time.time()
+    mem_mb = (torch.cuda.memory_allocated(device) // 1024 // 1024
+              if device and device.type == "cuda" else 0)
+    print(f"  [GP] device={X.device}  N={X.shape[0]} D={X.shape[1]} q={K}  "
+          f"vram_used={mem_mb}MB")
+
     model = SingleTaskGP(X, Y)
     mll   = ExactMarginalLogLikelihood(model.likelihood, model)
-    print(f"  [GP] fitting on {X.device}  N={X.shape[0]} D={X.shape[1]} q={K}")
     fit_gpytorch_mll(mll)
     model.eval()
+    print(f"  [GP] fit done in {_time.time()-_t0:.1f}s")
 
+    _t1 = _time.time()
     acqf = qLogNoisyExpectedImprovement(
         model=model,
         X_baseline=X,
@@ -150,6 +158,8 @@ def _fit_gp_and_suggest(
         num_restarts=5,
         raw_samples=128,
     )
+    print(f"  [GP] acqf optimized in {_time.time()-_t1:.1f}s  "
+          f"(total {_time.time()-_t0:.1f}s)")
     return candidates.float().cpu()    # [K, D] in [0,1], always back to CPU
 
 
