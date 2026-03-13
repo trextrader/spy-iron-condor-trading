@@ -135,6 +135,7 @@ def _fit_gp_and_suggest(
 
     model = SingleTaskGP(X, Y)
     mll   = ExactMarginalLogLikelihood(model.likelihood, model)
+    print(f"  [GP] fitting on {X.device}  N={X.shape[0]} D={X.shape[1]} q={K}")
     fit_gpytorch_mll(mll)
     model.eval()
 
