@@ -64,7 +64,7 @@ class BatchEvalResult:
 @dataclass
 class ObjectiveSpec:
     """Specifies how to compute the scalar objective from trade results."""
-    min_trades:  int   = 5
+    min_trades:  int   = 12
     max_dd_cap:  float = 10.0   # max drawdown cap (hard constraint)
     min_pf:      float = 1.0    # min profit factor (soft penalty)
 

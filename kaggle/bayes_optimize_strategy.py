@@ -13,7 +13,7 @@ CLI usage (via condor_brain_backtest_v45.py --optimize --optimize-mode bayes):
   --bo-init-trials 32
   --bo-batch-size  16
   --bo-rounds      8
-  --bo-min-trades  5
+  --bo-min-trades  12
   --bo-max-dd-cap  10.0
   --bo-min-pf      1.0
 """
