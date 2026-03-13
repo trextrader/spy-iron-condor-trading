@@ -117,34 +117,39 @@ def _fit_gp_and_suggest(
     Y_obs: torch.Tensor,   # [N, 1]
     K:     int,
     space: SearchSpaceSpec,
+    device: Optional[torch.device] = None,
 ) -> torch.Tensor:
-    """Fit GP and return K new candidates via qLogNEI. Returns [K, D]."""
+    """Fit GP and return K new candidates via qLogNEI. Returns [K, D] on CPU."""
     from botorch.models import SingleTaskGP
     from botorch.fit    import fit_gpytorch_mll
     from botorch.acquisition.logei import qLogNoisyExpectedImprovement
     from botorch.optim  import optimize_acqf
     from gpytorch.mlls  import ExactMarginalLogLikelihood
 
-    bounds = torch.zeros(2, space.dim, dtype=torch.double)
+    # Move GP tensors to device (GPU if available) — numpy backtest is always CPU
+    tkw = dict(dtype=torch.double, device=device)
+    X = X_obs.to(**tkw)
+    Y = Y_obs.to(**tkw)
+    bounds = torch.zeros(2, space.dim, **tkw)
     bounds[1] = 1.0
 
-    model = SingleTaskGP(X_obs.double(), Y_obs.double())
+    model = SingleTaskGP(X, Y)
     mll   = ExactMarginalLogLikelihood(model.likelihood, model)
     fit_gpytorch_mll(mll)
     model.eval()
 
     acqf = qLogNoisyExpectedImprovement(
         model=model,
-        X_baseline=X_obs.double(),
+        X_baseline=X,
     )
     candidates, _ = optimize_acqf(
         acqf,
-        bounds=bounds.double(),
+        bounds=bounds,
         q=K,
         num_restarts=5,
         raw_samples=128,
     )
-    return candidates.float()          # [K, D] in [0,1]
+    return candidates.float().cpu()    # [K, D] in [0,1], always back to CPU
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
@@ -370,7 +375,7 @@ def run_bayes_optimizer(
                 # Normalise Y
                 y_mean, y_std = Y_t.mean(), Y_t.std().clamp_min(1e-6)
                 Y_norm = (Y_t - y_mean) / y_std
-                x_next = _fit_gp_and_suggest(X_t, Y_norm, bo_batch, space)
+                x_next = _fit_gp_and_suggest(X_t, Y_norm, bo_batch, space, device=device)
                 cand_batch = decode_candidate_tensor(x_next, space)
             except Exception as e:
                 print(f"  [BO round {rnd}] GP fit failed ({e}), falling back to perturbation")
