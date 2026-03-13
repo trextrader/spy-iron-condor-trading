@@ -25,6 +25,7 @@ import sys
 import json
 import uuid
 import hashlib
+import time
 import subprocess
 import torch
 import pandas as pd
@@ -4148,6 +4149,8 @@ def main():
                 print(f"[autoall] min_apply_obj={_apply_floor}  (intensity={getattr(args,'optimize_intensity','med')})")
                 print(f"[autoall] Templates ({_n_total}): {_all_templates}\n")
                 _autoall_summary = []
+                _autoall_t0 = time.time()
+                _strat_times: list = []   # wall-time (s) per non-skipped strategy
                 for _ti, _tmpl in enumerate(_all_templates, 1):
                     # ── Dead strategy: skip before spending any GPU time ──────────────────────
                     if _tmpl in _AUTOALL_SKIP_TEMPLATES:
@@ -4155,6 +4158,7 @@ def main():
                         _autoall_summary.append((_tmpl, None, "skipped:class_idx=6"))
                         continue
                     print(f"\n[autoall] ─── {_ti}/{_n_total}: {_tmpl} ───────────────────────────────")
+                    _strat_t0 = time.time()
                     try:
                         _rows = run_bayes_optimizer(
                             run_backtest, args,
@@ -4176,11 +4180,32 @@ def main():
                         print(f"[autoall] ERROR for {_tmpl}: {_exc}")
                         _tb.print_exc()
                         _autoall_summary.append((_tmpl, None, str(_exc)))
+                    _strat_elapsed = time.time() - _strat_t0
+                    _strat_times.append(_strat_elapsed)
+                    # ── Per-strategy timing + rolling ETA ────────────────────────────────────
+                    _n_done_so_far = len(_strat_times)
+                    _n_skipped_so_far = sum(1 for _, _, _e in _autoall_summary if _e and _e.startswith("skipped:"))
+                    _n_remaining_strats = (_n_total - _n_skipped_so_far) - _n_done_so_far
+                    _avg_s = sum(_strat_times) / _n_done_so_far
+                    _eta_s = _avg_s * _n_remaining_strats
+                    _total_elapsed = time.time() - _autoall_t0
+                    def _fmt_sec(s):
+                        m, sec = divmod(int(s), 60)
+                        h, m = divmod(m, 60)
+                        return f"{h}h {m:02d}m {sec:02d}s" if h else f"{m}m {sec:02d}s"
+                    print(f"[autoall] ✓ {_tmpl}  took {_fmt_sec(_strat_elapsed)}  "
+                          f"(avg {_fmt_sec(_avg_s)}/strategy)  "
+                          f"elapsed {_fmt_sec(_total_elapsed)}  "
+                          f"ETA {_fmt_sec(_eta_s)} remaining  "
+                          f"[{_n_done_so_far}/{_n_done_so_far + _n_remaining_strats} done]")
                 # ── Final summary table ──────────────────────────────────────────
                 _n_skipped = sum(1 for _, _, _e in _autoall_summary if _e and _e.startswith("skipped:"))
                 _n_optimized = _n_total - _n_skipped
+                _autoall_total_s = time.time() - _autoall_t0
                 print(f"\n[autoall] {'═'*68}")
                 print(f"[autoall] COMPLETE — {_n_optimized}/{_n_total} strategies optimized  ({_n_skipped} skipped)")
+                print(f"[autoall] Total wall time: {_fmt_sec(_autoall_total_s)}  "
+                      f"(avg {_fmt_sec(sum(_strat_times)/len(_strat_times) if _strat_times else 0)}/strategy)")
                 print(f"[autoall] {'═'*68}")
                 print(f"  {'STRATEGY':<32}  {'obj':>8}  {'net%':>7}  {'dd%':>6}  {'trades':>7}  {'status'}")
                 for _tmpl, _r, _err in _autoall_summary:
@@ -4252,6 +4277,9 @@ def main():
                         print(f"  {_tmpl:<{_STRAT_W}}  {'  '.join(_pvals)}  {'  '.join(_pfvals)}")
                 print(f"  {_sep}")
             else:
+                _single_t0 = time.time()
+                _single_tmpl = list(ALLOWED_TEMPLATE_IDS)[0] if ALLOWED_TEMPLATE_IDS else "?"
+                print(f"[optimizer] Running BO for: {_single_tmpl}")
                 run_bayes_optimizer(
                     run_backtest, args,
                     v43_outputs=v43_outputs,
@@ -4264,6 +4292,11 @@ def main():
                     auto_apply=False,
                     intensity_name=getattr(args, 'optimize_intensity', 'med'),
                 )
+                _single_elapsed = time.time() - _single_t0
+                _sm, _ss = divmod(int(_single_elapsed), 60)
+                _sh, _sm = divmod(_sm, 60)
+                _s_str = f"{_sh}h {_sm:02d}m {_ss:02d}s" if _sh else f"{_sm}m {_ss:02d}s"
+                print(f"[optimizer] ✓ {_single_tmpl}  completed in {_s_str}")
         else:
             # Interactive grid search (original)
             from strategy_optimizer import run_optimizer
