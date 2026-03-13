@@ -3661,8 +3661,8 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
         print(f"\n  CREDIT SAMPLES (first {len(run_backtest._credit_samples)} low-credit trades):")
         for idx, cs in enumerate(run_backtest._credit_samples):
             print(f"  [{idx+1}] ts={cs.get('ts','?')}  spot=${cs.get('spot',0):.2f}")
-            print(f"       gross=${cs['gross']:.4f}  net=${cs['net']:.4f}  "
-                  f"min_req=${cs['min_req']:.4f}  slippage=${cs['slippage']:.4f}")
+            print(f"       gross=${cs.get('gross',0):.4f}  net=${cs.get('net',0):.4f}  "
+                  f"min_req=${cs.get('min_req',0):.4f}  slippage=${cs.get('slippage',0):.4f}")
             print(f"       Model: call_off={cs.get('call_off',0):.2f}%  "
                   f"put_off={cs.get('put_off',0):.2f}%  width={cs.get('width',0):.2f}")
             print(f"       Calls: S{cs.get('s_call',0):.0f}(bid ${cs.get('s_call_bid',0):.2f}) -> "
