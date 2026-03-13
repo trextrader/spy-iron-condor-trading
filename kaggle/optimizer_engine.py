@@ -86,6 +86,8 @@ class ObjectiveSpec:
         obj = np.where(total < self.min_trades, -100.0 + net_pct * 0.01, obj)
         # Soft constraint: extreme drawdown cap
         obj = np.where(max_dd > self.max_dd_cap, obj * 0.5, obj)
+        # Soft constraint: profit factor below threshold (was declared but never applied)
+        obj = np.where(pf < self.min_pf, obj * 0.7, obj)
         return obj
 
 
