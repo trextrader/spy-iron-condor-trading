@@ -54,10 +54,10 @@ CONFIG = {
 
     # ── Exit: Stop-Loss ───────────────────────────────────────────────────
     "stop_loss_mult":     2.0,   # Close when loss >= N * |credit| * qty * 100
-    "stop_loss_dollar":   1000,  # Hard dollar cap per trade (BO range 500–1500, step 250)
+    "stop_loss_dollar":   600,  # Hard dollar cap per trade (BO range 500–1500, step 250)
 
     # ── Exit: Profit Target ───────────────────────────────────────────────
-    "profit_target":      1500,   # Dollar target (BO range 500–2000, step 250)
+    "profit_target":      775,   # Dollar target (BO range 500–2000, step 250)
 
     # ── Template Preference ───────────────────────────────────────────────
     "fallback_template":  None,        # If no template eligible, use this template_id
@@ -73,17 +73,17 @@ CONFIG = {
     # ── Entry: Structure (overrides neural model when not None) ──────────────
     "call_offset_pct":    0.0,  # % OTM for call strike (None = neural model)
     "put_offset_pct":     0.0,  # % OTM for put strike  (None = neural model)
-    "spread_width":       20,  # Spread width points   (BO range 5–20, step 5)
-    "target_dte":         21,  # Target DTE at entry   (BO range 7–21, step 7)
+    "spread_width":       13,  # Spread width points   (BO range 5–20, step 5)
+    "target_dte":         15,  # Target DTE at entry   (BO range 7–21, step 7)
 
     # ── Entry: Quality Filter ─────────────────────────────────────────────────
     "max_leg_spread":     0.15,  # Max bid-ask ratio per leg
 
     # ── Entry: Delta Targets (template path) ────────────────────────────────
-    "short_delta":        0.4221,  # Target |delta| for short (selling) strikes
+    "short_delta":        0.4171,  # Target |delta| for short (selling) strikes
     "wing_delta":         0.2,  # Target |delta| for long wing strikes (None = N/A)
 
     # ── Exit: Time ────────────────────────────────────────────────────────────
-    "max_dte_exit":       2,  # Close when DTE remaining <= N (0 = expire naturally)
+    "max_dte_exit":       0,  # Close when DTE remaining <= N (0 = expire naturally)
     "hold_days":          17,  # Max calendar days held
 }
