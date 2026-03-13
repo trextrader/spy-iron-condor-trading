@@ -52,7 +52,7 @@ CONFIG = {
 
     # ── Exit: Stop-Loss ───────────────────────────────────────────────────
     "stop_loss_mult":     1.5,   # Close when loss >= N * |credit| * qty * 100
-    "stop_loss_dollar":   600,  # Hard dollar cap per trade (None = use multiplier only)
+    "stop_loss_dollar":   400,  # Hard dollar cap per trade (None = use multiplier only)
 
     # ── Exit: Profit Target ───────────────────────────────────────────────
     "profit_target":      3000,    # Dollar target (None = use 50% of credit)
@@ -72,16 +72,16 @@ CONFIG = {
     "call_offset_pct":    None,  # % OTM for call strike (None = neural model)
     "put_offset_pct":     0.0,  # % OTM for put strike  (None = neural model)
     "spread_width":       20,  # Spread width points   (None = neural model / N/A)
-    "target_dte":         17,  # Target DTE at entry   (None = neural model)
+    "target_dte":         7,  # Target DTE at entry   (None = neural model)
 
     # ── Entry: Quality Filter ─────────────────────────────────────────────────
     "max_leg_spread":     0.15,  # Max bid-ask ratio per leg
 
     # ── Entry: Delta Targets (template path) ────────────────────────────────
-    "short_delta":        0.2934,  # Target |delta| for short (selling) strikes
+    "short_delta":        0.1500,  # Target |delta| for short (selling) strikes
     "wing_delta":         0.2,  # Target |delta| for long wing strikes (None = N/A)
 
     # ── Exit: Time ────────────────────────────────────────────────────────────
-    "max_dte_exit":       2,  # Close when DTE remaining <= N (0 = expire naturally)
-    "hold_days":          15,  # Max calendar days held
+    "max_dte_exit":       0,  # Close when DTE remaining <= N (0 = expire naturally)
+    "hold_days":          10,  # Max calendar days held
 }

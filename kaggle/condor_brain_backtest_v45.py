@@ -4311,14 +4311,24 @@ def main():
                     print("[autoall] No strategy changes to commit (params unchanged from prior run).")
                 elif _r_commit.returncode == 0:
                     print(f"[autoall] Committed: {_autoall_commit_msg}")
-                    _r_push = _sp.run(
-                        ["git", "push", "origin", "main"],
+                    # Rebase onto remote first so push never fails due to diverged history
+                    _r_rebase = _sp.run(
+                        ["git", "pull", "--rebase", "origin", "main"],
                         capture_output=True, text=True
                     )
-                    if _r_push.returncode == 0:
-                        print("[autoall] Pushed to origin/main — git pull on other machines will be clean.")
+                    if _r_rebase.returncode != 0:
+                        print(f"[autoall] Rebase failed — push skipped. Run manually:\n"
+                              f"  git pull --rebase origin main && git push origin main\n"
+                              f"  {_r_rebase.stderr.strip()}")
                     else:
-                        print(f"[autoall] Push failed (commit saved locally): {_r_push.stderr.strip()}")
+                        _r_push = _sp.run(
+                            ["git", "push", "origin", "main"],
+                            capture_output=True, text=True
+                        )
+                        if _r_push.returncode == 0:
+                            print("[autoall] Pushed to origin/main — git pull on other machines will be clean.")
+                        else:
+                            print(f"[autoall] Push failed: {_r_push.stderr.strip()}")
                 else:
                     print(f"[autoall] Commit failed: {_r_commit.stderr.strip()}")
 

@@ -32,6 +32,7 @@ SWEEP_FILES = {
     "min_v2":  "GPU_Optimization_Sweep_min_v2.txt",
     "min-med": "GPU_Optimization_Sweep_min-med.txt",
     "med":     "GPU_Optimization_Sweep_med.txt",
+    "med_v2":  "GPU_Optimization_Sweep_med_v2.txt",
     "med-max": "GPU_Optimization_Sweep_med-max.txt",
 }
 

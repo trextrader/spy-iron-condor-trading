@@ -50,10 +50,10 @@ CONFIG = {
 
     # ── Exit: Stop-Loss ───────────────────────────────────────────────────
     "stop_loss_mult":     1.5,   # Close when loss >= N * |credit| * qty * 100
-    "stop_loss_dollar":   300,  # Hard dollar cap per trade (None = use multiplier only)
+    "stop_loss_dollar":   400,  # Hard dollar cap per trade (None = use multiplier only)
 
     # ── Exit: Profit Target ───────────────────────────────────────────────
-    "profit_target":      3000,    # Dollar target (None = use 50% of credit)
+    "profit_target":      400,    # Dollar target (None = use 50% of credit)
 
     # ── Template Preference ───────────────────────────────────────────────
     "fallback_template":  None,        # If no template eligible, use this template_id
@@ -70,13 +70,13 @@ CONFIG = {
     "call_offset_pct":    0.0,  # % OTM for call strike (None = neural model)
     "put_offset_pct":     0.0,  # % OTM for put strike  (None = neural model)
     "spread_width":       7,  # Spread width points   (None = neural model / N/A)
-    "target_dte":         18,  # Target DTE at entry   (None = neural model)
+    "target_dte":         11,  # Target DTE at entry   (None = neural model)
 
     # ── Entry: Quality Filter ─────────────────────────────────────────────────
     "max_leg_spread":     0.15,  # Max bid-ask ratio per leg
 
     # ── Entry: Delta Targets (template path) ────────────────────────────────
-    "short_delta":        0.3686,  # Target |delta| for short (selling) strikes
+    "short_delta":        0.4500,  # Target |delta| for short (selling) strikes
     "wing_delta":         None,  # Target |delta| for long wing strikes (None = N/A)
 
     # ── Exit: Time ────────────────────────────────────────────────────────────
