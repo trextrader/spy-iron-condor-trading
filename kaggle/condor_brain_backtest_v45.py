@@ -4277,6 +4277,40 @@ def main():
                         ]
                         print(f"  {_tmpl:<{_STRAT_W}}  {'  '.join(_pvals)}  {'  '.join(_pfvals)}")
                 print(f"  {_sep}")
+
+                # ── Auto-commit and push updated strategy files ───────────────
+                # Prevents pull conflicts: Lightning AI's auto-applied params
+                # flow back to the repo so the next pull is always clean.
+                import subprocess as _sp
+                _intensity_label = getattr(args, 'optimize_intensity', 'med')
+                _autoall_commit_msg = (
+                    f"feat(autoall): {_intensity_label} sweep — "
+                    f"apply best params ({_n_optimized}/{_n_total} strategies)"
+                )
+                print(f"\n[autoall] Committing updated strategy files...")
+                _r_add = _sp.run(
+                    ["git", "add", "kaggle/strategies/"],
+                    capture_output=True, text=True
+                )
+                _r_commit = _sp.run(
+                    ["git", "commit", "-m", _autoall_commit_msg],
+                    capture_output=True, text=True
+                )
+                if "nothing to commit" in _r_commit.stdout or "nothing to commit" in _r_commit.stderr:
+                    print("[autoall] No strategy changes to commit (params unchanged from prior run).")
+                elif _r_commit.returncode == 0:
+                    print(f"[autoall] Committed: {_autoall_commit_msg}")
+                    _r_push = _sp.run(
+                        ["git", "push", "origin", "main"],
+                        capture_output=True, text=True
+                    )
+                    if _r_push.returncode == 0:
+                        print("[autoall] Pushed to origin/main — git pull on other machines will be clean.")
+                    else:
+                        print(f"[autoall] Push failed (commit saved locally): {_r_push.stderr.strip()}")
+                else:
+                    print(f"[autoall] Commit failed: {_r_commit.stderr.strip()}")
+
             else:
                 _single_t0 = time.time()
                 _single_tmpl = list(ALLOWED_TEMPLATE_IDS)[0] if ALLOWED_TEMPLATE_IDS else "?"
