@@ -4193,7 +4193,11 @@ def main():
                         m, sec = divmod(int(s), 60)
                         h, m = divmod(m, 60)
                         return f"{h}h {m:02d}m {sec:02d}s" if h else f"{m}m {sec:02d}s"
-                    print(f"[autoall] ✓ {_tmpl}  took {_fmt_sec(_strat_elapsed)}  "
+                    _bw = int(_best.get('wins',   0)) if _best else 0
+                    _bl = int(_best.get('losses', 0)) if _best else 0
+                    _bo = _best.get('objective', 0.0) if _best else 0.0
+                    print(f"[autoall] ✓ {_tmpl}  obj={_bo:.3f}  W={_bw} L={_bl}  "
+                          f"took {_fmt_sec(_strat_elapsed)}  "
                           f"(avg {_fmt_sec(_avg_s)}/strategy)  "
                           f"elapsed {_fmt_sec(_total_elapsed)}  "
                           f"ETA {_fmt_sec(_eta_s)} remaining  "
@@ -4207,6 +4211,9 @@ def main():
                 print(f"[autoall] Total wall time: {_fmt_sec(_autoall_total_s)}  "
                       f"(avg {_fmt_sec(sum(_strat_times)/len(_strat_times) if _strat_times else 0)}/strategy)")
                 print(f"[autoall] {'═'*68}")
+                # Load registry once to show accurate applied/skipped status
+                from bayes_optimize_strategy import _load_best_registry as _lbr
+                _final_registry = _lbr()
                 print(f"  {'STRATEGY':<32}  {'obj':>8}  {'net%':>7}  {'dd%':>6}  {'wins':>6}  {'losses':>7}  {'status'}")
                 for _tmpl, _r, _err in _autoall_summary:
                     if _err and _err.startswith("skipped:"):
@@ -4215,11 +4222,15 @@ def main():
                     elif _err:
                         print(f"  {_tmpl:<32}  {'':>8}  {'':>7}  {'':>6}  {'':>6}  {'':>7}  ERROR: {_err[:40]}")
                     elif _r:
-                        _w = int(_r.get('wins',   0))
-                        _l = int(_r.get('losses', 0))
-                        print(f"  {_tmpl:<32}  {_r.get('objective',0):>8.3f}  "
+                        _w   = int(_r.get('wins',      0))
+                        _l   = int(_r.get('losses',    0))
+                        _obj = float(_r.get('objective', 0.0))
+                        # applied = registry was updated to this obj during this run
+                        _reg_obj = _final_registry.get(_tmpl, {}).get('obj', 0.0)
+                        _status  = 'applied' if abs(_reg_obj - _obj) < 1e-6 else 'skipped(registry)'
+                        print(f"  {_tmpl:<32}  {_obj:>8.3f}  "
                               f"{_r.get('net_pct',0):>7.2f}  {_r.get('max_dd',0):>6.2f}  "
-                              f"{_w:>6}  {_l:>7}  applied")
+                              f"{_w:>6}  {_l:>7}  {_status}")
                     else:
                         print(f"  {_tmpl:<32}  {'':>8}  {'':>7}  {'':>6}  {'':>6}  {'':>7}  no results")
 
