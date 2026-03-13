@@ -69,7 +69,7 @@ def build_iron_butterfly_search_space() -> SearchSpaceSpec:
     return SearchSpaceSpec(
         template_id="iron_butterfly",
         params=[
-            ParamSpec("stop_loss_dollar", 500,  1500, "grid", 50,  int),   # 21 pts
+            ParamSpec("stop_loss_dollar", 600,  1500, "grid", 50,  int),   # 19 pts
             ParamSpec("profit_target",    500,  2000, "grid", 50,  int),   # 31 pts
             ParamSpec("max_dte_exit",     0,    7,    "grid", 1,   int),   #  8 pts
             ParamSpec("spread_width",     5,    20,   "grid", 1,   int),   # 16 pts
@@ -86,8 +86,8 @@ def build_iron_condor_search_space() -> SearchSpaceSpec:
     return SearchSpaceSpec(
         template_id="iron_condor",
         params=[
-            ParamSpec("stop_loss_dollar", 300,  1500, "grid", 50,  int),   # 25 pts
-            ParamSpec("profit_target",    300,  2000, "grid", 50,  int),   # 35 pts
+            ParamSpec("stop_loss_dollar", 400,  1500, "grid", 50,  int),   # 23 pts
+            ParamSpec("profit_target",    400,  2000, "grid", 50,  int),   # 33 pts
             ParamSpec("max_dte_exit",     0,    5,    "grid", 1,   int),   #  6 pts
             ParamSpec("spread_width",     5,    20,   "grid", 1,   int),   # 16 pts
             ParamSpec("target_dte",       7,    21,   "grid", 1,   int),   # 15 pts
@@ -142,8 +142,8 @@ def build_search_space(template_id: str) -> SearchSpaceSpec:
     return SearchSpaceSpec(
         template_id=template_id,
         params=[
-            ParamSpec("stop_loss_dollar", 300,  1500, "grid", 50,  int),   # 25 pts
-            ParamSpec("profit_target",    300,  3000, "grid", 50,  int),   # 55 pts
+            ParamSpec("stop_loss_dollar", 400,  1500, "grid", 50,  int),   # 23 pts
+            ParamSpec("profit_target",    400,  3000, "grid", 50,  int),   # 53 pts
             ParamSpec("target_dte",       7,    28,   "grid", 1,   int),   # 22 pts
             ParamSpec("short_delta",      0.15, 0.45, "continuous"),       # GP free
             ParamSpec("spread_width",     5,    20,   "grid", 1,   int),   # 16 pts
