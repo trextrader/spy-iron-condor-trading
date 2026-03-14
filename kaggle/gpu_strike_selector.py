@@ -430,13 +430,13 @@ def mark_to_market_gpu(
         leg_m = cm
         sc_mid_v, sc_ok = _find_mid(leg_m, ssc_t)
         debit_t = torch.where(open_t & sc_ok, sc_mid_v,
-                              chain_right.new_full((K,), float("nan")))
+                              torch.full((K,), float("nan"), device=chain_right.device))
 
     elif strategy_family in ("short_put",):
         leg_m = pm
         sp_mid_v, sp_ok = _find_mid(leg_m, ssp_t)
         debit_t = torch.where(open_t & sp_ok, sp_mid_v,
-                              chain_right.new_full((K,), float("nan")))
+                              torch.full((K,), float("nan"), device=chain_right.device))
 
     else:   # iron_butterfly, iron_condor, generic 4-leg
         sc_mid_v, sc_ok = _find_mid(cm, ssc_t)
@@ -446,7 +446,7 @@ def mark_to_market_gpu(
         all_ok  = sc_ok & sp_ok & lc_ok & lp_ok
         debit_v = (sc_mid_v + sp_mid_v) - (lc_mid_v + lp_mid_v)
         debit_t = torch.where(open_t & all_ok, debit_v,
-                              chain_right.new_full((K,), float("nan")))
+                              torch.full((K,), float("nan"), device=chain_right.device))
 
     return debit_t.float().cpu().numpy()
 
