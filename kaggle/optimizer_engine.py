@@ -52,6 +52,7 @@ class BatchEvalResult:
     net_pnl:    np.ndarray   # [K] dollars
     net_pct:    np.ndarray   # [K] %
     max_dd:     np.ndarray   # [K] % (positive number)
+    np_dd:      np.ndarray   # [K] net_pct / max_dd style ratio
     objective:  np.ndarray   # [K] scalar to maximise
     wins:       np.ndarray   # [K] int
     losses:     np.ndarray   # [K] int
@@ -108,6 +109,15 @@ def _update_bar_mtm_drawdown(
     )
     max_dd = np.maximum(max_dd, dd_now)
     return peak, max_dd
+
+
+def _compute_np_dd_ratio(net_pct: np.ndarray, max_dd: np.ndarray) -> np.ndarray:
+    """Mirror the legacy strategy_optimizer ratio for side-by-side comparison."""
+    return np.where(
+        max_dd > 0.01,
+        net_pct / max_dd,
+        np.where(net_pct > 0, net_pct * 100.0, 0.0),
+    )
 
 
 # ── Chain helper ──────────────────────────────────────────────────────────────
@@ -1175,19 +1185,23 @@ def run_backtest_optimizer_batch(
                 print(f"  [WARN] >50% MtM used intrinsic fallback — P&L accuracy may be low")
         print(f"[engine] Per-candidate summary (K={K}):")
         print(f"  {'k':>4}  {'trades':>6}  {'wins':>5}  {'losses':>6}  {'net_pct':>8}  "
-              f"{'max_dd':>7}  {'pf':>6}  {'obj':>8}")
+              f"{'max_dd':>7}  {'np/dd':>8}  {'pf':>6}  {'obj':>8}")
         total_c = wins + losses
         wr_c    = wins / np.maximum(total_c, 1)
         # Capped profit factor: avoid quadrillion display when gross_loss=0
         pf_c    = np.where(gross_loss > 0, gross_win / gross_loss,
                            np.where(gross_win > 0, 999.0, 1.0))
+        np_dd_c = _compute_np_dd_ratio(
+            (equity - STARTING_EQUITY) / STARTING_EQUITY * 100.0,
+            max_dd,
+        )
         obj_c   = objective_spec.compute(
             (equity - STARTING_EQUITY) / STARTING_EQUITY * 100.0, max_dd, total_c, pf_c)
         for k in range(K):
             flag = " *** BEST" if k == int(np.nanargmax(obj_c)) else ""
             print(f"  {k:>4}  {total_c[k]:>6}  {wins[k]:>5}  {losses[k]:>6}  "
                   f"{(equity[k]-STARTING_EQUITY)/STARTING_EQUITY*100:>8.2f}%  "
-                  f"{max_dd[k]:>6.2f}%  {pf_c[k]:>6.2f}  {obj_c[k]:>8.3f}{flag}")
+                  f"{max_dd[k]:>6.2f}%  {np_dd_c[k]:>8.3f}  {pf_c[k]:>6.2f}  {obj_c[k]:>8.3f}{flag}")
 
     # ── Metrics ───────────────────────────────────────────────────────────
     net_pnl  = equity - STARTING_EQUITY
@@ -1198,6 +1212,7 @@ def run_backtest_optimizer_batch(
     pf       = np.where(gross_loss > 0,
                         gross_win / gross_loss,
                         np.where(gross_win > 0, 999.0, 1.0))
+    np_dd    = _compute_np_dd_ratio(net_pct, max_dd)
     objective = objective_spec.compute(net_pct, max_dd, total, pf)
 
     wall_sec = time.time() - t0
@@ -1206,6 +1221,7 @@ def run_backtest_optimizer_batch(
         net_pnl   = net_pnl,
         net_pct   = net_pct,
         max_dd    = max_dd,
+        np_dd     = np_dd,
         objective = objective,
         wins      = wins,
         losses    = losses,

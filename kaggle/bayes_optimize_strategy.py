@@ -101,6 +101,7 @@ def _make_row(rank: int, cfg: Dict, res: BatchEvalResult, k: int) -> Dict:
     row["net_pnl"]       = round(float(res.net_pnl[k]),   2)
     row["net_pct"]       = round(float(res.net_pct[k]),   2)
     row["max_dd"]        = round(float(res.max_dd[k]),    2)
+    row["np_dd"]         = round(float(res.np_dd[k]),     3)
     row["objective"]     = round(float(res.objective[k]), 4)
     row["wins"]          = int(res.wins[k])
     row["losses"]        = int(res.losses[k])
@@ -499,8 +500,8 @@ def run_bayes_optimizer(
               f"Use --bo-init-trials 10+ to see 10 results.")
     print("=" * 68)
     # Data keys for row lookup; display labels shown in header (rename wins/losses)
-    _data_keys = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "objective", "wins", "losses"]
-    _hdr_labels = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "objective", "#wins", "#losses"]
+    _data_keys = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "np_dd", "objective", "wins", "losses"]
+    _hdr_labels = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "np_dd", "objective", "#wins", "#losses"]
     print("  " + f"{'#':>4}  " + "  ".join(f"{h:>16}" for h in _hdr_labels))
     for idx, row in enumerate(final_rows, 1):
         vals = []
@@ -533,6 +534,7 @@ def run_bayes_optimizer(
             print(f"          objective     = {chosen.get('objective', 0.0):.4f}")
             print(f"          net_pct       = {chosen.get('net_pct', 0.0):+.2f}%")
             print(f"          max_dd        = {abs(float(chosen.get('max_dd', 0.0))):.2f}%")
+            print(f"          np_dd         = {chosen.get('np_dd', 0.0):.3f}")
             print(f"          profit_factor = {chosen.get('profit_factor', 0.0):.3f}")
             print(f"          wins          = {wins}")
             print(f"          losses        = {losses}")
