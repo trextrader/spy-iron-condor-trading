@@ -109,68 +109,68 @@ DEFAULT_GPU_PROFILE = GPU_PROFILES["t4"]
 #
 # Design rules:
 #   1. bo_init_trials MUST be >= gpu_k_threshold (Sobol phase hits GPU path).
-#   2. For A100/H100/H200: scale init_trials aggressively — these GPUs can handle
-#      K=1024–4096 without OOM; large K saturates the memory bus and pushes
-#      GPU utilisation above 50%.
-#   3. T4 caps at K=1024 (safe VRAM margin: 1024×3MB + 5.8GB = 8.9 GB of 16 GB).
-#   4. L40S caps at K=2048 (2048×3MB + 5.8GB = 12.0 GB of 48 GB; leaves room).
-#   5. A100-40GB caps at K=4096 (4096×3MB + 5.8GB = 18.2 GB of 40 GB).
-#   6. H100/H200 can run K=4096+ comfortably.
-#   7. bo_batch_size for GP rounds only needs to exceed gpu_k_threshold to use
-#      the GPU path; larger values mean more parallel GP proposals.
+#   2. bo_batch_size for GP rounds must also be large enough to keep the GPU busy.
+#      Observed: L40S with q=24 → GPU at ~20% utilization (too small).
+#      Rule: bo_batch_size >= 4 × gpu_k_threshold for meaningful GPU saturation.
+#   3. T4 caps at K=1024 init (VRAM: 1024×3MB + 5.8GB = 8.9 GB of 16 GB).
+#      T4 GP batches capped at 128 (at threshold — CPU is faster below this).
+#   4. L40S: init up to 2048, GP batches 64–128 (tested: q=24 underutilizes GPU).
+#   5. A100-40GB: init up to 4096, GP batches 64–256.
+#   6. H100/H200: init up to 4096+, GP batches 128–256.
+#   7. Acquisition optimization time scales with q but plateaus; test in practice.
 # ---------------------------------------------------------------------------
 
 GPU_INTENSITY_MATRIX: Dict[Tuple[str, str], Tuple] = {
     # ── T4 · 16 GB VRAM · threshold K≥128 · max safe K≈1024 ─────────────
-    # At K=1024: GPU ~12ms; CPU would take 99ms → ~8× speedup.
-    # ~100% GPU utilisation confirmed by user at K=1024 (gpu-sobol run).
-    ("t4", "min"):     (7,    128,   8, 2, ["fast"]),
-    ("t4", "min-med"): (9,    256,   8, 3, ["fast", "medium"]),
-    ("t4", "med"):     (11,   512,  12, 4, ["fast", "medium"]),
-    ("t4", "med-max"): (13,   768,  14, 5, ["fast", "medium", "full"]),
-    ("t4", "max"):     (999, 1024,  16, 6, ["fast", "medium", "full"]),
-    ("t4", "sobol"):   (11,  1024,  16, 0, ["fast", "medium"]),
+    # At K=1024: GPU ~12ms; CPU 99ms → ~8× speedup.  ~100% utilization confirmed.
+    # GP batches kept at 128 (threshold) — T4 is only marginally faster than CPU
+    # at small K, so large GP batches would slow acquisition more than they help.
+    ("t4", "min"):     (7,    128, 128, 2, ["fast"]),
+    ("t4", "min-med"): (9,    256, 128, 3, ["fast", "medium"]),
+    ("t4", "med"):     (11,   512, 128, 4, ["fast", "medium"]),
+    ("t4", "med-max"): (13,   768, 128, 5, ["fast", "medium", "full"]),
+    ("t4", "max"):     (999, 1024, 128, 6, ["fast", "medium", "full"]),
+    ("t4", "sobol"):   (11,  1024, 128, 0, ["fast", "medium"]),
 
     # ── L40S · 48 GB VRAM · threshold K≥48 · max safe K≈2048 ────────────
-    # At K=2048: GPU ~4.5ms*2 ≈ 9ms (memory-bound); CPU 99ms → ~11× speedup.
-    ("l40s", "min"):     (7,    128,   8, 2, ["fast"]),
-    ("l40s", "min-med"): (9,    256,  12, 3, ["fast", "medium"]),
-    ("l40s", "med"):     (11,   512,  16, 4, ["fast", "medium"]),
-    ("l40s", "med-max"): (13,  1024,  24, 5, ["fast", "medium", "full"]),
-    ("l40s", "max"):     (999, 2048,  32, 6, ["fast", "medium", "full"]),
-    ("l40s", "sobol"):   (11,  2048,  32, 0, ["fast", "medium"]),
+    # Observed: q=24 → 20% GPU utilization during GP rounds. Increase to 64+.
+    # At K=64 GPU still faster than CPU by ~4× (4.5ms vs 6.2ms CPU); at K=128 ~2.7×.
+    ("l40s", "min"):     (7,    128,  64, 2, ["fast"]),
+    ("l40s", "min-med"): (9,    256,  64, 3, ["fast", "medium"]),
+    ("l40s", "med"):     (11,   512,  64, 4, ["fast", "medium"]),
+    ("l40s", "med-max"): (13,  1024,  64, 5, ["fast", "medium", "full"]),
+    ("l40s", "max"):     (999, 2048, 128, 6, ["fast", "medium", "full"]),
+    ("l40s", "sobol"):   (11,  2048, 128, 0, ["fast", "medium"]),
 
     # ── A100-40GB · 40 GB VRAM · threshold K≥32 · max safe K≈4096 ───────
-    # At K=1024: GPU flat ~1935µs; CPU 99ms → ~51× speedup  (bandwidth ≈ 3.1 GB).
-    # At K=2048: GPU ~3.8ms (memory-bound); CPU 198ms → ~52× speedup.
-    # At K=4096: GPU ~7.6ms; CPU 397ms → ~52× speedup. VRAM: 18 GB of 40 GB.
-    # med uses K=1024 — near bandwidth saturation, >50% GPU utilization.
-    ("a100", "min"):     (7,    256,  16, 2, ["fast"]),
-    ("a100", "min-med"): (9,    512,  16, 3, ["fast", "medium"]),
-    ("a100", "med"):     (11,  1024,  24, 4, ["fast", "medium"]),
-    ("a100", "med-max"): (13,  2048,  32, 5, ["fast", "medium", "full"]),
-    ("a100", "max"):     (999, 4096,  48, 6, ["fast", "medium", "full"]),
-    ("a100", "sobol"):   (11,  1024,  24, 0, ["fast", "medium"]),
+    # At K=1024: ~51× speedup. med uses K=1024 init.
+    # GP batches at 128+ to keep GPU meaningfully busy during BO rounds.
+    ("a100", "min"):     (7,    256,  64, 2, ["fast"]),
+    ("a100", "min-med"): (9,    512,  64, 3, ["fast", "medium"]),
+    ("a100", "med"):     (11,  1024, 128, 4, ["fast", "medium"]),
+    ("a100", "med-max"): (13,  2048, 128, 5, ["fast", "medium", "full"]),
+    ("a100", "max"):     (999, 4096, 256, 6, ["fast", "medium", "full"]),
+    ("a100", "sobol"):   (11,  1024, 128, 0, ["fast", "medium"]),
 
     # ── H100 · 80 GB VRAM · threshold K≥16 · max safe K≈4096+ ───────────
-    # 3350 GB/s bandwidth → K=1024 in ~0.93ms; K=2048 in ~1.85ms.
-    # Large VRAM allows K=4096 (18.2 GB of 80 GB).
-    ("h100", "min"):     (7,    256,  16, 2, ["fast"]),
-    ("h100", "min-med"): (9,    512,  32, 3, ["fast", "medium"]),
-    ("h100", "med"):     (11,  1024,  32, 4, ["fast", "medium"]),
-    ("h100", "med-max"): (13,  2048,  64, 5, ["fast", "medium", "full"]),
-    ("h100", "max"):     (999, 4096,  64, 6, ["fast", "medium", "full"]),
-    ("h100", "sobol"):   (11,  2048,  32, 0, ["fast", "medium"]),
+    # 3350 GB/s bandwidth → K=1024 in ~0.93ms; very fast per batch.
+    # GP batches at 128–256 to saturate during BO rounds.
+    ("h100", "min"):     (7,    256,  64, 2, ["fast"]),
+    ("h100", "min-med"): (9,    512, 128, 3, ["fast", "medium"]),
+    ("h100", "med"):     (11,  1024, 128, 4, ["fast", "medium"]),
+    ("h100", "med-max"): (13,  2048, 128, 5, ["fast", "medium", "full"]),
+    ("h100", "max"):     (999, 4096, 256, 6, ["fast", "medium", "full"]),
+    ("h100", "sobol"):   (11,  2048, 128, 0, ["fast", "medium"]),
 
     # ── H200 · 141 GB VRAM · threshold K≥8 · max safe K≈8192+ ──────────
     # 4800 GB/s bandwidth → K=1024 in ~0.65ms; K=4096 in ~2.6ms.
-    # VRAM allows K=8192 (30.6 GB of 141 GB).
-    ("h200", "min"):     (7,    256,  16, 2, ["fast"]),
-    ("h200", "min-med"): (9,    512,  32, 3, ["fast", "medium"]),
-    ("h200", "med"):     (11,  1024,  32, 4, ["fast", "medium"]),
-    ("h200", "med-max"): (13,  2048,  64, 5, ["fast", "medium", "full"]),
-    ("h200", "max"):     (999, 4096, 128, 6, ["fast", "medium", "full"]),
-    ("h200", "sobol"):   (11,  4096,  64, 0, ["fast", "medium"]),
+    # VRAM allows K=8192 (30.6 GB of 141 GB). GP batches pushed to 128–256.
+    ("h200", "min"):     (7,    256,  64, 2, ["fast"]),
+    ("h200", "min-med"): (9,    512, 128, 3, ["fast", "medium"]),
+    ("h200", "med"):     (11,  1024, 128, 4, ["fast", "medium"]),
+    ("h200", "med-max"): (13,  2048, 128, 5, ["fast", "medium", "full"]),
+    ("h200", "max"):     (999, 4096, 256, 6, ["fast", "medium", "full"]),
+    ("h200", "sobol"):   (11,  4096, 256, 0, ["fast", "medium"]),
 }
 
 _GPU_INTENSITY_REGISTERED = False
