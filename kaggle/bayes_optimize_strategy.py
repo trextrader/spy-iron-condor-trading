@@ -356,15 +356,16 @@ def run_bayes_optimizer(
     best_k_p1  = int(np.nanargmax(res_p1.objective))
     print(f"  done in {elapsed_p1:.1f}s  best_obj={res_p1.objective[best_k_p1]:.3f}  "
           f"(cand[{best_k_p1}]: trades={res_p1.total[best_k_p1]}  "
-          f"net={res_p1.net_pct[best_k_p1]:+.1f}%  dd={res_p1.max_dd[best_k_p1]:.2f}%)")
+          f"net={res_p1.net_pct[best_k_p1]:+.1f}%  dd={res_p1.max_dd[best_k_p1]:.2f}%  "
+          f"np_dd={res_p1.np_dd[best_k_p1]:.3f})")
     print(f"  Phase 1 full results:")
     print(f"  {'k':>3}  {'obj':>8}  {'trades':>6}  {'wins':>5}  {'loss':>5}  "
-          f"{'net%':>7}  {'dd%':>6}")
+          f"{'net%':>7}  {'dd%':>6}  {'np/dd':>8}")
     for ki in range(bo_init):
         marker = " <-- best" if ki == best_k_p1 else ""
         print(f"  {ki:>3}  {res_p1.objective[ki]:>8.3f}  {res_p1.total[ki]:>6}  "
               f"{res_p1.wins[ki]:>5}  {res_p1.losses[ki]:>5}  "
-              f"{res_p1.net_pct[ki]:>7.2f}  {res_p1.max_dd[ki]:>6.2f}{marker}")
+              f"{res_p1.net_pct[ki]:>7.2f}  {res_p1.max_dd[ki]:>6.2f}  {res_p1.np_dd[ki]:>8.3f}{marker}")
 
     for k in range(bo_init):
         row = _make_row(0, configs_p1[k], res_p1, k)
@@ -423,15 +424,16 @@ def run_bayes_optimizer(
         print(f"  Round {rnd+1:>2}/{bo_rounds}  best_obj={best_obj:.3f}  "
               f"net_pct={res_rnd.net_pct[best_k]:+.1f}%  "
               f"dd={res_rnd.max_dd[best_k]:.1f}%  "
+              f"np_dd={res_rnd.np_dd[best_k]:.3f}  "
               f"trades={res_rnd.total[best_k]}  "
               f"({elapsed_rnd:.1f}s)")
         print(f"    All {bo_batch} candidates this round:")
-        print(f"    {'k':>3}  {'obj':>8}  {'trades':>6}  {'wins':>5}  {'loss':>5}  {'net%':>7}  {'dd%':>6}")
+        print(f"    {'k':>3}  {'obj':>8}  {'trades':>6}  {'wins':>5}  {'loss':>5}  {'net%':>7}  {'dd%':>6}  {'np/dd':>8}")
         for ki in range(bo_batch):
             marker = " <--" if ki == best_k else ""
             print(f"    {ki:>3}  {res_rnd.objective[ki]:>8.3f}  {res_rnd.total[ki]:>6}  "
                   f"{res_rnd.wins[ki]:>5}  {res_rnd.losses[ki]:>5}  "
-                  f"{res_rnd.net_pct[ki]:>7.2f}  {res_rnd.max_dd[ki]:>6.2f}{marker}")
+                  f"{res_rnd.net_pct[ki]:>7.2f}  {res_rnd.max_dd[ki]:>6.2f}  {res_rnd.np_dd[ki]:>8.3f}{marker}")
 
         for k in range(bo_batch):
             row = _make_row(0, configs_rnd[k], res_rnd, k)

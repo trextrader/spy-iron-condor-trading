@@ -118,11 +118,10 @@ def _update_bar_mtm_drawdown(
 
 def _compute_np_dd_ratio(net_pct: np.ndarray, max_dd: np.ndarray) -> np.ndarray:
     """Mirror the legacy strategy_optimizer ratio for side-by-side comparison."""
-    return np.where(
-        max_dd > 0.01,
-        net_pct / max_dd,
-        np.where(net_pct > 0, net_pct * 100.0, 0.0),
-    )
+    ratio = np.zeros_like(net_pct, dtype=np.float64)
+    valid_dd = max_dd > 0.01
+    np.divide(net_pct, max_dd, out=ratio, where=valid_dd)
+    return np.where(valid_dd, ratio, np.where(net_pct > 0, net_pct * 100.0, 0.0))
 
 
 # ── Chain helper ──────────────────────────────────────────────────────────────
@@ -1194,8 +1193,9 @@ def run_backtest_optimizer_batch(
         total_c = wins + losses
         wr_c    = wins / np.maximum(total_c, 1)
         # Capped profit factor: avoid quadrillion display when gross_loss=0
-        pf_c    = np.where(gross_loss > 0, gross_win / gross_loss,
-                           np.where(gross_win > 0, 999.0, 1.0))
+        pf_c    = np.ones_like(gross_win, dtype=np.float64)
+        np.divide(gross_win, gross_loss, out=pf_c, where=gross_loss > 0)
+        pf_c    = np.where(gross_loss > 0, pf_c, np.where(gross_win > 0, 999.0, 1.0))
         np_dd_c = _compute_np_dd_ratio(
             (equity - STARTING_EQUITY) / STARTING_EQUITY * 100.0,
             max_dd,
@@ -1218,9 +1218,9 @@ def run_backtest_optimizer_batch(
     total    = wins + losses
     wr       = wins / np.maximum(total, 1).astype(np.float64)
     # Profit factor: cap at 999.0 when gross_loss=0 (avoid quadrillion display)
-    pf       = np.where(gross_loss > 0,
-                        gross_win / gross_loss,
-                        np.where(gross_win > 0, 999.0, 1.0))
+    pf       = np.ones_like(gross_win, dtype=np.float64)
+    np.divide(gross_win, gross_loss, out=pf, where=gross_loss > 0)
+    pf       = np.where(gross_loss > 0, pf, np.where(gross_win > 0, 999.0, 1.0))
     np_dd    = _compute_np_dd_ratio(net_pct, max_dd)
     eligible = objective_spec.eligible_mask(max_dd, total, pf)
     legacy_objective = objective_spec.compute_legacy(net_pct, max_dd, total, pf)
