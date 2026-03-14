@@ -31,6 +31,7 @@ import numpy as np
 import torch
 
 from optimizer_prep import OptimizerContext
+import gpu_strike_selector as _gss
 from candidate_codec import CandidateBatch, candidates_to_configs
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -702,20 +703,43 @@ def run_backtest_optimizer_batch(
                   f"unique={len(np.unique(arr))}")
         print(f"[engine] Pulling {ctx.T} bars from {ctx.device} → CPU numpy…")
 
-    # Pull ctx arrays to CPU numpy for speed (avoid .item() in tight loop)
+    # Pull small [T] arrays to CPU numpy (used in Python bar loop — fast)
     spot_np         = ctx.spot.cpu().numpy()
     gate_e_np       = ctx.gate_entry.cpu().numpy()
     gate_p_np       = ctx.gate_pop.cpu().numpy()
     sidx_np         = ctx.strategy_idx.cpu().numpy()
     abstain_np      = ctx.abstain.cpu().numpy().astype(bool)
     bar_offsets_np  = ctx.bar_offsets.cpu().numpy()
-    right_np        = ctx.option_right.cpu().numpy()
-    strike_np       = ctx.option_strike.cpu().numpy()
-    dte_np          = ctx.option_dte.cpu().numpy()
-    delta_np        = ctx.option_delta.cpu().numpy()
-    bid_np          = ctx.opt_bid.cpu().numpy()
-    ask_np          = ctx.opt_ask.cpu().numpy()
     ts_np           = ctx.timestamps.cpu().numpy()
+
+    # GPU mode: keep 180M-element options arrays on device; avoid full transfer
+    _use_gpu = (hasattr(ctx, 'device') and ctx.device.type == 'cuda')
+    if _use_gpu:
+        _dev        = ctx.device
+        _right_gpu  = ctx.option_right     # [M] already pinned to cuda
+        _strike_gpu = ctx.option_strike
+        _dte_gpu    = ctx.option_dte
+        _delta_gpu  = ctx.option_delta
+        _bid_gpu    = ctx.opt_bid
+        _ask_gpu    = ctx.opt_ask
+        # Pre-convert K candidate params to GPU tensors once (outside bar loop)
+        _td_t = torch.from_numpy(target_dte_arr.astype(np.float32)).to(_dev)
+        _sd_t = torch.from_numpy(short_delta_arr.astype(np.float32)).to(_dev)
+        _sw_t = torch.from_numpy(spread_width_arr.astype(np.float32)).to(_dev)
+        # CPU copies still needed for intrinsic fallback arithmetic
+        right_np   = ctx.option_right.cpu().numpy()
+        strike_np  = ctx.option_strike.cpu().numpy()
+        dte_np     = ctx.option_dte.cpu().numpy()
+        delta_np   = ctx.option_delta.cpu().numpy()
+        bid_np     = ctx.opt_bid.cpu().numpy()
+        ask_np     = ctx.opt_ask.cpu().numpy()
+    else:
+        right_np   = ctx.option_right.cpu().numpy()
+        strike_np  = ctx.option_strike.cpu().numpy()
+        dte_np     = ctx.option_dte.cpu().numpy()
+        delta_np   = ctx.option_delta.cpu().numpy()
+        bid_np     = ctx.opt_bid.cpu().numpy()
+        ask_np     = ctx.opt_ask.cpu().numpy()
 
     # Reset MtM diagnostic counter for this batch run
     global _MtM_DIAG_CALLS
@@ -758,16 +782,22 @@ def run_backtest_optimizer_batch(
         # Chain slice for this bar
         s_off = int(bar_offsets_np[i])
         e_off = int(bar_offsets_np[i + 1])
-        if s_off < e_off:
-            r_sl  = right_np[s_off:e_off]
+        has_chain = s_off < e_off
+        if has_chain:
+            r_sl  = right_np[s_off:e_off]    # CPU slices — used by intrinsic fallback
             s_sl  = strike_np[s_off:e_off]
             d_sl  = dte_np[s_off:e_off]
             da_sl = delta_np[s_off:e_off]
             b_sl  = bid_np[s_off:e_off]
             a_sl  = ask_np[s_off:e_off]
-            has_chain = True
-        else:
-            has_chain = False
+            if _use_gpu:
+                # GPU views into pinned arrays — zero-copy slices
+                _r_t  = _right_gpu[s_off:e_off]
+                _s_t  = _strike_gpu[s_off:e_off]
+                _d_t  = _dte_gpu[s_off:e_off]
+                _da_t = _delta_gpu[s_off:e_off]
+                _b_t  = _bid_gpu[s_off:e_off]
+                _a_t  = _ask_gpu[s_off:e_off]
 
         # ── A. Process exits for open positions ───────────────────────────
         any_open = open_mask.any()
@@ -795,7 +825,13 @@ def run_backtest_optimizer_batch(
                           f"current_dte={current_dte[_dk]:.4f}  "
                           f"days_held={days_held[_dk]:.4f}")
             if has_chain:
-                if strategy_family in ("short_call",):
+                if _use_gpu:
+                    debit_per_share = _gss.mark_to_market_gpu(
+                        _r_t, _s_t, _d_t, _b_t, _a_t,
+                        entry_ss_call, entry_ss_put, entry_width,
+                        open_mask, current_dte, strategy_family,
+                    )
+                elif strategy_family in ("short_call",):
                     debit_per_share = _mark_to_market_single_leg(
                         r_sl, s_sl, d_sl, b_sl, a_sl,
                         entry_ss_call, open_mask, current_dte, option_right=0,
@@ -964,12 +1000,24 @@ def run_backtest_optimizer_batch(
         valid      = np.zeros(K, bool)
         struct_dte = np.full(K, np.nan, np.float32)
 
-        if strategy_family == "iron_butterfly":
+        if _use_gpu:
+            # ── GPU path: batched [K, M] tensor ops, no Python per-candidate loop ──
+            _g = _gss.select_entry_for_bar(
+                _r_t, _s_t, _d_t, _da_t, _b_t, _a_t, spot,
+                _td_t, _sd_t, _sw_t, strategy_family,
+            )
+            credit     = _g["credit"]
+            ss_call    = _g["ss_call"]
+            ss_put     = _g["ss_put"]
+            aw         = _g["actual_width"]
+            valid      = _g["valid"]
+            struct_dte = _g["actual_dte"]
+        elif strategy_family == "iron_butterfly":
             credit, ss_call, aw, valid, struct_dte = _find_best_structure_iron_bfly(
                 spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
                 td_elig, sd_elig, sw_elig,
             )
-            ss_put = ss_call.copy()   # IB: same strike for both shorts
+            ss_put = ss_call.copy()
 
         elif strategy_family == "iron_condor":
             credit, ss_call, ss_put, aw, valid, struct_dte = _find_best_structure_iron_condor(
@@ -982,7 +1030,6 @@ def run_backtest_optimizer_batch(
                 spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
                 td_elig, sd_elig,
             )
-            # No wings: width = 0, put strike unused (set to call strike as sentinel)
             aw     = np.zeros(K, np.float32)
             ss_put = ss_call.copy()
 
