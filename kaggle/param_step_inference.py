@@ -83,6 +83,9 @@ def infer_param_step(
     intensity: str,
 ) -> float | None:
     """Return the appropriate numeric step for (kind, intensity)."""
+    # Alias extended intensity names to their granularity base.
+    _INTENSITY_ALIAS = {"gpu-sobol": "med"}
+    intensity = _INTENSITY_ALIAS.get(intensity, intensity)
     width = float(hi) - float(lo)
 
     if kind == "dollar":
