@@ -3736,7 +3736,7 @@ def main():
     parser.add_argument("--bo-min-pf",      type=float, default=1.0,
                         help="Minimum profit factor soft constraint (default: 1.0)")
     parser.add_argument("--optimize-intensity", type=str, default="med",
-                        choices=["min", "min-med", "med", "med-max", "max"],
+                        choices=["min", "min-med", "med", "med-max", "max", "gpu-sobol"],
                         help=(
                             "Optimizer intensity: controls param breadth, step granularity, "
                             "and BO budget. min=fast/coarse, med=balanced (default), "
