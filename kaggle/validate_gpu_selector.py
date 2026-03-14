@@ -159,11 +159,23 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[validate] device={device}  K={args.K}  bars={args.bars}  family={args.family}")
 
-    # We need the ctx object — build a minimal one without v43 inference
-    # by importing the build function directly
+    # Build ctx — needs v43_outputs, bundle, and chain_df_by_date.
+    # Use dummy v43 outputs (all zeros) since validation only tests strike search.
     from backtest_v45_data import load_multi_tf_bundle
     bundle = load_multi_tf_bundle(args.data_dir)
-    ctx = build_optimizer_context(bundle, device=device, verbose=False)
+
+    T = len(bundle.m5_df_raw)
+    dummy_v43 = {
+        "entry_signal": np.ones(T, dtype=np.float32) * 0.8,   # always above threshold
+        "pop":          np.ones(T, dtype=np.float32) * 0.8,
+        "strategy_idx": np.full(T, 8, dtype=np.int16),         # iron_butterfly class
+        "abstain":      np.zeros(T, dtype=bool),
+    }
+
+    # chain_df_by_date from bundle
+    chain_df_by_date = bundle.chain_df_by_date
+
+    ctx = build_optimizer_context(dummy_v43, bundle, chain_df_by_date, device=device)
 
     td_t, sd_t, sw_t, td_np, sd_np, sw_np = _make_random_candidates(args.K, device)
 
