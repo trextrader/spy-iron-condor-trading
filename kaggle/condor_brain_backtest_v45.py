@@ -3742,6 +3742,13 @@ def main():
                             "and BO budget. min=fast/coarse, med=balanced (default), "
                             "max=finest/all params. Overrides --bo-init-trials/batch/rounds."
                         ))
+    parser.add_argument("--gputype", type=str, default=None,
+                        choices=["t4", "l40s", "a100", "h100"],
+                        help=(
+                            "GPU hardware type — sets optimal K threshold for GPU strike selector. "
+                            "t4: K≥128, l40s: K≥48, a100: K≥32 (default), h100: K≥16. "
+                            "If omitted, defaults to a100 profile."
+                        ))
     parser.add_argument("--strategyomit", nargs='+', default=None,
                         help=("Exclude specific strategy classes from trading. "
                               "Space-separated names or indices "
@@ -4130,6 +4137,10 @@ def main():
                     print("[optimizer] WARNING: no chain_df_by_date found in bundle; chain lookups will be empty.")
                     _chain_by_date = {}
             from bayes_optimize_strategy import run_bayes_optimizer
+            from gpu_profiles import get_gpu_profile, print_gpu_profile
+            _gpu_profile = get_gpu_profile(getattr(args, 'gputype', None))
+            print_gpu_profile(_gpu_profile)
+            _gpu_k_threshold = _gpu_profile.gpu_k_threshold
             if _autoall:
                 # ── Sequential autoall: optimize every template, auto-apply rank 1 ──
                 _all_templates = sorted(_STRATEGY_CONFIGS.keys())
@@ -4175,6 +4186,7 @@ def main():
                             auto_apply=True,
                             intensity_name=getattr(args, 'optimize_intensity', 'med'),
                             min_apply_obj=_apply_floor,
+                            gpu_k_threshold=_gpu_k_threshold,
                         )
                         _best = _rows[0] if _rows else None
                         _autoall_summary.append((_tmpl, _best, None))
@@ -4350,6 +4362,7 @@ def main():
                     verbose=getattr(args, 'verbose', False),
                     auto_apply=False,
                     intensity_name=getattr(args, 'optimize_intensity', 'med'),
+                    gpu_k_threshold=_gpu_k_threshold,
                 )
                 _single_elapsed = time.time() - _single_t0
                 _sm, _ss = divmod(int(_single_elapsed), 60)

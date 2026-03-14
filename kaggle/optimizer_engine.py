@@ -647,6 +647,7 @@ def run_backtest_optimizer_batch(
     pop_threshold:   float = POP_THRESHOLD,
     cooldown_bars:   int   = MIN_BARS_COOLDOWN,
     verbose: bool = False,
+    gpu_k_threshold: int = 32,        # use GPU path only when K >= this (hardware-dependent)
 ) -> BatchEvalResult:
     """
     Run K parameter candidates over T bars in a single vectorised loop.
@@ -713,12 +714,10 @@ def run_backtest_optimizer_batch(
     ts_np           = ctx.timestamps.cpu().numpy()
 
     # GPU mode: keep 180M-element options arrays on device; avoid full transfer.
-    # Crossover benchmark shows GPU wins at K≥32 (~97µs/candidate on CPU vs
-    # ~1935µs flat kernel overhead on GPU).  Below K=32 the per-call overhead
-    # dominates and CPU is faster.
-    _GPU_K_THRESHOLD = 32
+    # Crossover: GPU time is flat per GPU model; CPU scales at ~97µs/candidate.
+    # gpu_k_threshold is set per GPU type via --gputype (default=32 for A100).
     _use_gpu = (hasattr(ctx, 'device') and ctx.device.type == 'cuda'
-                and K >= _GPU_K_THRESHOLD)
+                and K >= gpu_k_threshold)
     if _use_gpu:
         _dev        = ctx.device
         _right_gpu  = ctx.option_right     # [M] already pinned to cuda

@@ -244,6 +244,7 @@ def run_bayes_optimizer(
     auto_apply: bool = False,      # If True: skip prompt and auto-apply rank-1 config
     intensity_name: str = "med",   # Optimizer intensity level
     min_apply_obj: float = 0.0,    # Auto-apply only if rank-1 obj >= this threshold
+    gpu_k_threshold: int = 32,     # passed through to run_backtest_optimizer_batch
 ):
     """
     Entry point called from condor_brain_backtest_v45.py when
@@ -338,6 +339,7 @@ def run_bayes_optimizer(
         strategy_idx_filter=_class_idx_for_template(template_id, strategy_configs),
         strategy_family=strategy_family,
         verbose=False,   # suppress bar-level detail for warmup speed
+        gpu_k_threshold=gpu_k_threshold,
     )
     elapsed_p1 = time.time() - t0
     best_k_p1  = int(np.nanargmax(res_p1.objective))
@@ -402,6 +404,7 @@ def run_bayes_optimizer(
             strategy_idx_filter=_class_idx_for_template(template_id, strategy_configs),
             strategy_family=strategy_family,
             verbose=False,
+            gpu_k_threshold=gpu_k_threshold,
         )
         elapsed_rnd = time.time() - t0
         best_k   = int(np.nanargmax(res_rnd.objective))
@@ -459,6 +462,7 @@ def run_bayes_optimizer(
         strategy_idx_filter=_class_idx_for_template(template_id, strategy_configs),
         strategy_family=strategy_family,
         verbose=verbose,   # full diagnostic when --verbose flag is set
+        gpu_k_threshold=gpu_k_threshold,
     )
     print(f"  Full-fidelity done in {time.time()-t0:.1f}s")
 
