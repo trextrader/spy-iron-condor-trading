@@ -77,6 +77,18 @@ INTENSITY_POLICIES: Dict[str, IntensityPolicy] = {
         bo_rounds=8,
         fidelity_schedule=["fast", "medium", "full"],
     ),
+    # GPU-optimized pure Sobol sweep: K=1024 candidates, no GP rounds.
+    # At K=1024 the GPU strike selector runs ~51× faster than CPU.
+    # Use with --optimize-intensity gpu-sobol on A100/H100.
+    # Benchmark: ~1935µs/bar flat GPU vs ~99ms/bar CPU at K=1024.
+    "gpu-sobol": IntensityPolicy(
+        name="gpu-sobol",
+        breadth_top_n=11,    # same param breadth as med
+        bo_init_trials=1024,
+        bo_batch_size=16,    # unused when bo_rounds=0
+        bo_rounds=0,
+        fidelity_schedule=["fast", "medium"],
+    ),
 }
 
 DEFAULT_INTENSITY_NAME = "med"
