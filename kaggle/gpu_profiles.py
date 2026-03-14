@@ -61,7 +61,7 @@ GPU_PROFILES: dict[str, GpuProfile] = {
     ),
 }
 
-DEFAULT_GPU_PROFILE = GPU_PROFILES["a100"]
+DEFAULT_GPU_PROFILE = GPU_PROFILES["t4"]
 
 
 def get_gpu_profile(name: str | None) -> GpuProfile:
