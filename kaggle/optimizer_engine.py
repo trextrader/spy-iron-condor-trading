@@ -92,6 +92,24 @@ class ObjectiveSpec:
         return obj
 
 
+def _update_bar_mtm_drawdown(
+    equity: np.ndarray,
+    unrealized: np.ndarray,
+    peak: np.ndarray,
+    max_dd: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Update drawdown using mark-to-market equity."""
+    equity_mark = equity + unrealized
+    peak = np.maximum(peak, equity_mark)
+    dd_now = np.where(
+        peak > 0,
+        (peak - equity_mark) / peak * 100.0,
+        0.0,
+    )
+    max_dd = np.maximum(max_dd, dd_now)
+    return peak, max_dd
+
+
 # ── Chain helper ──────────────────────────────────────────────────────────────
 
 def _lookup_price(
@@ -901,6 +919,13 @@ def run_backtest_optimizer_batch(
             exp_exit  = open_mask & (dte_remaining <= 0)
             exit_mask = sl_hit | pt_hit | dte_exit | hd_exit | exp_exit
 
+            peak, max_dd = _update_bar_mtm_drawdown(
+                equity=equity,
+                unrealized=unrealized,
+                peak=peak,
+                max_dd=max_dd,
+            )
+
             # ── Exit diagnostic: daily samples + any exit trigger ────────────
             _exit_diag_entry = int(entry_bar[open_mask][0]) if open_mask.any() else -1
             _print_exit_row = (
@@ -926,9 +951,12 @@ def run_backtest_optimizer_batch(
             if exit_mask.any():
                 pnl = np.where(exit_mask, unrealized, 0.0)
                 equity = np.where(exit_mask, equity + pnl, equity)
-                peak   = np.maximum(peak, equity)
-                dd_now = (peak - equity) / peak * 100.0
-                max_dd = np.maximum(max_dd, dd_now)
+                peak, max_dd = _update_bar_mtm_drawdown(
+                    equity=equity,
+                    unrealized=np.where(exit_mask, 0.0, unrealized),
+                    peak=peak,
+                    max_dd=max_dd,
+                )
 
                 # Win/loss accounting
                 new_wins   = exit_mask & (pnl > 0)
@@ -1106,9 +1134,12 @@ def run_backtest_optimizer_batch(
     if open_mask.any():
         pnl = np.where(open_mask, -np.abs(stop_loss_arr) * 0.5, 0.0)  # conservative end-of-sim close
         equity   = np.where(open_mask, equity + pnl, equity)
-        peak     = np.maximum(peak, equity)
-        dd_now   = (peak - equity) / peak * 100.0
-        max_dd   = np.maximum(max_dd, dd_now)
+        peak, max_dd = _update_bar_mtm_drawdown(
+            equity=equity,
+            unrealized=np.zeros_like(equity),
+            peak=peak,
+            max_dd=max_dd,
+        )
         new_wins  = open_mask & (pnl > 0)
         new_losses= open_mask & (pnl <= 0)
         wins   = np.where(new_wins,   wins   + 1, wins)

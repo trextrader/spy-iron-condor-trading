@@ -527,6 +527,16 @@ def run_bayes_optimizer(
             _new_obj = chosen['objective']
             _registry = _load_best_registry()
             _prev_best = _registry.get(template_id, {}).get("obj", 0.0)
+            wins = int(chosen.get("wins", 0))
+            losses = int(chosen.get("losses", 0))
+            print("  [audit] rank-1 selection metrics:")
+            print(f"          objective     = {chosen.get('objective', 0.0):.4f}")
+            print(f"          net_pct       = {chosen.get('net_pct', 0.0):+.2f}%")
+            print(f"          max_dd        = {abs(float(chosen.get('max_dd', 0.0))):.2f}%")
+            print(f"          profit_factor = {chosen.get('profit_factor', 0.0):.3f}")
+            print(f"          wins          = {wins}")
+            print(f"          losses        = {losses}")
+            print(f"          trades        = {wins + losses}")
             if _new_obj < min_apply_obj:
                 print(f"  [autoall] Skipping apply — obj={_new_obj:.4f} < "
                       f"min_apply_obj={min_apply_obj:.2f}  (existing params preserved)")
