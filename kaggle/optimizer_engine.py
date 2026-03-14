@@ -712,8 +712,13 @@ def run_backtest_optimizer_batch(
     bar_offsets_np  = ctx.bar_offsets.cpu().numpy()
     ts_np           = ctx.timestamps.cpu().numpy()
 
-    # GPU mode: keep 180M-element options arrays on device; avoid full transfer
-    _use_gpu = (hasattr(ctx, 'device') and ctx.device.type == 'cuda')
+    # GPU mode: keep 180M-element options arrays on device; avoid full transfer.
+    # Crossover benchmark shows GPU wins at K≥32 (~97µs/candidate on CPU vs
+    # ~1935µs flat kernel overhead on GPU).  Below K=32 the per-call overhead
+    # dominates and CPU is faster.
+    _GPU_K_THRESHOLD = 32
+    _use_gpu = (hasattr(ctx, 'device') and ctx.device.type == 'cuda'
+                and K >= _GPU_K_THRESHOLD)
     if _use_gpu:
         _dev        = ctx.device
         _right_gpu  = ctx.option_right     # [M] already pinned to cuda
