@@ -83,8 +83,6 @@ def infer_param_step(
     intensity: str,
 ) -> float | None:
     """Return the appropriate numeric step for (kind, intensity)."""
-    # Alias extended intensity names to their granularity base.
-    _INTENSITY_ALIAS = {"gpu-sobol": "med"}
     intensity = _INTENSITY_ALIAS.get(intensity, intensity)
     width = float(hi) - float(lo)
 
@@ -113,6 +111,9 @@ def infer_param_step(
             "max": max(width / 64.0, 1e-4)}[intensity]
 
 
+_INTENSITY_ALIAS = {"gpu-sobol": "med"}
+
+
 def build_semantic_or_arithmetic_grid(
     param_name: str,
     lo: float,
@@ -122,6 +123,7 @@ def build_semantic_or_arithmetic_grid(
     kind: str | None = None,
 ) -> list[float]:
     """Return the candidate grid values for a param at the given intensity."""
+    intensity = _INTENSITY_ALIAS.get(intensity, intensity)
     kind = kind or infer_param_kind(param_name, current_value, lo, hi)
 
     # Semantic grids for special time-domain params
