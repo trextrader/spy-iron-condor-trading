@@ -3862,6 +3862,8 @@ def main():
 
     # --- Parse --strategyomit (exclusion list, applied after --strategies) ---
     # nargs='+' gives us a list; also split each element on commas for backward compat
+    # Supports BOTH class names (iron_condor) AND template IDs (protective_put)
+    _TEMPLATE_OMIT_SET = set()   # template-level omit (for autoall dual-GPU partitioning)
     if args.strategyomit:
         _omit_idxs = set()
         _raw_tokens = []
@@ -3876,13 +3878,20 @@ def main():
             elif _tok in [n.lower() for n in V43_STRATEGY_NAMES]:
                 _omit_idxs.add(
                     next(i for i, n in enumerate(V43_STRATEGY_NAMES) if n.lower() == _tok))
+            elif _tok in _STRATEGY_CONFIGS:
+                # Template-level omit: skip this specific template in autoall loop
+                _TEMPLATE_OMIT_SET.add(_tok)
             else:
                 print(f"[WARN] --strategyomit: unknown token '{_tok}', ignoring. "
-                      f"Valid names: {', '.join(V43_STRATEGY_NAMES)}")
+                      f"Valid: class names ({', '.join(V43_STRATEGY_NAMES)}) "
+                      f"or template IDs (e.g. iron_condor, protective_put)")
+        if _TEMPLATE_OMIT_SET:
+            print(f"[strategyomit] Template-level omit ({len(_TEMPLATE_OMIT_SET)}): "
+                  f"{sorted(_TEMPLATE_OMIT_SET)}")
         if _omit_idxs:
             _omit_names = [V43_STRATEGY_NAMES[i] for i in sorted(_omit_idxs)
                            if i < len(V43_STRATEGY_NAMES)]
-            print(f"[strategyomit] Excluding indices {sorted(_omit_idxs)}: {_omit_names}")
+            print(f"[strategyomit] Excluding class indices {sorted(_omit_idxs)}: {_omit_names}")
             # If no allow-list yet, build one from the full set minus omitted
             if ALLOWED_STRATEGY_IDXS is None:
                 ALLOWED_STRATEGY_IDXS = set(range(len(V43_STRATEGY_NAMES) - 1)) - _omit_idxs  # -1: exclude abstain index
@@ -3894,7 +3903,7 @@ def main():
             else:
                 _final_names = [V43_STRATEGY_NAMES[i] for i in sorted(ALLOWED_STRATEGY_IDXS)
                                 if i < len(V43_STRATEGY_NAMES)]
-                print(f"[strategyomit] Final allowed: {_final_names}")
+                print(f"[strategyomit] Final allowed classes: {_final_names}")
 
     # Profit targets: strategy CONFIG profit_target used when set; else 50%-of-credit default.
     # Print active targets from loaded strategy configs so operator can verify before run.
@@ -4196,6 +4205,11 @@ def main():
                     if _tmpl in _AUTOALL_SKIP_TEMPLATES:
                         print(f"\n[autoall] SKIP [{_ti}/{_n_total}: {_tmpl}] — class_idx=6 never predicted by v43.")
                         _autoall_summary.append((_tmpl, None, "skipped:class_idx=6"))
+                        continue
+                    # ── Template-level omit (dual-GPU partitioning via --strategyomit) ────────
+                    if _tmpl in _TEMPLATE_OMIT_SET:
+                        print(f"\n[autoall] SKIP [{_ti}/{_n_total}: {_tmpl}] — excluded by --strategyomit")
+                        _autoall_summary.append((_tmpl, None, "skipped:strategyomit"))
                         continue
                     print(f"\n[autoall] ─── {_ti}/{_n_total}: {_tmpl} ───────────────────────────────")
                     _strat_t0 = time.time()
