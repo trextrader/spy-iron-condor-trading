@@ -3743,11 +3743,20 @@ def main():
                             "max=finest/all params. Overrides --bo-init-trials/batch/rounds."
                         ))
     parser.add_argument("--gputype", type=str, default=None,
-                        choices=["t4", "l40s", "a100", "h100"],
+                        choices=["t4", "l40s", "a100", "h100", "h200"],
                         help=(
                             "GPU hardware type — sets optimal K threshold for GPU strike selector. "
-                            "t4: K≥128, l40s: K≥48, a100: K≥32 (default), h100: K≥16. "
-                            "If omitted, defaults to a100 profile."
+                            "t4: K≥128, l40s: K≥48, a100: K≥32, h100: K≥16, h200: K≥8. "
+                            "Defaults to t4 profile if omitted."
+                        ))
+    parser.add_argument("--gpuintensity", type=str, default=None,
+                        choices=["min", "min-med", "med", "med-max", "max", "sobol"],
+                        help=(
+                            "GPU-tuned optimizer intensity — picks hardware-optimal K, batch, and rounds "
+                            "for the selected --gputype. Overrides --optimize-intensity when both "
+                            "--gputype and --gpuintensity are set. "
+                            "min=smallest GPU-safe K, sobol=max Sobol sweep (no GP). "
+                            "Example: --gputype t4 --gpuintensity med"
                         ))
     parser.add_argument("--strategyomit", nargs='+', default=None,
                         help=("Exclude specific strategy classes from trading. "
@@ -4137,10 +4146,22 @@ def main():
                     print("[optimizer] WARNING: no chain_df_by_date found in bundle; chain lookups will be empty.")
                     _chain_by_date = {}
             from bayes_optimize_strategy import run_bayes_optimizer
-            from gpu_profiles import get_gpu_profile, print_gpu_profile
+            from gpu_profiles import (get_gpu_profile, print_gpu_profile,
+                                      print_gpu_intensity_table,
+                                      register_gpu_intensity_policies)
+            register_gpu_intensity_policies()
             _gpu_profile = get_gpu_profile(getattr(args, 'gputype', None))
             print_gpu_profile(_gpu_profile)
             _gpu_k_threshold = _gpu_profile.gpu_k_threshold
+            # Resolve effective intensity: --gpuintensity overrides --optimize-intensity
+            _gpuintensity_arg = getattr(args, 'gpuintensity', None)
+            _gputype_arg      = getattr(args, 'gputype', None)
+            if _gpuintensity_arg and _gputype_arg:
+                _effective_intensity = f"{_gputype_arg}-{_gpuintensity_arg}"
+                print_gpu_intensity_table(_gputype_arg)
+                print(f"[gpu] Using GPU intensity matrix: {_effective_intensity}")
+            else:
+                _effective_intensity = getattr(args, 'optimize_intensity', 'med')
             if _autoall:
                 # ── Sequential autoall: optimize every template, auto-apply rank 1 ──
                 _all_templates = sorted(_STRATEGY_CONFIGS.keys())
@@ -4148,6 +4169,8 @@ def main():
                 # Minimum objective threshold before auto-applying results.
                 # min/min-med are feasibility filters — don't overwrite good params
                 # with noise from low eval-count searches.
+                # Apply-floor: GPU intensity names ending in "-min"/"-min-med" inherit
+                # the same floor as their base level; all others default to 0.0.
                 _intensity_apply_floor = {
                     "min":     0.20,
                     "min-med": 0.15,
@@ -4155,12 +4178,15 @@ def main():
                     "med-max": 0.0,
                     "max":     0.0,
                 }
-                _apply_floor = _intensity_apply_floor.get(
-                    getattr(args, 'optimize_intensity', 'med'), 0.0)
+                # Strip GPU prefix to get base level (e.g. "t4-min" → "min", "min-med" → "min-med")
+                _eff_base = _effective_intensity
+                for _gprefix in ("t4", "l40s", "a100", "h100", "h200"):
+                    if _effective_intensity.startswith(f"{_gprefix}-"):
+                        _eff_base = _effective_intensity[len(_gprefix) + 1:]
+                        break
+                _apply_floor = _intensity_apply_floor.get(_eff_base, 0.0)
                 print(f"\n[autoall] Starting sequential BO for {_n_total} strategy templates")
-                print(f"[autoall] Each template: bo_init={getattr(args,'bo_init_trials',32)}  "
-                      f"batch={getattr(args,'bo_batch_size',16)}  rounds={getattr(args,'bo_rounds',8)}")
-                print(f"[autoall] min_apply_obj={_apply_floor}  (intensity={getattr(args,'optimize_intensity','med')})")
+                print(f"[autoall] intensity={_effective_intensity}  min_apply_obj={_apply_floor}")
                 print(f"[autoall] Templates ({_n_total}): {_all_templates}\n")
                 _autoall_summary = []
                 _autoall_t0 = time.time()
@@ -4184,7 +4210,7 @@ def main():
                             device=DEVICE,
                             verbose=getattr(args, 'verbose', False),
                             auto_apply=True,
-                            intensity_name=getattr(args, 'optimize_intensity', 'med'),
+                            intensity_name=_effective_intensity,
                             min_apply_obj=_apply_floor,
                             gpu_k_threshold=_gpu_k_threshold,
                         )

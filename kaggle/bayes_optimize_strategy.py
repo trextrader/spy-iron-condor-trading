@@ -44,6 +44,14 @@ from optimization_intensity      import get_intensity_policy, IntensityPolicy
 from adaptive_search_space_builder import (build_adaptive_search_space,
                                             AdaptiveParamManifestRow)
 
+# Register GPU-specific intensity policies (t4-med, a100-sobol, etc.) so that
+# build_adaptive_search_space() can resolve them via get_intensity_policy().
+try:
+    from gpu_profiles import register_gpu_intensity_policies as _reg_gpu_policies
+    _reg_gpu_policies()
+except ImportError:
+    pass
+
 
 # ── Cross-sweep best-objective registry ──────────────────────────────────────
 # Prevents any single sweep from overwriting a better result found in a prior

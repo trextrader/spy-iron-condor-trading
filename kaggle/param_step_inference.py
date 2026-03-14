@@ -111,7 +111,14 @@ def infer_param_step(
             "max": max(width / 64.0, 1e-4)}[intensity]
 
 
-_INTENSITY_ALIAS = {"gpu-sobol": "med"}
+_INTENSITY_ALIAS: dict = {"gpu-sobol": "med", "sobol": "med"}
+# GPU-specific aliases: "t4-med" → "med", "h100-max" → "max", etc.
+# Needed so SEMANTIC_INTEGER_GRIDS and step-size dicts always see canonical names.
+for _g in ("t4", "l40s", "a100", "h100", "h200"):
+    for _lv in ("min", "min-med", "med", "med-max", "max"):
+        _INTENSITY_ALIAS[f"{_g}-{_lv}"] = _lv
+    _INTENSITY_ALIAS[f"{_g}-sobol"] = "med"
+del _g, _lv  # don't leak loop variables
 
 
 def build_semantic_or_arithmetic_grid(
