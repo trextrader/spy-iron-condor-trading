@@ -53,6 +53,8 @@ class BatchEvalResult:
     net_pct:    np.ndarray   # [K] %
     max_dd:     np.ndarray   # [K] % (positive number)
     np_dd:      np.ndarray   # [K] net_pct / max_dd style ratio
+    eligible:   np.ndarray   # [K] bool guardrail pass/fail
+    legacy_objective: np.ndarray  # [K] prior damped score for audit
     objective:  np.ndarray   # [K] scalar to maximise
     wins:       np.ndarray   # [K] int
     losses:     np.ndarray   # [K] int
@@ -66,31 +68,34 @@ class BatchEvalResult:
 @dataclass
 class ObjectiveSpec:
     """Specifies how to compute the scalar objective from trade results."""
-    min_trades:  int   = 12
-    max_dd_cap:  float = 10.0   # max drawdown cap (hard constraint)
-    min_pf:      float = 1.0    # min profit factor (soft penalty)
+    min_trades:  int   = 20
+    max_dd_cap:  float = 25.0   # max drawdown cap (eligibility guardrail)
+    min_pf:      float = 1.1    # min profit factor (eligibility guardrail)
 
     def compute(self, net_pct: np.ndarray, max_dd: np.ndarray,
                 total: np.ndarray, pf: np.ndarray) -> np.ndarray:
-        """Return objective[K] — higher is better.
+        """Return guarded risk-adjusted score[K] - higher is better."""
+        np_dd = _compute_np_dd_ratio(net_pct, max_dd)
+        obj = np_dd * np.sqrt(np.maximum(total, 1).astype(np.float64))
+        return np.where(self.eligible_mask(max_dd, total, pf), obj, -100.0 + net_pct * 0.01)
 
-        Objective = net_pct / (effective_dd + 2.0)
-          - effective_dd = max(max_dd, 1.0)  — floor prevents denominator gaming
-            when a candidate has 0% drawdown (all-win streaks get no free lunch)
-          - Additional penalties for insufficient trades or extreme drawdown
-        """
-        # Clamp max_dd to minimum 1.0% so 0-drawdown strategies aren't
-        # artificially rewarded with a near-zero denominator
+    def compute_legacy(self, net_pct: np.ndarray, max_dd: np.ndarray,
+                       total: np.ndarray, pf: np.ndarray) -> np.ndarray:
+        """Previous damped objective retained for audit comparison."""
         eff_dd = np.maximum(max_dd, 1.0)
         obj = net_pct / (eff_dd + 2.0)
-
-        # Hard constraint: insufficient trades → big negative penalty
-        obj = np.where(total < self.min_trades, -100.0 + net_pct * 0.01, obj)
-        # Soft constraint: extreme drawdown cap
-        obj = np.where(max_dd > self.max_dd_cap, obj * 0.5, obj)
-        # Soft constraint: profit factor below threshold (was declared but never applied)
-        obj = np.where(pf < self.min_pf, obj * 0.7, obj)
+        obj = np.where(total < 12, -100.0 + net_pct * 0.01, obj)
+        obj = np.where(max_dd > 10.0, obj * 0.5, obj)
+        obj = np.where(pf < 1.0, obj * 0.7, obj)
         return obj
+
+    def eligible_mask(self, max_dd: np.ndarray, total: np.ndarray, pf: np.ndarray) -> np.ndarray:
+        """Candidates must clear all guardrails before rank score is used."""
+        return (
+            (total >= self.min_trades)
+            & (max_dd <= self.max_dd_cap)
+            & (pf >= self.min_pf)
+        )
 
 
 def _update_bar_mtm_drawdown(
@@ -1185,7 +1190,7 @@ def run_backtest_optimizer_batch(
                 print(f"  [WARN] >50% MtM used intrinsic fallback — P&L accuracy may be low")
         print(f"[engine] Per-candidate summary (K={K}):")
         print(f"  {'k':>4}  {'trades':>6}  {'wins':>5}  {'losses':>6}  {'net_pct':>8}  "
-              f"{'max_dd':>7}  {'np/dd':>8}  {'pf':>6}  {'obj':>8}")
+              f"{'max_dd':>7}  {'np/dd':>8}  {'pf':>6}  {'elig':>5}  {'obj':>8}  {'legacy':>8}")
         total_c = wins + losses
         wr_c    = wins / np.maximum(total_c, 1)
         # Capped profit factor: avoid quadrillion display when gross_loss=0
@@ -1195,13 +1200,17 @@ def run_backtest_optimizer_batch(
             (equity - STARTING_EQUITY) / STARTING_EQUITY * 100.0,
             max_dd,
         )
+        eligible_c = objective_spec.eligible_mask(max_dd, total_c, pf_c)
         obj_c   = objective_spec.compute(
+            (equity - STARTING_EQUITY) / STARTING_EQUITY * 100.0, max_dd, total_c, pf_c)
+        legacy_obj_c = objective_spec.compute_legacy(
             (equity - STARTING_EQUITY) / STARTING_EQUITY * 100.0, max_dd, total_c, pf_c)
         for k in range(K):
             flag = " *** BEST" if k == int(np.nanargmax(obj_c)) else ""
             print(f"  {k:>4}  {total_c[k]:>6}  {wins[k]:>5}  {losses[k]:>6}  "
                   f"{(equity[k]-STARTING_EQUITY)/STARTING_EQUITY*100:>8.2f}%  "
-                  f"{max_dd[k]:>6.2f}%  {np_dd_c[k]:>8.3f}  {pf_c[k]:>6.2f}  {obj_c[k]:>8.3f}{flag}")
+                  f"{max_dd[k]:>6.2f}%  {np_dd_c[k]:>8.3f}  {pf_c[k]:>6.2f}  "
+                  f"{'Y' if eligible_c[k] else 'N':>5}  {obj_c[k]:>8.3f}  {legacy_obj_c[k]:>8.3f}{flag}")
 
     # ── Metrics ───────────────────────────────────────────────────────────
     net_pnl  = equity - STARTING_EQUITY
@@ -1213,6 +1222,8 @@ def run_backtest_optimizer_batch(
                         gross_win / gross_loss,
                         np.where(gross_win > 0, 999.0, 1.0))
     np_dd    = _compute_np_dd_ratio(net_pct, max_dd)
+    eligible = objective_spec.eligible_mask(max_dd, total, pf)
+    legacy_objective = objective_spec.compute_legacy(net_pct, max_dd, total, pf)
     objective = objective_spec.compute(net_pct, max_dd, total, pf)
 
     wall_sec = time.time() - t0
@@ -1222,6 +1233,8 @@ def run_backtest_optimizer_batch(
         net_pct   = net_pct,
         max_dd    = max_dd,
         np_dd     = np_dd,
+        eligible  = eligible,
+        legacy_objective = legacy_objective,
         objective = objective,
         wins      = wins,
         losses    = losses,

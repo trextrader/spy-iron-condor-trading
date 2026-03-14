@@ -102,6 +102,8 @@ def _make_row(rank: int, cfg: Dict, res: BatchEvalResult, k: int) -> Dict:
     row["net_pct"]       = round(float(res.net_pct[k]),   2)
     row["max_dd"]        = round(float(res.max_dd[k]),    2)
     row["np_dd"]         = round(float(res.np_dd[k]),     3)
+    row["eligible"]      = bool(res.eligible[k])
+    row["legacy_objective"] = round(float(res.legacy_objective[k]), 4)
     row["objective"]     = round(float(res.objective[k]), 4)
     row["wins"]          = int(res.wins[k])
     row["losses"]        = int(res.losses[k])
@@ -291,9 +293,9 @@ def run_bayes_optimizer(
     bo_rounds = policy.bo_rounds
 
     obj_spec = ObjectiveSpec(
-        min_trades  = getattr(args, 'bo_min_trades',  12),
-        max_dd_cap  = getattr(args, 'bo_max_dd_cap',  10.0),
-        min_pf      = getattr(args, 'bo_min_pf',      1.0),
+        min_trades  = getattr(args, 'bo_min_trades',  20),
+        max_dd_cap  = getattr(args, 'bo_max_dd_cap',  25.0),
+        min_pf      = getattr(args, 'bo_min_pf',      1.1),
     )
 
     _print_adaptive_manifest(
@@ -500,8 +502,8 @@ def run_bayes_optimizer(
               f"Use --bo-init-trials 10+ to see 10 results.")
     print("=" * 68)
     # Data keys for row lookup; display labels shown in header (rename wins/losses)
-    _data_keys = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "np_dd", "objective", "wins", "losses"]
-    _hdr_labels = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "np_dd", "objective", "#wins", "#losses"]
+    _data_keys = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "np_dd", "eligible", "objective", "legacy_objective", "wins", "losses"]
+    _hdr_labels = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "np_dd", "eligible", "objective", "legacy_obj", "#wins", "#losses"]
     print("  " + f"{'#':>4}  " + "  ".join(f"{h:>16}" for h in _hdr_labels))
     for idx, row in enumerate(final_rows, 1):
         vals = []
@@ -516,9 +518,9 @@ def run_bayes_optimizer(
     # ── 7. Offer to apply a config (numbered selection) ───────────────────
     if final_rows:
         print()
-        all_penalty = all(r.get("objective", -100) <= -100 for r in final_rows)
+        all_penalty = all(not r.get("eligible", False) for r in final_rows)
         if all_penalty:
-            print("  [WARN] All candidates scored -100 (no trades executed — chain data missing?).")
+            print("  [WARN] All candidates failed the ranking guardrails.")
             print("         Skipping apply to avoid overwriting strategy file with invalid params.")
         elif auto_apply:
             # autoall mode: silently apply rank 1 without prompting,
@@ -532,14 +534,18 @@ def run_bayes_optimizer(
             losses = int(chosen.get("losses", 0))
             print("  [audit] rank-1 selection metrics:")
             print(f"          objective     = {chosen.get('objective', 0.0):.4f}")
+            print(f"          legacy_obj    = {chosen.get('legacy_objective', 0.0):.4f}")
             print(f"          net_pct       = {chosen.get('net_pct', 0.0):+.2f}%")
             print(f"          max_dd        = {abs(float(chosen.get('max_dd', 0.0))):.2f}%")
             print(f"          np_dd         = {chosen.get('np_dd', 0.0):.3f}")
             print(f"          profit_factor = {chosen.get('profit_factor', 0.0):.3f}")
+            print(f"          eligible      = {chosen.get('eligible', False)}")
             print(f"          wins          = {wins}")
             print(f"          losses        = {losses}")
             print(f"          trades        = {wins + losses}")
-            if _new_obj < min_apply_obj:
+            if not chosen.get("eligible", False):
+                print("  [autoall] Skipping apply - rank 1 failed guardrails.")
+            elif _new_obj < min_apply_obj:
                 print(f"  [autoall] Skipping apply — obj={_new_obj:.4f} < "
                       f"min_apply_obj={min_apply_obj:.2f}  (existing params preserved)")
             elif _new_obj <= _prev_best:

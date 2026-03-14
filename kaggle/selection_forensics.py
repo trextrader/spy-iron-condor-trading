@@ -41,9 +41,11 @@ def main() -> None:
         print(
             row.get("strategy"),
             row.get("objective"),
+            f"legacy={row.get('legacy_objective', 'n/a')}",
             row.get("net_pct"),
             row.get("max_dd"),
             f"np_dd={np_dd:.3f}",
+            f"eligible={row.get('eligible', 'n/a')}",
         )
 
 
