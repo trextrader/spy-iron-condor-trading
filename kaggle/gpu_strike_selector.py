@@ -20,21 +20,80 @@ Public API
     nearest_delta_indices_sorted(sorted_deltas, target_deltas)
     select_entry_for_bar(chain_right, chain_strike, chain_dte, chain_delta,
                          chain_bid, chain_ask, spot,
-                         target_dte, short_delta, spread_width, family)
+                         target_dte, short_delta, spread_width, family,
+                         return_tensors=False)
     validate_against_cpu(gpu_result, cpu_credit, cpu_ss_call, cpu_ss_put,
                          cpu_aw, cpu_valid, cpu_dte, atol)
     bench_gpu(fn, *args, warmup, iters)
 
 All input tensors must already be on the same CUDA device.
-All outputs are CPU numpy — [K] results are small, transfer is negligible.
+Legacy output mode is CPU numpy; `return_tensors=True` keeps [K] results on
+device for downstream tensor-native consumers.
 """
 from __future__ import annotations
 
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 import numpy as np
 import torch
+
+
+TensorOrArray = Union[torch.Tensor, np.ndarray]
+
+
+def _assert_1d_tensor(name: str, tensor: torch.Tensor) -> None:
+    if tensor.dim() != 1:
+        raise ValueError(f"{name} must be 1D, got shape={tuple(tensor.shape)}")
+
+
+def _assert_same_device(reference: torch.Tensor, **named_tensors: torch.Tensor) -> None:
+    for name, tensor in named_tensors.items():
+        if tensor.device != reference.device:
+            raise ValueError(
+                f"{name} must be on {reference.device}, got {tensor.device}"
+            )
+
+
+def _as_device_tensor(
+    name: str,
+    value: TensorOrArray,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    if isinstance(value, torch.Tensor):
+        _assert_1d_tensor(name, value)
+        if value.device != device:
+            raise ValueError(f"{name} must be on {device}, got {value.device}")
+        return value.to(dtype=dtype)
+    arr = np.asarray(value)
+    if arr.ndim != 1:
+        raise ValueError(f"{name} must be 1D, got shape={arr.shape}")
+    return torch.as_tensor(arr, device=device, dtype=dtype)
+
+
+def _selector_output(
+    *,
+    credit: torch.Tensor,
+    ss_call: torch.Tensor,
+    ss_put: torch.Tensor,
+    actual_width: torch.Tensor,
+    valid: torch.Tensor,
+    actual_dte: torch.Tensor,
+    return_tensors: bool,
+) -> Dict[str, Union[np.ndarray, torch.Tensor]]:
+    out = {
+        "credit": credit,
+        "ss_call": ss_call,
+        "ss_put": ss_put,
+        "actual_width": actual_width,
+        "valid": valid,
+        "actual_dte": actual_dte,
+    }
+    if return_tensors:
+        return out
+    return {name: tensor.detach().cpu().numpy() for name, tensor in out.items()}
 
 
 # ── Core delta-search primitives ──────────────────────────────────────────────
@@ -168,14 +227,14 @@ def select_entry_for_bar(
     short_delta:  torch.Tensor,   # [K] float32
     spread_width: torch.Tensor,   # [K] float32 (0 for single-leg)
     strategy_family: str,         # "iron_butterfly"|"iron_condor"|"short_call"|"short_put"
-) -> Dict[str, np.ndarray]:
+    return_tensors: bool = False,
+) -> Dict[str, Union[np.ndarray, torch.Tensor]]:
     """
     GPU-vectorized entry structure selection for K candidates at one bar.
 
     Replaces the four _find_best_structure_* functions in optimizer_engine.py.
-    Returns a dict of [K] CPU numpy arrays with the same semantics as the CPU
-    functions, so the state machine in run_backtest_optimizer_batch needs no
-    changes.
+    Returns a dict of [K] results. Legacy mode returns CPU numpy arrays;
+    `return_tensors=True` returns device tensors for Stage 2A+ consumers.
 
     Keys
     ----
@@ -186,6 +245,30 @@ def select_entry_for_bar(
     valid         bool
     actual_dte    float32   DTE of the selected expiry
     """
+    for name, tensor in {
+        "chain_right": chain_right,
+        "chain_strike": chain_strike,
+        "chain_dte": chain_dte,
+        "chain_delta": chain_delta,
+        "chain_bid": chain_bid,
+        "chain_ask": chain_ask,
+        "target_dte": target_dte,
+        "short_delta": short_delta,
+        "spread_width": spread_width,
+    }.items():
+        _assert_1d_tensor(name, tensor)
+    _assert_same_device(
+        chain_right,
+        chain_strike=chain_strike,
+        chain_dte=chain_dte,
+        chain_delta=chain_delta,
+        chain_bid=chain_bid,
+        chain_ask=chain_ask,
+        target_dte=target_dte,
+        short_delta=short_delta,
+        spread_width=spread_width,
+    )
+
     M      = chain_right.shape[0]
     K      = target_dte.shape[0]
     device = chain_right.device
@@ -193,11 +276,15 @@ def select_entry_for_bar(
     zero_K = chain_right.new_zeros(K, dtype=torch.float32)
     false_K = torch.zeros(K, dtype=torch.bool, device=device)
 
-    _empty = {
-        "credit": nan_K.cpu().numpy(), "ss_call": zero_K.cpu().numpy(),
-        "ss_put": zero_K.cpu().numpy(), "actual_width": zero_K.cpu().numpy(),
-        "valid": false_K.cpu().numpy(), "actual_dte": nan_K.cpu().numpy(),
-    }
+    _empty = _selector_output(
+        credit=nan_K,
+        ss_call=zero_K,
+        ss_put=zero_K,
+        actual_width=zero_K,
+        valid=false_K,
+        actual_dte=nan_K,
+        return_tensors=return_tensors,
+    )
 
     if M == 0:
         return _empty
@@ -288,14 +375,15 @@ def select_entry_for_bar(
         )
         valid = can_enter & sp_ok & lc_ok & lp_ok & (credit >= min_credit)
 
-        return {
-            "credit":       torch.where(valid, credit,       nan_K ).cpu().numpy(),
-            "ss_call":      torch.where(valid, sc_stk,       zero_K).cpu().numpy(),
-            "ss_put":       torch.where(valid, sc_stk,       zero_K).cpu().numpy(),
-            "actual_width": torch.where(valid, actual_width, zero_K).cpu().numpy(),
-            "valid":        valid.cpu().numpy(),
-            "actual_dte":   torch.where(valid, best_dte,     nan_K ).cpu().numpy(),
-        }
+        return _selector_output(
+            credit=torch.where(valid, credit, nan_K),
+            ss_call=torch.where(valid, sc_stk, zero_K),
+            ss_put=torch.where(valid, sc_stk, zero_K),
+            actual_width=torch.where(valid, actual_width, zero_K),
+            valid=valid,
+            actual_dte=torch.where(valid, best_dte, nan_K),
+            return_tensors=return_tensors,
+        )
 
     elif strategy_family == "iron_condor":
         # ── Short call: OTM call at sd above spot ─────────────────────────
@@ -329,42 +417,45 @@ def select_entry_for_bar(
         )
         valid = has_calls & has_puts & ic_ok & lc_ok & lp_ok & (credit >= min_credit)
 
-        return {
-            "credit":       torch.where(valid, credit,       nan_K ).cpu().numpy(),
-            "ss_call":      torch.where(valid, sc_stk,       zero_K).cpu().numpy(),
-            "ss_put":       torch.where(valid, sp_stk,       zero_K).cpu().numpy(),
-            "actual_width": torch.where(valid, actual_width, zero_K).cpu().numpy(),
-            "valid":        valid.cpu().numpy(),
-            "actual_dte":   torch.where(valid, best_dte,     nan_K ).cpu().numpy(),
-        }
+        return _selector_output(
+            credit=torch.where(valid, credit, nan_K),
+            ss_call=torch.where(valid, sc_stk, zero_K),
+            ss_put=torch.where(valid, sp_stk, zero_K),
+            actual_width=torch.where(valid, actual_width, zero_K),
+            valid=valid,
+            actual_dte=torch.where(valid, best_dte, nan_K),
+            return_tensors=return_tensors,
+        )
 
     elif strategy_family == "short_call":
         has_calls = cm.any(dim=1)
         _, sc_stk, sc_mid = _short_delta_search(cm, 1.015)
         valid = has_calls & (sc_mid >= chain_right.new_tensor(0.05, dtype=torch.float32))
 
-        return {
-            "credit":       torch.where(valid, sc_mid,   nan_K ).cpu().numpy(),
-            "ss_call":      torch.where(valid, sc_stk,   zero_K).cpu().numpy(),
-            "ss_put":       torch.where(valid, sc_stk,   zero_K).cpu().numpy(),
-            "actual_width": zero_K.cpu().numpy(),
-            "valid":        valid.cpu().numpy(),
-            "actual_dte":   torch.where(valid, best_dte, nan_K ).cpu().numpy(),
-        }
+        return _selector_output(
+            credit=torch.where(valid, sc_mid, nan_K),
+            ss_call=torch.where(valid, sc_stk, zero_K),
+            ss_put=torch.where(valid, sc_stk, zero_K),
+            actual_width=zero_K,
+            valid=valid,
+            actual_dte=torch.where(valid, best_dte, nan_K),
+            return_tensors=return_tensors,
+        )
 
     elif strategy_family == "short_put":
         has_puts = pm.any(dim=1)
         _, sp_stk, sp_mid = _short_delta_search(pm, 0.985)
         valid = has_puts & (sp_mid >= chain_right.new_tensor(0.05, dtype=torch.float32))
 
-        return {
-            "credit":       torch.where(valid, sp_mid,   nan_K ).cpu().numpy(),
-            "ss_call":      torch.where(valid, sp_stk,   zero_K).cpu().numpy(),
-            "ss_put":       torch.where(valid, sp_stk,   zero_K).cpu().numpy(),
-            "actual_width": zero_K.cpu().numpy(),
-            "valid":        valid.cpu().numpy(),
-            "actual_dte":   torch.where(valid, best_dte, nan_K ).cpu().numpy(),
-        }
+        return _selector_output(
+            credit=torch.where(valid, sp_mid, nan_K),
+            ss_call=torch.where(valid, sp_stk, zero_K),
+            ss_put=torch.where(valid, sp_stk, zero_K),
+            actual_width=zero_K,
+            valid=valid,
+            actual_dte=torch.where(valid, best_dte, nan_K),
+            return_tensors=return_tensors,
+        )
 
     else:
         # Unknown family — fall back silently (iron_butterfly treatment)
@@ -373,6 +464,7 @@ def select_entry_for_bar(
             chain_bid, chain_ask, spot,
             target_dte, short_delta, spread_width,
             "iron_butterfly",
+            return_tensors=return_tensors,
         )
 
 
@@ -384,33 +476,51 @@ def mark_to_market_gpu(
     chain_dte:    torch.Tensor,   # [M]
     chain_bid:    torch.Tensor,   # [M]
     chain_ask:    torch.Tensor,   # [M]
-    entry_ssc:    np.ndarray,     # [K] CPU — short call strike
-    entry_ssp:    np.ndarray,     # [K] CPU — short put strike
-    entry_sw:     np.ndarray,     # [K] CPU — spread width
-    open_mask:    np.ndarray,     # [K] CPU bool
-    entry_dte:    np.ndarray,     # [K] CPU — DTE at entry
+    entry_ssc:    TensorOrArray,  # [K] short call strike
+    entry_ssp:    TensorOrArray,  # [K] short put strike
+    entry_sw:     TensorOrArray,  # [K] spread width
+    open_mask:    TensorOrArray,  # [K] bool
+    entry_dte:    TensorOrArray,  # [K] DTE at entry
     strategy_family: str,
-) -> np.ndarray:
+    return_tensors: bool = False,
+) -> Union[np.ndarray, torch.Tensor]:
     """
-    GPU-vectorized mark-to-market.  Returns debit_per_share[K] as CPU float32.
-    NaN means chain lookup failed — caller should use intrinsic fallback.
+    GPU-vectorized mark-to-market.
+    Legacy mode returns CPU float32 numpy; `return_tensors=True` returns [K]
+    float32 device tensors so callers can stay on-GPU.
     """
-    M      = chain_right.shape[0]
-    K      = len(entry_ssc)
-    device = chain_right.device
-    debit_out = np.full(K, np.nan, np.float32)
+    for name, tensor in {
+        "chain_right": chain_right,
+        "chain_strike": chain_strike,
+        "chain_dte": chain_dte,
+        "chain_bid": chain_bid,
+        "chain_ask": chain_ask,
+    }.items():
+        _assert_1d_tensor(name, tensor)
+    _assert_same_device(
+        chain_right,
+        chain_strike=chain_strike,
+        chain_dte=chain_dte,
+        chain_bid=chain_bid,
+        chain_ask=chain_ask,
+    )
 
-    if M == 0 or not open_mask.any():
-        return debit_out
+    M      = chain_right.shape[0]
+    open_t = _as_device_tensor("open_mask", open_mask, device=chain_right.device, dtype=torch.bool)
+    ssc_t  = _as_device_tensor("entry_ssc", entry_ssc, device=chain_right.device, dtype=torch.float32)
+    ssp_t  = _as_device_tensor("entry_ssp", entry_ssp, device=chain_right.device, dtype=torch.float32)
+    sw_t   = _as_device_tensor("entry_sw", entry_sw, device=chain_right.device, dtype=torch.float32)
+    dte_e  = _as_device_tensor("entry_dte", entry_dte, device=chain_right.device, dtype=torch.float32)
+    K      = int(ssc_t.shape[0])
+    device = chain_right.device
+    if not (ssp_t.shape[0] == sw_t.shape[0] == open_t.shape[0] == dte_e.shape[0] == K):
+        raise ValueError("mark_to_market_gpu entry-state tensors must all have shape [K]")
+    debit_out = torch.full((K,), float("nan"), dtype=torch.float32, device=device)
+
+    if M == 0 or not bool(open_t.any().item()):
+        return debit_out if return_tensors else debit_out.cpu().numpy()
 
     mid   = (chain_bid + chain_ask) * 0.5
-    open_t = torch.from_numpy(open_mask).to(device)
-
-    # Candidate entry state → device (K small values, negligible transfer)
-    ssc_t = torch.from_numpy(entry_ssc.astype(np.float32)).to(device)
-    ssp_t = torch.from_numpy(entry_ssp.astype(np.float32)).to(device)
-    sw_t  = torch.from_numpy(entry_sw.astype(np.float32)).to(device)
-    dte_e = torch.from_numpy(entry_dte.astype(np.float32)).to(device)
 
     _, exp_mask = _select_expiry(chain_dte, dte_e)          # [K, M]
     cm = (chain_right == 0).unsqueeze(0) & exp_mask         # [K, M]
@@ -448,13 +558,14 @@ def mark_to_market_gpu(
         debit_t = torch.where(open_t & all_ok, debit_v,
                               torch.full((K,), float("nan"), device=chain_right.device))
 
-    return debit_t.float().cpu().numpy()
+    debit_t = debit_t.float()
+    return debit_t if return_tensors else debit_t.cpu().numpy()
 
 
 # ── Validation helper ─────────────────────────────────────────────────────────
 
 def validate_against_cpu(
-    gpu: Dict[str, np.ndarray],
+    gpu: Dict[str, Union[np.ndarray, torch.Tensor]],
     cpu_credit:  np.ndarray,
     cpu_ss_call: np.ndarray,
     cpu_ss_put:  np.ndarray,
@@ -468,19 +579,25 @@ def validate_against_cpu(
     Logs mismatches with full context.  Returns True if all close.
     """
     passed = True
+    def _scalar(x, idx):
+        if isinstance(x, torch.Tensor):
+            return x[idx].item()
+        return x[idx]
+
     for k in range(len(cpu_valid)):
-        if cpu_valid[k] != gpu["valid"][k]:
-            print(f"  [validate k={k}] VALID MISMATCH: cpu={cpu_valid[k]} gpu={gpu['valid'][k]}")
+        gpu_valid = bool(_scalar(gpu["valid"], k))
+        if cpu_valid[k] != gpu_valid:
+            print(f"  [validate k={k}] VALID MISMATCH: cpu={cpu_valid[k]} gpu={gpu_valid}")
             passed = False
             continue
         if not cpu_valid[k]:
             continue
         for name, cpu_val, gpu_val in [
-            ("credit",  cpu_credit[k],  gpu["credit"][k]),
-            ("ss_call", cpu_ss_call[k], gpu["ss_call"][k]),
-            ("ss_put",  cpu_ss_put[k],  gpu["ss_put"][k]),
-            ("aw",      cpu_aw[k],      gpu["actual_width"][k]),
-            ("dte",     cpu_dte[k],     gpu["actual_dte"][k]),
+            ("credit",  cpu_credit[k],  _scalar(gpu["credit"], k)),
+            ("ss_call", cpu_ss_call[k], _scalar(gpu["ss_call"], k)),
+            ("ss_put",  cpu_ss_put[k],  _scalar(gpu["ss_put"], k)),
+            ("aw",      cpu_aw[k],      _scalar(gpu["actual_width"], k)),
+            ("dte",     cpu_dte[k],     _scalar(gpu["actual_dte"], k)),
         ]:
             if abs(float(cpu_val) - float(gpu_val)) > atol:
                 print(f"  [validate k={k}] {name}: cpu={cpu_val:.4f}  gpu={gpu_val:.4f}  "
