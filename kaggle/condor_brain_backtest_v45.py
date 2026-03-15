@@ -26,6 +26,7 @@ import json
 import uuid
 import hashlib
 import time
+import datetime
 import subprocess
 import torch
 import pandas as pd
@@ -378,6 +379,184 @@ def _json_safe(val):
 
 def _json_safe_dict(d):
     return {k: _json_safe(v) for k, v in d.items()}
+
+
+def _utc_now_iso():
+    return (
+        datetime.datetime.now(datetime.timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _visible_gpu_slots():
+    try:
+        if torch.cuda.is_available():
+            return max(1, int(torch.cuda.device_count()))
+    except Exception:
+        pass
+    return 1
+
+
+def _validate_json_runlog_path(path, flag_name):
+    if path and not str(path).lower().endswith(".json"):
+        raise ValueError(f"{flag_name} must point to a .json file: {path}")
+
+
+def _load_optimizer_runlog(path):
+    with open(path, "r", encoding="utf-8") as f:
+        state = json.load(f)
+    if not isinstance(state, dict):
+        raise ValueError(f"Invalid optimizer runlog payload in {path}")
+    completed = state.get("completed", {})
+    if not isinstance(completed, dict):
+        raise ValueError(f"Invalid optimizer runlog: 'completed' must be an object in {path}")
+    state.setdefault("schema_version", 1)
+    state.setdefault("completed_order", [])
+    state.setdefault("recent_completed", [])
+    state.setdefault("current", None)
+    state.setdefault("requested_templates", [])
+    return state
+
+
+def _new_optimizer_runlog(args, run_kind, requested_templates, effective_intensity):
+    now = _utc_now_iso()
+    gpu_slots = _visible_gpu_slots()
+    return {
+        "schema_version": 1,
+        "run_kind": run_kind,
+        "created_at": now,
+        "updated_at": now,
+        "command": " ".join(sys.argv),
+        "git_commit": _git_commit(),
+        "pid": os.getpid(),
+        "cwd": os.getcwd(),
+        "optimize_mode": getattr(args, "optimize_mode", None),
+        "strategies_arg": getattr(args, "strategies", None),
+        "strategyomit": list(getattr(args, "strategyomit", None) or []),
+        "gputype": getattr(args, "gputype", None),
+        "gpuintensity": getattr(args, "gpuintensity", None),
+        "effective_intensity": effective_intensity,
+        "visible_gpu_slots": gpu_slots,
+        "recent_completed_limit": gpu_slots,
+        "requested_templates": list(requested_templates or []),
+        "completed": {},
+        "completed_order": [],
+        "recent_completed": [],
+        "current": None,
+    }
+
+
+def _save_optimizer_runlog(path, state):
+    if not path:
+        return
+    state = dict(state)
+    state["updated_at"] = _utc_now_iso()
+    state["runlog_path"] = os.path.abspath(path)
+    _dir = os.path.dirname(path)
+    if _dir:
+        os.makedirs(_dir, exist_ok=True)
+    _tmp = f"{path}.tmp.{os.getpid()}.{uuid.uuid4().hex}"
+    with open(_tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2, ensure_ascii=True)
+        f.write("\n")
+    os.replace(_tmp, path)
+
+
+def _runlog_set_current(state, template_id, position, total):
+    state["current"] = {
+        "template_id": template_id,
+        "position": int(position),
+        "total": int(total),
+        "started_at": _utc_now_iso(),
+    }
+
+
+def _runlog_record_terminal(
+    state,
+    template_id,
+    status,
+    *,
+    result=None,
+    error=None,
+    elapsed_sec=0.0,
+    position=None,
+    total=None,
+):
+    result_payload = _json_safe_dict(result) if isinstance(result, dict) else None
+    entry = {
+        "template_id": template_id,
+        "status": status,
+        "completed_at": _utc_now_iso(),
+        "elapsed_sec": float(elapsed_sec or 0.0),
+        "position": int(position) if position is not None else None,
+        "total": int(total) if total is not None else None,
+        "result": result_payload,
+        "error": error,
+    }
+    completed = state.setdefault("completed", {})
+    completed[template_id] = entry
+    completed_order = state.setdefault("completed_order", [])
+    if template_id not in completed_order:
+        completed_order.append(template_id)
+    if status == "completed":
+        recent_limit = max(1, int(state.get("recent_completed_limit", 1)))
+        recent_row = {
+            "template_id": template_id,
+            "completed_at": entry["completed_at"],
+            "elapsed_sec": entry["elapsed_sec"],
+            "position": entry["position"],
+            "total": entry["total"],
+        }
+        if result_payload:
+            for key in (
+                "objective",
+                "legacy_objective",
+                "net_pnl",
+                "net_pct",
+                "max_dd",
+                "np_dd",
+                "profit_factor",
+                "wins",
+                "losses",
+                "eligible",
+            ):
+                if key in result_payload:
+                    recent_row[key] = result_payload[key]
+        recent = state.setdefault("recent_completed", [])
+        recent.append(recent_row)
+        state["recent_completed"] = recent[-recent_limit:]
+    state["current"] = None
+
+
+def _runlog_resume_rows(state):
+    rows = []
+    times = []
+    completed = state.get("completed", {})
+    order = list(state.get("completed_order", []))
+    for tmpl in completed:
+        if tmpl not in order:
+            order.append(tmpl)
+    for tmpl in order:
+        entry = completed.get(tmpl, {})
+        status = str(entry.get("status", ""))
+        if status == "completed":
+            rows.append((tmpl, entry.get("result"), None))
+            elapsed = float(entry.get("elapsed_sec", 0.0) or 0.0)
+            times.append(elapsed)
+        elif status.startswith("skipped:"):
+            rows.append((tmpl, None, status))
+    return rows, times
+
+
+def _runlog_completed_templates(state):
+    completed = set()
+    for tmpl, entry in (state.get("completed", {}) or {}).items():
+        status = str((entry or {}).get("status", ""))
+        if status == "completed" or status.startswith("skipped:"):
+            completed.add(tmpl)
+    return completed
 
 def load_data_and_features(data_path, rows=None):
     print(f"Loading data from {data_path}...")
@@ -3735,6 +3914,10 @@ def main():
                         help="Max drawdown cap for objective penalty (default: 10.0%%)")
     parser.add_argument("--bo-min-pf",      type=float, default=1.0,
                         help="Minimum profit factor soft constraint (default: 1.0)")
+    parser.add_argument("--runlog", type=str, default=None,
+                        help="Write optimizer scheduler state to this JSON file after each strategy completes")
+    parser.add_argument("--pickupstate", type=str, default=None,
+                        help="Resume optimizer scheduler state from this JSON file and skip already-completed strategies")
     parser.add_argument("--optimize-intensity", type=str, default="med",
                         choices=["min", "min-med", "med", "med-max", "max", "gpu-sobol"],
                         help=(
@@ -3799,6 +3982,19 @@ def main():
                         help="Disable automatic Friday 3pm+ position closeout (hold through weekends)")
 
     args = parser.parse_args()
+
+    try:
+        _validate_json_runlog_path(getattr(args, "runlog", None), "--runlog")
+        _validate_json_runlog_path(getattr(args, "pickupstate", None), "--pickupstate")
+    except ValueError as _runlog_err:
+        parser.error(str(_runlog_err))
+
+    if getattr(args, "pickupstate", None) and not os.path.exists(args.pickupstate):
+        parser.error(f"--pickupstate file not found: {args.pickupstate}")
+    if (getattr(args, "runlog", None) or getattr(args, "pickupstate", None)) and not getattr(args, "optimize", False):
+        parser.error("--runlog/--pickupstate are only supported with --optimize")
+    if (getattr(args, "runlog", None) or getattr(args, "pickupstate", None)) and getattr(args, "optimize_mode", "grid") != "bayes":
+        parser.error("--runlog/--pickupstate are only supported with --optimize-mode bayes")
 
     # Build per-day-of-week DTE cap dict: {0: Mon, 1: Tue, ..., 4: Fri}
     _dte_by_dow = {}
@@ -4171,6 +4367,15 @@ def main():
                 print(f"[gpu] Using GPU intensity matrix: {_effective_intensity}")
             else:
                 _effective_intensity = getattr(args, 'optimize_intensity', 'med')
+            _runlog_path = getattr(args, "runlog", None) or getattr(args, "pickupstate", None)
+            _resume_state = None
+            if getattr(args, "pickupstate", None):
+                try:
+                    _resume_state = _load_optimizer_runlog(args.pickupstate)
+                    print(f"[optimizer] Resuming from JSON state: {os.path.abspath(args.pickupstate)}")
+                except Exception as _resume_err:
+                    print(f"[optimizer] ERROR: failed to load --pickupstate {args.pickupstate}: {_resume_err}")
+                    import sys; sys.exit(1)
             if _autoall:
                 # ── Sequential autoall: optimize every template, auto-apply rank 1 ──
                 _all_templates = sorted(_STRATEGY_CONFIGS.keys())
@@ -4197,22 +4402,75 @@ def main():
                 print(f"\n[autoall] Starting sequential BO for {_n_total} strategy templates")
                 print(f"[autoall] intensity={_effective_intensity}  min_apply_obj={_apply_floor}")
                 print(f"[autoall] Templates ({_n_total}): {_all_templates}\n")
-                _autoall_summary = []
-                _autoall_t0 = time.time()
-                _strat_times: list = []   # wall-time (s) per non-skipped strategy
+                if _resume_state:
+                    _autoall_summary, _strat_times = _runlog_resume_rows(_resume_state)
+                    _resume_completed = _runlog_completed_templates(_resume_state)
+                    _runlog_state = _resume_state
+                    _runlog_state["run_kind"] = "bayes-autoall"
+                    _runlog_state["effective_intensity"] = _effective_intensity
+                    _runlog_state["strategyomit"] = list(getattr(args, "strategyomit", None) or [])
+                    _runlog_state["requested_templates"] = list(_all_templates)
+                    _runlog_state["current"] = None
+                    if _resume_state.get("current"):
+                        _cur = _resume_state["current"]
+                        print(f"[autoall] Previous interrupted strategy: {_cur.get('template_id')} "
+                              f"[{_cur.get('position')}/{_cur.get('total')}] — it will be rerun.")
+                    print(f"[autoall] Resume state loaded: {len(_resume_completed)} finalized strategies")
+                else:
+                    _autoall_summary = []
+                    _strat_times = []
+                    _resume_completed = set()
+                    _runlog_state = _new_optimizer_runlog(
+                        args,
+                        run_kind="bayes-autoall",
+                        requested_templates=_all_templates,
+                        effective_intensity=_effective_intensity,
+                    )
+                if _runlog_path:
+                    _save_optimizer_runlog(_runlog_path, _runlog_state)
+                    print(f"[autoall] Runlog JSON: {os.path.abspath(_runlog_path)}")
+                _autoall_t0 = time.time() - sum(_strat_times)
                 for _ti, _tmpl in enumerate(_all_templates, 1):
+                    if _tmpl in _resume_completed:
+                        _prev_status = _runlog_state.get("completed", {}).get(_tmpl, {}).get("status", "completed")
+                        print(f"\n[autoall] RESUME [{_ti}/{_n_total}: {_tmpl}] — already {_prev_status}, skipping rerun.")
+                        continue
                     # ── Dead strategy: skip before spending any GPU time ──────────────────────
                     if _tmpl in _AUTOALL_SKIP_TEMPLATES:
                         print(f"\n[autoall] SKIP [{_ti}/{_n_total}: {_tmpl}] — class_idx=6 never predicted by v43.")
                         _autoall_summary.append((_tmpl, None, "skipped:class_idx=6"))
+                        if _runlog_path:
+                            _runlog_record_terminal(
+                                _runlog_state,
+                                _tmpl,
+                                "skipped:class_idx=6",
+                                position=_ti,
+                                total=_n_total,
+                            )
+                            _save_optimizer_runlog(_runlog_path, _runlog_state)
                         continue
                     # ── Template-level omit (dual-GPU partitioning via --strategyomit) ────────
                     if _tmpl in _TEMPLATE_OMIT_SET:
                         print(f"\n[autoall] SKIP [{_ti}/{_n_total}: {_tmpl}] — excluded by --strategyomit")
                         _autoall_summary.append((_tmpl, None, "skipped:strategyomit"))
+                        if _runlog_path:
+                            _runlog_record_terminal(
+                                _runlog_state,
+                                _tmpl,
+                                "skipped:strategyomit",
+                                position=_ti,
+                                total=_n_total,
+                            )
+                            _save_optimizer_runlog(_runlog_path, _runlog_state)
                         continue
                     print(f"\n[autoall] ─── {_ti}/{_n_total}: {_tmpl} ───────────────────────────────")
                     _strat_t0 = time.time()
+                    _best = None
+                    _status = "completed"
+                    _err_msg = None
+                    if _runlog_path:
+                        _runlog_set_current(_runlog_state, _tmpl, _ti, _n_total)
+                        _save_optimizer_runlog(_runlog_path, _runlog_state)
                     try:
                         _rows = run_bayes_optimizer(
                             run_backtest, args,
@@ -4234,9 +4492,23 @@ def main():
                         import traceback as _tb
                         print(f"[autoall] ERROR for {_tmpl}: {_exc}")
                         _tb.print_exc()
-                        _autoall_summary.append((_tmpl, None, str(_exc)))
+                        _status = "error"
+                        _err_msg = str(_exc)
+                        _autoall_summary.append((_tmpl, None, _err_msg))
                     _strat_elapsed = time.time() - _strat_t0
                     _strat_times.append(_strat_elapsed)
+                    if _runlog_path:
+                        _runlog_record_terminal(
+                            _runlog_state,
+                            _tmpl,
+                            _status,
+                            result=_best,
+                            error=_err_msg,
+                            elapsed_sec=_strat_elapsed,
+                            position=_ti,
+                            total=_n_total,
+                        )
+                        _save_optimizer_runlog(_runlog_path, _runlog_state)
                     # ── Per-strategy timing + rolling ETA ────────────────────────────────────
                     _n_done_so_far = len(_strat_times)
                     _n_skipped_so_far = sum(1 for _, _, _e in _autoall_summary if _e and _e.startswith("skipped:"))
@@ -4391,20 +4663,62 @@ def main():
                 _single_t0 = time.time()
                 _single_tmpl = list(ALLOWED_TEMPLATE_IDS)[0] if ALLOWED_TEMPLATE_IDS else "?"
                 print(f"[optimizer] Running BO for: {_single_tmpl}")
-                run_bayes_optimizer(
-                    run_backtest, args,
-                    v43_outputs=v43_outputs,
-                    bundle=bundle_v43,
-                    chain_df_by_date=_chain_by_date,
-                    strategy_configs=_STRATEGY_CONFIGS,
-                    allowed_template_ids=ALLOWED_TEMPLATE_IDS,
-                    device=DEVICE,
-                    verbose=getattr(args, 'verbose', False),
-                    auto_apply=False,
-                    intensity_name=getattr(args, 'optimize_intensity', 'med'),
-                    gpu_k_threshold=_gpu_k_threshold,
-                )
-                _single_elapsed = time.time() - _single_t0
+                if _resume_state:
+                    _runlog_state = _resume_state
+                    _runlog_state["run_kind"] = "bayes-single"
+                    _runlog_state["effective_intensity"] = _effective_intensity
+                    _runlog_state["requested_templates"] = [_single_tmpl]
+                    _runlog_state["strategyomit"] = list(getattr(args, "strategyomit", None) or [])
+                    _prev_entry = _runlog_state.get("completed", {}).get(_single_tmpl, {})
+                    _prev_status = _prev_entry.get("status", "")
+                    if _prev_status == "completed" or str(_prev_status).startswith("skipped:"):
+                        print(f"[optimizer] Resume hit: {_single_tmpl} already {_prev_status}; skipping rerun.")
+                        import sys; sys.exit(0)
+                else:
+                    _runlog_state = _new_optimizer_runlog(
+                        args,
+                        run_kind="bayes-single",
+                        requested_templates=[_single_tmpl],
+                        effective_intensity=_effective_intensity,
+                    )
+                if _runlog_path:
+                    _save_optimizer_runlog(_runlog_path, _runlog_state)
+                    print(f"[optimizer] Runlog JSON: {os.path.abspath(_runlog_path)}")
+                    _runlog_set_current(_runlog_state, _single_tmpl, 1, 1)
+                    _save_optimizer_runlog(_runlog_path, _runlog_state)
+                _single_rows = None
+                _single_error = None
+                try:
+                    _single_rows = run_bayes_optimizer(
+                        run_backtest, args,
+                        v43_outputs=v43_outputs,
+                        bundle=bundle_v43,
+                        chain_df_by_date=_chain_by_date,
+                        strategy_configs=_STRATEGY_CONFIGS,
+                        allowed_template_ids=ALLOWED_TEMPLATE_IDS,
+                        device=DEVICE,
+                        verbose=getattr(args, 'verbose', False),
+                        auto_apply=False,
+                        intensity_name=_effective_intensity,
+                        gpu_k_threshold=_gpu_k_threshold,
+                    )
+                except Exception as _exc:
+                    _single_error = str(_exc)
+                    raise
+                finally:
+                    _single_elapsed = time.time() - _single_t0
+                    if _runlog_path:
+                        _runlog_record_terminal(
+                            _runlog_state,
+                            _single_tmpl,
+                            "completed" if _single_error is None else "error",
+                            result=_single_rows[0] if _single_rows else None,
+                            error=_single_error,
+                            elapsed_sec=_single_elapsed,
+                            position=1,
+                            total=1,
+                        )
+                        _save_optimizer_runlog(_runlog_path, _runlog_state)
                 _sm, _ss = divmod(int(_single_elapsed), 60)
                 _sh, _sm = divmod(_sm, 60)
                 _s_str = f"{_sh}h {_sm:02d}m {_ss:02d}s" if _sh else f"{_sm}m {_ss:02d}s"
