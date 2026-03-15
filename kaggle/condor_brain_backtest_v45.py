@@ -3914,10 +3914,8 @@ def main():
                         help="Max drawdown cap for objective penalty (default: 10.0%%)")
     parser.add_argument("--bo-min-pf",      type=float, default=1.0,
                         help="Minimum profit factor soft constraint (default: 1.0)")
-    parser.add_argument("--runlog", type=str, default=None,
-                        help="Write optimizer scheduler state to this JSON file after each strategy completes")
-    parser.add_argument("--pickupstate", type=str, default=None,
-                        help="Resume optimizer scheduler state from this JSON file and skip already-completed strategies")
+    parser.add_argument("--checkpoint", type=str, default=None,
+                        help="Optimizer scheduler checkpoint JSON; resumes if the file exists, otherwise creates it")
     parser.add_argument("--optimize-intensity", type=str, default="med",
                         choices=["min", "min-med", "med", "med-max", "max", "gpu-sobol"],
                         help=(
@@ -3984,17 +3982,14 @@ def main():
     args = parser.parse_args()
 
     try:
-        _validate_json_runlog_path(getattr(args, "runlog", None), "--runlog")
-        _validate_json_runlog_path(getattr(args, "pickupstate", None), "--pickupstate")
+        _validate_json_runlog_path(getattr(args, "checkpoint", None), "--checkpoint")
     except ValueError as _runlog_err:
         parser.error(str(_runlog_err))
 
-    if getattr(args, "pickupstate", None) and not os.path.exists(args.pickupstate):
-        parser.error(f"--pickupstate file not found: {args.pickupstate}")
-    if (getattr(args, "runlog", None) or getattr(args, "pickupstate", None)) and not getattr(args, "optimize", False):
-        parser.error("--runlog/--pickupstate are only supported with --optimize")
-    if (getattr(args, "runlog", None) or getattr(args, "pickupstate", None)) and getattr(args, "optimize_mode", "grid") != "bayes":
-        parser.error("--runlog/--pickupstate are only supported with --optimize-mode bayes")
+    if getattr(args, "checkpoint", None) and not getattr(args, "optimize", False):
+        parser.error("--checkpoint is only supported with --optimize")
+    if getattr(args, "checkpoint", None) and getattr(args, "optimize_mode", "grid") != "bayes":
+        parser.error("--checkpoint is only supported with --optimize-mode bayes")
 
     # Build per-day-of-week DTE cap dict: {0: Mon, 1: Tue, ..., 4: Fri}
     _dte_by_dow = {}
@@ -4367,14 +4362,14 @@ def main():
                 print(f"[gpu] Using GPU intensity matrix: {_effective_intensity}")
             else:
                 _effective_intensity = getattr(args, 'optimize_intensity', 'med')
-            _runlog_path = getattr(args, "runlog", None) or getattr(args, "pickupstate", None)
+            _runlog_path = getattr(args, "checkpoint", None)
             _resume_state = None
-            if getattr(args, "pickupstate", None):
+            if _runlog_path and os.path.exists(_runlog_path):
                 try:
-                    _resume_state = _load_optimizer_runlog(args.pickupstate)
-                    print(f"[optimizer] Resuming from JSON state: {os.path.abspath(args.pickupstate)}")
+                    _resume_state = _load_optimizer_runlog(_runlog_path)
+                    print(f"[optimizer] Resuming from checkpoint JSON: {os.path.abspath(_runlog_path)}")
                 except Exception as _resume_err:
-                    print(f"[optimizer] ERROR: failed to load --pickupstate {args.pickupstate}: {_resume_err}")
+                    print(f"[optimizer] ERROR: failed to load --checkpoint {_runlog_path}: {_resume_err}")
                     import sys; sys.exit(1)
             if _autoall:
                 # ── Sequential autoall: optimize every template, auto-apply rank 1 ──
@@ -4428,7 +4423,7 @@ def main():
                     )
                 if _runlog_path:
                     _save_optimizer_runlog(_runlog_path, _runlog_state)
-                    print(f"[autoall] Runlog JSON: {os.path.abspath(_runlog_path)}")
+                    print(f"[autoall] Checkpoint JSON: {os.path.abspath(_runlog_path)}")
                 _autoall_t0 = time.time() - sum(_strat_times)
                 for _ti, _tmpl in enumerate(_all_templates, 1):
                     if _tmpl in _resume_completed:
@@ -4683,7 +4678,7 @@ def main():
                     )
                 if _runlog_path:
                     _save_optimizer_runlog(_runlog_path, _runlog_state)
-                    print(f"[optimizer] Runlog JSON: {os.path.abspath(_runlog_path)}")
+                    print(f"[optimizer] Checkpoint JSON: {os.path.abspath(_runlog_path)}")
                     _runlog_set_current(_runlog_state, _single_tmpl, 1, 1)
                     _save_optimizer_runlog(_runlog_path, _runlog_state)
                 _single_rows = None
