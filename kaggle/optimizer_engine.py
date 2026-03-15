@@ -762,13 +762,6 @@ def run_backtest_optimizer_batch(
         _td_t = torch.from_numpy(target_dte_arr.astype(np.float32)).to(_dev)
         _sd_t = torch.from_numpy(short_delta_arr.astype(np.float32)).to(_dev)
         _sw_t = torch.from_numpy(spread_width_arr.astype(np.float32)).to(_dev)
-        # CPU copies still needed for intrinsic fallback arithmetic
-        right_np   = ctx.option_right.cpu().numpy()
-        strike_np  = ctx.option_strike.cpu().numpy()
-        dte_np     = ctx.option_dte.cpu().numpy()
-        delta_np   = ctx.option_delta.cpu().numpy()
-        bid_np     = ctx.opt_bid.cpu().numpy()
-        ask_np     = ctx.opt_ask.cpu().numpy()
     else:
         right_np   = ctx.option_right.cpu().numpy()
         strike_np  = ctx.option_strike.cpu().numpy()
@@ -820,12 +813,6 @@ def run_backtest_optimizer_batch(
         e_off = int(bar_offsets_np[i + 1])
         has_chain = s_off < e_off
         if has_chain:
-            r_sl  = right_np[s_off:e_off]    # CPU slices — used by intrinsic fallback
-            s_sl  = strike_np[s_off:e_off]
-            d_sl  = dte_np[s_off:e_off]
-            da_sl = delta_np[s_off:e_off]
-            b_sl  = bid_np[s_off:e_off]
-            a_sl  = ask_np[s_off:e_off]
             if _use_gpu:
                 # GPU views into pinned arrays — zero-copy slices
                 _r_t  = _right_gpu[s_off:e_off]
@@ -834,6 +821,13 @@ def run_backtest_optimizer_batch(
                 _da_t = _delta_gpu[s_off:e_off]
                 _b_t  = _bid_gpu[s_off:e_off]
                 _a_t  = _ask_gpu[s_off:e_off]
+            else:
+                r_sl  = right_np[s_off:e_off]
+                s_sl  = strike_np[s_off:e_off]
+                d_sl  = dte_np[s_off:e_off]
+                da_sl = delta_np[s_off:e_off]
+                b_sl  = bid_np[s_off:e_off]
+                a_sl  = ask_np[s_off:e_off]
 
         # ── A. Process exits for open positions ───────────────────────────
         any_open = open_mask.any()
@@ -862,11 +856,22 @@ def run_backtest_optimizer_batch(
                           f"days_held={days_held[_dk]:.4f}")
             if has_chain:
                 if _use_gpu:
-                    debit_per_share = _gss.mark_to_market_gpu(
+                    _debit_t = _gss.mark_to_market_gpu(
                         _r_t, _s_t, _d_t, _b_t, _a_t,
                         entry_ss_call, entry_ss_put, entry_width,
                         open_mask, current_dte, strategy_family,
+                        return_tensors=True,
                     )
+                    debit_per_share = np.full(K, np.nan, np.float32)
+                    _open_idx = np.flatnonzero(open_mask)
+                    if _open_idx.size:
+                        _open_idx_t = torch.as_tensor(_open_idx, device=_dev, dtype=torch.long)
+                        debit_per_share[_open_idx] = (
+                            _debit_t.index_select(0, _open_idx_t)
+                            .detach()
+                            .cpu()
+                            .numpy()
+                        )
                 elif strategy_family in ("short_call",):
                     debit_per_share = _mark_to_market_single_leg(
                         r_sl, s_sl, d_sl, b_sl, a_sl,
