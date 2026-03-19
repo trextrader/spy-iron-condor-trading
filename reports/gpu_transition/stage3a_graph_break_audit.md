@@ -79,9 +79,9 @@ data, M is typically fixed per session.
 |---|---|---|
 | `fullgraph=False` (default) | ✅ Yes | One graph break per bar in MtM. Safe. |
 | `fullgraph=True` | ❌ Not yet | Blocked by `mark_to_market_gpu:528`. Fix: remove `.any().item()`. |
-| `mode="reduce-overhead"` | ✅ Yes | Best for repeated same-shape calls (production use). |
-| `mode="default"` | ✅ Yes | Better first-call latency, lower steady-state than reduce-overhead. |
-| `mode="max-autotune"` | ⚠️ Slow warm-up | May improve steady-state for very large K. |
+| `mode="default"` | ✅ Yes | **Recommended.** Inductor kernel fusion, no CUDA graph capture. |
+| `mode="reduce-overhead"` | ❌ Incompatible | Uses CUDA graph capture — requires static input memory addresses. Our chain slices change address every bar (different offsets into the options tensor) → RuntimeError on second call. |
+| `mode="max-autotune"` | ⚠️ Slow warm-up | May improve steady-state for very large K; same CUDA-graph incompatibility as reduce-overhead unless disabled. |
 
 ---
 

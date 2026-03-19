@@ -97,6 +97,7 @@ def build_ctx(device: torch.device, T: int, M: int = 36,
     dlt_flat   = np.tile(bar_delta,  T)
     bid_flat   = np.tile(bar_bid,    T)
     ask_flat   = np.tile(bar_ask,    T)
+    mid_flat   = (bid_flat + ask_flat) / 2.0
 
     base      = datetime.date(2025, 1, 2)
     bar_dates = [(base + datetime.timedelta(days=i)).isoformat() for i in range(T)]
@@ -120,6 +121,7 @@ def build_ctx(device: torch.device, T: int, M: int = 36,
         option_delta  = _t(dlt_flat,   torch.float32),
         opt_bid       = _t(bid_flat,   torch.float32),
         opt_ask       = _t(ask_flat,   torch.float32),
+        opt_mid       = _t(mid_flat,   torch.float32),
         fast_end      = max(1, T // 4),
         medium_end    = max(1, T * 3 // 5),
         bar_dates     = bar_dates,

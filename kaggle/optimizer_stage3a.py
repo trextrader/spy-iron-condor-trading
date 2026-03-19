@@ -334,11 +334,17 @@ def step_bar_gpu(
 
 # ── torch.compile wrapper ──────────────────────────────────────────────────────
 
-def make_compiled_step(mode: str = "reduce-overhead"):
+def make_compiled_step(mode: str = "default"):
     """
     Return a torch.compile'd version of step_bar_gpu if PyTorch >= 2.0.
 
-    mode="reduce-overhead" is best for repeated calls with the same shapes.
+    mode="default" is the correct choice for our use case:
+    - Each bar passes a different slice of the options tensor (different memory
+      addresses) → "reduce-overhead" / CUDA graph capture is INCOMPATIBLE because
+      CUDA graphs require static input addresses between calls.
+    - "default" uses inductor kernel fusion without CUDA graph capture — safe for
+      variable-address inputs and still provides meaningful kernel fusion.
+
     fullgraph=False allows the one remaining graph break in mark_to_market_gpu.
 
     Warm-up: first call per specialization triggers JIT compilation.
@@ -357,7 +363,7 @@ def make_compiled_step(mode: str = "reduce-overhead"):
         return step_bar_gpu
 
 
-def make_compiled_step_fullgraph(mode: str = "reduce-overhead"):
+def make_compiled_step_fullgraph(mode: str = "default"):
     """
     Attempt fullgraph=True compilation for step_bar_gpu.
 
