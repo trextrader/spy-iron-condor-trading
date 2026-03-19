@@ -16,6 +16,18 @@ Status legend:
 
 ---
 
+## Post-Plan Status Update (2026-03-19)
+
+- ✅ The original six optimizer repair tasks remain landed in the repo.
+- ✅ Drawdown accounting was strengthened after this plan: `optimizer_engine.py` now updates drawdown from bar-by-bar mark-to-market equity instead of realized-only equity.
+- ✅ Ranking and audit output were expanded after this plan: `np_dd` is now surfaced in optimizer logs/results, the guarded score and eligibility flags are printed, `selection_forensics.py` was added, and the single-template leaderboard now shows a direct `W/L` column.
+- ✅ Checkpoint/restart support was added after this plan: `condor_brain_backtest_v45.py --checkpoint <file.json>` now persists interrupted BO progress, including per-template Phase 1 / Phase 2 round / Phase 3 state for single-template and autoall runs.
+- ✅ Repo sync support was added after this plan: `scripts/repo_sync_audit.py` inventories local-vs-remote tracked files, untracked non-ignored files, and staged/unstaged deltas for Lightning AI sync work.
+- [ ] Resume behavior still needs end-to-end validation on Lightning AI after an intentional interruption.
+- [ ] Non-interactive rank selection for background single-template runs is still not implemented; current manual row selection requires an interactive TTY.
+
+---
+
 ## Diagnosis Summary
 
 From analysis of `kaggle/reports/optimizer_sweep_comparison_all_58_strategies.csv` and the three sweep logs:

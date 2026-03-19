@@ -18,6 +18,17 @@ Status legend:
 
 ---
 
+## Status Update (2026-03-19)
+
+- ✅ Stage 1 selector audit and interface cleanup landed.
+- 🟡 GPU hot-path bounce reduction is underway: GPU MtM now supports `return_tensors=True`, unconditional CPU chain mirrors were reduced, and open-position copy-back is narrower.
+- 🟡 Stage 2A foundations are partially in place: the engine still uses host state and a Python bar loop, but the optimizer now has MtM drawdown correction, `np_dd` logging, guarded ranking/audit output, and checkpointed BO progress.
+- ✅ Operational support landed outside the original stage checklist: `--checkpoint` JSON resume, per-strategy BO phase/round persistence, `selection_forensics.py`, `scripts/repo_sync_audit.py`, and a `W/L` leaderboard column.
+- [ ] Stage 1 parity harness and benchmark work remain open.
+- [ ] Stage 2 tensorized state work has not started in earnest yet.
+
+---
+
 # Stage 1 — Remaining Work
 ## Goal
 Finish and harden the current GPU-vectorized strike-selection layer so it is stable, parity-tested, and ready to serve as the substrate for Stage 2.
@@ -55,7 +66,7 @@ Finish and harden the current GPU-vectorized strike-selection layer so it is sta
 ## 1.3 Remove unnecessary host/device bouncing
 - ✅ Trace all GPU outputs that are immediately converted back to CPU
 - 🟡 Eliminate conversions inside the hot path where possible
-- [ ] Keep final metrics extraction on CPU only at end-of-run
+- 🟡 Keep final metrics extraction on CPU only at end-of-run
 - [ ] Keep CPU fallback available only when explicitly required
 
 ### Success criteria
@@ -177,8 +188,8 @@ Keep current behavior exactly the same while moving state arrays from CPU/NumPy 
 ---
 
 ## 2A.3 Tensorize open-position mark-to-market flow
-- [ ] Feed open-position state directly into GPU MtM path
-- [ ] Return device tensors instead of CPU arrays when Stage 2A enabled
+- 🟡 Feed open-position state directly into GPU MtM path
+- 🟡 Return device tensors instead of CPU arrays when Stage 2A enabled
 - [ ] Compute unrealized PnL as torch tensors
 - [ ] Keep all arithmetic device-side
 
@@ -226,10 +237,10 @@ Keep current behavior exactly the same while moving state arrays from CPU/NumPy 
 ---
 
 ## 2A.7 Keep Python bar loop, remove host-state mutation
-- [ ] Preserve outer `for t in T` loop temporarily
+- ✅ Preserve outer `for t in T` loop temporarily
 - [ ] Ensure all per-bar updates are tensor-native
 - [ ] Prohibit new NumPy state mutation inside loop
-- [ ] Prohibit Python dict state in hot path
+- ✅ Prohibit Python dict state in hot path
 
 ### Milestone
 - [ ] Hybrid loop remains, but state machine is tensorized
