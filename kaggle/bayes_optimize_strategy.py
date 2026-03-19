@@ -666,14 +666,17 @@ def run_bayes_optimizer(
         print(f"  NOTE: only {n_results} candidates evaluated total. "
               f"Use --bo-init-trials 10+ to see 10 results.")
     print("=" * 68)
-    # Data keys for row lookup; display labels shown in header (rename wins/losses)
-    _data_keys = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "np_dd", "eligible", "objective", "legacy_objective", "wins", "losses"]
-    _hdr_labels = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "np_dd", "eligible", "objective", "legacy_obj", "#wins", "#losses"]
+    # Show a compact W/L column instead of separate far-right wins/losses counts.
+    _data_keys = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "np_dd", "eligible", "objective", "legacy_objective", "w_l"]
+    _hdr_labels = [p.name for p in space.params] + ["net_pnl", "net_pct", "max_dd", "np_dd", "eligible", "objective", "legacy_obj", "W/L"]
     print("  " + f"{'#':>4}  " + "  ".join(f"{h:>16}" for h in _hdr_labels))
     for idx, row in enumerate(final_rows, 1):
         vals = []
         for k in _data_keys:
-            v = row.get(k, "?")
+            if k == "w_l":
+                v = f"{int(row.get('wins', 0))}/{int(row.get('losses', 0))}"
+            else:
+                v = row.get(k, "?")
             if isinstance(v, float):
                 vals.append(f"{v:>16.3f}")
             else:
@@ -705,6 +708,7 @@ def run_bayes_optimizer(
             print(f"          np_dd         = {chosen.get('np_dd', 0.0):.3f}")
             print(f"          profit_factor = {chosen.get('profit_factor', 0.0):.3f}")
             print(f"          eligible      = {chosen.get('eligible', False)}")
+            print(f"          W/L           = {wins}/{losses}")
             print(f"          wins          = {wins}")
             print(f"          losses        = {losses}")
             print(f"          trades        = {wins + losses}")
