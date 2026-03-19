@@ -770,6 +770,35 @@ def run_backtest_optimizer_batch(
         bid_np     = ctx.opt_bid.cpu().numpy()
         ask_np     = ctx.opt_ask.cpu().numpy()
 
+    # ── Stage 2A: GPU tensor state ────────────────────────────────────────
+    # When GPU mode: ALL K state arrays live on device throughout the bar loop.
+    # Final .cpu().numpy() extraction happens ONCE after the loop.
+    if _use_gpu:
+        # Timestamp tensor for bar-index lookups (ts_np is small, pulled once above)
+        ts_t = torch.tensor(ts_np.astype(np.float64), dtype=torch.float64, device=_dev)
+        # Param tensors [K] on device
+        _sl_t  = torch.tensor(stop_loss_arr,    dtype=torch.float64, device=_dev)
+        _pt_t  = torch.tensor(profit_tgt_arr,   dtype=torch.float64, device=_dev)
+        _mde_t = torch.tensor(max_dte_exit_arr, dtype=torch.float64, device=_dev)
+        _hd_t  = torch.tensor(hold_days_arr,    dtype=torch.float64, device=_dev)
+        # State tensors — mirror numpy state arrays; names carry _t suffix
+        equity_t        = torch.full((K,), STARTING_EQUITY, dtype=torch.float64, device=_dev)
+        peak_t          = torch.full((K,), STARTING_EQUITY, dtype=torch.float64, device=_dev)
+        max_dd_t        = torch.zeros(K, dtype=torch.float64, device=_dev)
+        open_mask_t     = torch.zeros(K, dtype=torch.bool,    device=_dev)
+        entry_credit_t  = torch.zeros(K, dtype=torch.float64, device=_dev)
+        entry_qty_t     = torch.ones(K,  dtype=torch.int32,   device=_dev)
+        entry_ss_call_t = torch.zeros(K, dtype=torch.float64, device=_dev)
+        entry_ss_put_t  = torch.zeros(K, dtype=torch.float64, device=_dev)
+        entry_width_t   = torch.zeros(K, dtype=torch.float64, device=_dev)
+        entry_bar_t     = torch.full((K,), -999, dtype=torch.int32, device=_dev)
+        entry_dte_t     = torch.zeros(K, dtype=torch.float64, device=_dev)
+        last_entry_t    = torch.full((K,), -999, dtype=torch.int32, device=_dev)
+        wins_t          = torch.zeros(K, dtype=torch.int32,   device=_dev)
+        losses_t        = torch.zeros(K, dtype=torch.int32,   device=_dev)
+        gross_win_t     = torch.zeros(K, dtype=torch.float64, device=_dev)
+        gross_loss_t    = torch.zeros(K, dtype=torch.float64, device=_dev)
+
     # Reset MtM diagnostic counter for this batch run
     global _MtM_DIAG_CALLS
     _MtM_DIAG_CALLS = 0
@@ -830,185 +859,292 @@ def run_backtest_optimizer_batch(
                 a_sl  = ask_np[s_off:e_off]
 
         # ── A. Process exits for open positions ───────────────────────────
-        any_open = open_mask.any()
-        if any_open:
-            days_held = np.where(
-                open_mask,
-                (float(ts_np[i]) - ts_np[entry_bar].clip(0)) / 86400.0,
-                0.0,
-            )
-            dte_remaining = np.where(open_mask, entry_dte_at_entry - days_held, 0.0)
+        if _use_gpu:
+            # === Stage 2A GPU TORCH PATH: all state on device, zero per-bar bounces ===
+            if open_mask_t.any():
+                # days held and DTE remaining (device-side)
+                _eb_clamped = entry_bar_t.clamp(min=0).to(torch.int64)
+                _entry_ts_t = ts_t[_eb_clamped]                            # [K] f64
+                _ts_bar     = ts_t[i]                                       # scalar f64
+                _dh_t = torch.where(
+                    open_mask_t,
+                    (_ts_bar - _entry_ts_t) / 86400.0,
+                    torch.zeros(K, dtype=torch.float64, device=_dev),
+                )
+                _dtr_t = torch.where(open_mask_t, entry_dte_t - _dh_t,
+                                     torch.zeros_like(_dh_t))
+                _cur_dte_t = torch.where(open_mask_t, entry_dte_t - _dh_t,
+                                         entry_dte_t)
 
-            # Estimate current debit via chain lookup
-            # Pass entry_dte_at_entry (actual DTE when entered, decremented by
-            # days_held) so MtM finds the SAME expiry we entered, not target param.
-            current_dte = np.where(open_mask,
-                                   entry_dte_at_entry - days_held,
-                                   entry_dte_at_entry)
-            if verbose and _MtM_DIAG_CALLS < _MtM_DIAG_LIMIT and open_mask.any():
-                for _dk in np.where(open_mask)[0][:3]:
-                    print(f"  [MtM ctx k={_dk}] entry_credit={entry_credit[_dk]:.4f}  "
-                          f"entry_ss_call={entry_ss_call[_dk]:.2f}  "
-                          f"entry_ss_put={entry_ss_put[_dk]:.2f}  "
-                          f"entry_width={entry_width[_dk]:.2f}  "
-                          f"entry_dte={entry_dte_at_entry[_dk]:.1f}  "
-                          f"current_dte={current_dte[_dk]:.4f}  "
-                          f"days_held={days_held[_dk]:.4f}")
-            if has_chain:
-                if _use_gpu:
-                    _debit_t = _gss.mark_to_market_gpu(
+                # MtM: chain lookup (return_tensors=True keeps debit on GPU)
+                if has_chain:
+                    _raw_debit_t = _gss.mark_to_market_gpu(
                         _r_t, _s_t, _d_t, _b_t, _a_t,
-                        entry_ss_call, entry_ss_put, entry_width,
-                        open_mask, current_dte, strategy_family,
+                        entry_ss_call_t, entry_ss_put_t, entry_width_t,
+                        open_mask_t, _cur_dte_t, strategy_family,
                         return_tensors=True,
                     )
-                    debit_per_share = np.full(K, np.nan, np.float32)
-                    _open_idx = np.flatnonzero(open_mask)
-                    if _open_idx.size:
-                        _open_idx_t = torch.as_tensor(_open_idx, device=_dev, dtype=torch.long)
-                        debit_per_share[_open_idx] = (
-                            _debit_t.index_select(0, _open_idx_t)
-                            .detach()
-                            .cpu()
-                            .numpy()
-                        )
-                elif strategy_family in ("short_call",):
-                    debit_per_share = _mark_to_market_single_leg(
-                        r_sl, s_sl, d_sl, b_sl, a_sl,
-                        entry_ss_call, open_mask, current_dte, option_right=0,
-                    )
+                else:
+                    _raw_debit_t = entry_credit_t.new_full((K,), float('nan'),
+                                                           dtype=torch.float32)
+
+                # Intrinsic fallback (device-side, float32 to match chain output)
+                _spot_t = _raw_debit_t.new_tensor(spot)
+                _ssc_f  = entry_ss_call_t.float()
+                _ssp_f  = entry_ss_put_t.float()
+                _sw_f   = entry_width_t.float()
+                if strategy_family in ("short_call",):
+                    _intr_t = torch.clamp(_spot_t - _ssc_f, min=0.0)
                 elif strategy_family in ("short_put",):
-                    debit_per_share = _mark_to_market_single_leg(
-                        r_sl, s_sl, d_sl, b_sl, a_sl,
-                        entry_ss_put, open_mask, current_dte, option_right=1,
-                    )
-                else:  # iron_butterfly, iron_condor, generic 4-leg
-                    debit_per_share = _mark_to_market(
-                        spot, r_sl, s_sl, d_sl, b_sl, a_sl,
-                        entry_ss_call, entry_ss_put, entry_width,
-                        open_mask, current_dte, diag=verbose,
-                    )
-            else:
-                debit_per_share = np.full(K, np.nan, np.float32)
+                    _intr_t = torch.clamp(_ssp_f - _spot_t, min=0.0)
+                else:
+                    _ic  = torch.clamp(_spot_t - _ssc_f, min=0.0)
+                    _ip  = torch.clamp(_ssp_f - _spot_t, min=0.0)
+                    _iwc = torch.clamp(_spot_t - (_ssc_f + _sw_f), min=0.0)
+                    _iwp = torch.clamp((_ssp_f - _sw_f) - _spot_t, min=0.0)
+                    _intr_t = _ic + _ip - _iwc - _iwp
+                _debit_t = torch.where(torch.isfinite(_raw_debit_t),
+                                       _raw_debit_t, _intr_t)
 
-            # Track chain vs intrinsic coverage for diagnostic
-            if verbose:
-                _chain_ok = np.isfinite(debit_per_share) & open_mask
-                _chain_debit_hits += int(_chain_ok.sum())
-                _chain_debit_miss += int((~_chain_ok & open_mask).sum())
+                # Unrealized P&L
+                _unreal_t = torch.where(
+                    open_mask_t,
+                    (entry_credit_t.float() - _debit_t)
+                    * entry_qty_t.float() * IC_MULTIPLIER,
+                    torch.zeros(K, dtype=torch.float32, device=_dev),
+                )
 
-            # Fallback: intrinsic value when chain not available.
-            # Strategy-aware: single-leg vs 4-leg structures have different payoffs.
-            if strategy_family in ("short_call",):
-                intrinsic_debit = np.maximum(spot - entry_ss_call, 0.0)
-            elif strategy_family in ("short_put",):
-                intrinsic_debit = np.maximum(entry_ss_put - spot, 0.0)
-            else:  # 4-leg (iron_butterfly or iron_condor)
-                intrinsic_call = np.maximum(spot - entry_ss_call, 0.0)
-                intrinsic_put  = np.maximum(entry_ss_put - spot, 0.0)
-                intrinsic_wing_call = np.maximum(spot - (entry_ss_call + entry_width), 0.0)
-                intrinsic_wing_put  = np.maximum((entry_ss_put - entry_width) - spot, 0.0)
-                intrinsic_debit = (intrinsic_call + intrinsic_put
-                                    - intrinsic_wing_call - intrinsic_wing_put)
-            debit_per_share = np.where(
-                np.isfinite(debit_per_share),
-                debit_per_share,
-                intrinsic_debit.astype(np.float32),
-            )
+                # Dynamic profit target
+                _dpt_t = torch.where(
+                    _pt_t > 0,
+                    _pt_t.float(),
+                    entry_credit_t.float() * entry_qty_t.float() * IC_MULTIPLIER * 0.50,
+                )
 
-            # Unrealised P&L per position
-            unrealized = np.where(
-                open_mask,
-                (entry_credit - debit_per_share) * entry_qty * IC_MULTIPLIER,
-                0.0,
-            )
+                # Update drawdown with mark-to-market equity (pre-exit)
+                _eq_mark_t = equity_t + _unreal_t.double()
+                peak_t     = torch.maximum(peak_t, _eq_mark_t)
+                _dd_now_t  = torch.where(peak_t > 0,
+                                         (peak_t - _eq_mark_t) / peak_t * 100.0,
+                                         torch.zeros_like(peak_t))
+                max_dd_t   = torch.maximum(max_dd_t, _dd_now_t)
 
-            # Profit target (None → 50 % of max credit)
-            dyn_profit_tgt = np.where(
-                profit_tgt_arr > 0,
-                profit_tgt_arr,
-                entry_credit * entry_qty * IC_MULTIPLIER * 0.50,
-            )
+                # Exit condition masks (all on GPU)
+                _sl_hit_t  = open_mask_t & (_unreal_t.double() <= -_sl_t.abs())
+                _pt_hit_t  = open_mask_t & (_unreal_t.double() >= _dpt_t.double())
+                _dte_ex_t  = open_mask_t & (_mde_t > 0) & (_dtr_t <= _mde_t)
+                _hd_ex_t   = open_mask_t & (_dh_t >= _hd_t)
+                _exp_ex_t  = open_mask_t & (_dtr_t <= 0)
+                _exit_t    = _sl_hit_t | _pt_hit_t | _dte_ex_t | _hd_ex_t | _exp_ex_t
 
-            # Exit conditions
-            sl_hit    = open_mask & (unrealized <= -np.abs(stop_loss_arr))
-            pt_hit    = open_mask & (unrealized >= dyn_profit_tgt)
-            dte_exit  = open_mask & (max_dte_exit_arr > 0) & (dte_remaining <= max_dte_exit_arr)
-            hd_exit   = open_mask & (days_held >= hold_days_arr)
-            exp_exit  = open_mask & (dte_remaining <= 0)
-            exit_mask = sl_hit | pt_hit | dte_exit | hd_exit | exp_exit
+                if _exit_t.any():
+                    _pnl_t      = torch.where(_exit_t, _unreal_t.double(),
+                                              torch.zeros_like(equity_t))
+                    equity_t    = torch.where(_exit_t, equity_t + _pnl_t, equity_t)
+                    peak_t      = torch.maximum(peak_t, equity_t)
+                    _new_w_t    = _exit_t & (_pnl_t > 0)
+                    _new_l_t    = _exit_t & ~(_pnl_t > 0)
+                    wins_t      = torch.where(_new_w_t,  wins_t   + 1, wins_t)
+                    losses_t    = torch.where(_new_l_t,  losses_t + 1, losses_t)
+                    gross_win_t  = torch.where(_new_w_t,
+                                               gross_win_t  + _pnl_t, gross_win_t)
+                    gross_loss_t = torch.where(_new_l_t,
+                                               gross_loss_t + _pnl_t.abs(), gross_loss_t)
+                    open_mask_t  = open_mask_t & ~_exit_t
 
-            peak, max_dd = _update_bar_mtm_drawdown(
-                equity=equity,
-                unrealized=unrealized,
-                peak=peak,
-                max_dd=max_dd,
-            )
+                    if verbose:
+                        _exit_sl  += int(_sl_hit_t.sum().item())
+                        _exit_pt  += int(_pt_hit_t.sum().item())
+                        _exit_dte += int((_dte_ex_t & ~_sl_hit_t & ~_pt_hit_t).sum().item())
+                        _exit_hd  += int((_hd_ex_t  & ~_sl_hit_t & ~_pt_hit_t
+                                          & ~_dte_ex_t).sum().item())
+                        _exit_exp += int((_exp_ex_t  & ~_sl_hit_t & ~_pt_hit_t
+                                          & ~_dte_ex_t & ~_hd_ex_t).sum().item())
+                        if len(_hold_samples) < 20:
+                            # CPU extract only for verbose sampling
+                            _ex_np  = _exit_t.cpu().numpy()
+                            _dh_np  = _dh_t.cpu().numpy()
+                            _dr_np  = _dtr_t.cpu().numpy()
+                            _un_np  = _unreal_t.cpu().numpy()
+                            _slh_np = _sl_hit_t.cpu().numpy()
+                            _pth_np = _pt_hit_t.cpu().numpy()
+                            _dtx_np = _dte_ex_t.cpu().numpy()
+                            _hdx_np = _hd_ex_t.cpu().numpy()
+                            for _k in range(K):
+                                if _ex_np[_k] and len(_hold_samples) < 20:
+                                    _hold_samples.append({
+                                        "k": _k, "bar": i,
+                                        "days_held":  round(float(_dh_np[_k]), 2),
+                                        "dte_rem":    round(float(_dr_np[_k]), 2),
+                                        "unrealized": round(float(_un_np[_k]), 2),
+                                        "reason": ("SL"  if _slh_np[_k] else
+                                                   "PT"  if _pth_np[_k] else
+                                                   "DTE" if _dtx_np[_k] else
+                                                   "HD"  if _hdx_np[_k] else "EXP"),
+                                    })
+        else:
+            # === CPU NUMPY PATH (unchanged) ===
+            any_open = open_mask.any()
+            if any_open:
+                days_held = np.where(
+                    open_mask,
+                    (float(ts_np[i]) - ts_np[entry_bar].clip(0)) / 86400.0,
+                    0.0,
+                )
+                dte_remaining = np.where(open_mask, entry_dte_at_entry - days_held, 0.0)
 
-            # ── Exit diagnostic: daily samples + any exit trigger ────────────
-            _exit_diag_entry = int(entry_bar[open_mask][0]) if open_mask.any() else -1
-            _print_exit_row = (
-                verbose and open_mask.any()
-                and (exit_mask.any()                          # any exit fires
-                     or (i - _exit_diag_entry) % 78 == 0     # daily sample (78 bars/day)
-                     or i <= _exit_diag_entry + 5)            # first 5 bars always
-            )
-            if _print_exit_row:
-                for _ek in np.where(open_mask)[0][:2]:
-                    print(f"  [exit diag bar={i} k={_ek}] "
-                          f"days_held={days_held[_ek]:.3f}  "
-                          f"dte_rem={dte_remaining[_ek]:.3f}  "
-                          f"unrealized={unrealized[_ek]:.2f}  "
-                          f"hold_days={hold_days_arr[_ek]:.1f}  "
-                          f"stop_loss={stop_loss_arr[_ek]:.0f}  "
-                          f"max_dte_exit={max_dte_exit_arr[_ek]:.0f}  "
-                          f"sl={sl_hit[_ek]}  pt={pt_hit[_ek]}  "
-                          f"dte_ex={dte_exit[_ek]}  hd={hd_exit[_ek]}  "
-                          f"exp={exp_exit[_ek]}  EXIT={exit_mask[_ek]}")
+                # Estimate current debit via chain lookup.
+                # Pass entry_dte_at_entry decremented by days_held so MtM finds
+                # the SAME expiry we entered, not the target param.
+                current_dte = np.where(open_mask,
+                                       entry_dte_at_entry - days_held,
+                                       entry_dte_at_entry)
+                if verbose and _MtM_DIAG_CALLS < _MtM_DIAG_LIMIT and open_mask.any():
+                    for _dk in np.where(open_mask)[0][:3]:
+                        print(f"  [MtM ctx k={_dk}] entry_credit={entry_credit[_dk]:.4f}  "
+                              f"entry_ss_call={entry_ss_call[_dk]:.2f}  "
+                              f"entry_ss_put={entry_ss_put[_dk]:.2f}  "
+                              f"entry_width={entry_width[_dk]:.2f}  "
+                              f"entry_dte={entry_dte_at_entry[_dk]:.1f}  "
+                              f"current_dte={current_dte[_dk]:.4f}  "
+                              f"days_held={days_held[_dk]:.4f}")
+                if has_chain:
+                    if strategy_family in ("short_call",):
+                        debit_per_share = _mark_to_market_single_leg(
+                            r_sl, s_sl, d_sl, b_sl, a_sl,
+                            entry_ss_call, open_mask, current_dte, option_right=0,
+                        )
+                    elif strategy_family in ("short_put",):
+                        debit_per_share = _mark_to_market_single_leg(
+                            r_sl, s_sl, d_sl, b_sl, a_sl,
+                            entry_ss_put, open_mask, current_dte, option_right=1,
+                        )
+                    else:  # iron_butterfly, iron_condor, generic 4-leg
+                        debit_per_share = _mark_to_market(
+                            spot, r_sl, s_sl, d_sl, b_sl, a_sl,
+                            entry_ss_call, entry_ss_put, entry_width,
+                            open_mask, current_dte, diag=verbose,
+                        )
+                else:
+                    debit_per_share = np.full(K, np.nan, np.float32)
 
-            # Realise P&L for exiting positions
-            if exit_mask.any():
-                pnl = np.where(exit_mask, unrealized, 0.0)
-                equity = np.where(exit_mask, equity + pnl, equity)
+                # Track chain vs intrinsic coverage for diagnostic
+                if verbose:
+                    _chain_ok = np.isfinite(debit_per_share) & open_mask
+                    _chain_debit_hits += int(_chain_ok.sum())
+                    _chain_debit_miss += int((~_chain_ok & open_mask).sum())
+
+                # Intrinsic fallback when chain not available
+                if strategy_family in ("short_call",):
+                    intrinsic_debit = np.maximum(spot - entry_ss_call, 0.0)
+                elif strategy_family in ("short_put",):
+                    intrinsic_debit = np.maximum(entry_ss_put - spot, 0.0)
+                else:
+                    intrinsic_call = np.maximum(spot - entry_ss_call, 0.0)
+                    intrinsic_put  = np.maximum(entry_ss_put - spot, 0.0)
+                    intrinsic_wing_call = np.maximum(spot - (entry_ss_call + entry_width), 0.0)
+                    intrinsic_wing_put  = np.maximum((entry_ss_put - entry_width) - spot, 0.0)
+                    intrinsic_debit = (intrinsic_call + intrinsic_put
+                                       - intrinsic_wing_call - intrinsic_wing_put)
+                debit_per_share = np.where(
+                    np.isfinite(debit_per_share),
+                    debit_per_share,
+                    intrinsic_debit.astype(np.float32),
+                )
+
+                # Unrealised P&L per position
+                unrealized = np.where(
+                    open_mask,
+                    (entry_credit - debit_per_share) * entry_qty * IC_MULTIPLIER,
+                    0.0,
+                )
+
+                # Profit target (None → 50 % of max credit)
+                dyn_profit_tgt = np.where(
+                    profit_tgt_arr > 0,
+                    profit_tgt_arr,
+                    entry_credit * entry_qty * IC_MULTIPLIER * 0.50,
+                )
+
+                # Exit conditions
+                sl_hit    = open_mask & (unrealized <= -np.abs(stop_loss_arr))
+                pt_hit    = open_mask & (unrealized >= dyn_profit_tgt)
+                dte_exit  = open_mask & (max_dte_exit_arr > 0) & (dte_remaining <= max_dte_exit_arr)
+                hd_exit   = open_mask & (days_held >= hold_days_arr)
+                exp_exit  = open_mask & (dte_remaining <= 0)
+                exit_mask = sl_hit | pt_hit | dte_exit | hd_exit | exp_exit
+
                 peak, max_dd = _update_bar_mtm_drawdown(
                     equity=equity,
-                    unrealized=np.where(exit_mask, 0.0, unrealized),
+                    unrealized=unrealized,
                     peak=peak,
                     max_dd=max_dd,
                 )
 
-                # Win/loss accounting
-                new_wins   = exit_mask & (pnl > 0)
-                new_losses = exit_mask & (pnl <= 0)
-                wins    = np.where(new_wins,   wins   + 1, wins)
-                losses  = np.where(new_losses, losses + 1, losses)
-                gross_win  = np.where(new_wins,   gross_win  + pnl, gross_win)
-                gross_loss = np.where(new_losses, gross_loss + np.abs(pnl), gross_loss)
+                # ── Exit diagnostic: daily samples + any exit trigger ─────────
+                _exit_diag_entry = int(entry_bar[open_mask][0]) if open_mask.any() else -1
+                _print_exit_row = (
+                    verbose and open_mask.any()
+                    and (exit_mask.any()
+                         or (i - _exit_diag_entry) % 78 == 0
+                         or i <= _exit_diag_entry + 5)
+                )
+                if _print_exit_row:
+                    for _ek in np.where(open_mask)[0][:2]:
+                        print(f"  [exit diag bar={i} k={_ek}] "
+                              f"days_held={days_held[_ek]:.3f}  "
+                              f"dte_rem={dte_remaining[_ek]:.3f}  "
+                              f"unrealized={unrealized[_ek]:.2f}  "
+                              f"hold_days={hold_days_arr[_ek]:.1f}  "
+                              f"stop_loss={stop_loss_arr[_ek]:.0f}  "
+                              f"max_dte_exit={max_dte_exit_arr[_ek]:.0f}  "
+                              f"sl={sl_hit[_ek]}  pt={pt_hit[_ek]}  "
+                              f"dte_ex={dte_exit[_ek]}  hd={hd_exit[_ek]}  "
+                              f"exp={exp_exit[_ek]}  EXIT={exit_mask[_ek]}")
 
-                # Exit-type accounting (verbose)
-                if verbose:
-                    _exit_sl  += int(sl_hit.sum())
-                    _exit_pt  += int(pt_hit.sum())
-                    _exit_dte += int((dte_exit & ~sl_hit & ~pt_hit).sum())
-                    _exit_hd  += int((hd_exit  & ~sl_hit & ~pt_hit & ~dte_exit).sum())
-                    _exit_exp += int((exp_exit  & ~sl_hit & ~pt_hit & ~dte_exit & ~hd_exit).sum())
-                    # Sample hold times from first 20 exits
-                    if len(_hold_samples) < 20:
-                        for _k in range(K):
-                            if exit_mask[_k] and len(_hold_samples) < 20:
-                                _hold_samples.append({
-                                    "k": _k, "bar": i,
-                                    "days_held": round(float(days_held[_k]), 2),
-                                    "dte_rem": round(float(dte_remaining[_k]), 2),
-                                    "unrealized": round(float(unrealized[_k]), 2),
-                                    "reason": ("SL" if sl_hit[_k] else
-                                               "PT" if pt_hit[_k] else
-                                               "DTE" if dte_exit[_k] else
-                                               "HD" if hd_exit[_k] else "EXP"),
-                                })
+                # Realise P&L for exiting positions
+                if exit_mask.any():
+                    pnl = np.where(exit_mask, unrealized, 0.0)
+                    equity = np.where(exit_mask, equity + pnl, equity)
+                    peak, max_dd = _update_bar_mtm_drawdown(
+                        equity=equity,
+                        unrealized=np.where(exit_mask, 0.0, unrealized),
+                        peak=peak,
+                        max_dd=max_dd,
+                    )
 
-                # Clear exited positions
-                open_mask = np.where(exit_mask, False, open_mask)
+                    # Win/loss accounting
+                    new_wins   = exit_mask & (pnl > 0)
+                    new_losses = exit_mask & (pnl <= 0)
+                    wins    = np.where(new_wins,   wins   + 1, wins)
+                    losses  = np.where(new_losses, losses + 1, losses)
+                    gross_win  = np.where(new_wins,   gross_win  + pnl, gross_win)
+                    gross_loss = np.where(new_losses, gross_loss + np.abs(pnl), gross_loss)
+
+                    # Exit-type accounting (verbose)
+                    if verbose:
+                        _exit_sl  += int(sl_hit.sum())
+                        _exit_pt  += int(pt_hit.sum())
+                        _exit_dte += int((dte_exit & ~sl_hit & ~pt_hit).sum())
+                        _exit_hd  += int((hd_exit  & ~sl_hit & ~pt_hit & ~dte_exit).sum())
+                        _exit_exp += int((exp_exit  & ~sl_hit & ~pt_hit & ~dte_exit & ~hd_exit).sum())
+                        # Sample hold times from first 20 exits
+                        if len(_hold_samples) < 20:
+                            for _k in range(K):
+                                if exit_mask[_k] and len(_hold_samples) < 20:
+                                    _hold_samples.append({
+                                        "k": _k, "bar": i,
+                                        "days_held": round(float(days_held[_k]), 2),
+                                        "dte_rem": round(float(dte_remaining[_k]), 2),
+                                        "unrealized": round(float(unrealized[_k]), 2),
+                                        "reason": ("SL" if sl_hit[_k] else
+                                                   "PT" if pt_hit[_k] else
+                                                   "DTE" if dte_exit[_k] else
+                                                   "HD" if hd_exit[_k] else "EXP"),
+                                    })
+
+                    # Clear exited positions
+                    open_mask = np.where(exit_mask, False, open_mask)
 
         # ── B. Check entries for candidates without open positions ─────────
         if not has_chain:
@@ -1016,13 +1152,13 @@ def run_backtest_optimizer_batch(
 
         # Verbose progress print every 10%
         if verbose and (i % _progress_interval == 0):
-            n_open = int(open_mask.sum())
+            n_open = int(open_mask_t.sum().item()) if _use_gpu else int(open_mask.sum())
             pct    = 100.0 * i / T_end
             print(f"  [engine] {pct:>5.1f}%  bar={i:>5}/{T_end}  "
                   f"open={n_open}/{K}  gate_fires={_gate_fires}  "
                   f"total_entries={_total_entries}")
 
-        # Gate checks (vectorised over K but all use same bar signal)
+        # Gate checks — scalar, same for both paths
         gate_ok = (es > entry_threshold) and (pop > pop_threshold) and \
                   (not abt) and (sidx == strategy_idx_filter)
         if not gate_ok:
@@ -1030,141 +1166,208 @@ def run_backtest_optimizer_batch(
 
         _gate_fires += 1
 
-        # Cooldown check per candidate
-        cooldown_ok = (i - last_entry) >= cooldown_bars
-
-        # Candidates eligible for entry
-        eligible = cooldown_ok & (~open_mask)
-        if not eligible.any():
-            continue
-
-        # Find structure for all eligible candidates (strategy-family dispatch)
-        td_elig  = np.where(eligible, target_dte_arr,   21.0).astype(np.float32)
-        sd_elig  = np.where(eligible, short_delta_arr,   0.30).astype(np.float32)
-        sw_elig  = np.where(eligible, spread_width_arr,  5.0).astype(np.float32)
-
-        # Initialise per-bar outputs (NaN/zero → invalid until structure found)
-        credit     = np.full(K, np.nan, np.float32)
-        ss_call    = np.zeros(K, np.float32)
-        ss_put     = np.zeros(K, np.float32)
-        aw         = np.zeros(K, np.float32)
-        valid      = np.zeros(K, bool)
-        struct_dte = np.full(K, np.nan, np.float32)
-
         if _use_gpu:
-            # ── GPU path: batched [K, M] tensor ops, no Python per-candidate loop ──
+            # === Stage 2A GPU TORCH PATH ===
+            # Cooldown + eligibility (device-side)
+            _cool_t = (i - last_entry_t) >= cooldown_bars
+            _elig_t = _cool_t & (~open_mask_t)
+            if not _elig_t.any():
+                continue
+
+            # Structure selection — return_tensors=True keeps results on GPU
             _g = _gss.select_entry_for_bar(
                 _r_t, _s_t, _d_t, _da_t, _b_t, _a_t, spot,
                 _td_t, _sd_t, _sw_t, strategy_family,
+                return_tensors=True,
             )
-            credit     = _g["credit"]
-            ss_call    = _g["ss_call"]
-            ss_put     = _g["ss_put"]
-            aw         = _g["actual_width"]
-            valid      = _g["valid"]
-            struct_dte = _g["actual_dte"]
-        elif strategy_family == "iron_butterfly":
-            credit, ss_call, aw, valid, struct_dte = _find_best_structure_iron_bfly(
-                spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
-                td_elig, sd_elig, sw_elig,
-            )
-            ss_put = ss_call.copy()
+            _cred_t = _g["credit"]       # [K] float32, NaN for invalid
+            _ssc_t  = _g["ss_call"]
+            _ssp_t  = _g["ss_put"]
+            _aw_t   = _g["actual_width"]
+            _val_t  = _g["valid"]        # [K] bool
+            _sdte_t = _g["actual_dte"]
 
-        elif strategy_family == "iron_condor":
-            credit, ss_call, ss_put, aw, valid, struct_dte = _find_best_structure_iron_condor(
-                spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
-                td_elig, sd_elig, sw_elig,
-            )
+            _can_t = _elig_t & _val_t
+            if not _can_t.any():
+                continue
 
-        elif strategy_family == "short_call":
-            credit, ss_call, valid, struct_dte = _find_best_structure_short_call(
-                spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
-                td_elig, sd_elig,
-            )
-            aw     = np.zeros(K, np.float32)
-            ss_put = ss_call.copy()
-
-        elif strategy_family == "short_put":
-            credit, ss_put, valid, struct_dte = _find_best_structure_short_put(
-                spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
-                td_elig, sd_elig,
-            )
-            aw      = np.zeros(K, np.float32)
-            ss_call = ss_put.copy()
-
-        else:
-            # Unknown family → fall back to iron butterfly (logs a warning once)
-            if not hasattr(run_backtest_optimizer_batch, '_warned_family'):
-                run_backtest_optimizer_batch._warned_family = set()
-            if strategy_family not in run_backtest_optimizer_batch._warned_family:
-                print(f"[engine] WARNING: unknown strategy_family={strategy_family!r}. "
-                      f"Falling back to iron_butterfly simulation.")
-                run_backtest_optimizer_batch._warned_family.add(strategy_family)
-            credit, ss_call, aw, valid, struct_dte = _find_best_structure_iron_bfly(
-                spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
-                td_elig, sd_elig, sw_elig,
-            )
-            ss_put = ss_call.copy()
-
-        can_enter = eligible & valid
-
-        if can_enter.any():
-            # Quantity: 1 contract (simplified, matches minimum)
-            qty = np.ones(K, np.int32)
-
-            # Margin estimate: 4-leg → width − credit; single-leg → premium × 20% spot equivalent
+            # Margin + capital check (device-side)
             if strategy_family in ("short_call", "short_put"):
-                margin_per_ct = credit * IC_MULTIPLIER * 2.0   # simplified naked margin
+                _marg_t = _cred_t.double() * IC_MULTIPLIER * 2.0
             else:
-                margin_per_ct = np.maximum(aw - credit, 0) * IC_MULTIPLIER
-            margin_per_ct = np.where(can_enter, margin_per_ct, 0.0)
+                _marg_t = torch.clamp(_aw_t.double() - _cred_t.double(),
+                                      min=0.0) * IC_MULTIPLIER
+            _marg_t   = torch.where(_can_t, _marg_t, torch.zeros_like(_marg_t))
+            _capok_t  = _can_t & (_marg_t <= equity_t * 0.40)
 
-            # Simple capital check: equity × 40% ceiling
-            max_deploy    = equity * 0.40
-            capital_ok    = can_enter & (margin_per_ct <= max_deploy)
-
-            if capital_ok.any():
-                entry_credit  = np.where(capital_ok, credit.astype(np.float64),   entry_credit)
-                entry_qty     = np.where(capital_ok, qty,                           entry_qty)
-                entry_ss_call = np.where(capital_ok, ss_call.astype(np.float64),   entry_ss_call)
-                entry_ss_put  = np.where(capital_ok, ss_put.astype(np.float64),    entry_ss_put)
-                entry_width   = np.where(capital_ok, aw.astype(np.float64),        entry_width)
-                entry_bar     = np.where(capital_ok, i,                             entry_bar)
-                entry_dte_at_entry = np.where(capital_ok,
-                                              struct_dte.astype(np.float64),
-                                              entry_dte_at_entry)
-                open_mask  = np.where(capital_ok, True,  open_mask)
-                last_entry = np.where(capital_ok, i,     last_entry)
+            if _capok_t.any():
+                _i_t = torch.full((K,), i, dtype=torch.int32, device=_dev)
+                entry_credit_t  = torch.where(_capok_t, _cred_t.double(),  entry_credit_t)
+                entry_qty_t     = torch.where(_capok_t,
+                                              torch.ones(K, dtype=torch.int32, device=_dev),
+                                              entry_qty_t)
+                entry_ss_call_t = torch.where(_capok_t, _ssc_t.double(),   entry_ss_call_t)
+                entry_ss_put_t  = torch.where(_capok_t, _ssp_t.double(),   entry_ss_put_t)
+                entry_width_t   = torch.where(_capok_t, _aw_t.double(),    entry_width_t)
+                entry_bar_t     = torch.where(_capok_t, _i_t,              entry_bar_t)
+                entry_dte_t     = torch.where(_capok_t, _sdte_t.double(),  entry_dte_t)
+                open_mask_t     = open_mask_t | _capok_t
+                last_entry_t    = torch.where(_capok_t, _i_t,              last_entry_t)
 
                 if verbose:
-                    n_entered = int(capital_ok.sum())
+                    n_entered = int(_capok_t.sum().item())
                     _total_entries += n_entered
-                    dte_entered = struct_dte[capital_ok]
-                    _ssc = ss_call[capital_ok]
-                    _ssp = ss_put[capital_ok]
+                    # CPU extract only for verbose print
+                    _cok_np   = _capok_t.cpu().numpy()
+                    _cred_np  = _cred_t.cpu().numpy()
+                    _ssc_np   = _ssc_t.cpu().numpy()
+                    _ssp_np   = _ssp_t.cpu().numpy()
+                    _sdte_np  = _sdte_t.cpu().numpy()
                     print(f"  [engine]   bar={i:>5}  ENTRY: {n_entered} candidate(s)  "
                           f"spot={spot:.2f}  family={strategy_family}  "
-                          f"credits=[{credit[capital_ok].min():.2f}–{credit[capital_ok].max():.2f}]  "
-                          f"ss_call=[{_ssc.min():.0f}–{_ssc.max():.0f}]  "
-                          f"ss_put=[{_ssp.min():.0f}–{_ssp.max():.0f}]  "
-                          f"actual_dte=[{dte_entered.min():.2f}–{dte_entered.max():.2f}]")
+                          f"credits=[{_cred_np[_cok_np].min():.2f}–{_cred_np[_cok_np].max():.2f}]  "
+                          f"ss_call=[{_ssc_np[_cok_np].min():.0f}–{_ssc_np[_cok_np].max():.0f}]  "
+                          f"ss_put=[{_ssp_np[_cok_np].min():.0f}–{_ssp_np[_cok_np].max():.0f}]  "
+                          f"actual_dte=[{_sdte_np[_cok_np].min():.2f}–{_sdte_np[_cok_np].max():.2f}]")
+        else:
+            # === CPU NUMPY PATH (unchanged) ===
+            # Cooldown check per candidate
+            cooldown_ok = (i - last_entry) >= cooldown_bars
+            # Candidates eligible for entry
+            eligible = cooldown_ok & (~open_mask)
+            if not eligible.any():
+                continue
+
+            # Find structure for all eligible candidates (strategy-family dispatch)
+            td_elig  = np.where(eligible, target_dte_arr,   21.0).astype(np.float32)
+            sd_elig  = np.where(eligible, short_delta_arr,   0.30).astype(np.float32)
+            sw_elig  = np.where(eligible, spread_width_arr,  5.0).astype(np.float32)
+
+            # Initialise per-bar outputs (NaN/zero → invalid until structure found)
+            credit     = np.full(K, np.nan, np.float32)
+            ss_call    = np.zeros(K, np.float32)
+            ss_put     = np.zeros(K, np.float32)
+            aw         = np.zeros(K, np.float32)
+            valid      = np.zeros(K, bool)
+            struct_dte = np.full(K, np.nan, np.float32)
+
+            if strategy_family == "iron_butterfly":
+                credit, ss_call, aw, valid, struct_dte = _find_best_structure_iron_bfly(
+                    spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
+                    td_elig, sd_elig, sw_elig,
+                )
+                ss_put = ss_call.copy()
+            elif strategy_family == "iron_condor":
+                credit, ss_call, ss_put, aw, valid, struct_dte = _find_best_structure_iron_condor(
+                    spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
+                    td_elig, sd_elig, sw_elig,
+                )
+            elif strategy_family == "short_call":
+                credit, ss_call, valid, struct_dte = _find_best_structure_short_call(
+                    spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
+                    td_elig, sd_elig,
+                )
+                aw     = np.zeros(K, np.float32)
+                ss_put = ss_call.copy()
+            elif strategy_family == "short_put":
+                credit, ss_put, valid, struct_dte = _find_best_structure_short_put(
+                    spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
+                    td_elig, sd_elig,
+                )
+                aw      = np.zeros(K, np.float32)
+                ss_call = ss_put.copy()
+            else:
+                if not hasattr(run_backtest_optimizer_batch, '_warned_family'):
+                    run_backtest_optimizer_batch._warned_family = set()
+                if strategy_family not in run_backtest_optimizer_batch._warned_family:
+                    print(f"[engine] WARNING: unknown strategy_family={strategy_family!r}. "
+                          f"Falling back to iron_butterfly simulation.")
+                    run_backtest_optimizer_batch._warned_family.add(strategy_family)
+                credit, ss_call, aw, valid, struct_dte = _find_best_structure_iron_bfly(
+                    spot, r_sl, s_sl, d_sl, da_sl, b_sl, a_sl,
+                    td_elig, sd_elig, sw_elig,
+                )
+                ss_put = ss_call.copy()
+
+            can_enter = eligible & valid
+            if can_enter.any():
+                qty = np.ones(K, np.int32)
+                if strategy_family in ("short_call", "short_put"):
+                    margin_per_ct = credit * IC_MULTIPLIER * 2.0
+                else:
+                    margin_per_ct = np.maximum(aw - credit, 0) * IC_MULTIPLIER
+                margin_per_ct = np.where(can_enter, margin_per_ct, 0.0)
+                max_deploy    = equity * 0.40
+                capital_ok    = can_enter & (margin_per_ct <= max_deploy)
+
+                if capital_ok.any():
+                    entry_credit  = np.where(capital_ok, credit.astype(np.float64),   entry_credit)
+                    entry_qty     = np.where(capital_ok, qty,                           entry_qty)
+                    entry_ss_call = np.where(capital_ok, ss_call.astype(np.float64),   entry_ss_call)
+                    entry_ss_put  = np.where(capital_ok, ss_put.astype(np.float64),    entry_ss_put)
+                    entry_width   = np.where(capital_ok, aw.astype(np.float64),        entry_width)
+                    entry_bar     = np.where(capital_ok, i,                             entry_bar)
+                    entry_dte_at_entry = np.where(capital_ok,
+                                                  struct_dte.astype(np.float64),
+                                                  entry_dte_at_entry)
+                    open_mask  = np.where(capital_ok, True,  open_mask)
+                    last_entry = np.where(capital_ok, i,     last_entry)
+
+                    if verbose:
+                        n_entered = int(capital_ok.sum())
+                        _total_entries += n_entered
+                        dte_entered = struct_dte[capital_ok]
+                        _ssc = ss_call[capital_ok]
+                        _ssp = ss_put[capital_ok]
+                        print(f"  [engine]   bar={i:>5}  ENTRY: {n_entered} candidate(s)  "
+                              f"spot={spot:.2f}  family={strategy_family}  "
+                              f"credits=[{credit[capital_ok].min():.2f}–{credit[capital_ok].max():.2f}]  "
+                              f"ss_call=[{_ssc.min():.0f}–{_ssc.max():.0f}]  "
+                              f"ss_put=[{_ssp.min():.0f}–{_ssp.max():.0f}]  "
+                              f"actual_dte=[{dte_entered.min():.2f}–{dte_entered.max():.2f}]")
 
     # ── Force-close any remaining open positions at end ───────────────────
-    if open_mask.any():
-        pnl = np.where(open_mask, -np.abs(stop_loss_arr) * 0.5, 0.0)  # conservative end-of-sim close
-        equity   = np.where(open_mask, equity + pnl, equity)
-        peak, max_dd = _update_bar_mtm_drawdown(
-            equity=equity,
-            unrealized=np.zeros_like(equity),
-            peak=peak,
-            max_dd=max_dd,
-        )
-        new_wins  = open_mask & (pnl > 0)
-        new_losses= open_mask & (pnl <= 0)
-        wins   = np.where(new_wins,   wins   + 1, wins)
-        losses = np.where(new_losses, losses + 1, losses)
-        gross_win  = np.where(new_wins,   gross_win  + pnl,       gross_win)
-        gross_loss = np.where(new_losses, gross_loss + np.abs(pnl), gross_loss)
+    if _use_gpu:
+        # === Stage 2A GPU TORCH PATH ===
+        if open_mask_t.any():
+            _fc_pnl_t   = torch.where(open_mask_t,
+                                      -_sl_t.abs() * 0.5,
+                                      torch.zeros_like(equity_t))
+            equity_t    = torch.where(open_mask_t, equity_t + _fc_pnl_t, equity_t)
+            peak_t      = torch.maximum(peak_t, equity_t)
+            _fc_nw_t    = open_mask_t & (_fc_pnl_t > 0)
+            _fc_nl_t    = open_mask_t & ~(_fc_pnl_t > 0)
+            wins_t      = torch.where(_fc_nw_t, wins_t   + 1, wins_t)
+            losses_t    = torch.where(_fc_nl_t, losses_t + 1, losses_t)
+            gross_win_t  = torch.where(_fc_nw_t,
+                                       gross_win_t  + _fc_pnl_t, gross_win_t)
+            gross_loss_t = torch.where(_fc_nl_t,
+                                       gross_loss_t + _fc_pnl_t.abs(), gross_loss_t)
+
+        # ── Stage 2A: extract GPU tensors to CPU numpy for metrics/verbose ──
+        equity     = equity_t.cpu().numpy()
+        max_dd     = max_dd_t.cpu().numpy()
+        wins       = wins_t.cpu().numpy()
+        losses     = losses_t.cpu().numpy()
+        gross_win  = gross_win_t.cpu().numpy()
+        gross_loss = gross_loss_t.cpu().numpy()
+    else:
+        # === CPU NUMPY PATH (unchanged) ===
+        if open_mask.any():
+            pnl = np.where(open_mask, -np.abs(stop_loss_arr) * 0.5, 0.0)
+            equity   = np.where(open_mask, equity + pnl, equity)
+            peak, max_dd = _update_bar_mtm_drawdown(
+                equity=equity,
+                unrealized=np.zeros_like(equity),
+                peak=peak,
+                max_dd=max_dd,
+            )
+            new_wins  = open_mask & (pnl > 0)
+            new_losses= open_mask & (pnl <= 0)
+            wins   = np.where(new_wins,   wins   + 1, wins)
+            losses = np.where(new_losses, losses + 1, losses)
+            gross_win  = np.where(new_wins,   gross_win  + pnl,       gross_win)
+            gross_loss = np.where(new_losses, gross_loss + np.abs(pnl), gross_loss)
 
     # ── Verbose: final diagnostics ────────────────────────────────────────
     if verbose:

@@ -18,14 +18,14 @@ Status legend:
 
 ---
 
-## Status Update (2026-03-19)
+## Status Update (2026-03-18)
 
 - ✅ Stage 1 selector audit and interface cleanup landed.
-- 🟡 GPU hot-path bounce reduction is underway: GPU MtM now supports `return_tensors=True`, unconditional CPU chain mirrors were reduced, and open-position copy-back is narrower.
-- 🟡 Stage 2A foundations are partially in place: the engine still uses host state and a Python bar loop, but the optimizer now has MtM drawdown correction, `np_dd` logging, guarded ranking/audit output, and checkpointed BO progress.
-- ✅ Operational support landed outside the original stage checklist: `--checkpoint` JSON resume, per-strategy BO phase/round persistence, `selection_forensics.py`, `scripts/repo_sync_audit.py`, and a `W/L` leaderboard column.
-- [ ] Stage 1 parity harness and benchmark work remain open.
-- [ ] Stage 2 tensorized state work has not started in earnest yet.
+- ✅ GPU hot-path bounce elimination complete: Stage 2A tensorized state machine implemented in `optimizer_engine.py`. All K state arrays (`equity`, `peak`, `max_dd`, `open_mask`, `entry_credit`, `entry_qty`, `entry_ss_call/put`, `entry_width`, `entry_bar`, `entry_dte`, `last_entry`, `wins`, `losses`, `gross_win/loss`) live on GPU device throughout the bar loop. Zero per-bar `.cpu().numpy()` in GPU mode. Single extraction at end-of-run.
+- ✅ Both paths maintained: `_use_gpu=True` → full torch tensor path; `_use_gpu=False` → original numpy path unchanged.
+- ✅ Operational support: `--checkpoint` JSON resume, `selection_forensics.py`, `scripts/repo_sync_audit.py`, `W/L` leaderboard column.
+- [ ] Stage 1 parity harness and benchmark work remain open (1.5, 1.6, 1.7).
+- [ ] Stage 2A parity harness still needed (2A.8, 2A.9).
 
 ---
 
@@ -65,13 +65,13 @@ Finish and harden the current GPU-vectorized strike-selection layer so it is sta
 
 ## 1.3 Remove unnecessary host/device bouncing
 - ✅ Trace all GPU outputs that are immediately converted back to CPU
-- 🟡 Eliminate conversions inside the hot path where possible
-- 🟡 Keep final metrics extraction on CPU only at end-of-run
-- [ ] Keep CPU fallback available only when explicitly required
+- ✅ Eliminate conversions inside the hot path where possible
+- ✅ Keep final metrics extraction on CPU only at end-of-run
+- ✅ Keep CPU fallback available only when explicitly required (`_use_gpu=False` path)
 
 ### Success criteria
-- [ ] No unnecessary `.cpu().numpy()` inside per-bar GPU path
-- [ ] No unnecessary `torch.from_numpy(...)` round-trips during bar processing
+- ✅ No unnecessary `.cpu().numpy()` inside per-bar GPU path
+- ✅ No unnecessary `torch.from_numpy(...)` round-trips during bar processing
 
 ---
 
@@ -150,100 +150,100 @@ Keep current behavior exactly the same while moving state arrays from CPU/NumPy 
 ---
 
 ## 2A.1 Inventory current state variables
-- [ ] Enumerate all optimizer state arrays currently mutated in-loop
-- [ ] Confirm shapes, dtypes, semantics, and initialization values
+- ✅ Enumerate all optimizer state arrays currently mutated in-loop
+- ✅ Confirm shapes, dtypes, semantics, and initialization values
 
-### Expected state inventory
-- [ ] `equity`
-- [ ] `peak`
-- [ ] `max_dd`
-- [ ] `open_mask`
-- [ ] `entry_credit`
-- [ ] `entry_qty`
-- [ ] `entry_ss_call`
-- [ ] `entry_ss_put`
-- [ ] `entry_width`
-- [ ] `entry_bar`
-- [ ] `entry_dte_at_entry`
-- [ ] `last_entry`
-- [ ] `wins`
-- [ ] `losses`
-- [ ] `gross_win`
-- [ ] `gross_loss`
+### Expected state inventory (all confirmed and tensorized)
+- ✅ `equity`          → float64 [K], init STARTING_EQUITY
+- ✅ `peak`            → float64 [K], init STARTING_EQUITY
+- ✅ `max_dd`          → float64 [K], init 0
+- ✅ `open_mask`       → bool    [K], init False
+- ✅ `entry_credit`    → float64 [K], init 0
+- ✅ `entry_qty`       → int32   [K], init 1
+- ✅ `entry_ss_call`   → float64 [K], init 0
+- ✅ `entry_ss_put`    → float64 [K], init 0
+- ✅ `entry_width`     → float64 [K], init 0
+- ✅ `entry_bar`       → int32   [K], init -999
+- ✅ `entry_dte_at_entry` → float64 [K], init 0
+- ✅ `last_entry`      → int32   [K], init -999
+- ✅ `wins`            → int32   [K], init 0
+- ✅ `losses`          → int32   [K], init 0
+- ✅ `gross_win`       → float64 [K], init 0
+- ✅ `gross_loss`      → float64 [K], init 0
 
 ### Deliverable
-- [ ] `reports/gpu_transition/stage2a_state_inventory.md`
+- [ ] `reports/gpu_transition/stage2a_state_inventory.md` (code serves as inventory; formal doc optional)
 
 ---
 
 ## 2A.2 Convert state initialization to torch tensors
-- [ ] Replace NumPy initialization with torch initialization on target device
-- [ ] Standardize state dtype policy
-- [ ] Keep initialization deterministic
-- [ ] Verify zero-state matches legacy engine
+- ✅ Replace NumPy initialization with torch initialization on target device
+- ✅ Standardize state dtype policy (float64 for equity/P&L, int32 for bars/counts, bool for masks)
+- ✅ Keep initialization deterministic (same values as numpy defaults)
+- [ ] Verify zero-state matches legacy engine (pending parity test 2A.8)
 
 ### Deliverable
-- [ ] State tensors created directly on device
+- ✅ State tensors created directly on device (see `optimizer_engine.py` Stage 2A init block)
 
 ---
 
 ## 2A.3 Tensorize open-position mark-to-market flow
-- 🟡 Feed open-position state directly into GPU MtM path
-- 🟡 Return device tensors instead of CPU arrays when Stage 2A enabled
-- [ ] Compute unrealized PnL as torch tensors
-- [ ] Keep all arithmetic device-side
+- ✅ Feed open-position state directly into GPU MtM path (entry_ss_call/put/width as torch tensors)
+- ✅ Return device tensors from mark_to_market_gpu (return_tensors=True throughout)
+- ✅ Compute unrealized PnL as torch tensors
+- ✅ Keep all arithmetic device-side
 
 ### Success criteria
-- [ ] No NumPy MtM calculations inside hot path
-- [ ] No CPU extraction until final reporting
+- ✅ No NumPy MtM calculations inside hot path (GPU mode)
+- ✅ No CPU extraction until final reporting
 
 ---
 
 ## 2A.4 Tensorize exit-condition computation
-- [ ] Convert exit-condition logic to torch boolean masks
-- [ ] Compute days-held on device
-- [ ] Compute DTE remaining on device
-- [ ] Compute stop/target/expiration masks on device
-- [ ] Merge masks into a single final exit mask
-- [ ] Preserve current exit precedence rules exactly
+- ✅ Convert exit-condition logic to torch boolean masks
+- ✅ Compute days-held on device (via ts_t indexing)
+- ✅ Compute DTE remaining on device
+- ✅ Compute stop/target/expiration masks on device
+- ✅ Merge masks into a single final exit mask
+- ✅ Preserve current exit precedence rules exactly
 
 ### Deliverable
-- [ ] `tests/test_stage2a_exit_mask_parity.py`
+- [ ] `tests/test_stage2a_exit_mask_parity.py` (still needed for validation)
 
 ---
 
 ## 2A.5 Tensorize realized PnL updates
-- [ ] Use exit mask to compute realized PnL device-side
-- [ ] Update `equity`, `wins`, `losses`, `gross_win`, `gross_loss` using tensor ops
-- [ ] Update drawdown state device-side
-- [ ] Preserve current accounting definitions exactly
+- ✅ Use exit mask to compute realized PnL device-side
+- ✅ Update `equity`, `wins`, `losses`, `gross_win`, `gross_loss` using tensor ops
+- ✅ Update drawdown state device-side
+- ✅ Preserve current accounting definitions exactly
 
 ### Success criteria
-- [ ] Per-candidate realized PnL matches legacy engine
-- [ ] Max drawdown metrics match within tolerance
+- [ ] Per-candidate realized PnL matches legacy engine (pending parity test 2A.8)
+- [ ] Max drawdown metrics match within tolerance (pending parity test 2A.8)
 
 ---
 
 ## 2A.6 Tensorize entry eligibility logic
-- [ ] Compute entry eligibility masks on device
-- [ ] Compute cooldown / `last_entry` constraints on device
-- [ ] Compute capital / quantity constraints on device
-- [ ] Apply gating masks using tensor logic only
-- [ ] Write entry state directly into state tensors
+- ✅ Compute entry eligibility masks on device (cooldown + open_mask)
+- ✅ Compute cooldown / `last_entry` constraints on device
+- ✅ Compute capital / quantity constraints on device
+- ✅ Apply gating masks using tensor logic only
+- ✅ Write entry state directly into state tensors (torch.where updates)
 
 ### Deliverable
-- [ ] `tests/test_stage2a_entry_mask_parity.py`
+- [ ] `tests/test_stage2a_entry_mask_parity.py` (still needed for validation)
 
 ---
 
 ## 2A.7 Keep Python bar loop, remove host-state mutation
 - ✅ Preserve outer `for t in T` loop temporarily
-- [ ] Ensure all per-bar updates are tensor-native
-- [ ] Prohibit new NumPy state mutation inside loop
+- ✅ Ensure all per-bar updates are tensor-native (GPU path)
+- ✅ Prohibit new NumPy state mutation inside loop (GPU path has zero numpy mutations)
 - ✅ Prohibit Python dict state in hot path
 
 ### Milestone
-- [ ] Hybrid loop remains, but state machine is tensorized
+- ✅ Hybrid loop remains, but GPU-path state machine is fully tensorized
 
 ---
 
@@ -580,15 +580,14 @@ For the current codebase, the highest-value next step is:
 That sequence minimizes risk and gives the fastest real-world acceleration.
 ________________________________________
 Recommended immediate next section to start on
-I will with these first 10 checkboxes, in order:
 1.	✅ Stage 1 path audit
 2.	✅ Standardize selector interfaces
 3.	✅ Add return_tensors mode
-4.	🟡 Remove hot-path .cpu().numpy() conversions
-5.	Build Stage 1 parity tests
-6.	Benchmark current Stage 1
-7.	Inventory current state arrays
-8.	Convert state initialization to torch tensors
-9.	Tensorize exit masks
-10.	Tensorize entry logic
+4.	✅ Remove hot-path .cpu().numpy() conversions (Stage 2A complete)
+5.	✅ Inventory current state arrays
+6.	✅ Convert state initialization to torch tensors
+7.	✅ Tensorize exit masks
+8.	✅ Tensorize entry logic
+9.	[ ] Build Stage 2A parity tests (2A.8) — validate GPU vs CPU path numerics
+10.	[ ] Benchmark Stage 2A (2A.9) — bars/sec, candidates/sec, GPU utilization
 
