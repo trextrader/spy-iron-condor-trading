@@ -29,7 +29,7 @@ import contextlib
 import os
 import time
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -121,6 +121,73 @@ def _save_results(rows: List[Dict], csv_path: str):
         w = csv.DictWriter(f, fieldnames=keys)
         w.writeheader()
         w.writerows(rows)
+
+
+def _json_safe_value(val: Any) -> Any:
+    if isinstance(val, (np.integer, np.floating)):
+        return val.item()
+    if isinstance(val, np.ndarray):
+        return val.tolist()
+    if isinstance(val, dict):
+        return {k: _json_safe_value(v) for k, v in val.items()}
+    if isinstance(val, (list, tuple)):
+        return [_json_safe_value(v) for v in val]
+    return val
+
+
+def _serialize_obs_rows(rows: List[np.ndarray]) -> List[List[float]]:
+    return [np.asarray(row, dtype=np.float32).tolist() for row in rows]
+
+
+def _deserialize_obs_rows(rows: List[Any]) -> List[np.ndarray]:
+    out: List[np.ndarray] = []
+    for row in rows or []:
+        out.append(np.asarray(row, dtype=np.float32))
+    return out
+
+
+def _save_bayes_progress(
+    checkpoint_progress_cb: Optional[Callable[[Dict[str, Any]], None]],
+    *,
+    template_id: str,
+    phase: str,
+    completed_rounds: int,
+    ts_tag: str,
+    csv_path: str,
+    bo_init: int,
+    bo_batch: int,
+    bo_rounds: int,
+    phase1_max_trades: int,
+    all_rows: List[Dict[str, Any]],
+    X_obs_fast: List[np.ndarray],
+    Y_obs_fast: List[float],
+    X_obs_med: List[np.ndarray],
+    Y_obs_med: List[float],
+    final_rows: Optional[List[Dict[str, Any]]] = None,
+    final_csv: Optional[str] = None,
+) -> None:
+    if checkpoint_progress_cb is None:
+        return
+    checkpoint_progress_cb({
+        "schema_version": 1,
+        "template_id": template_id,
+        "phase": phase,
+        "completed_rounds": int(completed_rounds),
+        "ts_tag": ts_tag,
+        "csv_path": csv_path,
+        "final_csv": final_csv,
+        "bo_init": int(bo_init),
+        "bo_batch": int(bo_batch),
+        "bo_rounds": int(bo_rounds),
+        "phase1_max_trades": int(phase1_max_trades),
+        "all_rows": _json_safe_value(all_rows),
+        "X_obs_fast": _serialize_obs_rows(X_obs_fast),
+        "Y_obs_fast": [float(v) for v in Y_obs_fast],
+        "X_obs_med": _serialize_obs_rows(X_obs_med),
+        "Y_obs_med": [float(v) for v in Y_obs_med],
+        "final_rows": _json_safe_value(final_rows or []),
+        "saved_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+    })
 
 
 def _fit_gp_and_suggest(
@@ -256,6 +323,8 @@ def run_bayes_optimizer(
     intensity_name: str = "med",   # Optimizer intensity level
     min_apply_obj: float = 0.0,    # Auto-apply only if rank-1 obj >= this threshold
     gpu_k_threshold: int = 32,     # passed through to run_backtest_optimizer_batch
+    checkpoint_resume_state: Optional[Dict[str, Any]] = None,
+    checkpoint_progress_cb: Optional[Callable[[Dict[str, Any]], None]] = None,
 ):
     """
     Entry point called from condor_brain_backtest_v45.py when
@@ -316,69 +385,118 @@ def run_bayes_optimizer(
 
     # ── 2. Output CSV ─────────────────────────────────────────────────────
     os.makedirs("reports", exist_ok=True)
-    ts_tag   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    csv_path = os.path.join("reports", f"bo_{template_id}_{ts_tag}.csv")
+    _resume_ok = isinstance(checkpoint_resume_state, dict) and \
+        checkpoint_resume_state.get("template_id") == template_id
+    if _resume_ok:
+        ts_tag = str(checkpoint_resume_state.get("ts_tag") or datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
+        csv_path = str(
+            checkpoint_resume_state.get("csv_path")
+            or os.path.join("reports", f"bo_{template_id}_{ts_tag}.csv")
+        )
+        all_rows = [dict(r) for r in (checkpoint_resume_state.get("all_rows") or [])]
+        X_obs_fast = _deserialize_obs_rows(checkpoint_resume_state.get("X_obs_fast") or [])
+        Y_obs_fast = [float(v) for v in (checkpoint_resume_state.get("Y_obs_fast") or [])]
+        X_obs_med = _deserialize_obs_rows(checkpoint_resume_state.get("X_obs_med") or [])
+        Y_obs_med = [float(v) for v in (checkpoint_resume_state.get("Y_obs_med") or [])]
+        _resume_phase = str(checkpoint_resume_state.get("phase") or "")
+        _resume_rounds = int(checkpoint_resume_state.get("completed_rounds") or 0)
+        _phase1_max_trades = int(checkpoint_resume_state.get("phase1_max_trades") or 0)
+        _resume_final_rows = [dict(r) for r in (checkpoint_resume_state.get("final_rows") or [])]
+        _resume_final_csv = checkpoint_resume_state.get("final_csv")
+        print(f"[bayes_opt] Resume state loaded for [{template_id}]  "
+              f"phase={_resume_phase or 'unknown'}  rounds_done={_resume_rounds}/{bo_rounds}")
+    else:
+        ts_tag = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_path = os.path.join("reports", f"bo_{template_id}_{ts_tag}.csv")
+        all_rows: List[Dict] = []
+        X_obs_fast: List[np.ndarray] = []   # Phase 1: fast fidelity (25% bars)
+        Y_obs_fast: List[float]      = []
+        X_obs_med:  List[np.ndarray] = []   # Phase 2: medium fidelity (60% bars)
+        Y_obs_med:  List[float]      = []
+        _resume_phase = ""
+        _resume_rounds = 0
+        _phase1_max_trades = 0
+        _resume_final_rows = []
+        _resume_final_csv = None
     print(f"[bayes_opt] Results → {csv_path}")
-
-    all_rows: List[Dict] = []
-    X_obs_fast: List[np.ndarray] = []   # Phase 1: fast fidelity (25% bars)
-    Y_obs_fast: List[float]      = []
-    X_obs_med:  List[np.ndarray] = []   # Phase 2: medium fidelity (60% bars)
-    Y_obs_med:  List[float]      = []
 
     # Deterministic per-strategy seed (stable across Python restarts)
     _tmpl_seed = int(hashlib.md5(template_id.encode()).hexdigest(), 16) % 99991
 
     # ── 3. Phase 1: Sobol warmup (fast fidelity) ─────────────────────────
-    print(f"\n[Phase 1] Sobol warmup — {bo_init} candidates at FAST fidelity")
-    sobol_seed  = _tmpl_seed
-    sobol_batch = sobol_candidates(bo_init, space, seed=sobol_seed)
-    print(f"  [seed] Sobol seed={sobol_seed} (from template_id='{template_id}')")
-    configs_p1  = candidates_to_configs(sobol_batch, base_cfg)
+    sobol_seed = _tmpl_seed
+    if X_obs_fast and Y_obs_fast:
+        _p1_best = float(np.nanmax(np.asarray(Y_obs_fast, dtype=np.float32)))
+        _p1_trades = int(_phase1_max_trades)
+        print(f"\n[Phase 1] Resume — loaded {len(Y_obs_fast)} FAST candidates from checkpoint")
+        print(f"  [seed] Sobol seed={sobol_seed} (from template_id='{template_id}')")
+        print(f"  Resume summary: best_obj={_p1_best:.3f}  max_trades={_p1_trades}")
+    else:
+        print(f"\n[Phase 1] Sobol warmup — {bo_init} candidates at FAST fidelity")
+        sobol_batch = sobol_candidates(bo_init, space, seed=sobol_seed)
+        print(f"  [seed] Sobol seed={sobol_seed} (from template_id='{template_id}')")
+        configs_p1 = candidates_to_configs(sobol_batch, base_cfg)
 
-    # Print first 3 Sobol candidates so user can see the decoded param spread
-    print(f"  First 3 Sobol candidates (sample of search coverage):")
-    p1_cfgs_preview = candidates_to_configs(sobol_batch, base_cfg)
-    for ki in range(min(3, bo_init)):
-        cfg_preview = {k: v for k, v in p1_cfgs_preview[ki].items() if k in [p.name for p in space.params]}
-        print(f"    cand[{ki}]: " + "  ".join(f"{k}={v}" for k, v in cfg_preview.items()))
+        # Print first 3 Sobol candidates so user can see the decoded param spread
+        print(f"  First 3 Sobol candidates (sample of search coverage):")
+        p1_cfgs_preview = candidates_to_configs(sobol_batch, base_cfg)
+        for ki in range(min(3, bo_init)):
+            cfg_preview = {k: v for k, v in p1_cfgs_preview[ki].items() if k in [p.name for p in space.params]}
+            print(f"    cand[{ki}]: " + "  ".join(f"{k}={v}" for k, v in cfg_preview.items()))
 
-    t0 = time.time()
-    res_p1 = run_backtest_optimizer_batch(
-        ctx, sobol_batch,
-        base_config=base_cfg, objective_spec=obj_spec, fidelity="fast",
-        strategy_idx_filter=_class_idx_for_template(template_id, strategy_configs),
-        strategy_family=strategy_family,
-        verbose=False,   # suppress bar-level detail for warmup speed
-        gpu_k_threshold=gpu_k_threshold,
-    )
-    elapsed_p1 = time.time() - t0
-    best_k_p1  = int(np.nanargmax(res_p1.objective))
-    print(f"  done in {elapsed_p1:.1f}s  best_obj={res_p1.objective[best_k_p1]:.3f}  "
-          f"(cand[{best_k_p1}]: trades={res_p1.total[best_k_p1]}  "
-          f"net={res_p1.net_pct[best_k_p1]:+.1f}%  dd={res_p1.max_dd[best_k_p1]:.2f}%  "
-          f"np_dd={res_p1.np_dd[best_k_p1]:.3f})")
-    print(f"  Phase 1 full results:")
-    print(f"  {'k':>3}  {'obj':>8}  {'trades':>6}  {'wins':>5}  {'loss':>5}  "
-          f"{'net%':>7}  {'dd%':>6}  {'np/dd':>8}")
-    for ki in range(bo_init):
-        marker = " <-- best" if ki == best_k_p1 else ""
-        print(f"  {ki:>3}  {res_p1.objective[ki]:>8.3f}  {res_p1.total[ki]:>6}  "
-              f"{res_p1.wins[ki]:>5}  {res_p1.losses[ki]:>5}  "
-              f"{res_p1.net_pct[ki]:>7.2f}  {res_p1.max_dd[ki]:>6.2f}  {res_p1.np_dd[ki]:>8.3f}{marker}")
+        t0 = time.time()
+        res_p1 = run_backtest_optimizer_batch(
+            ctx, sobol_batch,
+            base_config=base_cfg, objective_spec=obj_spec, fidelity="fast",
+            strategy_idx_filter=_class_idx_for_template(template_id, strategy_configs),
+            strategy_family=strategy_family,
+            verbose=False,   # suppress bar-level detail for warmup speed
+            gpu_k_threshold=gpu_k_threshold,
+        )
+        elapsed_p1 = time.time() - t0
+        best_k_p1  = int(np.nanargmax(res_p1.objective))
+        print(f"  done in {elapsed_p1:.1f}s  best_obj={res_p1.objective[best_k_p1]:.3f}  "
+              f"(cand[{best_k_p1}]: trades={res_p1.total[best_k_p1]}  "
+              f"net={res_p1.net_pct[best_k_p1]:+.1f}%  dd={res_p1.max_dd[best_k_p1]:.2f}%  "
+              f"np_dd={res_p1.np_dd[best_k_p1]:.3f})")
+        print(f"  Phase 1 full results:")
+        print(f"  {'k':>3}  {'obj':>8}  {'trades':>6}  {'wins':>5}  {'loss':>5}  "
+              f"{'net%':>7}  {'dd%':>6}  {'np/dd':>8}")
+        for ki in range(bo_init):
+            marker = " <-- best" if ki == best_k_p1 else ""
+            print(f"  {ki:>3}  {res_p1.objective[ki]:>8.3f}  {res_p1.total[ki]:>6}  "
+                  f"{res_p1.wins[ki]:>5}  {res_p1.losses[ki]:>5}  "
+                  f"{res_p1.net_pct[ki]:>7.2f}  {res_p1.max_dd[ki]:>6.2f}  {res_p1.np_dd[ki]:>8.3f}{marker}")
 
-    for k in range(bo_init):
-        row = _make_row(0, configs_p1[k], res_p1, k)
-        all_rows.append(row)
-        x_enc = encode_config(configs_p1[k], space)
-        X_obs_fast.append(x_enc)
-        Y_obs_fast.append(float(res_p1.objective[k]))
+        for k in range(bo_init):
+            row = _make_row(0, configs_p1[k], res_p1, k)
+            all_rows.append(row)
+            x_enc = encode_config(configs_p1[k], space)
+            X_obs_fast.append(x_enc)
+            Y_obs_fast.append(float(res_p1.objective[k]))
 
-    _save_results(sorted(all_rows, key=lambda r: -r["objective"])[:100], csv_path)
+        _save_results(sorted(all_rows, key=lambda r: -r["objective"])[:100], csv_path)
+        _p1_best = float(np.nanmax(res_p1.objective))
+        _p1_trades = int(np.nanmax(res_p1.total))
+        _save_bayes_progress(
+            checkpoint_progress_cb,
+            template_id=template_id,
+            phase="phase1_complete",
+            completed_rounds=0,
+            ts_tag=ts_tag,
+            csv_path=csv_path,
+            bo_init=bo_init,
+            bo_batch=bo_batch,
+            bo_rounds=bo_rounds,
+            phase1_max_trades=_p1_trades,
+            all_rows=all_rows,
+            X_obs_fast=X_obs_fast,
+            Y_obs_fast=Y_obs_fast,
+            X_obs_med=X_obs_med,
+            Y_obs_med=Y_obs_med,
+        )
 
     # ── Early exit: dead strategy (gate never fires) ──────────────────────
-    _p1_best = float(np.nanmax(res_p1.objective))
-    _p1_trades = int(np.nanmax(res_p1.total))
     if _p1_trades == 0:
         print(f"\n[bayes_opt] SKIP — gate_eligible_bars=0 in Phase 1 fast fidelity.")
         print(f"[bayes_opt] v43 model does not predict class_idx="
@@ -388,10 +506,15 @@ def run_bayes_optimizer(
 
     # ── 4. Phase 2: BO rounds (medium fidelity) ──────────────────────────
     print(f"\n[Phase 2] BO rounds — {bo_rounds} rounds × {bo_batch} candidates at MEDIUM fidelity")
+    if _resume_rounds:
+        print(f"[bayes_opt] Resume — {min(_resume_rounds, bo_rounds)}/{bo_rounds} medium rounds already complete")
 
-    best_x = X_obs_fast[int(np.nanargmax(res_p1.objective))]  # best from warmup
+    if Y_obs_med:
+        best_x = X_obs_med[int(np.nanargmax(Y_obs_med))]
+    else:
+        best_x = X_obs_fast[int(np.nanargmax(Y_obs_fast))]
 
-    for rnd in range(bo_rounds):
+    for rnd in range(_resume_rounds, bo_rounds):
         seed_rnd = _tmpl_seed + rnd * 1000
         if _BOTORCH_OK and len(Y_obs_med) >= 4:
             try:
@@ -451,48 +574,88 @@ def run_bayes_optimizer(
             best_x = X_obs_fast[int(np.nanargmax(Y_obs_fast))]
 
         _save_results(sorted(all_rows, key=lambda r: -r["objective"])[:100], csv_path)
+        _save_bayes_progress(
+            checkpoint_progress_cb,
+            template_id=template_id,
+            phase="phase2_round_complete",
+            completed_rounds=rnd + 1,
+            ts_tag=ts_tag,
+            csv_path=csv_path,
+            bo_init=bo_init,
+            bo_batch=bo_batch,
+            bo_rounds=bo_rounds,
+            phase1_max_trades=_p1_trades,
+            all_rows=all_rows,
+            X_obs_fast=X_obs_fast,
+            Y_obs_fast=Y_obs_fast,
+            X_obs_med=X_obs_med,
+            Y_obs_med=Y_obs_med,
+        )
 
     # ── 5. Phase 3: Full-fidelity eval of top-k ───────────────────────────
     # Evaluate at least 10 candidates at full fidelity (or all available if <10)
     # so the TOP 10 leaderboard is always populated.
-    top_k = min(max(bo_batch, 10), len(all_rows))
-    sorted_rows = sorted(all_rows, key=lambda r: -r["objective"])[:top_k]
-    print(f"\n[Phase 3] Full-fidelity re-evaluation of top {top_k} candidates")
+    if _resume_phase == "phase3_complete" and _resume_final_rows:
+        final_rows = [dict(r) for r in _resume_final_rows]
+        final_csv = str(_resume_final_csv or os.path.join("reports", f"bo_{template_id}_{ts_tag}_final.csv"))
+        print(f"\n[Phase 3] Resume — loaded {len(final_rows)} full-fidelity candidates from checkpoint")
+        print(f"[bayes_opt] Final results → {final_csv}")
+    else:
+        top_k = min(max(bo_batch, 10), len(all_rows))
+        sorted_rows = sorted(all_rows, key=lambda r: -r["objective"])[:top_k]
+        print(f"\n[Phase 3] Full-fidelity re-evaluation of top {top_k} candidates")
 
-    # Re-encode top configs back into CandidateBatch
-    top_cfgs   = [r for r in sorted_rows]
-    top_params: Dict[str, np.ndarray] = {}
-    for p in space.params:
-        top_params[p.name] = np.array(
-            [float(cfg.get(p.name, p.lo)) for cfg in top_cfgs], dtype=np.float32
+        top_cfgs   = [r for r in sorted_rows]
+        top_params: Dict[str, np.ndarray] = {}
+        for p in space.params:
+            top_params[p.name] = np.array(
+                [float(cfg.get(p.name, p.lo)) for cfg in top_cfgs], dtype=np.float32
+            )
+        top_batch = CandidateBatch(K=len(top_cfgs), params=top_params)
+
+        t0 = time.time()
+        res_full = run_backtest_optimizer_batch(
+            ctx, top_batch,
+            base_config=base_cfg, objective_spec=obj_spec, fidelity="full",
+            strategy_idx_filter=_class_idx_for_template(template_id, strategy_configs),
+            strategy_family=strategy_family,
+            verbose=verbose,
+            gpu_k_threshold=gpu_k_threshold,
         )
-    top_batch = CandidateBatch(K=len(top_cfgs), params=top_params)
+        print(f"  Full-fidelity done in {time.time()-t0:.1f}s")
 
-    t0 = time.time()
-    res_full = run_backtest_optimizer_batch(
-        ctx, top_batch,
-        base_config=base_cfg, objective_spec=obj_spec, fidelity="full",
-        strategy_idx_filter=_class_idx_for_template(template_id, strategy_configs),
-        strategy_family=strategy_family,
-        verbose=verbose,   # full diagnostic when --verbose flag is set
-        gpu_k_threshold=gpu_k_threshold,
-    )
-    print(f"  Full-fidelity done in {time.time()-t0:.1f}s")
+        final_rows = []
+        for k in range(len(top_cfgs)):
+            row = _make_row(k + 1, top_cfgs[k], res_full, k)
+            row["fidelity"] = "full"
+            final_rows.append(row)
 
-    final_rows = []
-    for k in range(len(top_cfgs)):
-        row = _make_row(k + 1, top_cfgs[k], res_full, k)
-        row["fidelity"] = "full"
-        final_rows.append(row)
+        final_rows.sort(key=lambda r: -r["objective"])
+        for i, r in enumerate(final_rows):
+            r["rank"] = i + 1
 
-    final_rows.sort(key=lambda r: -r["objective"])
-    for i, r in enumerate(final_rows):
-        r["rank"] = i + 1
-
-    # Merge into all_rows for final CSV
-    final_csv = os.path.join("reports", f"bo_{template_id}_{ts_tag}_final.csv")
-    _save_results(final_rows, final_csv)
-    print(f"\n[bayes_opt] Final results → {final_csv}")
+        final_csv = os.path.join("reports", f"bo_{template_id}_{ts_tag}_final.csv")
+        _save_results(final_rows, final_csv)
+        print(f"\n[bayes_opt] Final results → {final_csv}")
+        _save_bayes_progress(
+            checkpoint_progress_cb,
+            template_id=template_id,
+            phase="phase3_complete",
+            completed_rounds=bo_rounds,
+            ts_tag=ts_tag,
+            csv_path=csv_path,
+            bo_init=bo_init,
+            bo_batch=bo_batch,
+            bo_rounds=bo_rounds,
+            phase1_max_trades=_p1_trades,
+            all_rows=all_rows,
+            X_obs_fast=X_obs_fast,
+            Y_obs_fast=Y_obs_fast,
+            X_obs_med=X_obs_med,
+            Y_obs_med=Y_obs_med,
+            final_rows=final_rows,
+            final_csv=final_csv,
+        )
 
     # ── 6. Print leaderboard ──────────────────────────────────────────────
     n_results = len(final_rows)

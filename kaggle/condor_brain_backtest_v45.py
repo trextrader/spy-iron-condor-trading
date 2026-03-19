@@ -417,6 +417,7 @@ def _load_optimizer_runlog(path):
     state.setdefault("recent_completed", [])
     state.setdefault("current", None)
     state.setdefault("requested_templates", [])
+    state.setdefault("current_bayes_state", None)
     return state
 
 
@@ -445,6 +446,7 @@ def _new_optimizer_runlog(args, run_kind, requested_templates, effective_intensi
         "completed_order": [],
         "recent_completed": [],
         "current": None,
+        "current_bayes_state": None,
     }
 
 
@@ -527,7 +529,9 @@ def _runlog_record_terminal(
         recent = state.setdefault("recent_completed", [])
         recent.append(recent_row)
         state["recent_completed"] = recent[-recent_limit:]
-    state["current"] = None
+    if status != "interrupted":
+        state["current"] = None
+        state["current_bayes_state"] = None
 
 
 def _runlog_resume_rows(state):
@@ -4398,6 +4402,8 @@ def main():
                 print(f"[autoall] intensity={_effective_intensity}  min_apply_obj={_apply_floor}")
                 print(f"[autoall] Templates ({_n_total}): {_all_templates}\n")
                 if _resume_state:
+                    _prev_current = _resume_state.get("current") or {}
+                    _prev_bayes = _resume_state.get("current_bayes_state") or {}
                     _autoall_summary, _strat_times = _runlog_resume_rows(_resume_state)
                     _resume_completed = _runlog_completed_templates(_resume_state)
                     _runlog_state = _resume_state
@@ -4405,11 +4411,17 @@ def main():
                     _runlog_state["effective_intensity"] = _effective_intensity
                     _runlog_state["strategyomit"] = list(getattr(args, "strategyomit", None) or [])
                     _runlog_state["requested_templates"] = list(_all_templates)
-                    _runlog_state["current"] = None
-                    if _resume_state.get("current"):
-                        _cur = _resume_state["current"]
-                        print(f"[autoall] Previous interrupted strategy: {_cur.get('template_id')} "
-                              f"[{_cur.get('position')}/{_cur.get('total')}] — it will be rerun.")
+                    if _prev_current:
+                        _resume_extra = ""
+                        if _prev_bayes.get("template_id") == _prev_current.get("template_id"):
+                            _resume_bo_state = _prev_bayes.get("state") or {}
+                            _resume_phase = _resume_bo_state.get("phase")
+                            _resume_rounds = int(_resume_bo_state.get("completed_rounds") or 0)
+                            if _resume_phase:
+                                _resume_extra = f"  resume_phase={_resume_phase} rounds_done={_resume_rounds}"
+                        print(f"[autoall] Previous interrupted strategy: {_prev_current.get('template_id')} "
+                              f"[{_prev_current.get('position')}/{_prev_current.get('total')}]"
+                              f"{_resume_extra}")
                     print(f"[autoall] Resume state loaded: {len(_resume_completed)} finalized strategies")
                 else:
                     _autoall_summary = []
@@ -4463,8 +4475,21 @@ def main():
                     _best = None
                     _status = "completed"
                     _err_msg = None
+                    _interrupted_exc = None
+                    _resume_bo_state = None
+                    _checkpoint_progress_cb = None
                     if _runlog_path:
                         _runlog_set_current(_runlog_state, _tmpl, _ti, _n_total)
+                        _current_bo = _runlog_state.get("current_bayes_state") or {}
+                        if _current_bo.get("template_id") == _tmpl:
+                            _resume_bo_state = _current_bo.get("state")
+                        def _checkpoint_progress_cb(_bo_state, _tmpl_id=_tmpl):
+                            _runlog_state["current_bayes_state"] = {
+                                "template_id": _tmpl_id,
+                                "state": _bo_state,
+                                "updated_at": _utc_now_iso(),
+                            }
+                            _save_optimizer_runlog(_runlog_path, _runlog_state)
                         _save_optimizer_runlog(_runlog_path, _runlog_state)
                     try:
                         _rows = run_bayes_optimizer(
@@ -4480,9 +4505,16 @@ def main():
                             intensity_name=_effective_intensity,
                             min_apply_obj=_apply_floor,
                             gpu_k_threshold=_gpu_k_threshold,
+                            checkpoint_resume_state=_resume_bo_state,
+                            checkpoint_progress_cb=_checkpoint_progress_cb,
                         )
                         _best = _rows[0] if _rows else None
                         _autoall_summary.append((_tmpl, _best, None))
+                    except KeyboardInterrupt as _exc:
+                        _status = "interrupted"
+                        _err_msg = "KeyboardInterrupt"
+                        _interrupted_exc = _exc
+                        print(f"[autoall] Interrupted during {_tmpl}; checkpoint retained for resume.")
                     except Exception as _exc:
                         import traceback as _tb
                         print(f"[autoall] ERROR for {_tmpl}: {_exc}")
@@ -4491,7 +4523,8 @@ def main():
                         _err_msg = str(_exc)
                         _autoall_summary.append((_tmpl, None, _err_msg))
                     _strat_elapsed = time.time() - _strat_t0
-                    _strat_times.append(_strat_elapsed)
+                    if _status != "interrupted":
+                        _strat_times.append(_strat_elapsed)
                     if _runlog_path:
                         _runlog_record_terminal(
                             _runlog_state,
@@ -4504,6 +4537,8 @@ def main():
                             total=_n_total,
                         )
                         _save_optimizer_runlog(_runlog_path, _runlog_state)
+                    if _interrupted_exc is not None:
+                        raise _interrupted_exc
                     # ── Per-strategy timing + rolling ETA ────────────────────────────────────
                     _n_done_so_far = len(_strat_times)
                     _n_skipped_so_far = sum(1 for _, _, _e in _autoall_summary if _e and _e.startswith("skipped:"))
@@ -4680,9 +4715,23 @@ def main():
                     _save_optimizer_runlog(_runlog_path, _runlog_state)
                     print(f"[optimizer] Checkpoint JSON: {os.path.abspath(_runlog_path)}")
                     _runlog_set_current(_runlog_state, _single_tmpl, 1, 1)
+                    _current_bo = _runlog_state.get("current_bayes_state") or {}
+                    _resume_bo_state = _current_bo.get("state") if _current_bo.get("template_id") == _single_tmpl else None
+                    def _checkpoint_progress_cb(_bo_state, _tmpl_id=_single_tmpl):
+                        _runlog_state["current_bayes_state"] = {
+                            "template_id": _tmpl_id,
+                            "state": _bo_state,
+                            "updated_at": _utc_now_iso(),
+                        }
+                        _save_optimizer_runlog(_runlog_path, _runlog_state)
                     _save_optimizer_runlog(_runlog_path, _runlog_state)
+                else:
+                    _resume_bo_state = None
+                    _checkpoint_progress_cb = None
                 _single_rows = None
+                _single_status = "completed"
                 _single_error = None
+                _single_interrupt = None
                 try:
                     _single_rows = run_bayes_optimizer(
                         run_backtest, args,
@@ -4696,8 +4745,16 @@ def main():
                         auto_apply=False,
                         intensity_name=_effective_intensity,
                         gpu_k_threshold=_gpu_k_threshold,
+                        checkpoint_resume_state=_resume_bo_state,
+                        checkpoint_progress_cb=_checkpoint_progress_cb,
                     )
+                except KeyboardInterrupt as _exc:
+                    _single_status = "interrupted"
+                    _single_error = "KeyboardInterrupt"
+                    _single_interrupt = _exc
+                    print(f"[optimizer] Interrupted during {_single_tmpl}; checkpoint retained for resume.")
                 except Exception as _exc:
+                    _single_status = "error"
                     _single_error = str(_exc)
                     raise
                 finally:
@@ -4706,14 +4763,16 @@ def main():
                         _runlog_record_terminal(
                             _runlog_state,
                             _single_tmpl,
-                            "completed" if _single_error is None else "error",
-                            result=_single_rows[0] if _single_rows else None,
+                            _single_status,
+                            result=_single_rows[0] if _single_status == "completed" and _single_rows else None,
                             error=_single_error,
                             elapsed_sec=_single_elapsed,
                             position=1,
                             total=1,
                         )
                         _save_optimizer_runlog(_runlog_path, _runlog_state)
+                if _single_interrupt is not None:
+                    raise _single_interrupt
                 _sm, _ss = divmod(int(_single_elapsed), 60)
                 _sh, _sm = divmod(_sm, 60)
                 _s_str = f"{_sh}h {_sm:02d}m {_ss:02d}s" if _sh else f"{_sm}m {_ss:02d}s"
