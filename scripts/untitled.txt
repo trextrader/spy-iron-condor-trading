@@ -1,0 +1,36 @@
+import pandas as pd
+import sys
+
+input_file = sys.argv[1]
+output_file = sys.argv[2]
+
+df = pd.read_csv(input_file)
+
+# Lowercase + strip whitespace
+df.columns = [c.strip().lower() for c in df.columns]
+
+rename_map = {}
+
+for col in df.columns:
+    base = col
+    # Remove timeframe suffixes
+    for suf in ["_m1", "_m5", "_m15", "_h1"]:
+        base = base.replace(suf, "")
+
+    base = base.replace("price", "").strip()
+
+    if base in ["open", "o"]:
+        rename_map[col] = "open"
+    elif base in ["high", "h"]:
+        rename_map[col] = "high"
+    elif base in ["low", "l"]:
+        rename_map[col] = "low"
+    elif base in ["close", "c", "last"]:
+        rename_map[col] = "close"
+    elif base in ["volume", "vol", "v"]:
+        rename_map[col] = "volume"
+
+df = df.rename(columns=rename_map)
+
+df.to_csv(output_file, index=False)
+print(f"[OK] Normalized columns → {output_file}")
