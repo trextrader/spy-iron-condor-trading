@@ -1335,6 +1335,11 @@ def run_backtest_optimizer_batch(
                                       torch.zeros_like(equity_t))
             equity_t    = torch.where(open_mask_t, equity_t + _fc_pnl_t, equity_t)
             peak_t      = torch.maximum(peak_t, equity_t)
+            # Mirror CPU _update_bar_mtm_drawdown: capture drawdown from force-close loss
+            _fc_dd_t    = torch.where(peak_t > 0,
+                                      (peak_t - equity_t) / peak_t * 100.0,
+                                      torch.zeros_like(peak_t))
+            max_dd_t    = torch.maximum(max_dd_t, _fc_dd_t)
             _fc_nw_t    = open_mask_t & (_fc_pnl_t > 0)
             _fc_nl_t    = open_mask_t & ~(_fc_pnl_t > 0)
             wins_t      = torch.where(_fc_nw_t, wins_t   + 1, wins_t)
