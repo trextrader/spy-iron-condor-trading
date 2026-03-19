@@ -18,14 +18,18 @@ Status legend:
 
 ---
 
-## Status Update (2026-03-18)
+## Status Update (2026-03-18 — Push 3)
 
 - ✅ Stage 1 selector audit and interface cleanup landed.
 - ✅ GPU hot-path bounce elimination complete: Stage 2A tensorized state machine implemented in `optimizer_engine.py`. All K state arrays (`equity`, `peak`, `max_dd`, `open_mask`, `entry_credit`, `entry_qty`, `entry_ss_call/put`, `entry_width`, `entry_bar`, `entry_dte`, `last_entry`, `wins`, `losses`, `gross_win/loss`) live on GPU device throughout the bar loop. Zero per-bar `.cpu().numpy()` in GPU mode. Single extraction at end-of-run.
 - ✅ Both paths maintained: `_use_gpu=True` → full torch tensor path; `_use_gpu=False` → original numpy path unchanged.
 - ✅ Operational support: `--checkpoint` JSON resume, `selection_forensics.py`, `scripts/repo_sync_audit.py`, `W/L` leaderboard column.
-- [ ] Stage 1 parity harness and benchmark work remain open (1.5, 1.6, 1.7).
-- [ ] Stage 2A parity harness still needed (2A.8, 2A.9).
+- ✅ Stage 1 parity harness: 22/22 tests pass (test_gpu_strike_selector_parity.py)
+- ✅ Stage 1 benchmark harness: benchmark_stage1.py, GPU crossover K≈32 (1.08x), K=512 21-26x
+- ✅ Stage 2A parity harness: 9/9 tests pass (test_stage2a_full_engine_parity.py)
+- ✅ Stage 2A benchmark: benchmark_stage2a.py, K=128/T=2000 GPU 4.47x, ~430 bars/sec flat
+- ✅ Stage 2A force-close max_dd bug fixed (commit bc9d4be)
+- 🟡 Stage 3A: step_bar_gpu extracted, 10/10 parity tests pass locally; benchmark + compiled parity pending Lightning AI test
 
 ---
 
@@ -371,42 +375,45 @@ Restructure the Stage 2 engine so the hot path is compatible with `torch.compile
 ---
 
 ## 3A.1 Isolate pure tensor step function
-- [ ] Extract one-bar transition into a pure tensor function:
-  - [ ] inputs: current state, bar tensors, candidate params
-  - [ ] outputs: next state, per-bar metrics
-- [ ] Remove side effects from hot step where possible
-- [ ] Separate logging/debugging from compute path
+- ✅ Extract one-bar transition into a pure tensor function:
+  - ✅ inputs: current state (BarState), bar tensors, candidate params
+  - ✅ outputs: next state (BarState)
+- ✅ Remove side effects from hot step (no verbose, no global counters)
+- ✅ Separate logging/debugging from compute path
 
 ### Deliverable
-- [ ] `step_bar_tensorized(...)` or equivalent
+- ✅ `kaggle/optimizer_stage3a.py` — BarState, init_bar_state, step_bar_gpu, make_compiled_step
 
 ---
 
 ## 3A.2 Remove graph-breaking constructs
-- [ ] Eliminate hidden Python branching in tensor path
-- [ ] Eliminate data-dependent Python object mutation
-- [ ] Eliminate NumPy calls in compiled region
-- [ ] Reduce shape polymorphism where practical
-- [ ] Standardize tensor layouts for compile stability
+- ✅ Eliminated all .any()/.item() guards (5 removed: open_mask, exit, elig, can, capok)
+- ✅ Eliminated data-dependent Python object mutation in hot path
+- ✅ No NumPy calls in step_bar_gpu
+- ✅ Strategy family dispatched via static Python int (compile specialization, not graph break)
+- ✅ gate_ok / family_code / K passed as Python scalars (compile specializations)
+- [ ] One remaining graph break: mark_to_market_gpu:528 bool(open_t.any().item())
+      → documented in audit; fullgraph=False works; fullgraph=True fix described
 
 ### Deliverable
-- [ ] `reports/gpu_transition/stage3a_graph_break_audit.md`
+- ✅ `reports/gpu_transition/stage3a_graph_break_audit.md`
 
 ---
 
 ## 3A.3 Test `torch.compile`
-- [ ] Compile selector path
-- [ ] Compile MtM path
-- [ ] Compile full per-bar step function
-- [ ] Benchmark compile warm-up vs steady-state runtime
-- [ ] Confirm numerical parity with eager mode
+- ✅ step_bar_gpu: 10/10 parity tests pass locally (CPU, no CUDA)
+- [ ] Compile parity test on CUDA (test_stage3a_compile_parity.py::TestCompileParity — needs Lightning AI)
+- [ ] Benchmark compile warm-up vs steady-state (benchmark_stage3a.py — needs Lightning AI)
+- ✅ Numerical parity confirmed vs optimizer_engine CPU path (7 full-run tests)
 
 ### Deliverable
-- [ ] `tests/test_stage3a_compile_parity.py`
-- [ ] `reports/gpu_transition/stage3a_compile_benchmark.md`
+- ✅ `tests/test_stage3a_compile_parity.py` (10 tests: 3 unit + 7 full-run parity)
+- ✅ `kaggle/benchmark_stage3a.py` (generates reports on run)
+- [ ] `reports/gpu_transition/stage3a_compile_benchmark.json` (generated on Lightning AI)
+- [ ] `reports/gpu_transition/stage3a_compile_benchmark.md` (generated on Lightning AI)
 
 ### Milestone
-- [ ] **Stage 3A complete**
+- [ ] **Stage 3A complete** — pending compiled parity + benchmark on Lightning AI
 
 ---
 
