@@ -38,6 +38,8 @@ from typing import Dict, Optional, Union
 import numpy as np
 import torch
 
+from tensor_contracts import assert_chain_tensors, assert_candidate_params
+
 
 TensorOrArray = Union[torch.Tensor, np.ndarray]
 
@@ -268,6 +270,11 @@ def select_entry_for_bar(
         short_delta=short_delta,
         spread_width=spread_width,
     )
+    assert_chain_tensors(
+        chain_right, chain_strike, chain_dte, chain_bid, chain_ask,
+        chain_delta=chain_delta,
+    )
+    assert_candidate_params(target_dte, short_delta, spread_width)
 
     M      = chain_right.shape[0]
     K      = target_dte.shape[0]
@@ -504,6 +511,7 @@ def mark_to_market_gpu(
         chain_bid=chain_bid,
         chain_ask=chain_ask,
     )
+    assert_chain_tensors(chain_right, chain_strike, chain_dte, chain_bid, chain_ask)
 
     M      = chain_right.shape[0]
     open_t = _as_device_tensor("open_mask", open_mask, device=chain_right.device, dtype=torch.bool)
