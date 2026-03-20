@@ -365,6 +365,10 @@ def run_benchmark(T_default: int = 2000, iters: int = 3):
                             "trades": trades2a,
                             "note": _note,
                         })
+                    # Triton crash leaves CUDA device in an error state.
+                    # Disable GPU for all remaining benchmark iterations.
+                    print("  CUDA device poisoned — skipping remaining GPU benchmark sections")
+                    device_gpu = None
 
             else:
                 # CPU-only path — compare stage2a CPU vs step_bar_gpu eager
