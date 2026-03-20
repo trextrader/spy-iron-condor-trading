@@ -120,17 +120,14 @@ def _step_bar_inner(
     ts_t:          torch.Tensor,  # [T] float64 — full timestamp array (passed by ref)
     # ── Pre-computed MtM result (computed eagerly before entering compiled region)
     raw_debit_t:   torch.Tensor,  # [K] float32  pre-computed MtM debit
-    # ── Chain slice [M] (M=0 when no chain this bar) ─────────────────────────
-    chain_right:   torch.Tensor,  # [M] int8
-    chain_strike:  torch.Tensor,  # [M] float32
-    chain_dte:     torch.Tensor,  # [M] float32
-    chain_bid:     torch.Tensor,  # [M] float32
-    chain_ask:     torch.Tensor,  # [M] float32
-    chain_delta:   torch.Tensor,  # [M] float32 (may contain NaN)
+    # ── Pre-computed entry selection results (computed eagerly, never inside compiled region)
+    entry_cred_t:  torch.Tensor,  # [K] float32  selected credit (zeros when gate_ok=False)
+    entry_ssc_t:   torch.Tensor,  # [K] float32  short call strike
+    entry_ssp_t:   torch.Tensor,  # [K] float32  short put strike
+    entry_aw_t:    torch.Tensor,  # [K] float32  actual spread width
+    entry_valid_t: torch.Tensor,  # [K] bool     entry valid flag
+    entry_sdte_t:  torch.Tensor,  # [K] float32  actual DTE at entry
     # ── Candidate params [K] — fixed throughout run ───────────────────────────
-    td_t:          torch.Tensor,  # [K] float32  target DTE
-    sd_t:          torch.Tensor,  # [K] float32  short delta
-    sw_t:          torch.Tensor,  # [K] float32  spread width
     sl_t:          torch.Tensor,  # [K] float64  stop-loss dollar
     pt_t:          torch.Tensor,  # [K] float64  profit-target dollar
     mde_t:         torch.Tensor,  # [K] float64  max-DTE-exit
@@ -155,6 +152,9 @@ def _step_bar_inner(
     - raw_debit_t ([K] float32) is the MtM debit computed eagerly by the
       calling wrapper (step_bar_gpu or _outer) before entering this function.
       mark_to_market_gpu never enters the compiled region.
+    - entry_*_t tensors are the entry selection results computed eagerly by the
+      calling wrapper via select_entry_for_bar.  select_entry_for_bar (which
+      contains argmin/any reductions) never enters the compiled region.
 
     Numerical parity
     ----------------
@@ -166,8 +166,6 @@ def _step_bar_inner(
     dev = state.equity.device
     zeros_f64 = torch.zeros(K, dtype=torch.float64, device=dev)
     zeros_f32 = torch.zeros(K, dtype=torch.float32, device=dev)
-
-    family_str = CODE_TO_STR[family_code]   # Python dict lookup — trace-time constant
 
     # ── EXIT PHASE ─────────────────────────────────────────────────────────────
     # Runs unconditionally (no .any() guard).
@@ -257,20 +255,13 @@ def _step_bar_inner(
         _cool_t = (bar_idx - state.last_entry) >= cooldown_bars
         _elig_t = _cool_t & (~open_mask_t)
 
-        # Structure selection for all K candidates
-        # (When M=0 chain, valid=False for all K → no entries made)
-        _g = _gss.select_entry_for_bar(
-            chain_right, chain_strike, chain_dte, chain_delta,
-            chain_bid, chain_ask, spot,
-            td_t, sd_t, sw_t, family_str,
-            return_tensors=True,
-        )
-        _cred_t = _g["credit"]        # [K] float32
-        _ssc_t  = _g["ss_call"]
-        _ssp_t  = _g["ss_put"]
-        _aw_t   = _g["actual_width"]
-        _val_t  = _g["valid"]         # [K] bool
-        _sdte_t = _g["actual_dte"]
+        # Entry selection pre-computed by outer wrapper (never inside compiled region)
+        _cred_t = entry_cred_t
+        _ssc_t  = entry_ssc_t
+        _ssp_t  = entry_ssp_t
+        _aw_t   = entry_aw_t
+        _val_t  = entry_valid_t
+        _sdte_t = entry_sdte_t
 
         _can_t = _elig_t & _val_t
 
@@ -371,12 +362,34 @@ def step_bar_gpu(
         return_tensors=True,
     )
 
+    if gate_ok:
+        _g = _gss.select_entry_for_bar(
+            chain_right, chain_strike, chain_dte, chain_delta,
+            chain_bid, chain_ask, spot,
+            td_t, sd_t, sw_t, family_str,
+            return_tensors=True,
+        )
+        entry_cred_t  = _g["credit"]
+        entry_ssc_t   = _g["ss_call"]
+        entry_ssp_t   = _g["ss_put"]
+        entry_aw_t    = _g["actual_width"]
+        entry_valid_t = _g["valid"]
+        entry_sdte_t  = _g["actual_dte"]
+    else:
+        entry_cred_t  = torch.zeros(K, dtype=torch.float32, device=dev)
+        entry_ssc_t   = torch.zeros(K, dtype=torch.float32, device=dev)
+        entry_ssp_t   = torch.zeros(K, dtype=torch.float32, device=dev)
+        entry_aw_t    = torch.zeros(K, dtype=torch.float32, device=dev)
+        entry_valid_t = torch.zeros(K, dtype=torch.bool,    device=dev)
+        entry_sdte_t  = torch.zeros(K, dtype=torch.float32, device=dev)
+
     return _step_bar_inner(
-        state, raw_debit_t=raw_debit_t,
+        state,
+        raw_debit_t=raw_debit_t,
+        entry_cred_t=entry_cred_t, entry_ssc_t=entry_ssc_t, entry_ssp_t=entry_ssp_t,
+        entry_aw_t=entry_aw_t, entry_valid_t=entry_valid_t, entry_sdte_t=entry_sdte_t,
         bar_idx=bar_idx, spot=spot, ts_t=ts_t,
-        chain_right=chain_right, chain_strike=chain_strike, chain_dte=chain_dte,
-        chain_bid=chain_bid, chain_ask=chain_ask, chain_delta=chain_delta,
-        td_t=td_t, sd_t=sd_t, sw_t=sw_t, sl_t=sl_t, pt_t=pt_t, mde_t=mde_t, hd_t=hd_t,
+        sl_t=sl_t, pt_t=pt_t, mde_t=mde_t, hd_t=hd_t,
         gate_ok=gate_ok, cooldown_bars=cooldown_bars,
         family_code=family_code, K=K, IC_MULTIPLIER=IC_MULTIPLIER,
     )
@@ -435,13 +448,33 @@ def make_compiled_step(mode: str = "default"):
             state.open_mask, _cur_dte_t.float(), family_str,
             return_tensors=True,
         )
+        if gate_ok:
+            _g = _gss.select_entry_for_bar(
+                chain_right, chain_strike, chain_dte, chain_delta,
+                chain_bid, chain_ask, spot,
+                td_t, sd_t, sw_t, family_str,
+                return_tensors=True,
+            )
+            entry_cred_t  = _g["credit"]
+            entry_ssc_t   = _g["ss_call"]
+            entry_ssp_t   = _g["ss_put"]
+            entry_aw_t    = _g["actual_width"]
+            entry_valid_t = _g["valid"]
+            entry_sdte_t  = _g["actual_dte"]
+        else:
+            entry_cred_t  = torch.zeros(K, dtype=torch.float32, device=dev)
+            entry_ssc_t   = torch.zeros(K, dtype=torch.float32, device=dev)
+            entry_ssp_t   = torch.zeros(K, dtype=torch.float32, device=dev)
+            entry_aw_t    = torch.zeros(K, dtype=torch.float32, device=dev)
+            entry_valid_t = torch.zeros(K, dtype=torch.bool,    device=dev)
+            entry_sdte_t  = torch.zeros(K, dtype=torch.float32, device=dev)
         return _compiled_inner(
-            state, raw_debit_t=raw_debit_t,
+            state,
+            raw_debit_t=raw_debit_t,
+            entry_cred_t=entry_cred_t, entry_ssc_t=entry_ssc_t, entry_ssp_t=entry_ssp_t,
+            entry_aw_t=entry_aw_t, entry_valid_t=entry_valid_t, entry_sdte_t=entry_sdte_t,
             bar_idx=bar_idx, spot=spot, ts_t=ts_t,
-            chain_right=chain_right, chain_strike=chain_strike, chain_dte=chain_dte,
-            chain_bid=chain_bid, chain_ask=chain_ask, chain_delta=chain_delta,
-            td_t=td_t, sd_t=sd_t, sw_t=sw_t, sl_t=sl_t, pt_t=pt_t,
-            mde_t=mde_t, hd_t=hd_t,
+            sl_t=sl_t, pt_t=pt_t, mde_t=mde_t, hd_t=hd_t,
             gate_ok=gate_ok, cooldown_bars=cooldown_bars,
             family_code=family_code, K=K, IC_MULTIPLIER=IC_MULTIPLIER,
         )
@@ -497,13 +530,33 @@ def make_compiled_step_fullgraph(mode: str = "default"):
             state.open_mask, _cur_dte_t.float(), family_str,
             return_tensors=True,
         )
+        if gate_ok:
+            _g = _gss.select_entry_for_bar(
+                chain_right, chain_strike, chain_dte, chain_delta,
+                chain_bid, chain_ask, spot,
+                td_t, sd_t, sw_t, family_str,
+                return_tensors=True,
+            )
+            entry_cred_t  = _g["credit"]
+            entry_ssc_t   = _g["ss_call"]
+            entry_ssp_t   = _g["ss_put"]
+            entry_aw_t    = _g["actual_width"]
+            entry_valid_t = _g["valid"]
+            entry_sdte_t  = _g["actual_dte"]
+        else:
+            entry_cred_t  = torch.zeros(K, dtype=torch.float32, device=dev)
+            entry_ssc_t   = torch.zeros(K, dtype=torch.float32, device=dev)
+            entry_ssp_t   = torch.zeros(K, dtype=torch.float32, device=dev)
+            entry_aw_t    = torch.zeros(K, dtype=torch.float32, device=dev)
+            entry_valid_t = torch.zeros(K, dtype=torch.bool,    device=dev)
+            entry_sdte_t  = torch.zeros(K, dtype=torch.float32, device=dev)
         return _compiled_inner(
-            state, raw_debit_t=raw_debit_t,
+            state,
+            raw_debit_t=raw_debit_t,
+            entry_cred_t=entry_cred_t, entry_ssc_t=entry_ssc_t, entry_ssp_t=entry_ssp_t,
+            entry_aw_t=entry_aw_t, entry_valid_t=entry_valid_t, entry_sdte_t=entry_sdte_t,
             bar_idx=bar_idx, spot=spot, ts_t=ts_t,
-            chain_right=chain_right, chain_strike=chain_strike, chain_dte=chain_dte,
-            chain_bid=chain_bid, chain_ask=chain_ask, chain_delta=chain_delta,
-            td_t=td_t, sd_t=sd_t, sw_t=sw_t, sl_t=sl_t, pt_t=pt_t,
-            mde_t=mde_t, hd_t=hd_t,
+            sl_t=sl_t, pt_t=pt_t, mde_t=mde_t, hd_t=hd_t,
             gate_ok=gate_ok, cooldown_bars=cooldown_bars,
             family_code=family_code, K=K, IC_MULTIPLIER=IC_MULTIPLIER,
         )
