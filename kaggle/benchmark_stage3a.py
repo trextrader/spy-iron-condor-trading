@@ -307,44 +307,64 @@ def run_benchmark(T_default: int = 2000, iters: int = 3):
                     "trades": trades2a,
                 })
 
-                # ── step_bar_gpu compiled — warm-up cost ─────────────────────
+                # ── step_bar_gpu compiled — warm-up + steady-state ──────────
+                # NOTE: torch 2.4.0 known bug — Triton reduction kernels with
+                # dynamic=True crash on non-power-of-2 M (chain slice size).
+                # The try/except below catches this gracefully; upgrade to
+                # torch>=2.5 to enable compiled benchmark results.
                 compiled_step = make_compiled_step()
+                try:
+                    t_warmup_start = time.perf_counter()
+                    run_step_bar_loop(ctx_gpu, cands, step_fn=compiled_step)
+                    if torch.cuda.is_available():
+                        torch.cuda.synchronize()
+                    w_warmup = time.perf_counter() - t_warmup_start
 
-                t_warmup_start = time.perf_counter()
-                run_step_bar_loop(ctx_gpu, cands, step_fn=compiled_step)
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
-                w_warmup = time.perf_counter() - t_warmup_start
+                    print(f"{'step_bar compile(1st)':<22} {K:>5} {T:>6} {w_warmup:>8.3f} "
+                          f"{'(warm-up)':>10} {w2a/w_warmup:>11.2f}x {trades2a:>8}")
+                    rows.append({
+                        "mode": "step_bar_compile_warmup", "K": K, "T": T,
+                        "wall_s": round(w_warmup, 4),
+                        "bars_per_s": round(T / w_warmup, 1),
+                        "speedup_vs_stage2a": round(w2a / w_warmup, 3),
+                        "trades": trades2a,
+                        "note": "includes JIT compilation cost",
+                    })
 
-                print(f"{'step_bar compile(1st)':<22} {K:>5} {T:>6} {w_warmup:>8.3f} "
-                      f"{'(warm-up)':>10} {w2a/w_warmup:>11.2f}x {trades2a:>8}")
-                rows.append({
-                    "mode": "step_bar_compile_warmup", "K": K, "T": T,
-                    "wall_s": round(w_warmup, 4),
-                    "bars_per_s": round(T / w_warmup, 1),
-                    "speedup_vs_stage2a": round(w2a / w_warmup, 3),
-                    "trades": trades2a,
-                    "note": "includes JIT compilation cost",
-                })
+                    # ── step_bar_gpu compiled — steady-state ─────────────────
+                    times_comp = []
+                    for _ in range(iters):
+                        times_comp.append(run_step_bar_loop(ctx_gpu, cands, step_fn=compiled_step))
+                    w_comp   = min(times_comp)
+                    bars_c   = T / w_comp
+                    speedup_c = w2a / w_comp
 
-                # ── step_bar_gpu compiled — steady-state ─────────────────────
-                times_comp = []
-                for _ in range(iters):
-                    times_comp.append(run_step_bar_loop(ctx_gpu, cands, step_fn=compiled_step))
-                w_comp   = min(times_comp)
-                bars_c   = T / w_comp
-                speedup_c = w2a / w_comp
+                    print(f"{'step_bar compile(SS)':<22} {K:>5} {T:>6} {w_comp:>8.3f} "
+                          f"{bars_c:>10.0f} {speedup_c:>11.2f}x {trades2a:>8}")
+                    rows.append({
+                        "mode": "step_bar_compile_steady", "K": K, "T": T,
+                        "wall_s": round(w_comp, 4),
+                        "bars_per_s": round(bars_c, 1),
+                        "speedup_vs_stage2a": round(speedup_c, 3),
+                        "trades": trades2a,
+                        "note": "steady-state (post-warmup)",
+                    })
 
-                print(f"{'step_bar compile(SS)':<22} {K:>5} {T:>6} {w_comp:>8.3f} "
-                      f"{bars_c:>10.0f} {speedup_c:>11.2f}x {trades2a:>8}")
-                rows.append({
-                    "mode": "step_bar_compile_steady", "K": K, "T": T,
-                    "wall_s": round(w_comp, 4),
-                    "bars_per_s": round(bars_c, 1),
-                    "speedup_vs_stage2a": round(speedup_c, 3),
-                    "trades": trades2a,
-                    "note": "steady-state (post-warmup)",
-                })
+                except Exception as _compile_err:
+                    _note = (
+                        f"UNSUPPORTED on torch {torch.__version__}: "
+                        f"{type(_compile_err).__name__}"
+                    )
+                    print(f"  step_bar compile SKIPPED — {_note}")
+                    print(f"  {_compile_err!s:.200}")
+                    for _mode in ("step_bar_compile_warmup", "step_bar_compile_steady"):
+                        rows.append({
+                            "mode": _mode, "K": K, "T": T,
+                            "wall_s": None, "bars_per_s": None,
+                            "speedup_vs_stage2a": None,
+                            "trades": trades2a,
+                            "note": _note,
+                        })
 
             else:
                 # CPU-only path — compare stage2a CPU vs step_bar_gpu eager
