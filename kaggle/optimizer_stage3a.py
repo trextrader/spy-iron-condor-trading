@@ -115,8 +115,8 @@ def init_bar_state(K: int, device: torch.device,
 def _step_bar_inner(
     state:         BarState,
     # ── Bar scalars ──────────────────────────────────────────────────────────
-    bar_idx:       int,           # current bar index — compile specialization
-    spot:          float,         # current spot price — compile specialization
+    bar_idx:       int,           # current bar index — dynamic int (safe with dynamic=True)
+    spot_t:        torch.Tensor,  # [] float32  0-d tensor — avoids Python float specialization
     ts_t:          torch.Tensor,  # [T] float64 — full timestamp array (passed by ref)
     # ── Pre-computed MtM result (computed eagerly before entering compiled region)
     raw_debit_t:   torch.Tensor,  # [K] float32  pre-computed MtM debit
@@ -184,7 +184,7 @@ def _step_bar_inner(
     _dtr_t    = torch.where(state.open_mask, state.entry_dte - _dh_t, zeros_f64)
 
     # Intrinsic value fallback (static dispatch on family_code — compile-static)
-    _spot_t = raw_debit_t.new_tensor(spot)
+    _spot_t = spot_t
     _ssc_f  = state.entry_ss_call.float()
     _ssp_f  = state.entry_ss_put.float()
     _sw_f   = state.entry_width.float()
@@ -345,6 +345,7 @@ def step_bar_gpu(
     dev        = state.equity.device
     zeros_f64  = torch.zeros(K, dtype=torch.float64, device=dev)
     family_str = CODE_TO_STR[family_code]
+    spot_t     = torch.tensor(spot, dtype=torch.float32, device=dev)
 
     _eb_clamped = state.entry_bar.clamp(min=0).to(torch.int64)
     _ts_bar     = ts_t[bar_idx]
@@ -388,7 +389,7 @@ def step_bar_gpu(
         raw_debit_t=raw_debit_t,
         entry_cred_t=entry_cred_t, entry_ssc_t=entry_ssc_t, entry_ssp_t=entry_ssp_t,
         entry_aw_t=entry_aw_t, entry_valid_t=entry_valid_t, entry_sdte_t=entry_sdte_t,
-        bar_idx=bar_idx, spot=spot, ts_t=ts_t,
+        bar_idx=bar_idx, spot_t=spot_t, ts_t=ts_t,
         sl_t=sl_t, pt_t=pt_t, mde_t=mde_t, hd_t=hd_t,
         gate_ok=gate_ok, cooldown_bars=cooldown_bars,
         family_code=family_code, K=K, IC_MULTIPLIER=IC_MULTIPLIER,
@@ -431,6 +432,7 @@ def make_compiled_step(mode: str = "default"):
         dev        = state.equity.device
         zeros_f64  = torch.zeros(K, dtype=torch.float64, device=dev)
         family_str = CODE_TO_STR[family_code]
+        spot_t     = torch.tensor(spot, dtype=torch.float32, device=dev)
 
         _eb_clamped = state.entry_bar.clamp(min=0).to(torch.int64)
         _ts_bar     = ts_t[bar_idx]
@@ -473,7 +475,7 @@ def make_compiled_step(mode: str = "default"):
             raw_debit_t=raw_debit_t,
             entry_cred_t=entry_cred_t, entry_ssc_t=entry_ssc_t, entry_ssp_t=entry_ssp_t,
             entry_aw_t=entry_aw_t, entry_valid_t=entry_valid_t, entry_sdte_t=entry_sdte_t,
-            bar_idx=bar_idx, spot=spot, ts_t=ts_t,
+            bar_idx=bar_idx, spot_t=spot_t, ts_t=ts_t,
             sl_t=sl_t, pt_t=pt_t, mde_t=mde_t, hd_t=hd_t,
             gate_ok=gate_ok, cooldown_bars=cooldown_bars,
             family_code=family_code, K=K, IC_MULTIPLIER=IC_MULTIPLIER,
@@ -513,6 +515,7 @@ def make_compiled_step_fullgraph(mode: str = "default"):
         dev        = state.equity.device
         zeros_f64  = torch.zeros(K, dtype=torch.float64, device=dev)
         family_str = CODE_TO_STR[family_code]
+        spot_t     = torch.tensor(spot, dtype=torch.float32, device=dev)
 
         _eb_clamped = state.entry_bar.clamp(min=0).to(torch.int64)
         _ts_bar     = ts_t[bar_idx]
@@ -555,7 +558,7 @@ def make_compiled_step_fullgraph(mode: str = "default"):
             raw_debit_t=raw_debit_t,
             entry_cred_t=entry_cred_t, entry_ssc_t=entry_ssc_t, entry_ssp_t=entry_ssp_t,
             entry_aw_t=entry_aw_t, entry_valid_t=entry_valid_t, entry_sdte_t=entry_sdte_t,
-            bar_idx=bar_idx, spot=spot, ts_t=ts_t,
+            bar_idx=bar_idx, spot_t=spot_t, ts_t=ts_t,
             sl_t=sl_t, pt_t=pt_t, mde_t=mde_t, hd_t=hd_t,
             gate_ok=gate_ok, cooldown_bars=cooldown_bars,
             family_code=family_code, K=K, IC_MULTIPLIER=IC_MULTIPLIER,
