@@ -14,9 +14,11 @@ Key design changes vs original optimizer_engine.py GPU path:
     graph breaks because they are not derived from tensor values)
   - All state carried in BarState dataclass (torch.compile treats it as pytree)
 
-Remaining graph break (noted in stage3a_graph_break_audit.md):
-  - mark_to_market_gpu:528  bool(open_t.any().item()) — requires .item()
-  - This limits fullgraph=True but allows fullgraph=False compilation
+Compile structure (noted in stage3a_graph_break_audit.md):
+  - Subgraph 1: exit phase (DTE/DH calc, MtM via _mtm_eager, debit accounting)
+  - [break] mark_to_market_gpu runs eagerly via torch._dynamo.disable wrapper
+  - Subgraph 2: entry phase (select_entry_for_bar, capital check, state update)
+  Both subgraphs are pure tensor ops with no further graph breaks.
 
 Usage:
     from optimizer_stage3a import (
@@ -40,6 +42,23 @@ if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 
 import gpu_strike_selector as _gss
+
+# Prevent torch.compile from tracing into mark_to_market_gpu.
+#
+# Root cause: mark_to_market_gpu has (a) an internal .item() graph break and
+# (b) _as_device_tensor() converts float64 BarState tensors to float32 via
+# .to(dtype=float32).  Inductor fuses this _to_copy with the argmin/any
+# reduction into a single Triton kernel.  In torch 2.4.0, that kernel's
+# autotuner crashes with "CUDA error: misaligned address" for small dynamic M
+# (the options chain slice size) regardless of whether inputs are zero-offset.
+#
+# Solution: torch._dynamo.disable makes the call site an explicit graph break.
+# The compiled step_bar_gpu gets two clean subgraphs:
+#   - Subgraph 1: pure exit-phase tensor ops (no graph breaks)
+#   - [break] mark_to_market_gpu runs eagerly (same as Stage 2A)
+#   - Subgraph 2: debit accounting + entry phase + select_entry_for_bar
+# Both subgraphs compile cleanly; MtM performance equals Stage 2A.
+_mtm_eager = torch._dynamo.disable(_gss.mark_to_market_gpu)
 
 # ── Strategy family codes (compile-static integer dispatchers) ─────────────────
 FAMILY_IRON_BUTTERFLY = 0
@@ -183,9 +202,9 @@ def step_bar_gpu(
     _cur_dte_t = torch.where(state.open_mask, state.entry_dte - _dh_t, state.entry_dte)
 
     # Mark-to-market via GPU chain lookup (returns [K] float32, NaN for misses)
-    # Note: when M=0 (no chain), mark_to_market_gpu returns full NaN immediately.
-    # When M>0, there is ONE graph break inside: bool(open_t.any().item()).
-    _raw_debit_t = _gss.mark_to_market_gpu(
+    # Runs eagerly via _mtm_eager (torch._dynamo.disable wrapper) — see module
+    # header comment for why MtM is excluded from torch.compile tracing.
+    _raw_debit_t = _mtm_eager(
         chain_right, chain_strike, chain_dte, chain_bid, chain_ask,
         state.entry_ss_call, state.entry_ss_put, state.entry_width,
         state.open_mask, _cur_dte_t.float(), family_str,
