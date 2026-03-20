@@ -56,7 +56,7 @@ correctly via `torch.where` on `debit_t`.
 
 ## torch 2.4.0 Triton Bug — Misaligned Address on Small Dynamic M
 
-**Status:** Confirmed torch 2.4.0 bug. Application-level workarounds exhausted. Fix: upgrade to torch ≥ 2.5.
+**Status:** Confirmed on torch 2.4.0+cu121 and torch 2.5.1+cu121. Application-level workarounds exhausted. Fix: extract MtM call outside compiled region (pass `debit_t` as arg to `step_bar_gpu`), OR upgrade to a torch version where the inductor stride bug is fixed.
 
 ### Symptom
 

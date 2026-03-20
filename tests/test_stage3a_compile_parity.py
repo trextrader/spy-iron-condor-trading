@@ -586,15 +586,16 @@ class TestCompileParity:
 
     @pytest.mark.xfail(
         reason=(
-            "torch 2.4.0 Triton reduction kernel crashes with 'CUDA error: misaligned "
-            "address' when dynamic=True is used with small non-power-of-2 M (chain slice "
-            "size, e.g. M=36). Root cause: inductor fuses _as_device_tensor float64->float32 "
-            "(_to_copy) with argmin/any reduction into one Triton kernel; the resulting kernel "
-            "uses next_pow2(M)=64 as pointer stride for actual stride M=36. All autotune "
-            "configs crash, CUDA state corrupts, execution fails at triton_heuristics.py:868. "
-            "Application-level fixes exhausted: .contiguous(), .clone(), torch._dynamo.disable, "
-            "CachingAutotuner.bench patch all tried. Fix requires torch>=2.5 (inductor "
-            "regression fix). Re-enable this test when Lightning AI upgrades torch."
+            "Triton reduction kernel crashes with 'CUDA error: misaligned address' when "
+            "dynamic=True is used with small non-power-of-2 M (chain slice size, e.g. M=36). "
+            "Confirmed on torch 2.4.0+cu121 and torch 2.5.1+cu121. "
+            "Root cause: inductor fuses _as_device_tensor float64->float32 (_to_copy) with "
+            "argmin/any reduction into one Triton kernel; kernel uses next_pow2(M) as pointer "
+            "stride for actual stride M. All autotune configs crash, CUDA state corrupts. "
+            "Application-level fixes exhausted (.contiguous, .clone, torch._dynamo.disable, "
+            "CachingAutotuner.bench patch). Proper fix: extract MtM call outside compiled "
+            "region (pass debit_t as arg to step_bar_gpu) OR upgrade to a torch version "
+            "where this inductor bug is fixed."
         ),
         strict=False,
     )
