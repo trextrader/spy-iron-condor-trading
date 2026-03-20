@@ -444,12 +444,14 @@ def run_benchmark(T_default: int = 2000, iters: int = 3):
         "|---|---|---|---|---|---|---|",
     ]
     for r in rows:
-        speedup = r.get("speedup_vs_stage2a", "N/A")
-        speedup_str = f"{speedup:.2f}x" if isinstance(speedup, (int, float)) else speedup
+        speedup = r.get("speedup_vs_stage2a")
+        speedup_str = f"{speedup:.2f}x" if isinstance(speedup, (int, float)) else "N/A"
+        wall_str = f"{r['wall_s']:.3f}" if r["wall_s"] is not None else "N/A"
+        bars_str = f"{r['bars_per_s']:.0f}" if r["bars_per_s"] is not None else "N/A"
         note = f" _{r['note']}_" if "note" in r else ""
         md_lines.append(
             f"| {r['mode']}{note} | {r['K']} | {r['T']} "
-            f"| {r['wall_s']:.3f} | {r['bars_per_s']:.0f} "
+            f"| {wall_str} | {bars_str} "
             f"| {speedup_str} | {r['trades']} |"
         )
 
