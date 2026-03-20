@@ -4318,6 +4318,25 @@ def main():
         extra={"mode": "backtest", "data_path": DATA_PATH},
     )
 
+    # ── Resolve chain_df_by_date (needed for GPU backtest + Bayes optimizer) ──
+    _chain_by_date = None
+    if bundle_v43 is not None:
+        _chain_by_date = getattr(bundle_v43, 'chain_df_by_date', None)
+        if _chain_by_date is None:
+            _cdf = getattr(bundle_v43, 'chain_df', None)
+            if _cdf is not None and 'date' in _cdf.columns:
+                _chain_by_date = {str(k): v for k, v in _cdf.groupby('date')}
+            elif _cdf is not None:
+                _chain_by_date = {}
+                for _ts_key, _rows in ts_ranges.items():
+                    _d = str(pd.Timestamp(_ts_key).date())
+                    if _d not in _chain_by_date:
+                        _chain_by_date[_d] = pd.DataFrame(_rows)
+            else:
+                print("[chain] WARNING: no chain_df_by_date found in bundle; "
+                      "GPU backtest will use intrinsic-only MtM.")
+                _chain_by_date = {}
+
     # Optimizer mode: grid search or Bayesian optimization
     if getattr(args, "optimize", False):
         _opt_mode = getattr(args, "optimize_mode", "grid")
@@ -4332,23 +4351,7 @@ def main():
                 print("            e.g.  --strategies iron_butterfly")
                 print("            e.g.  --strategies autoall   (optimize all 58 templates sequentially)")
                 import sys; sys.exit(1)
-            # Build chain_df_by_date from the bundle's chain data
-            _chain_by_date = getattr(bundle_v43, 'chain_df_by_date', None)
-            if _chain_by_date is None:
-                # Fall back to per-date groupby from raw chain df
-                _cdf = getattr(bundle_v43, 'chain_df', None)
-                if _cdf is not None and 'date' in _cdf.columns:
-                    _chain_by_date = {str(k): v for k, v in _cdf.groupby('date')}
-                elif _cdf is not None:
-                    # Try using the same lookup as the main backtest loop
-                    _chain_by_date = {}
-                    for _ts_key, _rows in ts_ranges.items():
-                        _d = str(pd.Timestamp(_ts_key).date())
-                        if _d not in _chain_by_date:
-                            _chain_by_date[_d] = pd.DataFrame(_rows)
-                else:
-                    print("[optimizer] WARNING: no chain_df_by_date found in bundle; chain lookups will be empty.")
-                    _chain_by_date = {}
+            # chain_df_by_date already resolved above (before optimizer block)
             from bayes_optimize_strategy import run_bayes_optimizer
             from gpu_profiles import (get_gpu_profile, print_gpu_profile,
                                       print_gpu_intensity_table,
@@ -4797,29 +4800,67 @@ def main():
         HOLD_PRINT_INTERVAL = 1
         print("[trace] HOLD_PRINT_INTERVAL set to 1 — full per-bar lifecycle output enabled")
 
-    equity, trades = run_backtest(
-        df,
-        rule_signals,
-        model,
-        feature_cols,
-        DEVICE,
-        ruleset,
-        model_path=model_path,
-        data_path=use_data_path,
-        norm_stats=norm_stats,
-        use_fuzzy_sizing=args.use_fuzzy_sizing,
-        use_trade_rules=args.use_trade_rules,
-        use_diffusion=args.use_diffusion,
-        limit=args.limit,
-        v43_outputs=v43_outputs,
-        bundle=bundle_v43,
-        verbose_sim=getattr(args, 'verbose', False),
-        max_positions=args.max_positions,
-        allowed_strategy_idxs=ALLOWED_STRATEGY_IDXS,
-        allowed_template_ids=ALLOWED_TEMPLATE_IDS,
-        dte_by_dow=_dte_by_dow,
-        friday_closeout=not getattr(args, 'no_friday_closeout', False),
+    # ── GPU backtest path: CUDA + v43 → gpu_backtest_engine ─────────────────
+    # Activates whenever CUDA is available and v43 inference has run.
+    # --strategies filters are respected; no filter = all templates eligible.
+    # Falls back to CPU run_backtest() when CUDA unavailable or bundle missing.
+    _use_gpu_bt = (
+        not getattr(args, 'optimize', False)
+        and DEVICE.type == 'cuda'
+        and v43_outputs is not None
+        and bundle_v43 is not None
+        and _chain_by_date is not None
     )
+    if _use_gpu_bt:
+        try:
+            from gpu_backtest_engine import run_backtest_gpu
+            from optimizer_prep import build_optimizer_context
+            print(f"[backtest] GPU path active  device={DEVICE}  "
+                  f"templates={len(_STRATEGY_CONFIGS)}"
+                  + (f"  filter={sorted(ALLOWED_TEMPLATE_IDS)}"
+                     if ALLOWED_TEMPLATE_IDS else "  filter=ALL"))
+            _gpu_ctx = build_optimizer_context(
+                v43_outputs, bundle_v43, _chain_by_date, device=DEVICE,
+            )
+            equity, trades = run_backtest_gpu(
+                _gpu_ctx,
+                strategy_configs=_STRATEGY_CONFIGS,
+                allowed_template_ids=ALLOWED_TEMPLATE_IDS,   # None = all
+                device=DEVICE,
+                max_positions=args.max_positions,
+                friday_closeout=not getattr(args, 'no_friday_closeout', False),
+                verbose=getattr(args, 'verbose', False),
+            )
+        except Exception as _gpu_bt_err:
+            import traceback as _tb
+            print(f"[backtest] GPU path failed: {_gpu_bt_err}; falling back to CPU")
+            _tb.print_exc()
+            _use_gpu_bt = False   # fall through to CPU path below
+
+    if not _use_gpu_bt:
+        equity, trades = run_backtest(
+            df,
+            rule_signals,
+            model,
+            feature_cols,
+            DEVICE,
+            ruleset,
+            model_path=model_path,
+            data_path=use_data_path,
+            norm_stats=norm_stats,
+            use_fuzzy_sizing=args.use_fuzzy_sizing,
+            use_trade_rules=args.use_trade_rules,
+            use_diffusion=args.use_diffusion,
+            limit=args.limit,
+            v43_outputs=v43_outputs,
+            bundle=bundle_v43,
+            verbose_sim=getattr(args, 'verbose', False),
+            max_positions=args.max_positions,
+            allowed_strategy_idxs=ALLOWED_STRATEGY_IDXS,
+            allowed_template_ids=ALLOWED_TEMPLATE_IDS,
+            dte_by_dow=_dte_by_dow,
+            friday_closeout=not getattr(args, 'no_friday_closeout', False),
+        )
 
     # 5. Report
     if not equity:
