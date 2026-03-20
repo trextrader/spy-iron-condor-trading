@@ -402,6 +402,43 @@ def _chain_cloned_wrapper(fn):
     return _step
 
 
+def _patch_autotune_safe() -> None:
+    """
+    Patch Triton's CachingAutotuner.bench to skip configs that raise.
+
+    Root cause (torch 2.4.0 / Triton):
+      Reduction kernels compiled with dynamic=True for mixed float64/float32 inputs
+      (e.g. mark_to_market_gpu: float64 BarState → float32 via _as_device_tensor)
+      crash with "CUDA error: misaligned address" during per-config benchmarking.
+      The autotune tries large RBLOCK values (256, 512, 1024) which use wide
+      (128-bit) vectorised loads.  For small dynamic M these loads access memory
+      beyond the valid tensor region, triggering a CUDA misaligned-address fault.
+
+    Fix: wrap bench() to return float('inf') for any failing config.
+      The autotuner then selects the fastest *passing* config — typically a small
+      RBLOCK that uses narrow scalar loads which never fault.  Subsequent calls use
+      the cached winning config; the patch only affects the first-call autotune.
+
+    This patch is idempotent (safe to call multiple times).
+    """
+    try:
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+    except ImportError:
+        return
+    if getattr(CachingAutotuner, "_bench_safe_patched", False):
+        return
+    _orig_bench = CachingAutotuner.bench
+
+    def _safe_bench(self, launcher, *args, **kwargs):
+        try:
+            return _orig_bench(self, launcher, *args, **kwargs)
+        except Exception:
+            return float("inf")   # skip bad config; autotuner picks the best survivor
+
+    CachingAutotuner.bench = _safe_bench
+    CachingAutotuner._bench_safe_patched = True
+
+
 def make_compiled_step(mode: str = "default"):
     """
     Return a torch.compile'd version of step_bar_gpu if PyTorch >= 2.0.
@@ -428,7 +465,10 @@ def make_compiled_step(mode: str = "default"):
 
     The returned callable is wrapped by _chain_cloned_wrapper which clones chain
     slice inputs BEFORE calling the compiled function to ensure 16-byte alignment.
+    _patch_autotune_safe() is applied to handle torch 2.4.0 reduction-kernel
+    autotune crashes on small dynamic M.
     """
+    _patch_autotune_safe()
     try:
         compiled = torch.compile(step_bar_gpu, mode=mode, fullgraph=False, dynamic=True)
         return _chain_cloned_wrapper(compiled)
@@ -450,6 +490,7 @@ def make_compiled_step_fullgraph(mode: str = "default"):
     Intended for post-audit use once that guard is removed from mark_to_market_gpu.
     Falls back to fullgraph=False on failure.
     """
+    _patch_autotune_safe()
     try:
         compiled = torch.compile(step_bar_gpu, mode=mode, fullgraph=True, dynamic=True)
         return _chain_cloned_wrapper(compiled)
