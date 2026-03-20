@@ -343,15 +343,23 @@ def make_compiled_step(mode: str = "default"):
       addresses) → "reduce-overhead" / CUDA graph capture is INCOMPATIBLE because
       CUDA graphs require static input addresses between calls.
     - "default" uses inductor kernel fusion without CUDA graph capture — safe for
-      variable-address inputs and still provides meaningful kernel fusion.
+      variable-address inputs.
+
+    dynamic=True is REQUIRED:
+    - `spot` (float) and `bar_idx` (int) change every bar. Without dynamic=True,
+      torch.compile creates a new specialised version for each unique value, hitting
+      cache_size_limit (default 8) after 8 bars and falling back to eager mode.
+      This caused 77-second warm-up costs and 0.21x regression in benchmarks.
+    - dynamic=True treats these as symbolic values — a single compiled version
+      handles all bar indices and spot prices.
 
     fullgraph=False allows the one remaining graph break in mark_to_market_gpu.
 
-    Warm-up: first call per specialization triggers JIT compilation.
-    Specializations are keyed on (gate_ok, family_code, K, chain M).
+    Warm-up: first call triggers JIT compilation — expect a few seconds.
+    Specialisations are keyed on (gate_ok, family_code, K) — stable per-run.
     """
     try:
-        compiled = torch.compile(step_bar_gpu, mode=mode, fullgraph=False)
+        compiled = torch.compile(step_bar_gpu, mode=mode, fullgraph=False, dynamic=True)
         return compiled
     except Exception as exc:
         import warnings
@@ -372,7 +380,7 @@ def make_compiled_step_fullgraph(mode: str = "default"):
     Falls back to fullgraph=False on failure.
     """
     try:
-        compiled = torch.compile(step_bar_gpu, mode=mode, fullgraph=True)
+        compiled = torch.compile(step_bar_gpu, mode=mode, fullgraph=True, dynamic=True)
         return compiled
     except Exception as exc:
         import warnings

@@ -73,6 +73,52 @@ data, M is typically fixed per session.
 
 ---
 
+## Scalar Specialization Trap — `spot` and `bar_idx`
+
+**Symptom observed (before fix):**
+
+```
+W torch._dynamo hit config.cache_size_limit (8)
+last reason: L['spot'] == 500.0609436035156
+```
+
+Benchmark showed 77-second warm-up and 0.21x regression (step_bar compiled SLOWER than Stage 2A):
+
+```
+step_bar compile(SS) 32 2000 0.883  566  0.21x
+```
+
+**Root cause:**
+
+`spot` (Python `float`, changes every bar) and `bar_idx` (Python `int`, 0…T-1) are passed
+as arguments to the compiled function. Without `dynamic=True`, torch.compile treats each
+unique scalar value as a separate specialization. After 8 bars the cache (`cache_size_limit=8`)
+is exhausted and torch falls back to eager mode — eliminating any compile benefit and paying
+full dynamo trace overhead for every bar.
+
+**Fix applied — `dynamic=True`:**
+
+```python
+compiled = torch.compile(step_bar_gpu, mode=mode, fullgraph=False, dynamic=True)
+```
+
+`dynamic=True` tells torch.compile to treat Python scalar arguments as symbolic dynamic
+values. A single compiled version handles all `bar_idx` and `spot` values — warm-up
+compilations remain at **2** (gate_ok specializations only).
+
+**Stable scalars (still specialised, but safe):**
+
+| Parameter | Why safe |
+|---|---|
+| `gate_ok` (bool) | Only 2 possible values |
+| `family_code` (int) | Fixed per optimization run |
+| `cooldown_bars` (int) | Fixed per optimization run |
+| `K` (int) | Fixed per optimization run |
+
+These produce at most 2 compiled versions total and are never hit again after warm-up.
+
+---
+
 ## Compile Mode Recommendations
 
 | Mode | Supported | Notes |
