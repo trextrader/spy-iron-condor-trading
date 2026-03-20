@@ -585,20 +585,11 @@ class TestCompileParity:
     """Verify torch.compile'd step_bar_gpu matches eager on CUDA."""
 
     def test_compiled_matches_eager_short_run(self):
-        """T=100 run: compiled step_bar_gpu final metrics match eager.
-
-        M=64 (power-of-2) is required on torch<=2.5.1: the inductor fuses
-        _as_device_tensor float64->float32 (_to_copy) with the argmin/any
-        reduction into one Triton kernel that uses next_pow2(M) as the pointer
-        stride.  For non-power-of-2 M (e.g. M=36, next_pow2=64≠36) every load
-        is misaligned → CUDA error.  M=64 satisfies next_pow2(64)==64==M so
-        the stride is always correct.
-        """
+        """T=100 run: compiled step_bar_gpu final metrics match eager."""
         dev   = torch.device("cuda")
         T     = 100
         K     = 32
-        # M must be a power-of-2 to avoid Triton stride bug on torch<=2.5.1
-        ctx   = _build_ctx(dev, T=T, entry_bars=list(range(0, T, 15)), M=64)
+        ctx   = _build_ctx(dev, T=T, entry_bars=list(range(0, T, 15)))
         cands = _make_candidates(K, stop_loss=600.0, hold_days=5.0)
 
         # Eager result

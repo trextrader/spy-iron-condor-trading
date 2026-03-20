@@ -14,11 +14,13 @@ Key design changes vs original optimizer_engine.py GPU path:
     graph breaks because they are not derived from tensor values)
   - All state carried in BarState dataclass (torch.compile treats it as pytree)
 
-Compile structure (noted in stage3a_graph_break_audit.md):
-  - Subgraph 1: exit phase (DTE/DH calc, MtM via _mtm_eager, debit accounting)
-  - [break] mark_to_market_gpu runs eagerly via torch._dynamo.disable wrapper
-  - Subgraph 2: entry phase (select_entry_for_bar, capital check, state update)
-  Both subgraphs are pure tensor ops with no further graph breaks.
+Compile structure:
+  - mark_to_market_gpu is computed OUTSIDE the compiled boundary (in the
+    eager wrapper step_bar_gpu / _outer), so it never enters torch.compile
+    tracing.
+  - _step_bar_inner receives pre-computed raw_debit_t and is compiled cleanly.
+  - Both make_compiled_step and make_compiled_step_fullgraph compile only
+    _step_bar_inner; MtM performance equals Stage 2A.
 
 Usage:
     from optimizer_stage3a import (
@@ -42,23 +44,6 @@ if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 
 import gpu_strike_selector as _gss
-
-# Prevent torch.compile from tracing into mark_to_market_gpu.
-#
-# Root cause: mark_to_market_gpu has (a) an internal .item() graph break and
-# (b) _as_device_tensor() converts float64 BarState tensors to float32 via
-# .to(dtype=float32).  Inductor fuses this _to_copy with the argmin/any
-# reduction into a single Triton kernel.  In torch 2.4.0, that kernel's
-# autotuner crashes with "CUDA error: misaligned address" for small dynamic M
-# (the options chain slice size) regardless of whether inputs are zero-offset.
-#
-# Solution: torch._dynamo.disable makes the call site an explicit graph break.
-# The compiled step_bar_gpu gets two clean subgraphs:
-#   - Subgraph 1: pure exit-phase tensor ops (no graph breaks)
-#   - [break] mark_to_market_gpu runs eagerly (same as Stage 2A)
-#   - Subgraph 2: debit accounting + entry phase + select_entry_for_bar
-# Both subgraphs compile cleanly; MtM performance equals Stage 2A.
-_mtm_eager = torch._dynamo.disable(_gss.mark_to_market_gpu)
 
 # ── Strategy family codes (compile-static integer dispatchers) ─────────────────
 FAMILY_IRON_BUTTERFLY = 0
@@ -127,12 +112,14 @@ def init_bar_state(K: int, device: torch.device,
 
 # ── Pure tensor one-bar step ───────────────────────────────────────────────────
 
-def step_bar_gpu(
+def _step_bar_inner(
     state:         BarState,
     # ── Bar scalars ──────────────────────────────────────────────────────────
     bar_idx:       int,           # current bar index — compile specialization
     spot:          float,         # current spot price — compile specialization
     ts_t:          torch.Tensor,  # [T] float64 — full timestamp array (passed by ref)
+    # ── Pre-computed MtM result (computed eagerly before entering compiled region)
+    raw_debit_t:   torch.Tensor,  # [K] float32  pre-computed MtM debit
     # ── Chain slice [M] (M=0 when no chain this bar) ─────────────────────────
     chain_right:   torch.Tensor,  # [M] int8
     chain_strike:  torch.Tensor,  # [M] float32
@@ -156,7 +143,7 @@ def step_bar_gpu(
     IC_MULTIPLIER: int = 100,
 ) -> BarState:
     """
-    Pure tensor one-bar step. Compatible with torch.compile(fullgraph=False).
+    Core compileable one-bar step. raw_debit_t is a pre-computed parameter.
 
     Design contract
     ---------------
@@ -165,11 +152,9 @@ def step_bar_gpu(
     - strategy_family dispatched via static Python int (compile specialization).
     - gate_ok / family_code / cooldown_bars / K are Python scalars → each unique
       combination is compiled as a separate specialization; no graph break.
-
-    Remaining external graph break
-    --------------------------------
-    mark_to_market_gpu line 528: bool(open_t.any().item())
-    This prevents fullgraph=True but allows fullgraph=False fused subgraphs.
+    - raw_debit_t ([K] float32) is the MtM debit computed eagerly by the
+      calling wrapper (step_bar_gpu or _outer) before entering this function.
+      mark_to_market_gpu never enters the compiled region.
 
     Numerical parity
     ----------------
@@ -199,20 +184,9 @@ def step_bar_gpu(
         zeros_f64,
     )
     _dtr_t    = torch.where(state.open_mask, state.entry_dte - _dh_t, zeros_f64)
-    _cur_dte_t = torch.where(state.open_mask, state.entry_dte - _dh_t, state.entry_dte)
-
-    # Mark-to-market via GPU chain lookup (returns [K] float32, NaN for misses)
-    # Runs eagerly via _mtm_eager (torch._dynamo.disable wrapper) — see module
-    # header comment for why MtM is excluded from torch.compile tracing.
-    _raw_debit_t = _mtm_eager(
-        chain_right, chain_strike, chain_dte, chain_bid, chain_ask,
-        state.entry_ss_call, state.entry_ss_put, state.entry_width,
-        state.open_mask, _cur_dte_t.float(), family_str,
-        return_tensors=True,
-    )
 
     # Intrinsic value fallback (static dispatch on family_code — compile-static)
-    _spot_t = _raw_debit_t.new_tensor(spot)
+    _spot_t = raw_debit_t.new_tensor(spot)
     _ssc_f  = state.entry_ss_call.float()
     _ssp_f  = state.entry_ss_put.float()
     _sw_f   = state.entry_width.float()
@@ -227,7 +201,7 @@ def step_bar_gpu(
         _iwp  = torch.clamp((_ssp_f - _sw_f) - _spot_t,  min=0.0)
         _intr_t = _ic + _ip - _iwc - _iwp
 
-    _debit_t = torch.where(torch.isfinite(_raw_debit_t), _raw_debit_t, _intr_t)
+    _debit_t = torch.where(torch.isfinite(raw_debit_t), raw_debit_t, _intr_t)
 
     # Unrealized P&L [K] float32
     _unreal_t = torch.where(
@@ -351,127 +325,80 @@ def step_bar_gpu(
     )
 
 
+def step_bar_gpu(
+    state:         BarState,
+    *,
+    bar_idx:       int,
+    spot:          float,
+    ts_t:          torch.Tensor,
+    chain_right:   torch.Tensor,
+    chain_strike:  torch.Tensor,
+    chain_dte:     torch.Tensor,
+    chain_bid:     torch.Tensor,
+    chain_ask:     torch.Tensor,
+    chain_delta:   torch.Tensor,
+    td_t:          torch.Tensor,
+    sd_t:          torch.Tensor,
+    sw_t:          torch.Tensor,
+    sl_t:          torch.Tensor,
+    pt_t:          torch.Tensor,
+    mde_t:         torch.Tensor,
+    hd_t:          torch.Tensor,
+    gate_ok:       bool,
+    cooldown_bars: int,
+    family_code:   int,
+    K:             int,
+    IC_MULTIPLIER: int = 100,
+) -> BarState:
+    """Public eager API. Computes MtM then delegates to _step_bar_inner."""
+    dev        = state.equity.device
+    zeros_f64  = torch.zeros(K, dtype=torch.float64, device=dev)
+    family_str = CODE_TO_STR[family_code]
+
+    _eb_clamped = state.entry_bar.clamp(min=0).to(torch.int64)
+    _ts_bar     = ts_t[bar_idx]
+    _dh_t       = torch.where(
+        state.open_mask,
+        (_ts_bar - ts_t[_eb_clamped]) / 86400.0,
+        zeros_f64,
+    )
+    _cur_dte_t = torch.where(state.open_mask, state.entry_dte - _dh_t, state.entry_dte)
+
+    raw_debit_t = _gss.mark_to_market_gpu(
+        chain_right, chain_strike, chain_dte, chain_bid, chain_ask,
+        state.entry_ss_call, state.entry_ss_put, state.entry_width,
+        state.open_mask, _cur_dte_t.float(), family_str,
+        return_tensors=True,
+    )
+
+    return _step_bar_inner(
+        state, raw_debit_t=raw_debit_t,
+        bar_idx=bar_idx, spot=spot, ts_t=ts_t,
+        chain_right=chain_right, chain_strike=chain_strike, chain_dte=chain_dte,
+        chain_bid=chain_bid, chain_ask=chain_ask, chain_delta=chain_delta,
+        td_t=td_t, sd_t=sd_t, sw_t=sw_t, sl_t=sl_t, pt_t=pt_t, mde_t=mde_t, hd_t=hd_t,
+        gate_ok=gate_ok, cooldown_bars=cooldown_bars,
+        family_code=family_code, K=K, IC_MULTIPLIER=IC_MULTIPLIER,
+    )
+
+
 # ── torch.compile wrapper ──────────────────────────────────────────────────────
-
-def _chain_cloned_wrapper(fn):
-    """
-    Wraps a compiled (or eager) step function to clone chain tensors BEFORE
-    calling the inner function.
-
-    Why clone, not contiguous:
-    - A 1-D tensor slice tensor[s:e] is already contiguous (stride=1), so
-      .contiguous() is a no-op that returns the SAME storage with the same
-      non-zero offset.
-    - Triton's autotuner uses 128-bit (16-byte) vectorized loads.  If the
-      slice offset s * sizeof(dtype) is not 16-byte aligned, the vectorized
-      load faults with "CUDA error: misaligned address".
-    - .clone() ALWAYS creates a fresh allocation with offset=0.  PyTorch's
-      CUDA allocator aligns to >= 256 bytes, so cloned tensors are always
-      16-byte aligned.
-    - The clone must happen OUTSIDE the compiled graph boundary.  If done
-      inside the compiled function, inductor fuses aten._to_copy with the
-      subsequent Triton reduction kernel and the original mis-aligned pointer
-      is still passed to the Triton kernel as the raw input.
-
-    Overhead: per bar, 6 clones of M float32 elements (M ~ 36 in production).
-    That is ~864 bytes per bar — negligible vs GPU kernel execution time.
-    """
-    def _step(
-        state, *,
-        bar_idx, spot, ts_t,
-        chain_right, chain_strike, chain_dte, chain_bid, chain_ask, chain_delta,
-        td_t, sd_t, sw_t, sl_t, pt_t, mde_t, hd_t,
-        gate_ok, cooldown_bars, family_code, K,
-        **kwargs,
-    ):
-        return fn(
-            state,
-            bar_idx=bar_idx, spot=spot, ts_t=ts_t,
-            chain_right=chain_right.clone(),
-            chain_strike=chain_strike.clone(),
-            chain_dte=chain_dte.clone(),
-            chain_bid=chain_bid.clone(),
-            chain_ask=chain_ask.clone(),
-            chain_delta=chain_delta.clone(),
-            td_t=td_t, sd_t=sd_t, sw_t=sw_t,
-            sl_t=sl_t, pt_t=pt_t, mde_t=mde_t, hd_t=hd_t,
-            gate_ok=gate_ok, cooldown_bars=cooldown_bars,
-            family_code=family_code, K=K,
-            **kwargs,
-        )
-    return _step
-
-
-def _patch_autotune_safe() -> None:
-    """
-    Patch Triton's CachingAutotuner.bench to skip configs that raise.
-
-    Root cause (torch 2.4.0 / Triton):
-      Reduction kernels compiled with dynamic=True for mixed float64/float32 inputs
-      (e.g. mark_to_market_gpu: float64 BarState → float32 via _as_device_tensor)
-      crash with "CUDA error: misaligned address" during per-config benchmarking.
-      The autotune tries large RBLOCK values (256, 512, 1024) which use wide
-      (128-bit) vectorised loads.  For small dynamic M these loads access memory
-      beyond the valid tensor region, triggering a CUDA misaligned-address fault.
-
-    Fix: wrap bench() to return float('inf') for any failing config.
-      The autotuner then selects the fastest *passing* config — typically a small
-      RBLOCK that uses narrow scalar loads which never fault.  Subsequent calls use
-      the cached winning config; the patch only affects the first-call autotune.
-
-    This patch is idempotent (safe to call multiple times).
-    """
-    try:
-        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
-    except ImportError:
-        return
-    if getattr(CachingAutotuner, "_bench_safe_patched", False):
-        return
-    _orig_bench = CachingAutotuner.bench
-
-    def _safe_bench(self, launcher, *args, **kwargs):
-        try:
-            return _orig_bench(self, launcher, *args, **kwargs)
-        except Exception:
-            return float("inf")   # skip bad config; autotuner picks the best survivor
-
-    CachingAutotuner.bench = _safe_bench
-    CachingAutotuner._bench_safe_patched = True
-
 
 def make_compiled_step(mode: str = "default"):
     """
-    Return a torch.compile'd version of step_bar_gpu if PyTorch >= 2.0.
+    Return a callable with the same interface as step_bar_gpu, where
+    _step_bar_inner (MtM-free) is compiled via torch.compile.
 
-    mode="default" is the correct choice for our use case:
-    - Each bar passes a different slice of the options tensor (different memory
-      addresses) → "reduce-overhead" / CUDA graph capture is INCOMPATIBLE because
-      CUDA graphs require static input addresses between calls.
-    - "default" uses inductor kernel fusion without CUDA graph capture — safe for
-      variable-address inputs.
-
-    dynamic=True is REQUIRED:
-    - `spot` (float) and `bar_idx` (int) change every bar. Without dynamic=True,
-      torch.compile creates a new specialised version for each unique value, hitting
-      cache_size_limit (default 8) after 8 bars and falling back to eager mode.
-      This caused 77-second warm-up costs and 0.21x regression in benchmarks.
-    - dynamic=True treats these as symbolic values — a single compiled version
-      handles all bar indices and spot prices.
-
-    fullgraph=False allows the one remaining graph break in mark_to_market_gpu.
-
-    Warm-up: first call triggers JIT compilation — expect a few seconds.
-    Specialisations are keyed on (gate_ok, family_code, K) — stable per-run.
-
-    The returned callable is wrapped by _chain_cloned_wrapper which clones chain
-    slice inputs BEFORE calling the compiled function to ensure 16-byte alignment.
-    _patch_autotune_safe() is applied to handle torch 2.4.0 reduction-kernel
-    autotune crashes on small dynamic M.
+    mark_to_market_gpu is called eagerly in a wrapper before the compiled
+    inner function — it never enters the compiled region.  This eliminates
+    the Triton misaligned-address crash caused by inductor fusing the
+    float64→float32 _to_copy inside mark_to_market_gpu with the argmin/any
+    reduction kernel when dynamic=True is used.
     """
-    _patch_autotune_safe()
     try:
-        compiled = torch.compile(step_bar_gpu, mode=mode, fullgraph=False, dynamic=True)
-        return _chain_cloned_wrapper(compiled)
+        _compiled_inner = torch.compile(
+            _step_bar_inner, mode=mode, fullgraph=False, dynamic=True
+        )
     except Exception as exc:
         import warnings
         warnings.warn(
@@ -481,19 +408,59 @@ def make_compiled_step(mode: str = "default"):
         )
         return step_bar_gpu
 
+    def _outer(
+        state, *,
+        bar_idx, spot, ts_t,
+        chain_right, chain_strike, chain_dte, chain_bid, chain_ask, chain_delta,
+        td_t, sd_t, sw_t, sl_t, pt_t, mde_t, hd_t,
+        gate_ok, cooldown_bars, family_code, K, IC_MULTIPLIER=100,
+    ):
+        dev        = state.equity.device
+        zeros_f64  = torch.zeros(K, dtype=torch.float64, device=dev)
+        family_str = CODE_TO_STR[family_code]
+
+        _eb_clamped = state.entry_bar.clamp(min=0).to(torch.int64)
+        _ts_bar     = ts_t[bar_idx]
+        _dh_t       = torch.where(
+            state.open_mask,
+            (_ts_bar - ts_t[_eb_clamped]) / 86400.0,
+            zeros_f64,
+        )
+        _cur_dte_t = torch.where(
+            state.open_mask, state.entry_dte - _dh_t, state.entry_dte
+        )
+        raw_debit_t = _gss.mark_to_market_gpu(
+            chain_right, chain_strike, chain_dte, chain_bid, chain_ask,
+            state.entry_ss_call, state.entry_ss_put, state.entry_width,
+            state.open_mask, _cur_dte_t.float(), family_str,
+            return_tensors=True,
+        )
+        return _compiled_inner(
+            state, raw_debit_t=raw_debit_t,
+            bar_idx=bar_idx, spot=spot, ts_t=ts_t,
+            chain_right=chain_right, chain_strike=chain_strike, chain_dte=chain_dte,
+            chain_bid=chain_bid, chain_ask=chain_ask, chain_delta=chain_delta,
+            td_t=td_t, sd_t=sd_t, sw_t=sw_t, sl_t=sl_t, pt_t=pt_t,
+            mde_t=mde_t, hd_t=hd_t,
+            gate_ok=gate_ok, cooldown_bars=cooldown_bars,
+            family_code=family_code, K=K, IC_MULTIPLIER=IC_MULTIPLIER,
+        )
+
+    return _outer
+
 
 def make_compiled_step_fullgraph(mode: str = "default"):
     """
-    Attempt fullgraph=True compilation for step_bar_gpu.
+    fullgraph=True compilation of _step_bar_inner.
 
-    This will fail if mark_to_market_gpu still contains the .any().item() call.
-    Intended for post-audit use once that guard is removed from mark_to_market_gpu.
-    Falls back to fullgraph=False on failure.
+    With mark_to_market_gpu outside the compiled region there are no graph
+    breaks remaining in _step_bar_inner.  fullgraph=True should compile
+    cleanly.  Falls back to fullgraph=False on error.
     """
-    _patch_autotune_safe()
     try:
-        compiled = torch.compile(step_bar_gpu, mode=mode, fullgraph=True, dynamic=True)
-        return _chain_cloned_wrapper(compiled)
+        _compiled_inner = torch.compile(
+            _step_bar_inner, mode=mode, fullgraph=True, dynamic=True
+        )
     except Exception as exc:
         import warnings
         warnings.warn(
@@ -502,3 +469,43 @@ def make_compiled_step_fullgraph(mode: str = "default"):
             stacklevel=2,
         )
         return make_compiled_step(mode=mode)
+
+    def _outer(
+        state, *,
+        bar_idx, spot, ts_t,
+        chain_right, chain_strike, chain_dte, chain_bid, chain_ask, chain_delta,
+        td_t, sd_t, sw_t, sl_t, pt_t, mde_t, hd_t,
+        gate_ok, cooldown_bars, family_code, K, IC_MULTIPLIER=100,
+    ):
+        dev        = state.equity.device
+        zeros_f64  = torch.zeros(K, dtype=torch.float64, device=dev)
+        family_str = CODE_TO_STR[family_code]
+
+        _eb_clamped = state.entry_bar.clamp(min=0).to(torch.int64)
+        _ts_bar     = ts_t[bar_idx]
+        _dh_t       = torch.where(
+            state.open_mask,
+            (_ts_bar - ts_t[_eb_clamped]) / 86400.0,
+            zeros_f64,
+        )
+        _cur_dte_t = torch.where(
+            state.open_mask, state.entry_dte - _dh_t, state.entry_dte
+        )
+        raw_debit_t = _gss.mark_to_market_gpu(
+            chain_right, chain_strike, chain_dte, chain_bid, chain_ask,
+            state.entry_ss_call, state.entry_ss_put, state.entry_width,
+            state.open_mask, _cur_dte_t.float(), family_str,
+            return_tensors=True,
+        )
+        return _compiled_inner(
+            state, raw_debit_t=raw_debit_t,
+            bar_idx=bar_idx, spot=spot, ts_t=ts_t,
+            chain_right=chain_right, chain_strike=chain_strike, chain_dte=chain_dte,
+            chain_bid=chain_bid, chain_ask=chain_ask, chain_delta=chain_delta,
+            td_t=td_t, sd_t=sd_t, sw_t=sw_t, sl_t=sl_t, pt_t=pt_t,
+            mde_t=mde_t, hd_t=hd_t,
+            gate_ok=gate_ok, cooldown_bars=cooldown_bars,
+            family_code=family_code, K=K, IC_MULTIPLIER=IC_MULTIPLIER,
+        )
+
+    return _outer
