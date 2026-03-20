@@ -54,9 +54,9 @@ correctly via `torch.where` on `debit_t`.
 
 ---
 
-## torch 2.4.0 Triton Bug — Misaligned Address on Small Dynamic M
+## Triton Misaligned Address Bug — Resolution
 
-**Status:** Confirmed on torch 2.4.0+cu121 and torch 2.5.1+cu121. Application-level workarounds exhausted. Fix: extract MtM call outside compiled region (pass `debit_t` as arg to `step_bar_gpu`), OR upgrade to a torch version where the inductor stride bug is fixed.
+**Status: RESOLVED** (2026-03-20). Root cause identified and fixed in `optimizer_stage3a.py`. No torch upgrade required.
 
 ### Symptom
 
@@ -64,32 +64,47 @@ correctly via `torch.where` on `debit_t`.
 triton/backends/nvidia/driver.py:365: RuntimeError: Triton Error [CUDA]: misaligned address
 ```
 
-Crash occurs during the **autotune phase** on the first bar that has open positions (MtM executed), then recurs at **execution time** on subsequent bars.
+Crash during **autotune** on first bar with open positions, then at **execution time** on subsequent bars. Confirmed on torch 2.4.0+cu121 and torch 2.5.1+cu121.
 
 ### Root Cause
 
-Inside `mark_to_market_gpu`, `_as_device_tensor()` converts three `float64` BarState tensors (`entry_ssc`, `entry_ssp`, `entry_sw`) to `float32` via `.to(dtype=torch.float32)`. This `aten._to_copy` operation is fused by inductor with the subsequent `argmin/any` reduction into a single 38-argument Triton kernel (`triton_red_fused__to_copy_abs_add_any_argmin_...`).
+Inductor fuses any `float64→float32 _to_copy` operation with any `argmin/any` reduction in the same compiled graph into a single Triton kernel. That fused kernel computes pointer strides incorrectly for dynamic M, causing misaligned reads.
 
-In torch 2.4.0, this fused reduction kernel computes pointer strides using `next_power_of_2(M)` (e.g. 64 for M=36) instead of the actual stride M=36. For chain slices where M is a non-power-of-2 (typical real-world case: 36 options per bar), every pointer dereference is misaligned.
+Two functions contained `float64→float32` casts + reductions:
+1. `mark_to_market_gpu` — `_to_copy` on BarState tensors + `argmin` for strike lookup
+2. `select_entry_for_bar` — `_to_copy` on delta/price tensors + `argmin/any` for best strike
 
-### Why Application Fixes Do Not Work
+Both were inside the compiled region. Either one was sufficient to trigger the crash.
+
+### Failed Fixes (Documented for Reference)
 
 | Fix attempted | Why it fails |
 |---|---|
-| `.contiguous()` on chain slices | 1-D slices are already contiguous (stride=1); no-op |
-| `.clone()` on chain slices outside compiled boundary | Issue is inside `mark_to_market_gpu` (`_to_copy` on float64 BarState tensors), not chain tensors |
-| `torch._dynamo.disable(_gss.mark_to_market_gpu)` | Prevents dynamo tracing, but AOT autograd still compiles MtM into the resume subgraph. `eval_frame.py:600` in traceback confirms this. |
-| `CachingAutotuner.bench` patch (return `inf` on crash) | Autotune completes, but first crash corrupts CUDA error state. All subsequent configs also return `inf`. Autotuner picks arbitrary config → execution crashes at `triton_heuristics.py:868`. |
+| `.contiguous()` on chain slices | Already contiguous; no-op |
+| `.clone()` outside compiled boundary | Issue is inside the functions, not chain slices |
+| `torch._dynamo.disable(mark_to_market_gpu)` | Prevents dynamo tracing but AOT autograd still compiles MtM into resume subgraph |
+| `CachingAutotuner.bench` patch | First crash corrupts CUDA state; subsequent configs all `inf` → arbitrary config → crash at execution |
+| Extract MtM only | Reduced crash frequency; revealed same bug in `select_entry_for_bar` |
 
-### Impact
+### Definitive Fix
 
-- `TestCompileParity::test_compiled_matches_eager_short_run` → uses `M=64` (power-of-2) to avoid the stride bug. All 11 tests pass.
-- `benchmark_stage3a.py` compile section → wrapped in `try/except`; prints `SKIPPED` and records `None` rows for non-power-of-2 M runs. Benchmark completes without crashing.
-- Production fix for arbitrary M: extract `mark_to_market_gpu` call outside the compiled region (pass `debit_t` as a pre-computed argument to `step_bar_gpu`).
+Move **both** `mark_to_market_gpu` and `select_entry_for_bar` outside the compiled region into the eager `_outer` wrapper. `_step_bar_inner` (the compiled function) then contains **zero reductions** — only pointwise, element-wise, and gather ops. Inductor has nothing to fuse.
 
-### Upgrade Path
+```python
+# In _outer (uncompiled):
+raw_debit_t = _gss.mark_to_market_gpu(..., return_tensors=True)     # eager
+entry_*     = _gss.select_entry_for_bar(..., return_tensors=True)   # eager
 
-On torch ≥ 2.5: remove `@pytest.mark.xfail` from `TestCompileParity::test_compiled_matches_eager_short_run`, remove `try/except` from benchmark compile section (or leave for safety), and re-run benchmark to measure compiled speedup.
+# _step_bar_inner (compiled) receives pre-computed tensors — no reductions inside
+return _compiled_inner(state, raw_debit_t=raw_debit_t,
+                       entry_cred_t=..., entry_ssc_t=..., ...)
+```
+
+### Result
+
+- `TestCompileParity::test_compiled_matches_eager_short_run` → **PASSED** (no xfail, any M value)
+- 11/11 tests pass on Tesla T4, torch 2.5.1+cu121
+- `benchmark_stage3a.py` compile section runs without try/except
 
 ---
 
@@ -114,47 +129,45 @@ data, M is typically fixed per session.
 
 ## Scalar Specialization Trap — `spot` and `bar_idx`
 
-**Symptom observed (before fix):**
-
+**Symptom (initial):**
 ```
 W torch._dynamo hit config.cache_size_limit (8)
 last reason: L['spot'] == 500.0609436035156
 ```
-
-Benchmark showed 77-second warm-up and 0.21x regression (step_bar compiled SLOWER than Stage 2A):
-
+After fixing `spot`, the next specialization offender appeared:
 ```
-step_bar compile(SS) 32 2000 0.883  566  0.21x
+W torch._dynamo hit config.cache_size_limit (8)
+last reason: L['bar_idx'] == 0
 ```
+
+Both caused cache exhaustion after 8 unique values → dynamo fallback to eager for all remaining bars.
 
 **Root cause:**
 
-`spot` (Python `float`, changes every bar) and `bar_idx` (Python `int`, 0…T-1) are passed
-as arguments to the compiled function. Without `dynamic=True`, torch.compile treats each
-unique scalar value as a separate specialization. After 8 bars the cache (`cache_size_limit=8`)
-is exhausted and torch falls back to eager mode — eliminating any compile benefit and paying
-full dynamo trace overhead for every bar.
+`dynamic=True` in `torch.compile` treats tensor **shape** integers as dynamic but does NOT prevent specialization on Python scalar **function arguments** (float or int). `spot` changes every bar (T unique floats) and `bar_idx` increments every bar (T unique ints) — both saturate the 8-entry compile cache within the first 8 bars.
 
-**Fix applied — `dynamic=True`:**
+**Fix applied — 0-d tensors:**
+
+Convert both scalars to 0-d tensors in all callers **before** passing to `_step_bar_inner`:
 
 ```python
-compiled = torch.compile(step_bar_gpu, mode=mode, fullgraph=False, dynamic=True)
+# In step_bar_gpu / _outer (before calling _compiled_inner):
+spot_t    = torch.tensor(spot,    dtype=torch.float32, device=dev)
+bar_idx_t = torch.tensor(bar_idx, dtype=torch.int64,   device=dev)
 ```
 
-`dynamic=True` tells torch.compile to treat Python scalar arguments as symbolic dynamic
-values. A single compiled version handles all `bar_idx` and `spot` values — warm-up
-compilations remain at **2** (gate_ok specializations only).
+Tensor arguments are never captured as Python value guards. A single compiled version handles all bars — warm-up compilations remain at **2** (gate_ok=True + gate_ok=False).
 
 **Stable scalars (still specialised, but safe):**
 
 | Parameter | Why safe |
 |---|---|
-| `gate_ok` (bool) | Only 2 possible values |
+| `gate_ok` (bool) | Only 2 possible values — both compiled at warm-up |
 | `family_code` (int) | Fixed per optimization run |
 | `cooldown_bars` (int) | Fixed per optimization run |
 | `K` (int) | Fixed per optimization run |
 
-These produce at most 2 compiled versions total and are never hit again after warm-up.
+**Result:** No scalar specialization warnings. Compile warm-up ~6s (K=32). Steady-state compile matches Stage 2A throughput.
 
 ---
 
@@ -162,8 +175,8 @@ These produce at most 2 compiled versions total and are never hit again after wa
 
 | Mode | Supported | Notes |
 |---|---|---|
-| `fullgraph=False` (default) | ✅ Yes | One graph break per bar in MtM. Safe. |
-| `fullgraph=True` | ❌ Not yet | Blocked by `mark_to_market_gpu:528`. Fix: remove `.any().item()`. |
+| `fullgraph=False` (default) | ✅ Yes | **Recommended.** Zero graph breaks in `_step_bar_inner`. |
+| `fullgraph=True` | ✅ Yes | `_step_bar_inner` contains no graph breaks. `make_compiled_step_fullgraph()` available. |
 | `mode="default"` | ✅ Yes | **Recommended.** Inductor kernel fusion, no CUDA graph capture. |
 | `mode="reduce-overhead"` | ❌ Incompatible | Uses CUDA graph capture — requires static input memory addresses. Our chain slices change address every bar (different offsets into the options tensor) → RuntimeError on second call. |
 | `mode="max-autotune"` | ⚠️ Slow warm-up | May improve steady-state for very large K; same CUDA-graph incompatibility as reduce-overhead unless disabled. |
@@ -184,23 +197,31 @@ Test coverage: `tests/test_stage3a_compile_parity.py`
 
 ---
 
-## Next Step: fullgraph=True Path
+## Final Benchmark Results (Tesla T4, torch 2.5.1+cu121, 2026-03-20)
 
-To enable fullgraph=True and eliminate the last graph break:
+```
+Mode                       K      T   wall_s     bars/s   vs Stage2A   trades
+Stage2A GPU eager         32    500    0.180       2783   (baseline)        0
+step_bar eager            32    500    0.922        542        0.19x        0
+step_bar compile(SS)      32    500    0.542        922        0.33x        0
 
-1. In `gpu_strike_selector.py::mark_to_market_gpu` line 528, replace:
-   ```python
-   if M == 0 or not bool(open_t.any().item()):
-       return debit_out if return_tensors else debit_out.cpu().numpy()
-   ```
-   with:
-   ```python
-   if M == 0:
-       return debit_out if return_tensors else debit_out.cpu().numpy()
-   ```
-   (Remove the `.any().item()` guard; the existing `torch.where(open_t & all_ok, ...)` already
-   handles all-False open_mask by returning NaN for all K.)
+Stage2A GPU eager        128    500    0.181       2769   (baseline)        0
+step_bar compile(SS)     128    500    0.541        924        0.33x        0
 
-2. Update parity tests to verify MtM still returns NaN for all-False open_mask.
+Stage2A GPU eager         32   2000    3.870        517   (baseline)       32
+step_bar eager            32   2000    5.345        374        0.72x       32
+step_bar compile(SS)      32   2000    3.818        524        1.01x       32
 
-3. Re-run benchmark with `fullgraph=True` to measure additional speedup from full kernel fusion.
+Stage2A GPU eager        128   2000    3.926        509   (baseline)      128
+step_bar compile(SS)     128   2000    3.812        525        1.03x      128
+```
+
+**Key observations:**
+- T=2000 (production-length runs): compiled path matches Stage 2A throughput (1.01–1.03x)
+- T=500 (short runs): Python per-bar overhead from eager MtM+entry calls dominates; 0.33x vs Stage2A
+- Warm-up ~6s for first K value; subsequent K reuses cached compilation (~0.6s)
+- No scalar specialization warnings; no Triton crashes; no xfail
+
+## Stage 3A — Complete
+
+All deliverables committed. Next stages: 3B (chunked execution) or 3C (Triton feasibility).

@@ -18,10 +18,10 @@ Status legend:
 
 ---
 
-## Status Update (2026-03-18 — Push 3)
+## Status Update (2026-03-20 — Push 6)
 
 - ✅ Stage 1 selector audit and interface cleanup landed.
-- ✅ GPU hot-path bounce elimination complete: Stage 2A tensorized state machine implemented in `optimizer_engine.py`. All K state arrays (`equity`, `peak`, `max_dd`, `open_mask`, `entry_credit`, `entry_qty`, `entry_ss_call/put`, `entry_width`, `entry_bar`, `entry_dte`, `last_entry`, `wins`, `losses`, `gross_win/loss`) live on GPU device throughout the bar loop. Zero per-bar `.cpu().numpy()` in GPU mode. Single extraction at end-of-run.
+- ✅ GPU hot-path bounce elimination complete: Stage 2A tensorized state machine implemented in `optimizer_engine.py`. All K state arrays live on GPU device throughout the bar loop. Zero per-bar `.cpu().numpy()` in GPU mode. Single extraction at end-of-run.
 - ✅ Both paths maintained: `_use_gpu=True` → full torch tensor path; `_use_gpu=False` → original numpy path unchanged.
 - ✅ Operational support: `--checkpoint` JSON resume, `selection_forensics.py`, `scripts/repo_sync_audit.py`, `W/L` leaderboard column.
 - ✅ Stage 1 parity harness: 22/22 tests pass (test_gpu_strike_selector_parity.py)
@@ -29,7 +29,7 @@ Status legend:
 - ✅ Stage 2A parity harness: 9/9 tests pass (test_stage2a_full_engine_parity.py)
 - ✅ Stage 2A benchmark: benchmark_stage2a.py, K=128/T=2000 GPU 4.47x, ~430 bars/sec flat
 - ✅ Stage 2A force-close max_dd bug fixed (commit bc9d4be)
-- ✅ Stage 3A: step_bar_gpu extracted, 10/11 parity tests pass on Lightning AI. Compiled parity test (test_compiled_matches_eager_short_run) marked xfail — torch 2.4.0 Triton reduction kernel bug with dynamic=True on non-power-of-2 M; all application-level fixes exhausted; fix requires torch≥2.5. Benchmark wraps compile section in try/except, completes without crash. Stage 3A deliverables complete.
+- ✅ Stage 3A: **FULLY COMPLETE** — 11/11 parity tests pass on Lightning AI (torch 2.5.1+cu121, Tesla T4). Triton misaligned-address bug resolved by extracting both `mark_to_market_gpu` AND `select_entry_for_bar` outside compiled region. Python scalar specialization fixed by passing `spot` and `bar_idx` as 0-d tensors. Compiled steady-state matches Stage 2A throughput (K=128/T=2000: compile 3.81s vs Stage2A 3.93s, 1.03x). Benchmark files generated. All deliverables committed.
 
 ---
 
@@ -392,8 +392,8 @@ Restructure the Stage 2 engine so the hot path is compatible with `torch.compile
 - ✅ No NumPy calls in step_bar_gpu
 - ✅ Strategy family dispatched via static Python int (compile specialization, not graph break)
 - ✅ gate_ok / family_code / K passed as Python scalars (compile specializations)
-- [ ] One remaining graph break: mark_to_market_gpu:528 bool(open_t.any().item())
-      → documented in audit; fullgraph=False works; fullgraph=True fix described
+- ✅ Remaining graph break eliminated: `mark_to_market_gpu` AND `select_entry_for_bar` both moved outside compiled region into `_outer` wrapper. `_step_bar_inner` contains zero reductions — only pointwise/element-wise/gather ops. fullgraph=False compiles cleanly; fullgraph=True also supported via `make_compiled_step_fullgraph`.
+- ✅ Scalar specialization fixed: `spot` and `bar_idx` passed as 0-d tensors — no Python scalar guards, single compiled version handles all bars.
 
 ### Deliverable
 - ✅ `reports/gpu_transition/stage3a_graph_break_audit.md`
@@ -401,19 +401,19 @@ Restructure the Stage 2 engine so the hot path is compatible with `torch.compile
 ---
 
 ## 3A.3 Test `torch.compile`
-- ✅ step_bar_gpu: 10/10 parity tests pass locally (CPU, no CUDA)
-- ✅ Compile parity test on CUDA: 10/11 pass; test_compiled_matches_eager_short_run xfail (torch 2.4.0 Triton bug; re-enable on torch≥2.5)
-- ✅ Benchmark compile: benchmark_stage3a.py completes; compile section skipped gracefully with try/except on torch 2.4.0
+- ✅ step_bar_gpu: 11/11 parity tests pass on Lightning AI (torch 2.5.1+cu121, Tesla T4). No xfail.
+- ✅ Compiled parity test passes: test_compiled_matches_eager_short_run PASSED (Triton bug fully resolved)
 - ✅ Numerical parity confirmed vs optimizer_engine CPU path (7 full-run tests)
+- ✅ Compile benchmark: K=128/T=2000 compile(SS)=3.81s vs Stage2A=3.93s (1.03x) — matches Stage2A throughput
 
 ### Deliverable
-- ✅ `tests/test_stage3a_compile_parity.py` (10 tests: 3 unit + 7 full-run parity)
+- ✅ `tests/test_stage3a_compile_parity.py` (11 tests: 3 unit + 7 full-run parity + 1 compile parity)
 - ✅ `kaggle/benchmark_stage3a.py` (generates reports on run)
-- [ ] `reports/gpu_transition/stage3a_compile_benchmark.json` (generated on Lightning AI)
-- [ ] `reports/gpu_transition/stage3a_compile_benchmark.md` (generated on Lightning AI)
+- ✅ `reports/gpu_transition/stage3a_compile_benchmark.json` (generated on Lightning AI 2026-03-20)
+- ✅ `reports/gpu_transition/stage3a_compile_benchmark.md` (generated on Lightning AI 2026-03-20)
 
 ### Milestone
-- ✅ **Stage 3A complete** — 10/11 parity tests pass; compile test xfail on torch 2.4.0 (Triton bug); benchmark runs cleanly; all deliverables committed
+- ✅ **Stage 3A complete** — 11/11 parity tests pass; compile matches Stage2A throughput; scalar specialization eliminated; all deliverables committed
 
 ---
 
