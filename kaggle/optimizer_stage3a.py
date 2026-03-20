@@ -163,6 +163,17 @@ def step_bar_gpu(
     zeros_f64 = torch.zeros(K, dtype=torch.float64, device=dev)
     zeros_f32 = torch.zeros(K, dtype=torch.float32, device=dev)
 
+    # Make chain slices contiguous.
+    # Callers pass views with non-zero storage offsets (e.g. option_right[s:e]).
+    # Non-contiguous inputs cause misaligned-address errors in Triton's autotuner
+    # when compiled by torch.compile.  .contiguous() is a no-op if already aligned.
+    chain_right  = chain_right.contiguous()
+    chain_strike = chain_strike.contiguous()
+    chain_dte    = chain_dte.contiguous()
+    chain_bid    = chain_bid.contiguous()
+    chain_ask    = chain_ask.contiguous()
+    chain_delta  = chain_delta.contiguous()
+
     family_str = CODE_TO_STR[family_code]   # Python dict lookup — trace-time constant
 
     # ── EXIT PHASE ─────────────────────────────────────────────────────────────
