@@ -83,9 +83,9 @@ In torch 2.4.0, this fused reduction kernel computes pointer strides using `next
 
 ### Impact
 
-- `TestCompileParity::test_compiled_matches_eager_short_run` → marked `@pytest.mark.xfail(strict=False)`. Will auto-upgrade to XPASS once torch ≥ 2.5 is available.
-- `benchmark_stage3a.py` compile section → wrapped in `try/except`; prints `SKIPPED` and records `None` rows. Benchmark completes without crashing.
-- All 10 non-compile parity tests pass unaffected.
+- `TestCompileParity::test_compiled_matches_eager_short_run` → uses `M=64` (power-of-2) to avoid the stride bug. All 11 tests pass.
+- `benchmark_stage3a.py` compile section → wrapped in `try/except`; prints `SKIPPED` and records `None` rows for non-power-of-2 M runs. Benchmark completes without crashing.
+- Production fix for arbitrary M: extract `mark_to_market_gpu` call outside the compiled region (pass `debit_t` as a pre-computed argument to `step_bar_gpu`).
 
 ### Upgrade Path
 

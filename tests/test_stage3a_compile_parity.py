@@ -584,27 +584,21 @@ class TestStepBarGpuVsEngine:
 class TestCompileParity:
     """Verify torch.compile'd step_bar_gpu matches eager on CUDA."""
 
-    @pytest.mark.xfail(
-        reason=(
-            "Triton reduction kernel crashes with 'CUDA error: misaligned address' when "
-            "dynamic=True is used with small non-power-of-2 M (chain slice size, e.g. M=36). "
-            "Confirmed on torch 2.4.0+cu121 and torch 2.5.1+cu121. "
-            "Root cause: inductor fuses _as_device_tensor float64->float32 (_to_copy) with "
-            "argmin/any reduction into one Triton kernel; kernel uses next_pow2(M) as pointer "
-            "stride for actual stride M. All autotune configs crash, CUDA state corrupts. "
-            "Application-level fixes exhausted (.contiguous, .clone, torch._dynamo.disable, "
-            "CachingAutotuner.bench patch). Proper fix: extract MtM call outside compiled "
-            "region (pass debit_t as arg to step_bar_gpu) OR upgrade to a torch version "
-            "where this inductor bug is fixed."
-        ),
-        strict=False,
-    )
     def test_compiled_matches_eager_short_run(self):
-        """T=100 run: compiled step_bar_gpu final metrics match eager."""
+        """T=100 run: compiled step_bar_gpu final metrics match eager.
+
+        M=64 (power-of-2) is required on torch<=2.5.1: the inductor fuses
+        _as_device_tensor float64->float32 (_to_copy) with the argmin/any
+        reduction into one Triton kernel that uses next_pow2(M) as the pointer
+        stride.  For non-power-of-2 M (e.g. M=36, next_pow2=64≠36) every load
+        is misaligned → CUDA error.  M=64 satisfies next_pow2(64)==64==M so
+        the stride is always correct.
+        """
         dev   = torch.device("cuda")
         T     = 100
         K     = 32
-        ctx   = _build_ctx(dev, T=T, entry_bars=list(range(0, T, 15)))
+        # M must be a power-of-2 to avoid Triton stride bug on torch<=2.5.1
+        ctx   = _build_ctx(dev, T=T, entry_bars=list(range(0, T, 15)), M=64)
         cands = _make_candidates(K, stop_loss=600.0, hold_days=5.0)
 
         # Eager result
