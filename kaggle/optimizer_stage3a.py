@@ -163,17 +163,6 @@ def step_bar_gpu(
     zeros_f64 = torch.zeros(K, dtype=torch.float64, device=dev)
     zeros_f32 = torch.zeros(K, dtype=torch.float32, device=dev)
 
-    # Make chain slices contiguous.
-    # Callers pass views with non-zero storage offsets (e.g. option_right[s:e]).
-    # Non-contiguous inputs cause misaligned-address errors in Triton's autotuner
-    # when compiled by torch.compile.  .contiguous() is a no-op if already aligned.
-    chain_right  = chain_right.contiguous()
-    chain_strike = chain_strike.contiguous()
-    chain_dte    = chain_dte.contiguous()
-    chain_bid    = chain_bid.contiguous()
-    chain_ask    = chain_ask.contiguous()
-    chain_delta  = chain_delta.contiguous()
-
     family_str = CODE_TO_STR[family_code]   # Python dict lookup — trace-time constant
 
     # ── EXIT PHASE ─────────────────────────────────────────────────────────────
@@ -345,6 +334,55 @@ def step_bar_gpu(
 
 # ── torch.compile wrapper ──────────────────────────────────────────────────────
 
+def _chain_cloned_wrapper(fn):
+    """
+    Wraps a compiled (or eager) step function to clone chain tensors BEFORE
+    calling the inner function.
+
+    Why clone, not contiguous:
+    - A 1-D tensor slice tensor[s:e] is already contiguous (stride=1), so
+      .contiguous() is a no-op that returns the SAME storage with the same
+      non-zero offset.
+    - Triton's autotuner uses 128-bit (16-byte) vectorized loads.  If the
+      slice offset s * sizeof(dtype) is not 16-byte aligned, the vectorized
+      load faults with "CUDA error: misaligned address".
+    - .clone() ALWAYS creates a fresh allocation with offset=0.  PyTorch's
+      CUDA allocator aligns to >= 256 bytes, so cloned tensors are always
+      16-byte aligned.
+    - The clone must happen OUTSIDE the compiled graph boundary.  If done
+      inside the compiled function, inductor fuses aten._to_copy with the
+      subsequent Triton reduction kernel and the original mis-aligned pointer
+      is still passed to the Triton kernel as the raw input.
+
+    Overhead: per bar, 6 clones of M float32 elements (M ~ 36 in production).
+    That is ~864 bytes per bar — negligible vs GPU kernel execution time.
+    """
+    def _step(
+        state, *,
+        bar_idx, spot, ts_t,
+        chain_right, chain_strike, chain_dte, chain_bid, chain_ask, chain_delta,
+        td_t, sd_t, sw_t, sl_t, pt_t, mde_t, hd_t,
+        gate_ok, cooldown_bars, family_code, K,
+        **kwargs,
+    ):
+        return fn(
+            state,
+            bar_idx=bar_idx, spot=spot, ts_t=ts_t,
+            chain_right=chain_right.clone(),
+            chain_strike=chain_strike.clone(),
+            chain_dte=chain_dte.clone(),
+            chain_bid=chain_bid.clone(),
+            chain_ask=chain_ask.clone(),
+            chain_delta=chain_delta.clone(),
+            td_t=td_t, sd_t=sd_t, sw_t=sw_t,
+            sl_t=sl_t, pt_t=pt_t, mde_t=mde_t, hd_t=hd_t,
+            gate_ok=gate_ok, cooldown_bars=cooldown_bars,
+            family_code=family_code, K=K,
+            **kwargs,
+        )
+    return _step
+
+
 def make_compiled_step(mode: str = "default"):
     """
     Return a torch.compile'd version of step_bar_gpu if PyTorch >= 2.0.
@@ -368,10 +406,13 @@ def make_compiled_step(mode: str = "default"):
 
     Warm-up: first call triggers JIT compilation — expect a few seconds.
     Specialisations are keyed on (gate_ok, family_code, K) — stable per-run.
+
+    The returned callable is wrapped by _chain_cloned_wrapper which clones chain
+    slice inputs BEFORE calling the compiled function to ensure 16-byte alignment.
     """
     try:
         compiled = torch.compile(step_bar_gpu, mode=mode, fullgraph=False, dynamic=True)
-        return compiled
+        return _chain_cloned_wrapper(compiled)
     except Exception as exc:
         import warnings
         warnings.warn(
@@ -392,7 +433,7 @@ def make_compiled_step_fullgraph(mode: str = "default"):
     """
     try:
         compiled = torch.compile(step_bar_gpu, mode=mode, fullgraph=True, dynamic=True)
-        return compiled
+        return _chain_cloned_wrapper(compiled)
     except Exception as exc:
         import warnings
         warnings.warn(
