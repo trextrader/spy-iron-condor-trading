@@ -8,7 +8,7 @@ Replicates run_backtest() shared-capital semantics on GPU:
   - Per-slot family dispatch for MtM and intrinsic value
 
 Financial equivalences vs run_backtest():
-  - DOLLAR_STOP, PROFIT_TARGET, TIME_EXIT/EXPIRY, FRIDAY_CLOSEOUT → same thresholds
+  - PER_TRADE_STOP (credit×mult formula), PROFIT_TARGET, TIME_EXIT/EXPIRY, FRIDAY_CLOSEOUT → same thresholds
   - ExecutionRealityEngine slippage → not ported (no option symbol tracking on GPU)
   - DecisionTraceLogger → supported via optional trace_logger param
 
@@ -187,7 +187,7 @@ def run_backtest_gpu(
     Replaces run_backtest() semantics on GPU:
       - Up to max_positions concurrent position slots sharing one equity pool
       - Entries driven by v43 model gates (same thresholds as run_backtest)
-      - Exits: DOLLAR_STOP, PROFIT_TARGET, TIME/EXPIRY, FRIDAY_CLOSEOUT
+      - Exits: PER_TRADE_STOP (credit×mult+dollar), PROFIT_TARGET, TIME/EXPIRY, FRIDAY_CLOSEOUT
       - Template selection: resolves strategy_idx → template_id → engine_family
 
     Parameters
@@ -234,7 +234,10 @@ def run_backtest_gpu(
     entry_dte_t     = torch.zeros(N_pos, dtype=torch.float64, device=dev)
     entry_bar_t     = torch.full((N_pos,), -999, dtype=torch.int64, device=dev)
     # Per-slot exit thresholds (written at entry from template config)
-    stop_loss_t     = torch.full((N_pos,), 600.0,  dtype=torch.float64, device=dev)
+    # stop_loss_t stores the PER-TRADE stop threshold as a NEGATIVE value.
+    # Computed at entry via CPU formula: max(-(credit × mult × IC_MULT), -dollar_stop)
+    # Default -600.0 matches IC_STOP_LOSS_MULT=2.0 fallback with $300 credit equivalent.
+    stop_loss_t     = torch.full((N_pos,), -600.0,  dtype=torch.float64, device=dev)
     profit_tgt_t    = torch.full((N_pos,), 1500.0, dtype=torch.float64, device=dev)
     hold_days_t     = torch.full((N_pos,), 30.0,   dtype=torch.float64, device=dev)
     max_dte_exit_t  = torch.zeros(N_pos,            dtype=torch.float64, device=dev)
@@ -353,8 +356,8 @@ def run_backtest_gpu(
                                          'template_id': _slot_template[j]})
                     _update_tstat(_slot_template[j] or 'unknown', _p)
                     if trace_logger is not None and _slot_trade_id[j]:
-                        _sl_val = float(stop_loss_t[j].item())
-                        _r_mult = round(_p / _sl_val, 4) if _sl_val != 0 else 0.0
+                        _sl_val = float(stop_loss_t[j].item())   # negative threshold
+                        _r_mult = round(_p / abs(_sl_val), 4) if _sl_val != 0 else 0.0
                         trace_logger.append({
                             'event_id': str(uuid.uuid4()),
                             'instrument': {
@@ -449,7 +452,8 @@ def run_backtest_gpu(
                                      torch.zeros_like(_days_held))
 
             # Exit condition masks
-            _sl_hit   = open_mask_t & (_unreal_t <= -stop_loss_t.abs())
+            # stop_loss_t already stores negative per-trade threshold (CPU formula)
+            _sl_hit   = open_mask_t & (_unreal_t <= stop_loss_t)
             _pt_hit   = open_mask_t & (_unreal_t >= profit_tgt_t) & (_unreal_t > 0)
             _exp_ex   = open_mask_t & (_dte_rem <= 0)
             _hd_ex    = open_mask_t & (_days_held >= hold_days_t)
@@ -464,7 +468,7 @@ def run_backtest_gpu(
                 for j in range(N_pos):
                     if bool(_exit_t[j].item()):
                         _p = float(_pnl_t[j].item())
-                        _reason = ('DOLLAR_STOP'    if bool(_sl_hit[j].item()) else
+                        _reason = ('PER_TRADE_STOP' if bool(_sl_hit[j].item()) else
                                    'PROFIT_TARGET'  if bool(_pt_hit[j].item()) else
                                    'EXPIRY'         if bool(_exp_ex[j].item()) else
                                    'MAX_HOLD'       if bool(_hd_ex[j].item()) else 'DTE_EXIT')
@@ -534,12 +538,16 @@ def run_backtest_gpu(
                             _pt_v  = float(profit_tgt_t[j].item())
                             _hl_v  = float(hold_days_t[j].item())
                             _left  = max(0.0, _dte_v - _dh_v)
-                            if _reason == 'DOLLAR_STOP':
-                                print(f"\n  \U0001f6d1 CLOSED [DOLLAR_STOP] [{_slot_trade_id[j]}]"
+                            if _reason == 'PER_TRADE_STOP':
+                                print(f"\n  \U0001f6d1 CLOSED [PER_TRADE_STOP] [{_slot_trade_id[j]}]"
                                       f"  bar={i}  {_ts_v}"
+                                      f"\n     EARLY EXIT — stopped out at {_dh_v:.1f}d held"
+                                      f" / {_dte_v:.0f}d DTE"
+                                      f"  ({_left:.1f}d left on contract)"
                                       f"\n     strategy={_slot_template[j]}"
-                                      f"  stop=${_sl_v:,.0f}  unrealized=${_p:,.2f}"
-                                      f"\n     realized=${_p:,.2f}  held={_dh_v:.1f}d"
+                                      f"  stop_thresh=${_sl_v:+,.2f}  unrealized=${_p:,.2f}"
+                                      f"\n     realized=${_p:,.2f}"
+                                      f"  premium_captured={_prem_v:+.1f}%"
                                       f"  equity_after=${_eq_v:,.2f}")
                             elif _reason == 'PROFIT_TARGET':
                                 print(f"\n  ✅ CLOSED [PROFIT_TARGET] [{_slot_trade_id[j]}]"
@@ -678,7 +686,17 @@ def run_backtest_gpu(
         entry_dte_t[j]     = float(_g['actual_dte'][0].item())
         entry_bar_t[j]     = i
         family_code_t[j]   = _FAMILY_CODE.get(engine_family, FC_IRON_BUTTERFLY)
-        stop_loss_t[j]     = float(cfg.get('stop_loss_dollar', 600.0) or 600.0)
+        # Per-trade stop: mirrors CPU formula max(-(|credit|*mult*IC_MULT), -dollar_stop)
+        # Both checks use 'is not None' so mult=0.0 (covered_call) and absent dollar_stop
+        # are handled identically to run_backtest().
+        _sl_m_raw = cfg.get('stop_loss_mult')
+        _sl_m_v   = float(_sl_m_raw) if _sl_m_raw is not None else 2.0
+        _sl_d_raw = cfg.get('stop_loss_dollar')
+        _cred_a   = float(_g['credit'][0].item())
+        _ptstop   = -(abs(_cred_a) * _sl_m_v * IC_MULTIPLIER)
+        if _sl_d_raw is not None:
+            _ptstop = max(_ptstop, -abs(float(_sl_d_raw)))
+        stop_loss_t[j]     = _ptstop   # stored as negative per-trade threshold
         profit_tgt_t[j]    = float(cfg.get('profit_target',  1500.0) or 1500.0)
         hold_days_t[j]     = float(cfg.get('hold_days',         30.0) or 30.0)
         max_dte_exit_t[j]  = float(cfg.get('max_dte_exit',       0.0) or 0.0)
@@ -758,12 +776,28 @@ def run_backtest_gpu(
             })
 
         if verbose:
-            print(f"\n  ─── ENTRY [{_tid}] bar={i} ts={_fmt_ts(ts_i)} spot={spot:.2f} ───"
-                  f"\n     tmpl={tmpl_id} ({engine_family})"
-                  f"  credit={_cred:.4f}/shr"
-                  f"  SS_call={float(_g['ss_call'][0].item()):.0f}"
+            _to_sl_mult_v = _sl_m_v
+            _to_sl_dol_v  = float(_sl_d_raw) if _sl_d_raw is not None else None
+            _to_pt_v      = float(profit_tgt_t[j].item())
+            _to_hl_v      = float(hold_days_t[j].item())
+            print(f"\n  {'─'*72}"
+                  f"\n  TRADE OPENED [{_tid}] bar={i}  {_fmt_ts(ts_i)}"
+                  f"\n    Template     : {tmpl_id} ({engine_family})"
+                  f"  credit=${_cred:.4f}/shr  DTE={_actual_dte:.0f}"
+                  f"\n    Legs         : SS_call={float(_g['ss_call'][0].item()):.0f}"
                   f"  SS_put={float(_g['ss_put'][0].item()):.0f}"
-                  f"  DTE={_actual_dte:.0f}")
+                  f"  width={float(_g['actual_width'][0].item()):.0f}"
+                  f"  spot={spot:.2f}"
+                  f"\n  {'-'*72}"
+                  f"\n  EXIT THRESHOLDS (fire when unrealized crosses):"
+                  f"\n    [1] Friday closeout  : Fri 15:00+  (always-on)"
+                  f"\n    [2] Per-trade stop   : unrealized < ${_ptstop:>+,.2f}"
+                  f"  ({_to_sl_mult_v}x credit"
+                  + (f" + ${_to_sl_dol_v:.0f} hard cap" if _to_sl_dol_v is not None else "") + ")"
+                  + f"\n    [3] Portfolio stop   : unrealized < -5% equity"
+                  f"\n    [4] Profit target    : unrealized > ${_to_pt_v:>+,.0f}"
+                  f"\n    [5] Time / DTE exit  : hold > {_to_hl_v:.0f}d  |  DTE = 0"
+                  f"\n  {'─'*72}")
 
     # ── Post-loop: force-close remaining open positions ────────────────────
     if bool(open_mask_t.any()):
