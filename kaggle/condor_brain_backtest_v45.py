@@ -4819,6 +4819,29 @@ def main():
                   f"templates={len(_STRATEGY_CONFIGS)}"
                   + (f"  filter={sorted(ALLOWED_TEMPLATE_IDS)}"
                      if ALLOWED_TEMPLATE_IDS else "  filter=ALL"))
+            # Build trace logger for GPU path (mirrors CPU path init in run_backtest())
+            import uuid as _uuid_mod
+            import subprocess as _sp_mod
+            try:
+                _gpu_commit = _sp_mod.check_output(
+                    ['git', 'rev-parse', '--short', 'HEAD'],
+                    stderr=_sp_mod.DEVNULL).decode().strip()
+            except Exception:
+                _gpu_commit = "unknown"
+            _gpu_cfg = TraceConfig(
+                output_path  = DECISION_TRACE_PATH,
+                model_id     = os.path.basename(model_path) if model_path else "condor_v43",
+                model_version= "v4.3",
+                model_hash   = "unknown",
+                code_commit  = _gpu_commit,
+                run_id       = _uuid_mod.uuid4().hex[:8],
+                dataset_id   = os.path.basename(use_data_path) if use_data_path else "options_2025_v43.csv",
+                dataset_path = use_data_path,
+            )
+            if os.path.exists(DECISION_TRACE_PATH):
+                os.remove(DECISION_TRACE_PATH)
+            _gpu_trace = DecisionTraceLogger(_gpu_cfg)
+            print(f"[Trace] DecisionTraceLogger initialised → {DECISION_TRACE_PATH}")
             _gpu_ctx = build_optimizer_context(
                 v43_outputs, bundle_v43, _chain_by_date, device=DEVICE,
             )
@@ -4831,6 +4854,7 @@ def main():
                 friday_closeout=not getattr(args, 'no_friday_closeout', False),
                 verbose=getattr(args, 'verbose', False),
                 limit=args.limit if args.limit else None,
+                trace_logger=_gpu_trace,
             )
             # Downstream reporting expects CLOSE-only trade list (matches run_backtest() shape)
             trades = [e for e in trades if e['action'] == 'CLOSE']

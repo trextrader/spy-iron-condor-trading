@@ -10,14 +10,16 @@ Replicates run_backtest() shared-capital semantics on GPU:
 Financial equivalences vs run_backtest():
   - DOLLAR_STOP, PROFIT_TARGET, TIME_EXIT/EXPIRY, FRIDAY_CLOSEOUT → same thresholds
   - ExecutionRealityEngine slippage → not ported (no option symbol tracking on GPU)
-  - DecisionTraceLogger → not ported (diagnostic only)
+  - DecisionTraceLogger → supported via optional trace_logger param
 
 Results are financially equivalent but not bit-for-bit identical to run_backtest().
 """
 from __future__ import annotations
 
 import math
-from typing import Dict, List, Optional, Set, Tuple
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 import torch
@@ -164,6 +166,7 @@ def run_backtest_gpu(
     friday_closeout: bool = True,
     verbose: bool = False,
     limit: Optional[int] = None,
+    trace_logger: Optional[Any] = None,
 ) -> Tuple[List[float], List[dict]]:
     """
     GPU multi-position backtest with shared capital.
@@ -228,6 +231,13 @@ def run_backtest_gpu(
     trade_events:  List[dict]  = []
     last_entry_bar = -999
 
+    # ── Per-slot attribution data (needed for EVAL records at close) ─────────
+    _slot_trade_id     = [''] * N_pos
+    _slot_entry_logit  = [0.0] * N_pos
+    _slot_entry_pop    = [0.0] * N_pos
+    _slot_family_str   = [''] * N_pos
+    _slot_entry_ts     = [0] * N_pos
+
     print(f"[gpu_backtest] T={T}  N_pos={max_positions}  device={dev}  "
           f"templates={len(strategy_configs)}"
           + (f"  filter={len(allowed_template_ids)}" if allowed_template_ids else "  filter=ALL"))
@@ -275,6 +285,50 @@ def run_backtest_gpu(
                     trade_events.append({'action': 'CLOSE', 'idx': i,
                                          'pnl': _p, 'pnl_pct': _p / STARTING_EQUITY * 100,
                                          'spot': spot, 'reason': 'FRIDAY_CLOSEOUT'})
+                    if trace_logger is not None and _slot_trade_id[j]:
+                        _sl_val = float(stop_loss_t[j].item())
+                        _r_mult = round(_p / _sl_val, 4) if _sl_val != 0 else 0.0
+                        trace_logger.append({
+                            'event_id': str(uuid.uuid4()),
+                            'instrument': {
+                                'symbol': 'SPY', 'venue': 'CBOE',
+                                'asset_class': 'OPTIONS',
+                                'contract': {
+                                    'expiry': '',
+                                    'right': _slot_family_str[j].upper(),
+                                    'strike': float(entry_ss_call_t[j].item()),
+                                    'multiplier': IC_MULTIPLIER,
+                                },
+                            },
+                            'decision': {
+                                'decision_type': 'EVAL',
+                                'decision_id': str(uuid.uuid4()),
+                                'trade_id': _slot_trade_id[j],
+                                'scope': 'EXIT',
+                                'intent': f'{_slot_family_str[j]}_exit',
+                                'timeframe': 'M5', 'horizon_bars': 0,
+                                'exit_reason': 'FRIDAY_CLOSEOUT',
+                            },
+                            'state': {}, 'inputs': {},
+                            'action': {'exit_reason': 'FRIDAY_CLOSEOUT'},
+                            'decision_factors': {
+                                'rules': [],
+                                'attribution': [
+                                    {'factor_id': 'entry_logit', 'factor_kind': 'FEATURE',
+                                     'contribution': round(_slot_entry_logit[j], 4),
+                                     'importance': 0.0},
+                                    {'factor_id': 'pop_prob', 'factor_kind': 'FEATURE',
+                                     'contribution': round(_slot_entry_pop[j], 4),
+                                     'importance': 0.0},
+                                ],
+                                'fuzzy': {'rules_fired': []},
+                            },
+                            'outcome': {
+                                'win': bool(_p > 0), 'loss': bool(_p < 0),
+                                'neutral': bool(_p == 0),
+                                'r_multiple_final': _r_mult, 'pnl': round(_p, 4),
+                            },
+                        })
                     if verbose:
                         print(f"  [CLOSE:FRIDAY_CLOSEOUT] slot={j} bar={i} pnl={_p:+,.0f}")
             open_mask_t = torch.zeros(N_pos, dtype=torch.bool, device=dev)
@@ -346,6 +400,53 @@ def run_backtest_gpu(
                                              'pnl': _p,
                                              'pnl_pct': _p / STARTING_EQUITY * 100,
                                              'spot': spot, 'reason': _reason})
+                        if trace_logger is not None and _slot_trade_id[j]:
+                            _sl_val = float(stop_loss_t[j].item())
+                            _r_mult = round(_p / _sl_val, 4) if _sl_val != 0 else 0.0
+                            trace_logger.append({
+                                'event_id': str(uuid.uuid4()),
+                                'instrument': {
+                                    'symbol': 'SPY', 'venue': 'CBOE',
+                                    'asset_class': 'OPTIONS',
+                                    'contract': {
+                                        'expiry': '',
+                                        'right': _slot_family_str[j].upper(),
+                                        'strike': float(entry_ss_call_t[j].item()),
+                                        'multiplier': IC_MULTIPLIER,
+                                    },
+                                },
+                                'decision': {
+                                    'decision_type': 'EVAL',
+                                    'decision_id': str(uuid.uuid4()),
+                                    'trade_id': _slot_trade_id[j],
+                                    'scope': 'EXIT',
+                                    'intent': f'{_slot_family_str[j]}_exit',
+                                    'timeframe': 'M5',
+                                    'horizon_bars': 0,
+                                    'exit_reason': _reason,
+                                },
+                                'state': {},
+                                'inputs': {},
+                                'action': {'exit_reason': _reason},
+                                'decision_factors': {
+                                    'rules': [],
+                                    'attribution': [
+                                        {'factor_id': 'entry_logit', 'factor_kind': 'FEATURE',
+                                         'contribution': round(_slot_entry_logit[j], 4),
+                                         'importance': 0.0},
+                                        {'factor_id': 'pop_prob', 'factor_kind': 'FEATURE',
+                                         'contribution': round(_slot_entry_pop[j], 4),
+                                         'importance': 0.0},
+                                    ],
+                                    'fuzzy': {'rules_fired': []},
+                                },
+                                'outcome': {
+                                    'win': bool(_p > 0), 'loss': bool(_p < 0),
+                                    'neutral': bool(_p == 0),
+                                    'r_multiple_final': _r_mult,
+                                    'pnl': round(_p, 4),
+                                },
+                            })
                         if verbose:
                             print(f"  [CLOSE:{_reason}] slot={j} bar={i} "
                                   f"pnl={_p:+,.0f} equity={float(equity_t):,.0f}")
@@ -417,15 +518,76 @@ def run_backtest_gpu(
         max_dte_exit_t[j]  = float(cfg.get('max_dte_exit',       0.0) or 0.0)
         last_entry_bar     = i
 
-        _cred = float(_g['credit'][0].item())
+        _cred   = float(_g['credit'][0].item())
+        _actual_dte = float(_g['actual_dte'][0].item())
+        _tid    = f"TR_GPU_{i}_{j}"
+        _slot_trade_id[j]    = _tid
+        _slot_entry_logit[j] = es
+        _slot_entry_pop[j]   = pop
+        _slot_family_str[j]  = engine_family
+        _slot_entry_ts[j]    = ts_i
+
         trade_events.append({
             'action': 'OPEN', 'idx': i, 'template_id': tmpl_id,
             'spot': spot, 'credit': _cred,
             'ss_call': float(_g['ss_call'][0].item()),
             'ss_put':  float(_g['ss_put'][0].item()),
-            'dte':     float(_g['actual_dte'][0].item()),
-            'pnl_pct': 0.0,   # placeholder for reporting compat
+            'dte':     _actual_dte,
+            'pnl_pct': 0.0,
         })
+
+        if trace_logger is not None:
+            _expiry = (datetime.fromtimestamp(ts_i, tz=timezone.utc) +
+                       timedelta(days=_actual_dte)).strftime('%Y-%m-%d')
+            _short_delta = float(cfg.get('short_delta', 0.20) or 0.20)
+            trace_logger.append({
+                'event_id': str(uuid.uuid4()),
+                'instrument': {
+                    'symbol': 'SPY', 'venue': 'CBOE', 'asset_class': 'OPTIONS',
+                    'contract': {
+                        'expiry': _expiry,
+                        'right': engine_family.upper(),
+                        'strike': float(_g['ss_call'][0].item()),
+                        'multiplier': IC_MULTIPLIER,
+                    },
+                },
+                'decision': {
+                    'decision_type': 'ENTRY',
+                    'decision_id': str(uuid.uuid4()),
+                    'trade_id': _tid,
+                    'scope': 'ENTRY',
+                    'intent': f'{engine_family}_entry',
+                    'timeframe': 'M5',
+                    'horizon_bars': int(_actual_dte * 78),
+                },
+                'state': {},
+                'inputs': {
+                    'spot': round(spot, 4),
+                    'template_id': tmpl_id,
+                    'engine_family': engine_family,
+                },
+                'action': {
+                    'ss_call': float(_g['ss_call'][0].item()),
+                    'ss_put':  float(_g['ss_put'][0].item()),
+                    'width':   float(_g['actual_width'][0].item()),
+                    'credit':  round(_cred, 4),
+                },
+                'decision_factors': {
+                    'rules': [],
+                    'attribution': [
+                        {'factor_id': 'entry_logit', 'factor_kind': 'FEATURE',
+                         'contribution': round(es, 4), 'importance': 0.0},
+                        {'factor_id': 'pop_prob', 'factor_kind': 'FEATURE',
+                         'contribution': round(pop, 4), 'importance': 0.0},
+                        {'factor_id': 'short_delta', 'factor_kind': 'FEATURE',
+                         'contribution': round(_short_delta, 4), 'importance': 0.0},
+                    ],
+                    'fuzzy': {'rules_fired': []},
+                },
+                'outcome': {'win': False, 'loss': False, 'neutral': True,
+                            'r_multiple_final': 0.0},
+            })
+
         if verbose:
             print(f"  [OPEN] slot={j} bar={i} tmpl={tmpl_id} family={engine_family} "
                   f"credit={_cred:.4f} spot={spot:.2f}")
@@ -450,6 +612,47 @@ def run_backtest_gpu(
                                      'pnl': _p, 'pnl_pct': _p / STARTING_EQUITY * 100,
                                      'spot': float(spot_np[-1]),
                                      'reason': 'END_OF_SIM'})
+                if trace_logger is not None and _slot_trade_id[j]:
+                    _sl_val = float(stop_loss_t[j].item())
+                    _r_mult = round(_p / _sl_val, 4) if _sl_val != 0 else 0.0
+                    trace_logger.append({
+                        'event_id': str(uuid.uuid4()),
+                        'instrument': {
+                            'symbol': 'SPY', 'venue': 'CBOE', 'asset_class': 'OPTIONS',
+                            'contract': {
+                                'expiry': '', 'right': _slot_family_str[j].upper(),
+                                'strike': float(entry_ss_call_t[j].item()),
+                                'multiplier': IC_MULTIPLIER,
+                            },
+                        },
+                        'decision': {
+                            'decision_type': 'EVAL',
+                            'decision_id': str(uuid.uuid4()),
+                            'trade_id': _slot_trade_id[j],
+                            'scope': 'EXIT', 'intent': f'{_slot_family_str[j]}_exit',
+                            'timeframe': 'M5', 'horizon_bars': 0,
+                            'exit_reason': 'END_OF_SIM',
+                        },
+                        'state': {}, 'inputs': {},
+                        'action': {'exit_reason': 'END_OF_SIM'},
+                        'decision_factors': {
+                            'rules': [],
+                            'attribution': [
+                                {'factor_id': 'entry_logit', 'factor_kind': 'FEATURE',
+                                 'contribution': round(_slot_entry_logit[j], 4),
+                                 'importance': 0.0},
+                                {'factor_id': 'pop_prob', 'factor_kind': 'FEATURE',
+                                 'contribution': round(_slot_entry_pop[j], 4),
+                                 'importance': 0.0},
+                            ],
+                            'fuzzy': {'rules_fired': []},
+                        },
+                        'outcome': {
+                            'win': bool(_p > 0), 'loss': bool(_p < 0),
+                            'neutral': bool(_p == 0),
+                            'r_multiple_final': _r_mult, 'pnl': round(_p, 4),
+                        },
+                    })
 
     net_pnl = float(equity_t.item()) - STARTING_EQUITY
     n_closes = sum(1 for e in trade_events if e['action'] == 'CLOSE')
