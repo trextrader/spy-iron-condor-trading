@@ -263,6 +263,18 @@ def run_backtest_gpu(
     _n_wins = 0
     _n_loss = 0
 
+    # ── Per-class gate distribution for MODEL STRATEGY DISTRIBUTION table ────
+    _strat_dist: Dict[int, dict] = {}
+
+    def _sdist(sx: int) -> dict:
+        if sx not in _strat_dist:
+            _strat_dist[sx] = {
+                'predicted': 0, 'pass_entry': 0, 'pass_pop': 0,
+                'pass_ic': 0, 'pass_all_gates': 0, 'opened': 0,
+                'abstain_blocked': 0, 'filter_blocked': 0,
+            }
+        return _strat_dist[sx]
+
     def _tstat(tid: str) -> dict:
         if tid not in _tmpl_stats:
             _tmpl_stats[tid] = {
@@ -640,25 +652,32 @@ def run_backtest_gpu(
                       f"  SC_dist={_sc_dist2:+.2f}%  SP_dist={_sp_dist2:+.2f}%")
 
         # ── C. Entry gate ────────────────────────────────────────────────
+        _sdist(sidx)['predicted'] += 1   # count every bar prediction
         if not has_chain:
             _gc_no_chain += 1
             continue
         if es <= ENTRY_THRESHOLD:
             _gc_gate_e += 1
             continue
+        _sdist(sidx)['pass_entry'] += 1
         if pop <= POP_THRESHOLD:
             _gc_gate_p += 1
             continue
+        _sdist(sidx)['pass_pop'] += 1
         if abt:
             _gc_gate_ic += 1
+            _sdist(sidx)['abstain_blocked'] += 1
             continue
+        _sdist(sidx)['pass_ic'] += 1
         if (i - last_entry_bar) < MIN_BARS_COOLDOWN:
             _gc_cooldown += 1
             continue
 
+        _sdist(sidx)['pass_all_gates'] += 1
         # Resolve template and check filter
         tmpl_id = _resolve_template_gpu(sidx, strategy_configs)
         if allowed_template_ids is not None and tmpl_id not in allowed_template_ids:
+            _sdist(sidx)['filter_blocked'] += 1
             continue
         cfg = strategy_configs.get(tmpl_id, {})
         if not cfg:
@@ -681,6 +700,19 @@ def run_backtest_gpu(
         if _est_margin > _max_deploy:
             _gc_capital += 1
             continue
+
+        # Verbose: ENTRY ATTEMPT (mirrors CPU ENTRY ATTEMPT block)
+        if verbose:
+            _n_rows = int(_r_t.shape[0]) if _r_t is not None else 0
+            _sd_cfg  = float(cfg.get('short_delta', 0.20) or 0.20)
+            _sw_cfg  = float(cfg.get('spread_width', 5.0) or 5.0)
+            print(f"\n  ─── ENTRY ATTEMPT bar={i} ts={_fmt_ts(ts_i)} spot={spot:.2f} ───")
+            print(f"  (G) Chain: {_n_rows} rows"
+                  f" | tmpl={tmpl_id} ({engine_family})"
+                  f" | short_delta={_sd_cfg:.4f}"
+                  f" | spread_width={_sw_cfg:.1f}"
+                  f" | entry_logit={es:.4f}"
+                  f" | pop={pop:.4f}")
 
         # Structure selection (K=1 call to select_entry_for_bar)
         _td_t = torch.tensor([float(cfg.get('target_dte',    21.0) or 21.0)],
@@ -723,6 +755,7 @@ def run_backtest_gpu(
         max_dte_exit_t[j]  = float(cfg.get('max_dte_exit',       0.0) or 0.0)
         last_entry_bar     = i
         _gc_success        += 1
+        _sdist(sidx)['opened'] += 1
         _tstat(tmpl_id)    # ensure entry exists in stats dict
 
         _cred   = float(_g['credit'][0].item())
@@ -971,6 +1004,39 @@ def run_backtest_gpu(
             print(f"  {_tid:<26} {_tc:>5}  {_pct:>4.1f}%  ${_tp:>+11,.2f}  ${_dd:>+9,.2f}"
                   f"  {_tw:>3}/{_tl:<3}  ${_b:>+10,.2f}  ${_w:>+11,.2f}  {_ml:>12}")
         print(_SEP)
+
+    # ── MODEL STRATEGY DISTRIBUTION ──────────────────────────────────────────
+    if _strat_dist:
+        _total_pred = sum(v['predicted'] for v in _strat_dist.values())
+        if _total_pred > 0:
+            _SD_SEP = '=' * 140
+            print(f"\n{_SD_SEP}")
+            print(f"  MODEL STRATEGY DISTRIBUTION (what the model predicted vs. what entered)")
+            print(_SD_SEP)
+            _sd_hdr = (f"  {'Idx':>3}  {'Strategy Class':<22s}  {'Predicted':>9}  {'%':>6}  "
+                       f"{'→Entry':>7}  {'→Pop':>7}  {'→IC':>7}  {'AllGates':>8}  "
+                       f"{'Opened':>7}  {'Abstain':>8}  {'Filtered':>8}")
+            print(_sd_hdr)
+            _sd_sep = (f"  {'-'*3}  {'-'*22}  {'-'*9}  {'-'*6}  "
+                       f"{'-'*7}  {'-'*7}  {'-'*7}  {'-'*8}  "
+                       f"{'-'*7}  {'-'*8}  {'-'*8}")
+            print(_sd_sep)
+            _v43_names = list(_SIDX_TO_CLASS_NAME.values()) + ['unknown']
+            for idx in range(10):  # 0-9 including abstain
+                sd = _strat_dist.get(idx, {})
+                _pred = sd.get('predicted', 0)
+                _name = _SIDX_TO_CLASS_NAME.get(idx, f'class{idx}')
+                _pct  = (_pred / _total_pred * 100) if _total_pred > 0 else 0.0
+                print(f"  {idx:>3}  {_name:<22s}  {_pred:>9,}  {_pct:>5.1f}%  "
+                      f"{sd.get('pass_entry', 0):>7,}  {sd.get('pass_pop', 0):>7,}  "
+                      f"{sd.get('pass_ic', 0):>7,}  {sd.get('pass_all_gates', 0):>8,}  "
+                      f"{sd.get('opened', 0):>7,}  "
+                      f"{sd.get('abstain_blocked', 0):>8,}  {sd.get('filter_blocked', 0):>8,}")
+            _abstain_pred = _strat_dist.get(9, {}).get('predicted', 0)
+            print(f"\n  Total predictions: {_total_pred:,}  |  "
+                  f"Abstain (idx=9): {_abstain_pred:,}  |  "
+                  f"Non-abstain: {_total_pred - _abstain_pred:,}")
+            print(_SD_SEP)
 
     # ── PERFORMANCE SUMMARY ──────────────────────────────────────────────────
     print(f"\n{'='*80}")
