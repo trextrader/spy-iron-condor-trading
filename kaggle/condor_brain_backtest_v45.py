@@ -2169,7 +2169,7 @@ def run_backtest(df, rule_signals, model, feature_cols, device, ruleset=None, mo
             code_commit    = _commit,
             run_id         = _run_id,
             dataset_id     = os.path.basename(data_path) if data_path else "options_2025_v43.csv",
-            dataset_path   = data_path,
+            dataset_path   = data_path if (data_path and os.path.isfile(data_path)) else None,
         )
         trace_logger = DecisionTraceLogger(_cfg)
         # Clear any stale trace from a previous run
@@ -4836,7 +4836,7 @@ def main():
                 code_commit  = _gpu_commit,
                 run_id       = _uuid_mod.uuid4().hex[:8],
                 dataset_id   = os.path.basename(use_data_path) if use_data_path else "options_2025_v43.csv",
-                dataset_path = use_data_path,
+                dataset_path = use_data_path if (use_data_path and os.path.isfile(use_data_path)) else None,
             )
             if os.path.exists(DECISION_TRACE_PATH):
                 os.remove(DECISION_TRACE_PATH)
