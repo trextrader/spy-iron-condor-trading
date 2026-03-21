@@ -75,8 +75,27 @@ def _get_engine_family(class_name: str) -> str:
     return _CLASS_TO_ENGINE_FAMILY.get(class_name, 'iron_butterfly')
 
 
+# Catalog-ordered template priority: class_idx → [template_id, ...] in STRATEGY_CATALOG order.
+# Built at import time so _resolve_template_gpu matches CPU select_best_template priority.
+_CATALOG_ORDER: Dict[int, List[str]] = {}
+try:
+    from intelligence.strategy_templates_v43 import STRATEGY_CATALOG as _SC_CATALOG
+    _cls_name_to_idx = {v: k for k, v in _SIDX_TO_CLASS_NAME.items()}
+    for _ct in _SC_CATALOG:
+        _ci = _cls_name_to_idx.get(getattr(_ct, 'v43_class', None))
+        if _ci is not None:
+            _CATALOG_ORDER.setdefault(_ci, []).append(getattr(_ct, 'template_id', ''))
+    del _SC_CATALOG, _cls_name_to_idx, _ct, _ci
+except Exception:
+    pass  # catalog unavailable — falls back to dict iteration order
+
+
 def _resolve_template_gpu(sidx: int, strategy_configs: Dict) -> str:
-    """Given strategy class index, return first matching template_id."""
+    """Return template_id using catalog priority (mirrors CPU select_best_template)."""
+    for tid in _CATALOG_ORDER.get(sidx, []):
+        if tid in strategy_configs:
+            return tid
+    # Fallback: dict iteration order
     for tid, cfg in strategy_configs.items():
         if cfg.get('class_idx') == sidx:
             return tid
@@ -596,7 +615,7 @@ def run_backtest_gpu(
                                 f"  total=${_total_eq_sb:>12,.2f}"
                                 f"  event_pnl={_p:+,.2f}\n"
                                 f"  cur_dd={_cur_dd_sb:>+6.2f}%"
-                                f"  max_dd={float(max_dd_t.item()):>+7.2f}%"
+                                f"  max_dd={-float(max_dd_t.item()):>+7.2f}%"
                                 f"  W={_n_wins}  L={_n_loss}  W/L={_wl_str_sb}"
                                 f"  open_positions={int(_rem_mask_sb.sum().item())}\n"
                                 f"  {'─'*56}"
@@ -877,7 +896,7 @@ def run_backtest_gpu(
                 f"  open_pnl(all)={_unrealized_e:>+10,.2f}"
                 f"  total=${_total_eq_e:>12,.2f}\n"
                 f"  cur_dd={_cur_dd_e:>+6.2f}%"
-                f"  max_dd={float(max_dd_t.item()):>+7.2f}%"
+                f"  max_dd={-float(max_dd_t.item()):>+7.2f}%"
                 f"  W={_n_wins}  L={_n_loss}  W/L={_wl_str_e}"
                 f"  open_positions={int(open_mask_t.sum().item())}\n"
                 f"  {'─'*56}"
@@ -955,7 +974,7 @@ def run_backtest_gpu(
     net_pnl  = float(equity_t.item()) - STARTING_EQUITY
     net_pct  = net_pnl / STARTING_EQUITY * 100
     n_closes = sum(1 for e in trade_events if e['action'] == 'CLOSE')
-    max_dd_val = float(max_dd_t.item())
+    max_dd_val = -float(max_dd_t.item())  # stored positive internally; display as negative (CPU convention)
     wr_val   = _n_wins / n_closes * 100 if n_closes else 0.0
 
     print(f"[gpu_backtest] Done  T={T}  trades={n_closes}  "
