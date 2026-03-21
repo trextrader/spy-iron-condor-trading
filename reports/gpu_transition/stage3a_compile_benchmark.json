@@ -1,0 +1,163 @@
+{
+  "meta": {
+    "torch_version": "2.5.1+cu121",
+    "cuda_version": "12.1",
+    "gpu_name": "Tesla T4",
+    "T_default": 2000,
+    "iters": 3
+  },
+  "rows": [
+    {
+      "mode": "stage2a_gpu_eager",
+      "K": 32,
+      "T": 500,
+      "wall_s": 0.1796,
+      "bars_per_s": 2783.5,
+      "speedup_vs_stage2a": 1.0,
+      "trades": 0
+    },
+    {
+      "mode": "step_bar_eager",
+      "K": 32,
+      "T": 500,
+      "wall_s": 0.9218,
+      "bars_per_s": 542.4,
+      "speedup_vs_stage2a": 0.195,
+      "trades": 0
+    },
+    {
+      "mode": "step_bar_compile_warmup",
+      "K": 32,
+      "T": 500,
+      "wall_s": 5.9534,
+      "bars_per_s": 84.0,
+      "speedup_vs_stage2a": 0.03,
+      "trades": 0,
+      "note": "includes JIT compilation cost"
+    },
+    {
+      "mode": "step_bar_compile_steady",
+      "K": 32,
+      "T": 500,
+      "wall_s": 0.5424,
+      "bars_per_s": 921.8,
+      "speedup_vs_stage2a": 0.331,
+      "trades": 0,
+      "note": "steady-state (post-warmup)"
+    },
+    {
+      "mode": "stage2a_gpu_eager",
+      "K": 128,
+      "T": 500,
+      "wall_s": 0.1806,
+      "bars_per_s": 2768.7,
+      "speedup_vs_stage2a": 1.0,
+      "trades": 0
+    },
+    {
+      "mode": "step_bar_eager",
+      "K": 128,
+      "T": 500,
+      "wall_s": 0.9195,
+      "bars_per_s": 543.8,
+      "speedup_vs_stage2a": 0.196,
+      "trades": 0
+    },
+    {
+      "mode": "step_bar_compile_warmup",
+      "K": 128,
+      "T": 500,
+      "wall_s": 0.5672,
+      "bars_per_s": 881.6,
+      "speedup_vs_stage2a": 0.318,
+      "trades": 0,
+      "note": "includes JIT compilation cost"
+    },
+    {
+      "mode": "step_bar_compile_steady",
+      "K": 128,
+      "T": 500,
+      "wall_s": 0.5408,
+      "bars_per_s": 924.5,
+      "speedup_vs_stage2a": 0.334,
+      "trades": 0,
+      "note": "steady-state (post-warmup)"
+    },
+    {
+      "mode": "stage2a_gpu_eager",
+      "K": 32,
+      "T": 2000,
+      "wall_s": 3.8699,
+      "bars_per_s": 516.8,
+      "speedup_vs_stage2a": 1.0,
+      "trades": 32
+    },
+    {
+      "mode": "step_bar_eager",
+      "K": 32,
+      "T": 2000,
+      "wall_s": 5.3452,
+      "bars_per_s": 374.2,
+      "speedup_vs_stage2a": 0.724,
+      "trades": 32
+    },
+    {
+      "mode": "step_bar_compile_warmup",
+      "K": 32,
+      "T": 2000,
+      "wall_s": 3.8079,
+      "bars_per_s": 525.2,
+      "speedup_vs_stage2a": 1.016,
+      "trades": 32,
+      "note": "includes JIT compilation cost"
+    },
+    {
+      "mode": "step_bar_compile_steady",
+      "K": 32,
+      "T": 2000,
+      "wall_s": 3.8178,
+      "bars_per_s": 523.9,
+      "speedup_vs_stage2a": 1.014,
+      "trades": 32,
+      "note": "steady-state (post-warmup)"
+    },
+    {
+      "mode": "stage2a_gpu_eager",
+      "K": 128,
+      "T": 2000,
+      "wall_s": 3.9258,
+      "bars_per_s": 509.5,
+      "speedup_vs_stage2a": 1.0,
+      "trades": 128
+    },
+    {
+      "mode": "step_bar_eager",
+      "K": 128,
+      "T": 2000,
+      "wall_s": 5.328,
+      "bars_per_s": 375.4,
+      "speedup_vs_stage2a": 0.737,
+      "trades": 128
+    },
+    {
+      "mode": "step_bar_compile_warmup",
+      "K": 128,
+      "T": 2000,
+      "wall_s": 3.8951,
+      "bars_per_s": 513.5,
+      "speedup_vs_stage2a": 1.008,
+      "trades": 128,
+      "note": "includes JIT compilation cost"
+    },
+    {
+      "mode": "step_bar_compile_steady",
+      "K": 128,
+      "T": 2000,
+      "wall_s": 3.8122,
+      "bars_per_s": 524.6,
+      "speedup_vs_stage2a": 1.03,
+      "trades": 128,
+      "note": "steady-state (post-warmup)"
+    }
+  ]
+}

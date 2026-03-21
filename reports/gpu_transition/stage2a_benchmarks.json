@@ -1,0 +1,125 @@
+{
+  "meta": {
+    "torch_version": "2.4.0+cu121",
+    "cuda_version": "12.1",
+    "gpu_name": "Tesla T4",
+    "T_default": 2000,
+    "iters": 3
+  },
+  "rows": [
+    {
+      "path": "CPU",
+      "K": 8,
+      "T": 500,
+      "wall_s": 0.0449,
+      "bars_per_s": 11133.4,
+      "cands_per_s": 89067.1,
+      "total_trades": 0
+    },
+    {
+      "path": "GPU",
+      "K": 8,
+      "T": 500,
+      "wall_s": 0.1839,
+      "bars_per_s": 2719.6,
+      "cands_per_s": 21756.8,
+      "total_trades": 0,
+      "speedup_vs_cpu": 0.244
+    },
+    {
+      "path": "CPU",
+      "K": 32,
+      "T": 500,
+      "wall_s": 0.1567,
+      "bars_per_s": 3191.2,
+      "cands_per_s": 102118.8,
+      "total_trades": 0
+    },
+    {
+      "path": "GPU",
+      "K": 32,
+      "T": 500,
+      "wall_s": 0.2331,
+      "bars_per_s": 2145.2,
+      "cands_per_s": 68647.3,
+      "total_trades": 0,
+      "speedup_vs_cpu": 0.672
+    },
+    {
+      "path": "CPU",
+      "K": 128,
+      "T": 500,
+      "wall_s": 0.6193,
+      "bars_per_s": 807.4,
+      "cands_per_s": 103345.1,
+      "total_trades": 0
+    },
+    {
+      "path": "GPU",
+      "K": 128,
+      "T": 500,
+      "wall_s": 0.1862,
+      "bars_per_s": 2685.6,
+      "cands_per_s": 343758.6,
+      "total_trades": 0,
+      "speedup_vs_cpu": 3.326
+    },
+    {
+      "path": "CPU",
+      "K": 8,
+      "T": 2000,
+      "wall_s": 1.4894,
+      "bars_per_s": 1342.8,
+      "cands_per_s": 10742.5,
+      "total_trades": 8
+    },
+    {
+      "path": "GPU",
+      "K": 8,
+      "T": 2000,
+      "wall_s": 4.6502,
+      "bars_per_s": 430.1,
+      "cands_per_s": 3440.7,
+      "total_trades": 8,
+      "speedup_vs_cpu": 0.32
+    },
+    {
+      "path": "CPU",
+      "K": 32,
+      "T": 2000,
+      "wall_s": 6.1385,
+      "bars_per_s": 325.8,
+      "cands_per_s": 10426.0,
+      "total_trades": 32
+    },
+    {
+      "path": "GPU",
+      "K": 32,
+      "T": 2000,
+      "wall_s": 4.7035,
+      "bars_per_s": 425.2,
+      "cands_per_s": 13607.0,
+      "total_trades": 32,
+      "speedup_vs_cpu": 1.305
+    },
+    {
+      "path": "CPU",
+      "K": 128,
+      "T": 2000,
+      "wall_s": 20.5033,
+      "bars_per_s": 97.5,
+      "cands_per_s": 12485.8,
+      "total_trades": 128
+    },
+    {
+      "path": "GPU",
+      "K": 128,
+      "T": 2000,
+      "wall_s": 4.5841,
+      "bars_per_s": 436.3,
+      "cands_per_s": 55844.6,
+      "total_trades": 128,
+      "speedup_vs_cpu": 4.473
+    }
+  ]
+}

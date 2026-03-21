@@ -1,0 +1,65 @@
+{
+  "global": {
+    "best_epoch": 0,
+    "best_val_loss": Infinity,
+    "train_losses": [],
+    "val_losses": []
+  },
+  "per_head": {
+    "call_offset": {
+      "best_epoch": 0,
+      "best_val_loss": Infinity,
+      "val_losses": []
+    },
+    "put_offset": {
+      "best_epoch": 0,
+      "best_val_loss": Infinity,
+      "val_losses": []
+    },
+    "wing_width": {
+      "best_epoch": 0,
+      "best_val_loss": Infinity,
+      "val_losses": []
+    },
+    "dte": {
+      "best_epoch": 0,
+      "best_val_loss": Infinity,
+      "val_losses": []
+    },
+    "pop": {
+      "best_epoch": 0,
+      "best_val_loss": Infinity,
+      "val_losses": []
+    },
+    "roi": {
+      "best_epoch": 0,
+      "best_val_loss": Infinity,
+      "val_losses": []
+    },
+    "max_loss": {
+      "best_epoch": 0,
+      "best_val_loss": Infinity,
+      "val_losses": []
+    },
+    "confidence": {
+      "best_epoch": 0,
+      "best_val_loss": Infinity,
+      "val_losses": []
+    },
+    "entry": {
+      "best_epoch": 0,
+      "best_val_loss": Infinity,
+      "val_losses": []
+    },
+    "exit": {
+      "best_epoch": 0,
+      "best_val_loss": Infinity,
+      "val_losses": []
+    },
+    "regime_accuracy": {
+      "best_epoch": 0,
+      "best_val_loss": Infinity,
+      "val_losses": []
+    }
+  }
+}
