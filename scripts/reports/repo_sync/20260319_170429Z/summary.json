@@ -1,0 +1,1859 @@
+{
+  "generated_at_utc": "2026-03-19T17:04:29.786027Z",
+  "repo_root": "/teamspace/studios/this_studio/spy-iron-condor-trading/scripts",
+  "compare_ref": "origin/main",
+  "current_branch": "main",
+  "head_commit": "7a2e08d76cce983e32aae5af50ef23d7a2a10004",
+  "ref_commit": "5e067380794bd3dc9ea2c9629dfbdb5e810d16ee",
+  "counts": {
+    "tracked_head_files": 97,
+    "tracked_ref_files": 98,
+    "local_only_tracked_files": 0,
+    "ref_only_tracked_files": 1,
+    "untracked_not_ignored": 7,
+    "unstaged_changes": 248,
+    "staged_changes": 1,
+    "local_commits_ahead": 2,
+    "ref_commits_ahead": 2
+  },
+  "stage_untracked_requested": true,
+  "artifacts": {
+    "tracked_head_files": "/teamspace/studios/this_studio/spy-iron-condor-trading/scripts/reports/repo_sync/20260319_170429Z/tracked_head_files.txt",
+    "tracked_ref_files": "/teamspace/studios/this_studio/spy-iron-condor-trading/scripts/reports/repo_sync/20260319_170429Z/tracked_ref_files.txt",
+    "local_only_tracked_files": "/teamspace/studios/this_studio/spy-iron-condor-trading/scripts/reports/repo_sync/20260319_170429Z/local_only_tracked_files.txt",
+    "ref_only_tracked_files": "/teamspace/studios/this_studio/spy-iron-condor-trading/scripts/reports/repo_sync/20260319_170429Z/ref_only_tracked_files.txt",
+    "untracked_not_ignored": "/teamspace/studios/this_studio/spy-iron-condor-trading/scripts/reports/repo_sync/20260319_170429Z/untracked_not_ignored.txt",
+    "unstaged_name_status": "/teamspace/studios/this_studio/spy-iron-condor-trading/scripts/reports/repo_sync/20260319_170429Z/unstaged_name_status.txt",
+    "staged_name_status": "/teamspace/studios/this_studio/spy-iron-condor-trading/scripts/reports/repo_sync/20260319_170429Z/staged_name_status.txt",
+    "local_committed_name_status": "/teamspace/studios/this_studio/spy-iron-condor-trading/scripts/reports/repo_sync/20260319_170429Z/local_committed_name_status.txt",
+    "ref_committed_name_status": "/teamspace/studios/this_studio/spy-iron-condor-trading/scripts/reports/repo_sync/20260319_170429Z/ref_committed_name_status.txt",
+    "summary_json": "/teamspace/studios/this_studio/spy-iron-condor-trading/scripts/reports/repo_sync/20260319_170429Z/summary.json",
+    "summary_md": "/teamspace/studios/this_studio/spy-iron-condor-trading/scripts/reports/repo_sync/20260319_170429Z/summary.md"
+  },
+  "local_only_tracked_files": [],
+  "ref_only_tracked_files": [
+    "repo_sync_audit.py"
+  ],
+  "untracked_not_ignored": [
+    "normalize_columns.py",
+    "pivot_labeler_lightning_safe.py",
+    "pivot_test.py",
+    "run_all_timeframes_grouped_auto.sh",
+    "run_v42_tests.sh",
+    "strip_timeframe_prefixes.py",
+    "untitled.txt"
+  ],
+  "unstaged_changes": [
+    {
+      "status": "M",
+      "raw": "M\taudit/contract_snapshot.json",
+      "path": "audit/contract_snapshot.json"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/reports/best_obj_registry.json",
+      "path": "kaggle/reports/best_obj_registry.json"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bull_call_spread.py",
+      "path": "kaggle/strategies/bull_call_spread.py"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/backtest_v2_result.png",
+      "path": "reports/backtest_v2_result.png"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/competition_combined.png",
+      "path": "reports/competition_combined.png"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/competition_es_only.png",
+      "path": "reports/competition_es_only.png"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/competition_nikkei_only.png",
+      "path": "reports/competition_nikkei_only.png"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/condor_epoch3_logic.json",
+      "path": "reports/condor_epoch3_logic.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/EPOCH_Comparison_02242026_071134.json",
+      "path": "reports/v43TrainRun12/EPOCH_Comparison_02242026_071134.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch10_CNv43_DSv43_02242026_060751.json",
+      "path": "reports/v43TrainRun12/Epoch10_CNv43_DSv43_02242026_060751.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch11_CNv43_DSv43_02242026_061051.json",
+      "path": "reports/v43TrainRun12/Epoch11_CNv43_DSv43_02242026_061051.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch12_CNv43_DSv43_02242026_061353.json",
+      "path": "reports/v43TrainRun12/Epoch12_CNv43_DSv43_02242026_061353.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch13_CNv43_DSv43_02242026_061655.json",
+      "path": "reports/v43TrainRun12/Epoch13_CNv43_DSv43_02242026_061655.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch14_CNv43_DSv43_02242026_061958.json",
+      "path": "reports/v43TrainRun12/Epoch14_CNv43_DSv43_02242026_061958.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch15_CNv43_DSv43_02242026_062301.json",
+      "path": "reports/v43TrainRun12/Epoch15_CNv43_DSv43_02242026_062301.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch16_CNv43_DSv43_02242026_062604.json",
+      "path": "reports/v43TrainRun12/Epoch16_CNv43_DSv43_02242026_062604.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch17_CNv43_DSv43_02242026_062907.json",
+      "path": "reports/v43TrainRun12/Epoch17_CNv43_DSv43_02242026_062907.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch18_CNv43_DSv43_02242026_063209.json",
+      "path": "reports/v43TrainRun12/Epoch18_CNv43_DSv43_02242026_063209.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch19_CNv43_DSv43_02242026_063512.json",
+      "path": "reports/v43TrainRun12/Epoch19_CNv43_DSv43_02242026_063512.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch1_CNv43_DSv43_02242026_054035.json",
+      "path": "reports/v43TrainRun12/Epoch1_CNv43_DSv43_02242026_054035.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch20_CNv43_DSv43_02242026_063815.json",
+      "path": "reports/v43TrainRun12/Epoch20_CNv43_DSv43_02242026_063815.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch21_CNv43_DSv43_02242026_064118.json",
+      "path": "reports/v43TrainRun12/Epoch21_CNv43_DSv43_02242026_064118.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch22_CNv43_DSv43_02242026_064419.json",
+      "path": "reports/v43TrainRun12/Epoch22_CNv43_DSv43_02242026_064419.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch23_CNv43_DSv43_02242026_064722.json",
+      "path": "reports/v43TrainRun12/Epoch23_CNv43_DSv43_02242026_064722.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch24_CNv43_DSv43_02242026_065024.json",
+      "path": "reports/v43TrainRun12/Epoch24_CNv43_DSv43_02242026_065024.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch25_CNv43_DSv43_02242026_065324.json",
+      "path": "reports/v43TrainRun12/Epoch25_CNv43_DSv43_02242026_065324.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch26_CNv43_DSv43_02242026_065625.json",
+      "path": "reports/v43TrainRun12/Epoch26_CNv43_DSv43_02242026_065625.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch27_CNv43_DSv43_02242026_065926.json",
+      "path": "reports/v43TrainRun12/Epoch27_CNv43_DSv43_02242026_065926.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch28_CNv43_DSv43_02242026_070228.json",
+      "path": "reports/v43TrainRun12/Epoch28_CNv43_DSv43_02242026_070228.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch29_CNv43_DSv43_02242026_070529.json",
+      "path": "reports/v43TrainRun12/Epoch29_CNv43_DSv43_02242026_070529.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch2_CNv43_DSv43_02242026_054335.json",
+      "path": "reports/v43TrainRun12/Epoch2_CNv43_DSv43_02242026_054335.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch30_CNv43_DSv43_02242026_070831.json",
+      "path": "reports/v43TrainRun12/Epoch30_CNv43_DSv43_02242026_070831.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch31_CNv43_DSv43_02242026_071134.json",
+      "path": "reports/v43TrainRun12/Epoch31_CNv43_DSv43_02242026_071134.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch3_CNv43_DSv43_02242026_054635.json",
+      "path": "reports/v43TrainRun12/Epoch3_CNv43_DSv43_02242026_054635.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch4_CNv43_DSv43_02242026_054935.json",
+      "path": "reports/v43TrainRun12/Epoch4_CNv43_DSv43_02242026_054935.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch5_CNv43_DSv43_02242026_055235.json",
+      "path": "reports/v43TrainRun12/Epoch5_CNv43_DSv43_02242026_055235.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch6_CNv43_DSv43_02242026_055547.json",
+      "path": "reports/v43TrainRun12/Epoch6_CNv43_DSv43_02242026_055547.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch7_CNv43_DSv43_02242026_055850.json",
+      "path": "reports/v43TrainRun12/Epoch7_CNv43_DSv43_02242026_055850.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch8_CNv43_DSv43_02242026_060152.json",
+      "path": "reports/v43TrainRun12/Epoch8_CNv43_DSv43_02242026_060152.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun12/Epoch9_CNv43_DSv43_02242026_060451.json",
+      "path": "reports/v43TrainRun12/Epoch9_CNv43_DSv43_02242026_060451.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/EPOCH_Comparison_02242026_112749.json",
+      "path": "reports/v43TrainRun13/EPOCH_Comparison_02242026_112749.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch10_CNv43_DSv43_02242026_102810.json",
+      "path": "reports/v43TrainRun13/Epoch10_CNv43_DSv43_02242026_102810.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch11_CNv43_DSv43_02242026_103109.json",
+      "path": "reports/v43TrainRun13/Epoch11_CNv43_DSv43_02242026_103109.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch12_CNv43_DSv43_02242026_103407.json",
+      "path": "reports/v43TrainRun13/Epoch12_CNv43_DSv43_02242026_103407.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch13_CNv43_DSv43_02242026_103706.json",
+      "path": "reports/v43TrainRun13/Epoch13_CNv43_DSv43_02242026_103706.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch14_CNv43_DSv43_02242026_104005.json",
+      "path": "reports/v43TrainRun13/Epoch14_CNv43_DSv43_02242026_104005.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch15_CNv43_DSv43_02242026_104304.json",
+      "path": "reports/v43TrainRun13/Epoch15_CNv43_DSv43_02242026_104304.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch16_CNv43_DSv43_02242026_104603.json",
+      "path": "reports/v43TrainRun13/Epoch16_CNv43_DSv43_02242026_104603.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch17_CNv43_DSv43_02242026_104901.json",
+      "path": "reports/v43TrainRun13/Epoch17_CNv43_DSv43_02242026_104901.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch18_CNv43_DSv43_02242026_105200.json",
+      "path": "reports/v43TrainRun13/Epoch18_CNv43_DSv43_02242026_105200.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch19_CNv43_DSv43_02242026_105459.json",
+      "path": "reports/v43TrainRun13/Epoch19_CNv43_DSv43_02242026_105459.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch1_CNv43_DSv43_02242026_100117.json",
+      "path": "reports/v43TrainRun13/Epoch1_CNv43_DSv43_02242026_100117.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch20_CNv43_DSv43_02242026_105757.json",
+      "path": "reports/v43TrainRun13/Epoch20_CNv43_DSv43_02242026_105757.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch21_CNv43_DSv43_02242026_110055.json",
+      "path": "reports/v43TrainRun13/Epoch21_CNv43_DSv43_02242026_110055.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch22_CNv43_DSv43_02242026_110355.json",
+      "path": "reports/v43TrainRun13/Epoch22_CNv43_DSv43_02242026_110355.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch23_CNv43_DSv43_02242026_110654.json",
+      "path": "reports/v43TrainRun13/Epoch23_CNv43_DSv43_02242026_110654.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch24_CNv43_DSv43_02242026_110953.json",
+      "path": "reports/v43TrainRun13/Epoch24_CNv43_DSv43_02242026_110953.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch25_CNv43_DSv43_02242026_111252.json",
+      "path": "reports/v43TrainRun13/Epoch25_CNv43_DSv43_02242026_111252.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch26_CNv43_DSv43_02242026_111551.json",
+      "path": "reports/v43TrainRun13/Epoch26_CNv43_DSv43_02242026_111551.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch27_CNv43_DSv43_02242026_111851.json",
+      "path": "reports/v43TrainRun13/Epoch27_CNv43_DSv43_02242026_111851.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch28_CNv43_DSv43_02242026_112150.json",
+      "path": "reports/v43TrainRun13/Epoch28_CNv43_DSv43_02242026_112150.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch29_CNv43_DSv43_02242026_112449.json",
+      "path": "reports/v43TrainRun13/Epoch29_CNv43_DSv43_02242026_112449.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch2_CNv43_DSv43_02242026_100418.json",
+      "path": "reports/v43TrainRun13/Epoch2_CNv43_DSv43_02242026_100418.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch30_CNv43_DSv43_02242026_112749.json",
+      "path": "reports/v43TrainRun13/Epoch30_CNv43_DSv43_02242026_112749.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch3_CNv43_DSv43_02242026_100718.json",
+      "path": "reports/v43TrainRun13/Epoch3_CNv43_DSv43_02242026_100718.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch4_CNv43_DSv43_02242026_101018.json",
+      "path": "reports/v43TrainRun13/Epoch4_CNv43_DSv43_02242026_101018.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch5_CNv43_DSv43_02242026_101317.json",
+      "path": "reports/v43TrainRun13/Epoch5_CNv43_DSv43_02242026_101317.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch6_CNv43_DSv43_02242026_101617.json",
+      "path": "reports/v43TrainRun13/Epoch6_CNv43_DSv43_02242026_101617.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch7_CNv43_DSv43_02242026_101915.json",
+      "path": "reports/v43TrainRun13/Epoch7_CNv43_DSv43_02242026_101915.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch8_CNv43_DSv43_02242026_102213.json",
+      "path": "reports/v43TrainRun13/Epoch8_CNv43_DSv43_02242026_102213.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun13/Epoch9_CNv43_DSv43_02242026_102512.json",
+      "path": "reports/v43TrainRun13/Epoch9_CNv43_DSv43_02242026_102512.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/EPOCH_Comparison_02242026_133304.json",
+      "path": "reports/v43TrainRun14/EPOCH_Comparison_02242026_133304.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch10_CNv43_DSv43_02242026_121400.json",
+      "path": "reports/v43TrainRun14/Epoch10_CNv43_DSv43_02242026_121400.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch11_CNv43_DSv43_02242026_121657.json",
+      "path": "reports/v43TrainRun14/Epoch11_CNv43_DSv43_02242026_121657.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch12_CNv43_DSv43_02242026_121952.json",
+      "path": "reports/v43TrainRun14/Epoch12_CNv43_DSv43_02242026_121952.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch13_CNv43_DSv43_02242026_122246.json",
+      "path": "reports/v43TrainRun14/Epoch13_CNv43_DSv43_02242026_122246.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch14_CNv43_DSv43_02242026_122542.json",
+      "path": "reports/v43TrainRun14/Epoch14_CNv43_DSv43_02242026_122542.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch15_CNv43_DSv43_02242026_122839.json",
+      "path": "reports/v43TrainRun14/Epoch15_CNv43_DSv43_02242026_122839.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch16_CNv43_DSv43_02242026_123134.json",
+      "path": "reports/v43TrainRun14/Epoch16_CNv43_DSv43_02242026_123134.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch17_CNv43_DSv43_02242026_123430.json",
+      "path": "reports/v43TrainRun14/Epoch17_CNv43_DSv43_02242026_123430.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch18_CNv43_DSv43_02242026_123726.json",
+      "path": "reports/v43TrainRun14/Epoch18_CNv43_DSv43_02242026_123726.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch19_CNv43_DSv43_02242026_124021.json",
+      "path": "reports/v43TrainRun14/Epoch19_CNv43_DSv43_02242026_124021.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch1_CNv43_DSv43_02242026_114705.json",
+      "path": "reports/v43TrainRun14/Epoch1_CNv43_DSv43_02242026_114705.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch20_CNv43_DSv43_02242026_124316.json",
+      "path": "reports/v43TrainRun14/Epoch20_CNv43_DSv43_02242026_124316.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch21_CNv43_DSv43_02242026_124612.json",
+      "path": "reports/v43TrainRun14/Epoch21_CNv43_DSv43_02242026_124612.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch22_CNv43_DSv43_02242026_124907.json",
+      "path": "reports/v43TrainRun14/Epoch22_CNv43_DSv43_02242026_124907.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch23_CNv43_DSv43_02242026_125201.json",
+      "path": "reports/v43TrainRun14/Epoch23_CNv43_DSv43_02242026_125201.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch24_CNv43_DSv43_02242026_125455.json",
+      "path": "reports/v43TrainRun14/Epoch24_CNv43_DSv43_02242026_125455.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch25_CNv43_DSv43_02242026_125751.json",
+      "path": "reports/v43TrainRun14/Epoch25_CNv43_DSv43_02242026_125751.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch26_CNv43_DSv43_02242026_130046.json",
+      "path": "reports/v43TrainRun14/Epoch26_CNv43_DSv43_02242026_130046.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch27_CNv43_DSv43_02242026_130342.json",
+      "path": "reports/v43TrainRun14/Epoch27_CNv43_DSv43_02242026_130342.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch28_CNv43_DSv43_02242026_130641.json",
+      "path": "reports/v43TrainRun14/Epoch28_CNv43_DSv43_02242026_130641.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch29_CNv43_DSv43_02242026_130940.json",
+      "path": "reports/v43TrainRun14/Epoch29_CNv43_DSv43_02242026_130940.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch2_CNv43_DSv43_02242026_115005.json",
+      "path": "reports/v43TrainRun14/Epoch2_CNv43_DSv43_02242026_115005.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch30_CNv43_DSv43_02242026_131236.json",
+      "path": "reports/v43TrainRun14/Epoch30_CNv43_DSv43_02242026_131236.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch31_CNv43_DSv43_02242026_131530.json",
+      "path": "reports/v43TrainRun14/Epoch31_CNv43_DSv43_02242026_131530.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch32_CNv43_DSv43_02242026_131826.json",
+      "path": "reports/v43TrainRun14/Epoch32_CNv43_DSv43_02242026_131826.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch33_CNv43_DSv43_02242026_132123.json",
+      "path": "reports/v43TrainRun14/Epoch33_CNv43_DSv43_02242026_132123.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch34_CNv43_DSv43_02242026_132419.json",
+      "path": "reports/v43TrainRun14/Epoch34_CNv43_DSv43_02242026_132419.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch35_CNv43_DSv43_02242026_132713.json",
+      "path": "reports/v43TrainRun14/Epoch35_CNv43_DSv43_02242026_132713.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch36_CNv43_DSv43_02242026_133008.json",
+      "path": "reports/v43TrainRun14/Epoch36_CNv43_DSv43_02242026_133008.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch37_CNv43_DSv43_02242026_133304.json",
+      "path": "reports/v43TrainRun14/Epoch37_CNv43_DSv43_02242026_133304.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch3_CNv43_DSv43_02242026_115305.json",
+      "path": "reports/v43TrainRun14/Epoch3_CNv43_DSv43_02242026_115305.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch4_CNv43_DSv43_02242026_115605.json",
+      "path": "reports/v43TrainRun14/Epoch4_CNv43_DSv43_02242026_115605.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch5_CNv43_DSv43_02242026_115905.json",
+      "path": "reports/v43TrainRun14/Epoch5_CNv43_DSv43_02242026_115905.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch6_CNv43_DSv43_02242026_120204.json",
+      "path": "reports/v43TrainRun14/Epoch6_CNv43_DSv43_02242026_120204.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch7_CNv43_DSv43_02242026_120502.json",
+      "path": "reports/v43TrainRun14/Epoch7_CNv43_DSv43_02242026_120502.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch8_CNv43_DSv43_02242026_120802.json",
+      "path": "reports/v43TrainRun14/Epoch8_CNv43_DSv43_02242026_120802.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/Epoch9_CNv43_DSv43_02242026_121101.json",
+      "path": "reports/v43TrainRun14/Epoch9_CNv43_DSv43_02242026_121101.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun14/train_v43_t4_14th_test.txt",
+      "path": "reports/v43TrainRun14/train_v43_t4_14th_test.txt"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/EPOCH_Comparison_02272026_055733.json",
+      "path": "reports/v43TrainRun15/EPOCH_Comparison_02272026_055733.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch10_CNv43_DSv43_02272026_042741.json",
+      "path": "reports/v43TrainRun15/Epoch10_CNv43_DSv43_02272026_042741.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch11_CNv43_DSv43_02272026_043037.json",
+      "path": "reports/v43TrainRun15/Epoch11_CNv43_DSv43_02272026_043037.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch12_CNv43_DSv43_02272026_043331.json",
+      "path": "reports/v43TrainRun15/Epoch12_CNv43_DSv43_02272026_043331.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch13_CNv43_DSv43_02272026_043628.json",
+      "path": "reports/v43TrainRun15/Epoch13_CNv43_DSv43_02272026_043628.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch14_CNv43_DSv43_02272026_043928.json",
+      "path": "reports/v43TrainRun15/Epoch14_CNv43_DSv43_02272026_043928.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch15_CNv43_DSv43_02272026_044228.json",
+      "path": "reports/v43TrainRun15/Epoch15_CNv43_DSv43_02272026_044228.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch16_CNv43_DSv43_02272026_044526.json",
+      "path": "reports/v43TrainRun15/Epoch16_CNv43_DSv43_02272026_044526.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch17_CNv43_DSv43_02272026_044824.json",
+      "path": "reports/v43TrainRun15/Epoch17_CNv43_DSv43_02272026_044824.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch18_CNv43_DSv43_02272026_045126.json",
+      "path": "reports/v43TrainRun15/Epoch18_CNv43_DSv43_02272026_045126.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch19_CNv43_DSv43_02272026_045425.json",
+      "path": "reports/v43TrainRun15/Epoch19_CNv43_DSv43_02272026_045425.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch1_CNv43_DSv43_02272026_040045.json",
+      "path": "reports/v43TrainRun15/Epoch1_CNv43_DSv43_02272026_040045.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch20_CNv43_DSv43_02272026_045727.json",
+      "path": "reports/v43TrainRun15/Epoch20_CNv43_DSv43_02272026_045727.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch21_CNv43_DSv43_02272026_050025.json",
+      "path": "reports/v43TrainRun15/Epoch21_CNv43_DSv43_02272026_050025.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch22_CNv43_DSv43_02272026_050327.json",
+      "path": "reports/v43TrainRun15/Epoch22_CNv43_DSv43_02272026_050327.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch23_CNv43_DSv43_02272026_050631.json",
+      "path": "reports/v43TrainRun15/Epoch23_CNv43_DSv43_02272026_050631.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch24_CNv43_DSv43_02272026_050936.json",
+      "path": "reports/v43TrainRun15/Epoch24_CNv43_DSv43_02272026_050936.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch25_CNv43_DSv43_02272026_051240.json",
+      "path": "reports/v43TrainRun15/Epoch25_CNv43_DSv43_02272026_051240.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch26_CNv43_DSv43_02272026_051540.json",
+      "path": "reports/v43TrainRun15/Epoch26_CNv43_DSv43_02272026_051540.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch27_Audit_Interpretation_output.json",
+      "path": "reports/v43TrainRun15/Epoch27_Audit_Interpretation_output.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch27_CNv43_DSv43_02272026_051840.json",
+      "path": "reports/v43TrainRun15/Epoch27_CNv43_DSv43_02272026_051840.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch28_CNv43_DSv43_02272026_052143.json",
+      "path": "reports/v43TrainRun15/Epoch28_CNv43_DSv43_02272026_052143.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch29_CNv43_DSv43_02272026_052441.json",
+      "path": "reports/v43TrainRun15/Epoch29_CNv43_DSv43_02272026_052441.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch2_CNv43_DSv43_02272026_040344.json",
+      "path": "reports/v43TrainRun15/Epoch2_CNv43_DSv43_02272026_040344.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch30_CNv43_DSv43_02272026_052737.json",
+      "path": "reports/v43TrainRun15/Epoch30_CNv43_DSv43_02272026_052737.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch31_CNv43_DSv43_02272026_053033.json",
+      "path": "reports/v43TrainRun15/Epoch31_CNv43_DSv43_02272026_053033.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch32_CNv43_DSv43_02272026_053331.json",
+      "path": "reports/v43TrainRun15/Epoch32_CNv43_DSv43_02272026_053331.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch33_CNv43_DSv43_02272026_053631.json",
+      "path": "reports/v43TrainRun15/Epoch33_CNv43_DSv43_02272026_053631.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch34_CNv43_DSv43_02272026_053934.json",
+      "path": "reports/v43TrainRun15/Epoch34_CNv43_DSv43_02272026_053934.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch35_CNv43_DSv43_02272026_054235.json",
+      "path": "reports/v43TrainRun15/Epoch35_CNv43_DSv43_02272026_054235.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch36_CNv43_DSv43_02272026_054534.json",
+      "path": "reports/v43TrainRun15/Epoch36_CNv43_DSv43_02272026_054534.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch37_CNv43_DSv43_02272026_054835.json",
+      "path": "reports/v43TrainRun15/Epoch37_CNv43_DSv43_02272026_054835.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch38_CNv43_DSv43_02272026_055138.json",
+      "path": "reports/v43TrainRun15/Epoch38_CNv43_DSv43_02272026_055138.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch39_CNv43_DSv43_02272026_055435.json",
+      "path": "reports/v43TrainRun15/Epoch39_CNv43_DSv43_02272026_055435.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch3_CNv43_DSv43_02272026_040644.json",
+      "path": "reports/v43TrainRun15/Epoch3_CNv43_DSv43_02272026_040644.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch40_CNv43_DSv43_02272026_055733.json",
+      "path": "reports/v43TrainRun15/Epoch40_CNv43_DSv43_02272026_055733.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch4_CNv43_DSv43_02272026_040944.json",
+      "path": "reports/v43TrainRun15/Epoch4_CNv43_DSv43_02272026_040944.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch5_CNv43_DSv43_02272026_041241.json",
+      "path": "reports/v43TrainRun15/Epoch5_CNv43_DSv43_02272026_041241.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch6_CNv43_DSv43_02272026_041537.json",
+      "path": "reports/v43TrainRun15/Epoch6_CNv43_DSv43_02272026_041537.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch7_CNv43_DSv43_02272026_041839.json",
+      "path": "reports/v43TrainRun15/Epoch7_CNv43_DSv43_02272026_041839.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch8_CNv43_DSv43_02272026_042141.json",
+      "path": "reports/v43TrainRun15/Epoch8_CNv43_DSv43_02272026_042141.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun15/Epoch9_CNv43_DSv43_02272026_042442.json",
+      "path": "reports/v43TrainRun15/Epoch9_CNv43_DSv43_02272026_042442.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun2/EPOCH_Comparison_02232026_155521.json",
+      "path": "reports/v43TrainRun2/EPOCH_Comparison_02232026_155521.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun2/Epoch10_CNv43_DSv43_02232026_155521.json",
+      "path": "reports/v43TrainRun2/Epoch10_CNv43_DSv43_02232026_155521.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun2/Epoch2_CNv43_DSv43_02232026_153520.json",
+      "path": "reports/v43TrainRun2/Epoch2_CNv43_DSv43_02232026_153520.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun2/Epoch3_CNv43_DSv43_02232026_153709.json",
+      "path": "reports/v43TrainRun2/Epoch3_CNv43_DSv43_02232026_153709.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun2/Epoch4_CNv43_DSv43_02232026_154000.json",
+      "path": "reports/v43TrainRun2/Epoch4_CNv43_DSv43_02232026_154000.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun2/Epoch5_CNv43_DSv43_02232026_154159.json",
+      "path": "reports/v43TrainRun2/Epoch5_CNv43_DSv43_02232026_154159.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun2/Epoch6_CNv43_DSv43_02232026_154527.json",
+      "path": "reports/v43TrainRun2/Epoch6_CNv43_DSv43_02232026_154527.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun2/Epoch7_CNv43_DSv43_02232026_154726.json",
+      "path": "reports/v43TrainRun2/Epoch7_CNv43_DSv43_02232026_154726.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun2/Epoch8_CNv43_DSv43_02232026_154946.json",
+      "path": "reports/v43TrainRun2/Epoch8_CNv43_DSv43_02232026_154946.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun2/Epoch9_CNv43_DSv43_02232026_155253.json",
+      "path": "reports/v43TrainRun2/Epoch9_CNv43_DSv43_02232026_155253.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun2/analyze_logic.py",
+      "path": "reports/v43TrainRun2/analyze_logic.py"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun3/EPOCH_Comparison_02232026_180830.json",
+      "path": "reports/v43TrainRun3/EPOCH_Comparison_02232026_180830.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun3/Epoch10_CNv43_DSv43_02232026_180830.json",
+      "path": "reports/v43TrainRun3/Epoch10_CNv43_DSv43_02232026_180830.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun3/Epoch1_CNv43_DSv43_02232026_174246.json",
+      "path": "reports/v43TrainRun3/Epoch1_CNv43_DSv43_02232026_174246.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun3/Epoch2_CNv43_DSv43_02232026_174830.json",
+      "path": "reports/v43TrainRun3/Epoch2_CNv43_DSv43_02232026_174830.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun3/Epoch3_CNv43_DSv43_02232026_175138.json",
+      "path": "reports/v43TrainRun3/Epoch3_CNv43_DSv43_02232026_175138.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun3/Epoch4_CNv43_DSv43_02232026_175444.json",
+      "path": "reports/v43TrainRun3/Epoch4_CNv43_DSv43_02232026_175444.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun3/Epoch5_CNv43_DSv43_02232026_175719.json",
+      "path": "reports/v43TrainRun3/Epoch5_CNv43_DSv43_02232026_175719.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun3/Epoch6_CNv43_DSv43_02232026_175951.json",
+      "path": "reports/v43TrainRun3/Epoch6_CNv43_DSv43_02232026_175951.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun3/Epoch7_CNv43_DSv43_02232026_180155.json",
+      "path": "reports/v43TrainRun3/Epoch7_CNv43_DSv43_02232026_180155.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun3/Epoch8_CNv43_DSv43_02232026_180403.json",
+      "path": "reports/v43TrainRun3/Epoch8_CNv43_DSv43_02232026_180403.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun3/Epoch9_CNv43_DSv43_02232026_180641.json",
+      "path": "reports/v43TrainRun3/Epoch9_CNv43_DSv43_02232026_180641.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun4/EPOCH_Comparison_02232026_200248.json",
+      "path": "reports/v43TrainRun4/EPOCH_Comparison_02232026_200248.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun4/Epoch10_CNv43_DSv43_02232026_200248.json",
+      "path": "reports/v43TrainRun4/Epoch10_CNv43_DSv43_02232026_200248.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun4/Epoch1_CNv43_DSv43_02232026_193703.json",
+      "path": "reports/v43TrainRun4/Epoch1_CNv43_DSv43_02232026_193703.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun4/Epoch2_CNv43_DSv43_02232026_194241.json",
+      "path": "reports/v43TrainRun4/Epoch2_CNv43_DSv43_02232026_194241.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun4/Epoch3_CNv43_DSv43_02232026_194651.json",
+      "path": "reports/v43TrainRun4/Epoch3_CNv43_DSv43_02232026_194651.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun4/Epoch4_CNv43_DSv43_02232026_194857.json",
+      "path": "reports/v43TrainRun4/Epoch4_CNv43_DSv43_02232026_194857.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun4/Epoch5_CNv43_DSv43_02232026_195045.json",
+      "path": "reports/v43TrainRun4/Epoch5_CNv43_DSv43_02232026_195045.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun4/Epoch6_CNv43_DSv43_02232026_195249.json",
+      "path": "reports/v43TrainRun4/Epoch6_CNv43_DSv43_02232026_195249.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun4/Epoch7_CNv43_DSv43_02232026_195613.json",
+      "path": "reports/v43TrainRun4/Epoch7_CNv43_DSv43_02232026_195613.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun4/Epoch8_CNv43_DSv43_02232026_195757.json",
+      "path": "reports/v43TrainRun4/Epoch8_CNv43_DSv43_02232026_195757.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun5/EPOCH_Comparison_02232026_213513.json",
+      "path": "reports/v43TrainRun5/EPOCH_Comparison_02232026_213513.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun5/Epoch10_CNv43_DSv43_02232026_213513.json",
+      "path": "reports/v43TrainRun5/Epoch10_CNv43_DSv43_02232026_213513.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun5/Epoch1_CNv43_DSv43_02232026_210754.json",
+      "path": "reports/v43TrainRun5/Epoch1_CNv43_DSv43_02232026_210754.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun5/Epoch2_CNv43_DSv43_02232026_211342.json",
+      "path": "reports/v43TrainRun5/Epoch2_CNv43_DSv43_02232026_211342.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun5/Epoch3_CNv43_DSv43_02232026_211939.json",
+      "path": "reports/v43TrainRun5/Epoch3_CNv43_DSv43_02232026_211939.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun5/Epoch4_CNv43_DSv43_02232026_212246.json",
+      "path": "reports/v43TrainRun5/Epoch4_CNv43_DSv43_02232026_212246.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun5/Epoch5_CNv43_DSv43_02232026_212457.json",
+      "path": "reports/v43TrainRun5/Epoch5_CNv43_DSv43_02232026_212457.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun5/Epoch6_CNv43_DSv43_02232026_212648.json",
+      "path": "reports/v43TrainRun5/Epoch6_CNv43_DSv43_02232026_212648.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun5/Epoch7_CNv43_DSv43_02232026_212842.json",
+      "path": "reports/v43TrainRun5/Epoch7_CNv43_DSv43_02232026_212842.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun5/Epoch8_CNv43_DSv43_02232026_213037.json",
+      "path": "reports/v43TrainRun5/Epoch8_CNv43_DSv43_02232026_213037.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/EPOCH_Comparison_02232026_235256.json",
+      "path": "reports/v43TrainRun6/EPOCH_Comparison_02232026_235256.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch10_CNv43_DSv43_02232026_231100.json",
+      "path": "reports/v43TrainRun6/Epoch10_CNv43_DSv43_02232026_231100.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch11_CNv43_DSv43_02232026_231253.json",
+      "path": "reports/v43TrainRun6/Epoch11_CNv43_DSv43_02232026_231253.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch12_CNv43_DSv43_02232026_231533.json",
+      "path": "reports/v43TrainRun6/Epoch12_CNv43_DSv43_02232026_231533.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch13_CNv43_DSv43_02232026_231730.json",
+      "path": "reports/v43TrainRun6/Epoch13_CNv43_DSv43_02232026_231730.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch14_CNv43_DSv43_02232026_231916.json",
+      "path": "reports/v43TrainRun6/Epoch14_CNv43_DSv43_02232026_231916.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch15_CNv43_DSv43_02232026_232113.json",
+      "path": "reports/v43TrainRun6/Epoch15_CNv43_DSv43_02232026_232113.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch16_CNv43_DSv43_02232026_232307.json",
+      "path": "reports/v43TrainRun6/Epoch16_CNv43_DSv43_02232026_232307.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch17_CNv43_DSv43_02232026_232500.json",
+      "path": "reports/v43TrainRun6/Epoch17_CNv43_DSv43_02232026_232500.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch18_CNv43_DSv43_02232026_232717.json",
+      "path": "reports/v43TrainRun6/Epoch18_CNv43_DSv43_02232026_232717.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch19_CNv43_DSv43_02232026_232908.json",
+      "path": "reports/v43TrainRun6/Epoch19_CNv43_DSv43_02232026_232908.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch1_CNv43_DSv43_02232026_224708.json",
+      "path": "reports/v43TrainRun6/Epoch1_CNv43_DSv43_02232026_224708.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch20_CNv43_DSv43_02232026_233201.json",
+      "path": "reports/v43TrainRun6/Epoch20_CNv43_DSv43_02232026_233201.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch21_CNv43_DSv43_02232026_233344.json",
+      "path": "reports/v43TrainRun6/Epoch21_CNv43_DSv43_02232026_233344.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch22_CNv43_DSv43_02232026_233616.json",
+      "path": "reports/v43TrainRun6/Epoch22_CNv43_DSv43_02232026_233616.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch23_CNv43_DSv43_02232026_233813.json",
+      "path": "reports/v43TrainRun6/Epoch23_CNv43_DSv43_02232026_233813.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch24_CNv43_DSv43_02232026_233956.json",
+      "path": "reports/v43TrainRun6/Epoch24_CNv43_DSv43_02232026_233956.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch25_CNv43_DSv43_02232026_234218.json",
+      "path": "reports/v43TrainRun6/Epoch25_CNv43_DSv43_02232026_234218.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch26_CNv43_DSv43_02232026_234408.json",
+      "path": "reports/v43TrainRun6/Epoch26_CNv43_DSv43_02232026_234408.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch27_CNv43_DSv43_02232026_234555.json",
+      "path": "reports/v43TrainRun6/Epoch27_CNv43_DSv43_02232026_234555.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch28_CNv43_DSv43_02232026_234858.json",
+      "path": "reports/v43TrainRun6/Epoch28_CNv43_DSv43_02232026_234858.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch29_CNv43_DSv43_02232026_235041.json",
+      "path": "reports/v43TrainRun6/Epoch29_CNv43_DSv43_02232026_235041.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch2_CNv43_DSv43_02232026_225013.json",
+      "path": "reports/v43TrainRun6/Epoch2_CNv43_DSv43_02232026_225013.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch30_CNv43_DSv43_02232026_235256.json",
+      "path": "reports/v43TrainRun6/Epoch30_CNv43_DSv43_02232026_235256.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch3_CNv43_DSv43_02232026_225316.json",
+      "path": "reports/v43TrainRun6/Epoch3_CNv43_DSv43_02232026_225316.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch4_CNv43_DSv43_02232026_225619.json",
+      "path": "reports/v43TrainRun6/Epoch4_CNv43_DSv43_02232026_225619.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch5_CNv43_DSv43_02232026_225850.json",
+      "path": "reports/v43TrainRun6/Epoch5_CNv43_DSv43_02232026_225850.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch6_CNv43_DSv43_02232026_230153.json",
+      "path": "reports/v43TrainRun6/Epoch6_CNv43_DSv43_02232026_230153.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch7_CNv43_DSv43_02232026_230334.json",
+      "path": "reports/v43TrainRun6/Epoch7_CNv43_DSv43_02232026_230334.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch8_CNv43_DSv43_02232026_230620.json",
+      "path": "reports/v43TrainRun6/Epoch8_CNv43_DSv43_02232026_230620.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun6/Epoch9_CNv43_DSv43_02232026_230823.json",
+      "path": "reports/v43TrainRun6/Epoch9_CNv43_DSv43_02232026_230823.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/EPOCH_Comparison_02242026_012725.json",
+      "path": "reports/v43TrainRun7/EPOCH_Comparison_02242026_012725.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch10_CNv43_DSv43_02242026_010656.json",
+      "path": "reports/v43TrainRun7/Epoch10_CNv43_DSv43_02242026_010656.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch11_CNv43_DSv43_02242026_010827.json",
+      "path": "reports/v43TrainRun7/Epoch11_CNv43_DSv43_02242026_010827.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch12_CNv43_DSv43_02242026_011001.json",
+      "path": "reports/v43TrainRun7/Epoch12_CNv43_DSv43_02242026_011001.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch13_CNv43_DSv43_02242026_011126.json",
+      "path": "reports/v43TrainRun7/Epoch13_CNv43_DSv43_02242026_011126.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch14_CNv43_DSv43_02242026_011255.json",
+      "path": "reports/v43TrainRun7/Epoch14_CNv43_DSv43_02242026_011255.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch15_CNv43_DSv43_02242026_011440.json",
+      "path": "reports/v43TrainRun7/Epoch15_CNv43_DSv43_02242026_011440.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch16_CNv43_DSv43_02242026_011607.json",
+      "path": "reports/v43TrainRun7/Epoch16_CNv43_DSv43_02242026_011607.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch17_CNv43_DSv43_02242026_011819.json",
+      "path": "reports/v43TrainRun7/Epoch17_CNv43_DSv43_02242026_011819.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch18_CNv43_DSv43_02242026_011944.json",
+      "path": "reports/v43TrainRun7/Epoch18_CNv43_DSv43_02242026_011944.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch19_CNv43_DSv43_02242026_012212.json",
+      "path": "reports/v43TrainRun7/Epoch19_CNv43_DSv43_02242026_012212.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch1_CNv43_DSv43_02242026_004755.json",
+      "path": "reports/v43TrainRun7/Epoch1_CNv43_DSv43_02242026_004755.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch20_CNv43_DSv43_02242026_012336.json",
+      "path": "reports/v43TrainRun7/Epoch20_CNv43_DSv43_02242026_012336.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch21_CNv43_DSv43_02242026_012600.json",
+      "path": "reports/v43TrainRun7/Epoch21_CNv43_DSv43_02242026_012600.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch22_CNv43_DSv43_02242026_012725.json",
+      "path": "reports/v43TrainRun7/Epoch22_CNv43_DSv43_02242026_012725.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch2_CNv43_DSv43_02242026_005054.json",
+      "path": "reports/v43TrainRun7/Epoch2_CNv43_DSv43_02242026_005054.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch3_CNv43_DSv43_02242026_005234.json",
+      "path": "reports/v43TrainRun7/Epoch3_CNv43_DSv43_02242026_005234.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch4_CNv43_DSv43_02242026_005407.json",
+      "path": "reports/v43TrainRun7/Epoch4_CNv43_DSv43_02242026_005407.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch5_CNv43_DSv43_02242026_005619.json",
+      "path": "reports/v43TrainRun7/Epoch5_CNv43_DSv43_02242026_005619.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch6_CNv43_DSv43_02242026_005854.json",
+      "path": "reports/v43TrainRun7/Epoch6_CNv43_DSv43_02242026_005854.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch7_CNv43_DSv43_02242026_010110.json",
+      "path": "reports/v43TrainRun7/Epoch7_CNv43_DSv43_02242026_010110.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch8_CNv43_DSv43_02242026_010328.json",
+      "path": "reports/v43TrainRun7/Epoch8_CNv43_DSv43_02242026_010328.json"
+    },
+    {
+      "status": "D",
+      "raw": "D\treports/v43TrainRun7/Epoch9_CNv43_DSv43_02242026_010531.json",
+      "path": "reports/v43TrainRun7/Epoch9_CNv43_DSv43_02242026_010531.json"
+    }
+  ],
+  "staged_changes": [
+    {
+      "status": "A",
+      "raw": "A\tscripts/repo_sync_audit.py",
+      "path": "scripts/repo_sync_audit.py"
+    }
+  ],
+  "local_committed_changes": [
+    {
+      "status": "M",
+      "raw": "M\tkaggle/bayes_optimize_strategy.py",
+      "path": "kaggle/bayes_optimize_strategy.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/condor_brain_backtest_v45.py",
+      "path": "kaggle/condor_brain_backtest_v45.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bear_call_ladder.py",
+      "path": "kaggle/strategies/bear_call_ladder.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bear_call_spread_credit.py",
+      "path": "kaggle/strategies/bear_call_spread_credit.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bear_put_ladder.py",
+      "path": "kaggle/strategies/bear_put_ladder.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bear_put_spread.py",
+      "path": "kaggle/strategies/bear_put_spread.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bull_call_ladder.py",
+      "path": "kaggle/strategies/bull_call_ladder.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bull_call_spread.py",
+      "path": "kaggle/strategies/bull_call_spread.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bull_put_ladder.py",
+      "path": "kaggle/strategies/bull_put_ladder.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bull_put_spread_credit.py",
+      "path": "kaggle/strategies/bull_put_spread_credit.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/calendar_call.py",
+      "path": "kaggle/strategies/calendar_call.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/calendar_put.py",
+      "path": "kaggle/strategies/calendar_put.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/call_ratio_backspread.py",
+      "path": "kaggle/strategies/call_ratio_backspread.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/call_ratio_spread.py",
+      "path": "kaggle/strategies/call_ratio_spread.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/cash_secured_put.py",
+      "path": "kaggle/strategies/cash_secured_put.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/collar.py",
+      "path": "kaggle/strategies/collar.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/covered_call.py",
+      "path": "kaggle/strategies/covered_call.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/covered_short_straddle.py",
+      "path": "kaggle/strategies/covered_short_straddle.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/covered_short_strangle.py",
+      "path": "kaggle/strategies/covered_short_strangle.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/diagonal_call.py",
+      "path": "kaggle/strategies/diagonal_call.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/diagonal_put.py",
+      "path": "kaggle/strategies/diagonal_put.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/double_diagonal.py",
+      "path": "kaggle/strategies/double_diagonal.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/guts.py",
+      "path": "kaggle/strategies/guts.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/inverse_call_broken_wing.py",
+      "path": "kaggle/strategies/inverse_call_broken_wing.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/inverse_iron_butterfly.py",
+      "path": "kaggle/strategies/inverse_iron_butterfly.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/inverse_iron_condor.py",
+      "path": "kaggle/strategies/inverse_iron_condor.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/inverse_put_broken_wing.py",
+      "path": "kaggle/strategies/inverse_put_broken_wing.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/iron_butterfly.py",
+      "path": "kaggle/strategies/iron_butterfly.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/iron_condor.py",
+      "path": "kaggle/strategies/iron_condor.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/jade_lizard.py",
+      "path": "kaggle/strategies/jade_lizard.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/long_call.py",
+      "path": "kaggle/strategies/long_call.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/long_call_condor.py",
+      "path": "kaggle/strategies/long_call_condor.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/long_combo.py",
+      "path": "kaggle/strategies/long_combo.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/long_put.py",
+      "path": "kaggle/strategies/long_put.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/long_put_butterfly.py",
+      "path": "kaggle/strategies/long_put_butterfly.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/long_put_condor.py",
+      "path": "kaggle/strategies/long_put_condor.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/long_synthetic_future.py",
+      "path": "kaggle/strategies/long_synthetic_future.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/protective_put.py",
+      "path": "kaggle/strategies/protective_put.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/put_broken_wing.py",
+      "path": "kaggle/strategies/put_broken_wing.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/put_ratio_backspread.py",
+      "path": "kaggle/strategies/put_ratio_backspread.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/put_ratio_spread.py",
+      "path": "kaggle/strategies/put_ratio_spread.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/reverse_jade_lizard.py",
+      "path": "kaggle/strategies/reverse_jade_lizard.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_call.py",
+      "path": "kaggle/strategies/short_call.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_call_condor.py",
+      "path": "kaggle/strategies/short_call_condor.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_combo.py",
+      "path": "kaggle/strategies/short_combo.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_guts.py",
+      "path": "kaggle/strategies/short_guts.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_put.py",
+      "path": "kaggle/strategies/short_put.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_put_condor.py",
+      "path": "kaggle/strategies/short_put_condor.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_straddle.py",
+      "path": "kaggle/strategies/short_straddle.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_strangle.py",
+      "path": "kaggle/strategies/short_strangle.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/straddle_long.py",
+      "path": "kaggle/strategies/straddle_long.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/strangle_long.py",
+      "path": "kaggle/strategies/strangle_long.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/strap.py",
+      "path": "kaggle/strategies/strap.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/strip.py",
+      "path": "kaggle/strategies/strip.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/synthetic_put.py",
+      "path": "kaggle/strategies/synthetic_put.py"
+    },
+    {
+      "status": "D",
+      "raw": "D\tscripts/repo_sync_audit.py",
+      "path": "scripts/repo_sync_audit.py"
+    }
+  ],
+  "ref_committed_changes": [
+    {
+      "status": "M",
+      "raw": "M\tkaggle/bayes_optimize_strategy.py",
+      "path": "kaggle/bayes_optimize_strategy.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/condor_brain_backtest_v45.py",
+      "path": "kaggle/condor_brain_backtest_v45.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bear_call_ladder.py",
+      "path": "kaggle/strategies/bear_call_ladder.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bear_call_spread_credit.py",
+      "path": "kaggle/strategies/bear_call_spread_credit.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bear_put_ladder.py",
+      "path": "kaggle/strategies/bear_put_ladder.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bear_put_spread.py",
+      "path": "kaggle/strategies/bear_put_spread.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bull_call_ladder.py",
+      "path": "kaggle/strategies/bull_call_ladder.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bull_call_spread.py",
+      "path": "kaggle/strategies/bull_call_spread.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bull_put_ladder.py",
+      "path": "kaggle/strategies/bull_put_ladder.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/bull_put_spread_credit.py",
+      "path": "kaggle/strategies/bull_put_spread_credit.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/calendar_call.py",
+      "path": "kaggle/strategies/calendar_call.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/calendar_put.py",
+      "path": "kaggle/strategies/calendar_put.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/call_ratio_backspread.py",
+      "path": "kaggle/strategies/call_ratio_backspread.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/call_ratio_spread.py",
+      "path": "kaggle/strategies/call_ratio_spread.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/cash_secured_put.py",
+      "path": "kaggle/strategies/cash_secured_put.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/collar.py",
+      "path": "kaggle/strategies/collar.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/covered_call.py",
+      "path": "kaggle/strategies/covered_call.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/covered_short_straddle.py",
+      "path": "kaggle/strategies/covered_short_straddle.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/covered_short_strangle.py",
+      "path": "kaggle/strategies/covered_short_strangle.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/diagonal_call.py",
+      "path": "kaggle/strategies/diagonal_call.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/diagonal_put.py",
+      "path": "kaggle/strategies/diagonal_put.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/double_diagonal.py",
+      "path": "kaggle/strategies/double_diagonal.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/guts.py",
+      "path": "kaggle/strategies/guts.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/inverse_call_broken_wing.py",
+      "path": "kaggle/strategies/inverse_call_broken_wing.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/inverse_iron_butterfly.py",
+      "path": "kaggle/strategies/inverse_iron_butterfly.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/inverse_iron_condor.py",
+      "path": "kaggle/strategies/inverse_iron_condor.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/inverse_put_broken_wing.py",
+      "path": "kaggle/strategies/inverse_put_broken_wing.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/iron_butterfly.py",
+      "path": "kaggle/strategies/iron_butterfly.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/iron_condor.py",
+      "path": "kaggle/strategies/iron_condor.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/jade_lizard.py",
+      "path": "kaggle/strategies/jade_lizard.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/long_call.py",
+      "path": "kaggle/strategies/long_call.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/long_call_condor.py",
+      "path": "kaggle/strategies/long_call_condor.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/long_combo.py",
+      "path": "kaggle/strategies/long_combo.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/long_put.py",
+      "path": "kaggle/strategies/long_put.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/long_put_butterfly.py",
+      "path": "kaggle/strategies/long_put_butterfly.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/long_put_condor.py",
+      "path": "kaggle/strategies/long_put_condor.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/long_synthetic_future.py",
+      "path": "kaggle/strategies/long_synthetic_future.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/protective_put.py",
+      "path": "kaggle/strategies/protective_put.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/put_broken_wing.py",
+      "path": "kaggle/strategies/put_broken_wing.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/put_ratio_backspread.py",
+      "path": "kaggle/strategies/put_ratio_backspread.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/put_ratio_spread.py",
+      "path": "kaggle/strategies/put_ratio_spread.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/reverse_jade_lizard.py",
+      "path": "kaggle/strategies/reverse_jade_lizard.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_call.py",
+      "path": "kaggle/strategies/short_call.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_call_condor.py",
+      "path": "kaggle/strategies/short_call_condor.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_combo.py",
+      "path": "kaggle/strategies/short_combo.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_guts.py",
+      "path": "kaggle/strategies/short_guts.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_put.py",
+      "path": "kaggle/strategies/short_put.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_put_condor.py",
+      "path": "kaggle/strategies/short_put_condor.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_straddle.py",
+      "path": "kaggle/strategies/short_straddle.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/short_strangle.py",
+      "path": "kaggle/strategies/short_strangle.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/straddle_long.py",
+      "path": "kaggle/strategies/straddle_long.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/strangle_long.py",
+      "path": "kaggle/strategies/strangle_long.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/strap.py",
+      "path": "kaggle/strategies/strap.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/strip.py",
+      "path": "kaggle/strategies/strip.py"
+    },
+    {
+      "status": "M",
+      "raw": "M\tkaggle/strategies/synthetic_put.py",
+      "path": "kaggle/strategies/synthetic_put.py"
+    },
+    {
+      "status": "A",
+      "raw": "A\tscripts/repo_sync_audit.py",
+      "path": "scripts/repo_sync_audit.py"
+    }
+  ]
+}

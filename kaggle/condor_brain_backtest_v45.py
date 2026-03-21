@@ -208,8 +208,8 @@ def robust_zscore_transform(X, median, mad, clip_val=10.0):
     return np.clip(z, -clip_val, clip_val)
 
 # --- CONFIG ---
-MODEL_PATH = "condor_brain_retrain_v22_e3.pth" # Default
-DATA_PATH = "/kaggle/input/spy-options-data/mamba_institutional_1m.csv"
+MODEL_PATH = "models/condor_net_v43_run18.pth"  # v4.3 default (legacy non-v43 path; use --use-v43)
+DATA_PATH = "data/Datasetv4/v43"                 # v4.3 data dir (used as fallback; --v43-data-dir overrides)
 RULESET_PATH = "docs/Complete_Ruleset_DSL.yaml"
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

@@ -1,0 +1,156 @@
+{
+  "meta": {
+    "torch_version": "2.4.0+cu121",
+    "cuda_version": "12.1",
+    "gpu_name": "Tesla T4",
+    "device": "cuda",
+    "iters": 100,
+    "warmup": 10
+  },
+  "rows": [
+    {
+      "strategy": "iron_condor",
+      "K": 8,
+      "S": 50,
+      "cpu_ms": 0.8275,
+      "gpu_ms": 2.0781,
+      "speedup": 0.398,
+      "device": "cuda"
+    },
+    {
+      "strategy": "iron_condor",
+      "K": 32,
+      "S": 50,
+      "cpu_ms": 1.925,
+      "gpu_ms": 1.7901,
+      "speedup": 1.075,
+      "device": "cuda"
+    },
+    {
+      "strategy": "iron_condor",
+      "K": 128,
+      "S": 50,
+      "cpu_ms": 8.4648,
+      "gpu_ms": 1.805,
+      "speedup": 4.69,
+      "device": "cuda"
+    },
+    {
+      "strategy": "iron_condor",
+      "K": 512,
+      "S": 50,
+      "cpu_ms": 39.1435,
+      "gpu_ms": 1.8148,
+      "speedup": 21.569,
+      "device": "cuda"
+    },
+    {
+      "strategy": "iron_condor",
+      "K": 8,
+      "S": 200,
+      "cpu_ms": 0.5029,
+      "gpu_ms": 1.7954,
+      "speedup": 0.28,
+      "device": "cuda"
+    },
+    {
+      "strategy": "iron_condor",
+      "K": 32,
+      "S": 200,
+      "cpu_ms": 1.9538,
+      "gpu_ms": 1.8047,
+      "speedup": 1.083,
+      "device": "cuda"
+    },
+    {
+      "strategy": "iron_condor",
+      "K": 128,
+      "S": 200,
+      "cpu_ms": 11.0629,
+      "gpu_ms": 2.4544,
+      "speedup": 4.507,
+      "device": "cuda"
+    },
+    {
+      "strategy": "iron_condor",
+      "K": 512,
+      "S": 200,
+      "cpu_ms": 40.1019,
+      "gpu_ms": 2.7462,
+      "speedup": 14.603,
+      "device": "cuda"
+    },
+    {
+      "strategy": "iron_condor",
+      "K": 8,
+      "S": 500,
+      "cpu_ms": 1.047,
+      "gpu_ms": 2.6556,
+      "speedup": 0.394,
+      "device": "cuda"
+    },
+    {
+      "strategy": "iron_condor",
+      "K": 32,
+      "S": 500,
+      "cpu_ms": 3.5747,
+      "gpu_ms": 2.5506,
+      "speedup": 1.402,
+      "device": "cuda"
+    },
+    {
+      "strategy": "iron_condor",
+      "K": 128,
+      "S": 500,
+      "cpu_ms": 9.1072,
+      "gpu_ms": 1.8094,
+      "speedup": 5.033,
+      "device": "cuda"
+    },
+    {
+      "strategy": "iron_condor",
+      "K": 512,
+      "S": 500,
+      "cpu_ms": 47.4698,
+      "gpu_ms": 1.8301,
+      "speedup": 25.938,
+      "device": "cuda"
+    },
+    {
+      "strategy": "mark_to_market",
+      "K": 8,
+      "S": 200,
+      "cpu_ms": null,
+      "gpu_ms": 0.8847,
+      "speedup": null,
+      "device": "cuda"
+    },
+    {
+      "strategy": "mark_to_market",
+      "K": 32,
+      "S": 200,
+      "cpu_ms": null,
+      "gpu_ms": 1.0234,
+      "speedup": null,
+      "device": "cuda"
+    },
+    {
+      "strategy": "mark_to_market",
+      "K": 128,
+      "S": 200,
+      "cpu_ms": null,
+      "gpu_ms": 0.9831,
+      "speedup": null,
+      "device": "cuda"
+    },
+    {
+      "strategy": "mark_to_market",
+      "K": 512,
+      "S": 200,
+      "cpu_ms": null,
+      "gpu_ms": 0.9005,
+      "speedup": null,
+      "device": "cuda"
+    }
+  ]
+}
