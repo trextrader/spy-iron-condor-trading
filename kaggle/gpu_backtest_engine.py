@@ -568,6 +568,27 @@ def run_backtest_gpu(
                                       f"\n     realized=${_p:,.2f}"
                                       f"  premium_captured={_prem_v:+.1f}%"
                                       f"  equity_after=${_eq_v:,.2f}")
+                            # ── AFTER EXIT scoreboard (mirrors CPU _scoreboard) ──────
+                            _rem_mask_sb   = open_mask_t & ~_exit_t
+                            _rem_unreal_sb = float((_unreal_t * _rem_mask_sb.float().double()).sum().item())
+                            _total_eq_sb   = _eq_v + _rem_unreal_sb
+                            _cur_dd_sb     = ((_total_eq_sb - float(peak_t.item())) /
+                                              float(peak_t.item()) * 100
+                                              if float(peak_t.item()) > 0 else 0.0)
+                            _wl_str_sb = f"{_n_wins/_n_loss:.2f}" if _n_loss else "—"
+                            print(
+                                f"  {'─'*56}\n"
+                                f"  [AFTER EXIT:{_reason}]"
+                                f"  cash=${_eq_v:>12,.2f}"
+                                f"  open_pnl(all)={_rem_unreal_sb:>+10,.2f}"
+                                f"  total=${_total_eq_sb:>12,.2f}"
+                                f"  event_pnl={_p:+,.2f}\n"
+                                f"  cur_dd={_cur_dd_sb:>+6.2f}%"
+                                f"  max_dd={float(max_dd_t.item()):>+7.2f}%"
+                                f"  W={_n_wins}  L={_n_loss}  W/L={_wl_str_sb}"
+                                f"  open_positions={int(_rem_mask_sb.sum().item())}\n"
+                                f"  {'─'*56}"
+                            )
                 open_mask_t = open_mask_t & ~_exit_t
 
         # Record realised equity after exits
@@ -798,6 +819,36 @@ def run_backtest_gpu(
                   f"\n    [4] Profit target    : unrealized > ${_to_pt_v:>+,.0f}"
                   f"\n    [5] Time / DTE exit  : hold > {_to_hl_v:.0f}d  |  DTE = 0"
                   f"\n  {'─'*72}")
+            # ── AFTER ENTRY scoreboard (mirrors CPU _scoreboard) ─────────────
+            _spot_sb = torch.tensor(spot, dtype=torch.float32, device=dev)
+            _intr_sb = _intrinsic_debit_vec(
+                _spot_sb,
+                entry_ss_call_t.float(), entry_ss_put_t.float(),
+                entry_width_t.float(), family_code_t, open_mask_t,
+            )
+            _unreal_sb = torch.where(
+                open_mask_t,
+                (entry_credit_t.float() - _intr_sb).double() * IC_MULTIPLIER,
+                torch.zeros(N_pos, dtype=torch.float64, device=dev),
+            )
+            _unrealized_e  = float(_unreal_sb.sum().item())
+            _total_eq_e    = float(equity_t.item()) + _unrealized_e
+            _cur_dd_e      = ((_total_eq_e - float(peak_t.item())) /
+                              float(peak_t.item()) * 100
+                              if float(peak_t.item()) > 0 else 0.0)
+            _wl_str_e = f"{_n_wins/_n_loss:.2f}" if _n_loss else "—"
+            print(
+                f"  {'─'*56}\n"
+                f"  [AFTER ENTRY]"
+                f"  cash=${float(equity_t.item()):>12,.2f}"
+                f"  open_pnl(all)={_unrealized_e:>+10,.2f}"
+                f"  total=${_total_eq_e:>12,.2f}\n"
+                f"  cur_dd={_cur_dd_e:>+6.2f}%"
+                f"  max_dd={float(max_dd_t.item()):>+7.2f}%"
+                f"  W={_n_wins}  L={_n_loss}  W/L={_wl_str_e}"
+                f"  open_positions={int(open_mask_t.sum().item())}\n"
+                f"  {'─'*56}"
+            )
 
     # ── Post-loop: force-close remaining open positions ────────────────────
     if bool(open_mask_t.any()):
