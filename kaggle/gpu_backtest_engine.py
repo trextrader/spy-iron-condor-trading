@@ -163,6 +163,7 @@ def run_backtest_gpu(
     max_positions: int = 5,
     friday_closeout: bool = True,
     verbose: bool = False,
+    limit: Optional[int] = None,
 ) -> Tuple[List[float], List[dict]]:
     """
     GPU multi-position backtest with shared capital.
@@ -192,7 +193,7 @@ def run_backtest_gpu(
 
     dev = device
     N_pos = max_positions
-    T     = ctx.T
+    T     = ctx.T if not limit else min(ctx.T, limit)
 
     # ── Pull bar-level arrays to CPU numpy (small; used in Python gate checks) ──
     spot_np        = ctx.spot.cpu().numpy()

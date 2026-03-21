@@ -4830,7 +4830,10 @@ def main():
                 max_positions=args.max_positions,
                 friday_closeout=not getattr(args, 'no_friday_closeout', False),
                 verbose=getattr(args, 'verbose', False),
+                limit=args.limit if args.limit else None,
             )
+            # Downstream reporting expects CLOSE-only trade list (matches run_backtest() shape)
+            trades = [e for e in trades if e['action'] == 'CLOSE']
         except Exception as _gpu_bt_err:
             import traceback as _tb
             print(f"[backtest] GPU path failed: {_gpu_bt_err}; falling back to CPU")
