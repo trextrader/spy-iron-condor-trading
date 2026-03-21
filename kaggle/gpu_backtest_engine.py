@@ -829,6 +829,11 @@ def run_backtest_gpu(
                         },
                     })
 
+    # Backfill last equity_curve entry so equity_curve[-1] matches final equity_t.
+    # The loop appended equity before post-loop end-of-sim closes; fix that discrepancy.
+    if equity_curve:
+        equity_curve[-1] = float(equity_t.item())
+
     net_pnl  = float(equity_t.item()) - STARTING_EQUITY
     net_pct  = net_pnl / STARTING_EQUITY * 100
     n_closes = sum(1 for e in trade_events if e['action'] == 'CLOSE')
