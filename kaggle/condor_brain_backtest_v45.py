@@ -4855,6 +4855,7 @@ def main():
                 verbose=getattr(args, 'verbose', False),
                 limit=args.limit if args.limit else None,
                 trace_logger=_gpu_trace,
+                hold_print_interval=HOLD_PRINT_INTERVAL,
             )
             # Downstream reporting expects CLOSE-only trade list (matches run_backtest() shape)
             trades = [e for e in trades if e['action'] == 'CLOSE']
