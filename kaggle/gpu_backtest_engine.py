@@ -63,6 +63,13 @@ _FAMILY_CODE: Dict[str, int] = {
 # int8 code → engine family string (for mark_to_market_gpu dispatch)
 _CODE_TO_FAMILY: Dict[int, str] = {v: k for k, v in _FAMILY_CODE.items()}
 
+# v43 strategy class index → class name (matches CPU strategy_idx labels)
+_SIDX_TO_CLASS_NAME: Dict[int, str] = {
+    0: 'single_call', 1: 'single_put',  2: 'bull_call_spread',
+    3: 'bear_put_spread', 4: 'straddle', 5: 'strangle',
+    6: 'butterfly_call', 7: 'iron_condor', 8: 'custom_multi_leg', 9: 'abstain',
+}
+
 
 def _get_engine_family(class_name: str) -> str:
     return _CLASS_TO_ENGINE_FAMILY.get(class_name, 'iron_butterfly')
@@ -78,7 +85,7 @@ def _resolve_template_gpu(sidx: int, strategy_configs: Dict) -> str:
 
 def _fmt_ts(ts_unix: int) -> str:
     """Format unix-seconds timestamp to match CPU str(pd.Timestamp)[:19]."""
-    return datetime.fromtimestamp(ts_unix, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.fromtimestamp(ts_unix, tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
 
 
 def _intrinsic_debit_vec(
@@ -237,6 +244,57 @@ def run_backtest_gpu(
     trade_events:  List[dict]  = []
     last_entry_bar = -999
 
+    # ── Gate counters (mirror CPU V4.5 ENTRY GATE SUMMARY) ───────────────────
+    _gc_cooldown = 0   # cooldown_block
+    _gc_capital  = 0   # capital_block
+    _gc_gate_e   = 0   # gate_fail_entry_logit
+    _gc_gate_p   = 0   # gate_fail_pop
+    _gc_gate_ic  = 0   # gate_fail_ic (abstain)
+    _gc_max_pos  = 0   # max_pos_block
+    _gc_no_chain = 0   # missing_chain
+    _gc_bad_fill = 0   # select_entry_for_bar returned invalid
+    _gc_success  = 0   # SUCCESS
+
+    # ── Per-template stats for STRATEGY BREAKDOWN ────────────────────────────
+    _tmpl_stats: Dict[str, dict] = {}
+    _n_wins = 0
+    _n_loss = 0
+
+    def _tstat(tid: str) -> dict:
+        if tid not in _tmpl_stats:
+            _tmpl_stats[tid] = {
+                'count': 0, 'pnl': 0.0, 'wins': 0, 'losses': 0,
+                'best': 0.0, 'worst': 0.0, 'max_cl': 0, 'cur_cl': 0,
+                'seq_pnl': 0.0, 'seq_peak': 0.0, 'cum_seq_dd': 0.0,
+            }
+        return _tmpl_stats[tid]
+
+    def _update_tstat(tid: str, pnl: float) -> None:
+        nonlocal _n_wins, _n_loss
+        ts = _tstat(tid)
+        ts['count'] += 1
+        ts['pnl']   += pnl
+        ts['seq_pnl'] += pnl
+        if ts['seq_pnl'] > ts['seq_peak']:
+            ts['seq_peak'] = ts['seq_pnl']
+        _cur_dd = ts['seq_pnl'] - ts['seq_peak']
+        if _cur_dd < ts['cum_seq_dd']:
+            ts['cum_seq_dd'] = _cur_dd
+        if pnl > 0:
+            ts['wins'] += 1
+            ts['cur_cl'] = 0
+            if pnl > ts['best']:
+                ts['best'] = pnl
+            _n_wins += 1
+        else:
+            ts['losses'] += 1
+            ts['cur_cl'] += 1
+            if ts['cur_cl'] > ts['max_cl']:
+                ts['max_cl'] = ts['cur_cl']
+            if pnl < ts['worst']:
+                ts['worst'] = pnl
+            _n_loss += 1
+
     # ── Per-slot attribution data (needed for EVAL records at close) ─────────
     _slot_trade_id     = [''] * N_pos
     _slot_entry_logit  = [0.0] * N_pos
@@ -291,7 +349,9 @@ def run_backtest_gpu(
                     _p = float(_pnl_fc_t[j].item())
                     trade_events.append({'action': 'CLOSE', 'idx': i,
                                          'pnl': _p, 'pnl_pct': _p / STARTING_EQUITY * 100,
-                                         'spot': spot, 'reason': 'FRIDAY_CLOSEOUT'})
+                                         'spot': spot, 'reason': 'FRIDAY_CLOSEOUT',
+                                         'template_id': _slot_template[j]})
+                    _update_tstat(_slot_template[j] or 'unknown', _p)
                     if trace_logger is not None and _slot_trade_id[j]:
                         _sl_val = float(stop_loss_t[j].item())
                         _r_mult = round(_p / _sl_val, 4) if _sl_val != 0 else 0.0
@@ -411,7 +471,9 @@ def run_backtest_gpu(
                         trade_events.append({'action': 'CLOSE', 'idx': i,
                                              'pnl': _p,
                                              'pnl_pct': _p / STARTING_EQUITY * 100,
-                                             'spot': spot, 'reason': _reason})
+                                             'spot': spot, 'reason': _reason,
+                                             'template_id': _slot_template[j]})
+                        _update_tstat(_slot_template[j] or 'unknown', _p)
                         if trace_logger is not None and _slot_trade_id[j]:
                             _sl_val = float(stop_loss_t[j].item())
                             _r_mult = round(_p / _sl_val, 4) if _sl_val != 0 else 0.0
@@ -503,15 +565,16 @@ def run_backtest_gpu(
         # Record realised equity after exits
         equity_curve.append(float(equity_t.item()))
 
-        # ── verbose: per-bar gate status (mirrors CPU line 3021) ─────────
+        # ── verbose: per-bar gate status (mirrors CPU format) ────────────
         if verbose:
             _n_open   = int(open_mask_t.sum().item())
             _ts_str   = _fmt_ts(ts_i)
             _e_ok     = es > ENTRY_THRESHOLD
             _p_ok     = pop > POP_THRESHOLD
-            _v_entry  = f"entry={'✓' if _e_ok else '✗'}({es:.4f}>{ENTRY_THRESHOLD:.2f})"
-            _v_pop    = f"pop={'✓' if _p_ok else '✗'}({pop:.4f}>{POP_THRESHOLD:.2f})"
-            _v_ic     = f"nonAbt={'✓' if not abt else '✗'}(class={sidx})"
+            _cname_v  = _SIDX_TO_CLASS_NAME.get(sidx, f'class{sidx}')
+            _v_entry  = f"entry={'✓' if _e_ok else '✗'}({es:.3f}>{ENTRY_THRESHOLD})"
+            _v_pop    = f"pop={'✓' if _p_ok else '✗'}({pop:.3f}>{POP_THRESHOLD})"
+            _v_ic     = f"nonAbt={'✓' if not abt else '✗'}(abt={abt},sidx={sidx}/{_cname_v})"
             print(f"[{i:>5}] {_ts_str} spot={spot:>8.2f}  {_v_entry}  {_v_pop}  {_v_ic}  open={_n_open}")
 
         # ── verbose: HOLD status for open slots ──────────────────────────
@@ -549,11 +612,19 @@ def run_backtest_gpu(
 
         # ── C. Entry gate ────────────────────────────────────────────────
         if not has_chain:
+            _gc_no_chain += 1
             continue
-        gate_ok = (es > ENTRY_THRESHOLD) and (pop > POP_THRESHOLD) and (not abt)
-        if not gate_ok:
+        if es <= ENTRY_THRESHOLD:
+            _gc_gate_e += 1
+            continue
+        if pop <= POP_THRESHOLD:
+            _gc_gate_p += 1
+            continue
+        if abt:
+            _gc_gate_ic += 1
             continue
         if (i - last_entry_bar) < MIN_BARS_COOLDOWN:
+            _gc_cooldown += 1
             continue
 
         # Resolve template and check filter
@@ -568,6 +639,7 @@ def run_backtest_gpu(
         # Find empty position slot
         _empty = (~open_mask_t).nonzero(as_tuple=False)
         if len(_empty) == 0:
+            _gc_max_pos += 1
             continue
         j = int(_empty[0, 0].item())
 
@@ -578,6 +650,7 @@ def run_backtest_gpu(
         _est_margin = (spot * 0.02 * IC_MULTIPLIER if _is_naked
                        else _est_width * IC_MULTIPLIER)
         if _est_margin > _max_deploy:
+            _gc_capital += 1
             continue
 
         # Structure selection (K=1 call to select_entry_for_bar)
@@ -593,6 +666,7 @@ def run_backtest_gpu(
             return_tensors=True,
         )
         if not bool(_g['valid'][0].item()):
+            _gc_bad_fill += 1
             continue
 
         # Write entry to slot j
@@ -609,6 +683,8 @@ def run_backtest_gpu(
         hold_days_t[j]     = float(cfg.get('hold_days',         30.0) or 30.0)
         max_dte_exit_t[j]  = float(cfg.get('max_dte_exit',       0.0) or 0.0)
         last_entry_bar     = i
+        _gc_success        += 1
+        _tstat(tmpl_id)    # ensure entry exists in stats dict
 
         _cred   = float(_g['credit'][0].item())
         _actual_dte = float(_g['actual_dte'][0].item())
@@ -708,7 +784,9 @@ def run_backtest_gpu(
                 trade_events.append({'action': 'CLOSE', 'idx': T - 1,
                                      'pnl': _p, 'pnl_pct': _p / STARTING_EQUITY * 100,
                                      'spot': float(spot_np[-1]),
-                                     'reason': 'END_OF_SIM'})
+                                     'reason': 'END_OF_SIM',
+                                     'template_id': _slot_template[j]})
+                _update_tstat(_slot_template[j] or 'unknown', _p)
                 if trace_logger is not None and _slot_trade_id[j]:
                     _sl_val = float(stop_loss_t[j].item())
                     _r_mult = round(_p / _sl_val, 4) if _sl_val != 0 else 0.0
@@ -754,12 +832,68 @@ def run_backtest_gpu(
     net_pnl  = float(equity_t.item()) - STARTING_EQUITY
     net_pct  = net_pnl / STARTING_EQUITY * 100
     n_closes = sum(1 for e in trade_events if e['action'] == 'CLOSE')
+    max_dd_val = float(max_dd_t.item())
+    wr_val   = _n_wins / n_closes * 100 if n_closes else 0.0
+
     print(f"[gpu_backtest] Done  T={T}  trades={n_closes}  "
           f"net={net_pnl:+,.0f}  ({net_pct:+.2f}%)  "
-          f"max_dd={float(max_dd_t.item()):.2f}%")
-    print(f"\nSimulation Complete.")
+          f"max_dd={max_dd_val:.2f}%")
+
+    # ── V4.5 ENTRY GATE SUMMARY ──────────────────────────────────────────────
+    _bars = T
+    print(f"\n{'='*80}")
+    print(f"  V4.5 ENTRY GATE SUMMARY (GPU PATH)")
+    print(f"{'='*80}")
+    print(f"  {'bars_seen':<30}: {_bars:>8,}")
+    print(f"  {'cooldown_block':<30}: {_gc_cooldown:>8,}  ({_gc_cooldown/_bars*100:.1f}%)")
+    print(f"  {'capital_block':<30}: {_gc_capital:>8,}  ({_gc_capital/_bars*100:.1f}%)")
+    print(f"  {'missing_chain':<30}: {_gc_no_chain:>8,}")
+    print(f"  {'gate_fail_entry_logit':<30}: {_gc_gate_e:>8,}  ({_gc_gate_e/_bars*100:.1f}%)")
+    print(f"  {'gate_fail_pop':<30}: {_gc_gate_p:>8,}  ({_gc_gate_p/_bars*100:.1f}%)")
+    print(f"  {'gate_fail_ic(abstain)':<30}: {_gc_gate_ic:>8,}  ({_gc_gate_ic/_bars*100:.1f}%)")
+    print(f"  {'max_pos_block':<30}: {_gc_max_pos:>8,}  ({_gc_max_pos/_bars*100:.1f}%)")
+    print(f"  {'bad_fill':<30}: {_gc_bad_fill:>8,}")
+    print(f"  {'SUCCESS (trades opened)':<30}: {_gc_success:>8,}  ({_gc_success/_bars*100:.1f}%)")
+    print(f"\n  Capital: start=${STARTING_EQUITY:,.0f} | leverage={LEVERAGE_FACTOR:.0f}x | "
+          f"max_deploy={STARTING_EQUITY*LEVERAGE_FACTOR*MAX_OPTIONS_ALLOC_PCT:,.0f}")
+    print(f"{'='*80}")
+
+    # ── STRATEGY BREAKDOWN ───────────────────────────────────────────────────
+    if _tmpl_stats:
+        _SEP  = '=' * 100
+        _HDR  = f"  {'Template ID':<26} {'Count':>5}  {'%':>5}  {'Net Profit':>12}  {'CumDD(seq)':>10}  {'W / L':>7}  {'Best Trade':>11}  {'Worst Trade':>12}  {'Max Consec L':>12}"
+        _DASH = f"  {'-'*25} {'-'*5}  {'-'*5}  {'-'*12}  {'-'*10}  {'-'*7}  {'-'*11}  {'-'*12}  {'-'*12}"
+        print(f"\n{_SEP}")
+        print(f"  STRATEGY BREAKDOWN")
+        print(f"{_SEP}")
+        print(_HDR)
+        print(_DASH)
+        for _tid, _ts in sorted(_tmpl_stats.items(), key=lambda x: -x[1]['count']):
+            _tc  = _ts['count']
+            _tp  = _ts['pnl']
+            _tw  = _ts['wins']
+            _tl  = _ts['losses']
+            _pct = _tc / n_closes * 100 if n_closes else 0.0
+            _dd  = _ts['cum_seq_dd']
+            _b   = _ts['best']
+            _w   = _ts['worst']
+            _ml  = _ts['max_cl']
+            print(f"  {_tid:<26} {_tc:>5}  {_pct:>4.1f}%  ${_tp:>+11,.2f}  ${_dd:>+9,.2f}"
+                  f"  {_tw:>3}/{_tl:<3}  ${_b:>+10,.2f}  ${_w:>+11,.2f}  {_ml:>12}")
+        print(_SEP)
+
+    # ── PERFORMANCE SUMMARY ──────────────────────────────────────────────────
+    print(f"\n{'='*80}")
+    print(f"  PERFORMANCE SUMMARY")
+    print(f"{'='*80}")
+    print(f"  Net PnL          : ${net_pnl:+,.2f}  ({net_pct:+.2f}%)")
+    print(f"  Max Drawdown     : {max_dd_val:.2f}%  (mark-to-market)")
+    print(f"  Closed Positions : {n_closes}  (wins={_n_wins}  losses={_n_loss}  wr={wr_val:.1f}%)")
+    print(f"  Gross Realized   : ${net_pnl:+,.2f}")
+    print(f"{'='*80}\n")
+
+    print(f"Simulation Complete.")
     print(f"  Final Equity : ${float(equity_t.item()):,.2f}  ({net_pct:+.2f}%  net PnL=${net_pnl:+,.2f})")
-    print(f"  Max Drawdown : {float(max_dd_t.item()):.2f}%  "
-          f"(mark-to-market; {n_closes} closed trades)")
+    print(f"  Max Drawdown : {max_dd_val:.2f}%  (mark-to-market; {n_closes} closed trades)")
 
     return equity_curve, trade_events
