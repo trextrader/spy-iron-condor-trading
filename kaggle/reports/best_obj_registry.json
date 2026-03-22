@@ -25,7 +25,7 @@
   },
   "bull_put_ladder": {
     "intensity": "med",
-    "obj": 6.7678
+    "obj": 8.3105
   },
   "bull_put_spread_credit": {
     "intensity": "max",
@@ -44,8 +44,8 @@
     "obj": 5.5767
   },
   "call_ratio_spread": {
-    "intensity": "max",
-    "obj": 2.3049
+    "intensity": "med",
+    "obj": 10.1181
   },
   "cash_secured_put": {
     "intensity": "max",
@@ -72,8 +72,8 @@
     "obj": 12.659
   },
   "diagonal_put": {
-    "intensity": "max",
-    "obj": 7.3517
+    "intensity": "med",
+    "obj": 11.1969
   },
   "double_diagonal": {
     "intensity": "med",
@@ -84,8 +84,8 @@
     "obj": 36.0281
   },
   "inverse_call_broken_wing": {
-    "intensity": "max",
-    "obj": 4.0778
+    "intensity": "med",
+    "obj": 10.1181
   },
   "inverse_iron_butterfly": {
     "intensity": "max",
@@ -116,8 +116,8 @@
     "obj": 5.6384
   },
   "long_call_condor": {
-    "intensity": "max",
-    "obj": 9.6852
+    "intensity": "med",
+    "obj": 10.3017
   },
   "long_combo": {
     "intensity": "max",
@@ -128,20 +128,20 @@
     "obj": 3.4159
   },
   "long_put_butterfly": {
-    "intensity": "max",
-    "obj": 22.9949
+    "intensity": "med",
+    "obj": 28.3478
   },
   "long_put_condor": {
     "intensity": "max",
     "obj": 17.5717
   },
   "long_synthetic_future": {
-    "intensity": "max",
-    "obj": 3.5041
+    "intensity": "med",
+    "obj": 4.9045
   },
   "protective_put": {
-    "intensity": "max",
-    "obj": 2.8153
+    "intensity": "med",
+    "obj": 3.2301
   },
   "put_broken_wing": {
     "intensity": "max",
@@ -152,8 +152,8 @@
     "obj": 9.8108
   },
   "put_ratio_spread": {
-    "intensity": "max",
-    "obj": 6.7862
+    "intensity": "med",
+    "obj": 7.0827
   },
   "reverse_jade_lizard": {
     "intensity": "med",
