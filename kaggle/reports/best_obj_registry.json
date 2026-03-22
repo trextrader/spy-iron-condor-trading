@@ -4,12 +4,12 @@
     "obj": 3.9823
   },
   "bear_call_spread_credit": {
-    "intensity": "max",
-    "obj": 2.8782
+    "intensity": "med",
+    "obj": 8.198
   },
   "bear_put_ladder": {
     "intensity": "med",
-    "obj": 7.3494
+    "obj": 28.8904
   },
   "bear_put_spread": {
     "intensity": "max",
@@ -25,19 +25,19 @@
   },
   "bull_put_ladder": {
     "intensity": "med",
-    "obj": 8.3105
+    "obj": 40.5621
   },
   "bull_put_spread_credit": {
-    "intensity": "max",
-    "obj": 6.9988
+    "intensity": "med",
+    "obj": 28.8904
   },
   "calendar_call": {
     "intensity": "med",
-    "obj": 18.239
+    "obj": 24.481
   },
   "calendar_put": {
     "intensity": "med",
-    "obj": 14.304
+    "obj": 25.7636
   },
   "call_ratio_backspread": {
     "intensity": "med",
@@ -57,15 +57,15 @@
   },
   "covered_call": {
     "intensity": "med",
-    "obj": 13.9488
+    "obj": 30.6582
   },
   "covered_short_straddle": {
-    "intensity": "max",
-    "obj": 26.8785
+    "intensity": "med",
+    "obj": 31.9294
   },
   "covered_short_strangle": {
     "intensity": "med",
-    "obj": 3.8929
+    "obj": 16.3246
   },
   "diagonal_call": {
     "intensity": "max",
@@ -77,7 +77,7 @@
   },
   "double_diagonal": {
     "intensity": "med",
-    "obj": 15.0212
+    "obj": 24.481
   },
   "guts": {
     "intensity": "max",
@@ -96,8 +96,8 @@
     "obj": 15.245
   },
   "inverse_put_broken_wing": {
-    "intensity": "max",
-    "obj": 7.0285
+    "intensity": "med",
+    "obj": 43.6086
   },
   "iron_butterfly": {
     "intensity": "max",
@@ -105,19 +105,19 @@
   },
   "iron_condor": {
     "intensity": "med",
-    "obj": 15.1382
+    "obj": 16.2467
   },
   "jade_lizard": {
     "intensity": "max",
     "obj": 40.351
   },
   "long_call": {
-    "intensity": "max",
-    "obj": 5.6384
+    "intensity": "med",
+    "obj": 30.016
   },
   "long_call_condor": {
     "intensity": "med",
-    "obj": 10.3017
+    "obj": 20.0886
   },
   "long_combo": {
     "intensity": "max",
@@ -132,8 +132,8 @@
     "obj": 28.3478
   },
   "long_put_condor": {
-    "intensity": "max",
-    "obj": 17.5717
+    "intensity": "med",
+    "obj": 24.481
   },
   "long_synthetic_future": {
     "intensity": "med",
@@ -144,44 +144,44 @@
     "obj": 3.2301
   },
   "put_broken_wing": {
-    "intensity": "max",
-    "obj": 8.257
+    "intensity": "med",
+    "obj": 40.5621
   },
   "put_ratio_backspread": {
-    "intensity": "max",
-    "obj": 9.8108
+    "intensity": "med",
+    "obj": 40.5621
   },
   "put_ratio_spread": {
     "intensity": "med",
-    "obj": 7.0827
+    "obj": 28.8904
   },
   "reverse_jade_lizard": {
     "intensity": "med",
-    "obj": 15.9958
+    "obj": 28.2947
   },
   "short_call": {
-    "intensity": "max",
-    "obj": 14.7633
+    "intensity": "med",
+    "obj": 54.1611
   },
   "short_call_condor": {
-    "intensity": "max",
-    "obj": 15.3142
+    "intensity": "med",
+    "obj": 20.7052
   },
   "short_combo": {
     "intensity": "med",
-    "obj": 3.7686
+    "obj": 5.424
   },
   "short_guts": {
-    "intensity": "max",
-    "obj": 19.1505
+    "intensity": "med",
+    "obj": 30.3586
   },
   "short_put": {
     "intensity": "med",
     "obj": 33.6418
   },
   "short_put_condor": {
-    "intensity": "max",
-    "obj": 14.677
+    "intensity": "med",
+    "obj": 24.481
   },
   "short_straddle": {
     "intensity": "max",
@@ -208,11 +208,11 @@
     "obj": 27.9684
   },
   "strip": {
-    "intensity": "max",
-    "obj": 21.5889
+    "intensity": "med",
+    "obj": 26.6165
   },
   "synthetic_put": {
     "intensity": "med",
-    "obj": 7.1929
+    "obj": 28.9359
   }
 }
