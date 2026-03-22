@@ -4808,11 +4808,26 @@ def main():
                     print("[autoall] No strategy changes to commit (params unchanged from prior run).")
                 elif _r_commit.returncode == 0:
                     print(f"[autoall] Committed: {_autoall_commit_msg}")
-                    # Rebase onto remote first so push never fails due to diverged history
+                    # Stash any unstaged changes so rebase can proceed cleanly,
+                    # then restore them afterwards.
+                    _r_stash = _sp.run(
+                        ["git", "stash", "--include-untracked"],
+                        capture_output=True, text=True
+                    )
+                    _stashed = "No local changes" not in _r_stash.stdout
+                    if _stashed:
+                        print(f"[autoall] Stashed local changes before rebase.")
                     _r_rebase = _sp.run(
                         ["git", "pull", "--rebase", "origin", "main"],
                         capture_output=True, text=True
                     )
+                    if _stashed:
+                        _r_pop = _sp.run(
+                            ["git", "stash", "pop"],
+                            capture_output=True, text=True
+                        )
+                        if _r_pop.returncode != 0:
+                            print(f"[autoall] Stash pop warning: {_r_pop.stderr.strip()}")
                     if _r_rebase.returncode != 0:
                         print(f"[autoall] Rebase failed — push skipped. Run manually:\n"
                               f"  git pull --rebase origin main && git push origin main\n"
