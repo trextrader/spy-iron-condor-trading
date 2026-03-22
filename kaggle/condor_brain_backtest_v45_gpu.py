@@ -4418,6 +4418,49 @@ def main():
                         _eff_base = _effective_intensity[len(_gprefix) + 1:]
                         break
                 _apply_floor = _intensity_apply_floor.get(_eff_base, 0.0)
+                # ── Pre-run snapshot: registry + file params for ALL templates ──────────
+                # Strategy files are modified in-place by auto-apply during the loop,
+                # so we capture them now before any optimisation run can overwrite them.
+                from bayes_optimize_strategy import _load_best_registry as _lbr_pre
+                _pre_run_registry = _lbr_pre()
+                _BO_PARAM_KEYS_SNAP = [
+                    "stop_loss_dollar", "profit_target", "spread_width",
+                    "target_dte", "hold_days", "max_dte_exit", "short_delta",
+                ]
+                def _read_strat_cfg(_tid, _keys):
+                    import re as _re
+                    _cands = [
+                        os.path.join("kaggle", "strategies", f"{_tid}.py"),
+                        os.path.join("strategies", f"{_tid}.py"),
+                    ]
+                    try:
+                        _cands.append(os.path.join(
+                            os.path.dirname(os.path.abspath(__file__)),
+                            "strategies", f"{_tid}.py"))
+                    except NameError:
+                        pass
+                    _sf = next((p for p in _cands if os.path.isfile(p)), None)
+                    if not _sf:
+                        return {}
+                    try:
+                        with open(_sf) as _f:
+                            _src = _f.read()
+                        _out = {}
+                        for _k in _keys:
+                            _m = _re.search(rf'"{_k}"\s*:\s*([^,\n]+)', _src)
+                            if _m:
+                                _raw = _m.group(1).strip().rstrip(',').strip()
+                                try:
+                                    _fv = float(_raw)
+                                    _out[_k] = int(_fv) if (_fv == int(_fv) and '.' not in _raw) else _fv
+                                except (ValueError, TypeError):
+                                    _out[_k] = _raw
+                        return _out
+                    except Exception:
+                        return {}
+                _pre_run_file_params = {
+                    _t: _read_strat_cfg(_t, _BO_PARAM_KEYS_SNAP) for _t in _all_templates
+                }
                 print(f"\n[autoall] Starting sequential BO for {_n_total} strategy templates")
                 print(f"[autoall] intensity={_effective_intensity}  min_apply_obj={_apply_floor}")
                 print(f"[autoall] Templates ({_n_total}): {_all_templates}\n")
@@ -4588,30 +4631,48 @@ def main():
                 print(f"[autoall] Total wall time: {_fmt_sec(_autoall_total_s)}  "
                       f"(avg {_fmt_sec(sum(_strat_times)/len(_strat_times) if _strat_times else 0)}/strategy)")
                 print(f"[autoall] {'═'*68}")
-                # Load registry once to show accurate applied/skipped status
+                # Load registry once to show final applied/skipped status
                 from bayes_optimize_strategy import _load_best_registry as _lbr
                 _final_registry = _lbr()
-                print(f"  {'STRATEGY':<32}  {'obj':>8}  {'net%':>7}  {'dd%':>6}  {'wins':>6}  {'losses':>7}  {'status'}")
+                # ANSI color constants (orange = current/preserved, green = improved)
+                _AO = "\033[38;5;214m"   # orange
+                _AG = "\033[92m"          # bright green
+                _AR = "\033[0m"           # reset
+
+                # ── Summary table: new_obj vs prev_obj, colored by outcome ──────────
+                print(f"  {'STRATEGY':<32}  {'new_obj':>8}  {'prev_obj':>8}"
+                      f"  {'net%':>7}  {'dd%':>6}  {'W':>5}  {'L':>5}  status")
+                print(f"  {'─'*32}  {'─'*8}  {'─'*8}  {'─'*7}  {'─'*6}  {'─'*5}  {'─'*5}  {'─'*12}")
                 for _tmpl, _r, _err in _autoall_summary:
+                    _prev_obj = _pre_run_registry.get(_tmpl, {}).get('obj', 0.0)
                     if _err and _err.startswith("skipped:"):
                         _reason = _err.split(":", 1)[1]
-                        print(f"  {_tmpl:<32}  {'SKIPPED':<8}  — {_reason}")
+                        print(f"  {_AO}{_tmpl:<32}{_AR}  {'SKIPPED':>8}  {_prev_obj:>8.3f}  — {_reason}")
                     elif _err:
-                        print(f"  {_tmpl:<32}  {'':>8}  {'':>7}  {'':>6}  {'':>6}  {'':>7}  ERROR: {_err[:40]}")
+                        print(f"  {_tmpl:<32}  {'':>8}  {_prev_obj:>8.3f}"
+                              f"  {'':>7}  {'':>6}  {'':>5}  {'':>5}  ERROR: {_err[:40]}")
                     elif _r:
                         _w   = int(_r.get('wins',      0))
                         _l   = int(_r.get('losses',    0))
                         _obj = float(_r.get('objective', 0.0))
-                        # applied = registry was updated to this obj during this run
-                        _reg_obj = _final_registry.get(_tmpl, {}).get('obj', 0.0)
-                        _status  = 'applied' if abs(_reg_obj - _obj) < 1e-6 else 'skipped(registry)'
-                        print(f"  {_tmpl:<32}  {_obj:>8.3f}  "
-                              f"{_r.get('net_pct',0):>7.2f}  {_r.get('max_dd',0):>6.2f}  "
-                              f"{_w:>6}  {_l:>7}  {_status}")
+                        _net = float(_r.get('net_pct',  0.0))
+                        _dd  = float(_r.get('max_dd',   0.0))
+                        _improved = _obj > _prev_obj + 1e-6
+                        if _improved:
+                            _sn = f"{_tmpl:<32}"
+                            _ob = f"{_AG}{_obj:>8.3f}{_AR}"
+                            _st = f"{_AG}IMPROVED ↑{_AR}"
+                        else:
+                            _sn = f"{_AO}{_tmpl:<32}{_AR}"
+                            _ob = f"{_obj:>8.3f}"
+                            _st = f"{_AO}PRESERVED{_AR}"
+                        print(f"  {_sn}  {_ob}  {_prev_obj:>8.3f}"
+                              f"  {_net:>+7.2f}  {_dd:>6.2f}  {_w:>5}  {_l:>5}  {_st}")
                     else:
-                        print(f"  {_tmpl:<32}  {'':>8}  {'':>7}  {'':>6}  {'':>6}  {'':>7}  no results")
+                        print(f"  {_tmpl:<32}  {'':>8}  {_prev_obj:>8.3f}"
+                              f"  {'':>7}  {'':>6}  {'':>5}  {'':>5}  no results")
 
-                # ── Detailed optimized params table ──────────────────────────
+                # ── Detailed params table: ★ current (orange) vs → new best ─────────
                 _BO_PARAM_KEYS = [
                     "stop_loss_dollar", "profit_target", "spread_width",
                     "target_dte", "hold_days", "max_dte_exit", "short_delta",
@@ -4619,52 +4680,74 @@ def main():
                 # Collect only params that appear in at least one result
                 _present_keys = [k for k in _BO_PARAM_KEYS
                                   if any(_r and k in _r for _, _r, _ in _autoall_summary)]
-                # Fixed perf columns always shown
-                _PERF_COLS  = [("wins", 6), ("losses", 6), ("net_pnl", 10), ("net%", 7), ("dd%", 6)]
+                # Perf cols: obj first so rank comparison is immediate
+                _PERF_COLS  = [("obj", 8), ("wins", 6), ("losses", 6), ("net_pnl", 10), ("net%", 7), ("dd%", 6)]
                 _COL_W  = 11   # param column width
-                _STRAT_W = 32
+                _STRAT_W = 36  # strategy label col (2-char prefix + name)
                 _hdr_params = "  ".join(f"{k[:_COL_W]:>{_COL_W}}" for k in _present_keys)
                 _hdr_perf   = "  ".join(f"{h:>{w}}" for h, w in _PERF_COLS)
                 _total_w = (_STRAT_W + 2
                             + len(_present_keys) * (_COL_W + 2)
                             + sum(w + 2 for _, w in _PERF_COLS))
                 _sep = "─" * _total_w
+
+                def _fmt_pv(_pk, _v):
+                    """Format a single param value right-aligned to _COL_W."""
+                    if _v is None or str(_v).strip() in ("—", "N/A", "None"):
+                        return f"{'—':>{_COL_W}}"
+                    if _pk == "short_delta":
+                        try:
+                            return f"{float(_v):>{_COL_W}.4f}"
+                        except (ValueError, TypeError):
+                            return f"{_v!s:>{_COL_W}}"
+                    if isinstance(_v, int):
+                        return f"{_v:>{_COL_W}}"
+                    if isinstance(_v, float):
+                        return f"{_v:>{_COL_W}.2f}"
+                    try:
+                        _fv = float(_v)
+                        return f"{_fv:>{_COL_W}.2f}" if '.' in str(_v) else f"{int(_fv):>{_COL_W}}"
+                    except (ValueError, TypeError):
+                        return f"{_v!s:>{_COL_W}}"
+
                 print(f"\n[autoall] {'═'*_total_w}")
-                print(f"[autoall] OPTIMIZED PARAMETERS BY STRATEGY")
+                print(f"[autoall] OPTIMIZED PARAMS  "
+                      f"(★ orange = current file  |  → green = new best APPLIED  |  → plain = tested but not better)")
                 print(f"[autoall] {'═'*_total_w}")
-                print(f"  {'STRATEGY':<{_STRAT_W}}  {_hdr_params}  {_hdr_perf}")
+                print(f"  {'':>{_STRAT_W}}  {_hdr_params}  {_hdr_perf}")
                 print(f"  {_sep}")
                 for _tmpl, _r, _err in _autoall_summary:
                     if _err and _err.startswith("skipped:"):
                         continue  # don't show in params table
+                    _prev_obj   = _pre_run_registry.get(_tmpl, {}).get('obj', 0.0)
+                    _cur_params = _pre_run_file_params.get(_tmpl, {})
+                    # Orange row: current file params (pre-run snapshot)
+                    _cpv = "  ".join(_fmt_pv(_pk, _cur_params.get(_pk)) for _pk in _present_keys)
+                    _cpf = [f"{_prev_obj:>8.3f}",
+                            f"{'—':>6}", f"{'—':>6}", f"{'—':>10}", f"{'—':>7}", f"{'—':>6}"]
+                    _c_lbl = f"★ {_tmpl}"
+                    print(f"  {_AO}{_c_lbl:<{_STRAT_W}}{_AR}  {_AO}{_cpv}{_AR}  {_AO}{'  '.join(_cpf)}{_AR}")
                     if _err or not _r:
-                        _pv  = "  ".join(f"{'N/A':>{_COL_W}}" for _ in _present_keys)
-                        _pfv = "  ".join(f"{'N/A':>{w}}" for _, w in _PERF_COLS)
-                        print(f"  {_tmpl:<{_STRAT_W}}  {_pv}  {_pfv}")
+                        print(f"  {_sep}")
+                        continue
+                    # New best row
+                    _new_obj  = float(_r.get('objective', 0.0))
+                    _improved = _new_obj > _prev_obj + 1e-6
+                    _npv = "  ".join(_fmt_pv(_pk, _r.get(_pk)) for _pk in _present_keys)
+                    _w  = int(_r.get("wins",   0))
+                    _l  = int(_r.get("losses", 0))
+                    _np = float(_r.get("net_pnl", 0.0))
+                    _pc = float(_r.get("net_pct",  0.0))
+                    _dd = float(_r.get("max_dd",   0.0))
+                    _npf = [f"{_new_obj:>8.3f}", f"{_w:>6}", f"{_l:>6}",
+                            f"{_np:>+10.0f}", f"{_pc:>+7.2f}", f"{_dd:>6.2f}"]
+                    _tag   = " ↑ APPLIED" if _improved else " = not better"
+                    _n_lbl = f"→ NEW{_tag}"
+                    if _improved:
+                        print(f"  {_AG}{_n_lbl:<{_STRAT_W}}{_AR}  {_AG}{_npv}{_AR}  {_AG}{'  '.join(_npf)}{_AR}")
                     else:
-                        _pvals = []
-                        for _pk in _present_keys:
-                            _v = _r.get(_pk, "—")
-                            if _pk == "short_delta" and _v != "—":
-                                _pvals.append(f"{float(_v):>{_COL_W}.4f}")
-                            elif isinstance(_v, float):
-                                _pvals.append(f"{_v:>{_COL_W}.2f}")
-                            else:
-                                _pvals.append(f"{_v!s:>{_COL_W}}")
-                        _w  = int(_r.get("wins",   0))
-                        _l  = int(_r.get("losses", 0))
-                        _np = float(_r.get("net_pnl", 0.0))
-                        _pc = float(_r.get("net_pct",  0.0))
-                        _dd = float(_r.get("max_dd",   0.0))
-                        _pfvals = [
-                            f"{_w:>6}",
-                            f"{_l:>6}",
-                            f"{_np:>+10.0f}",
-                            f"{_pc:>+7.2f}",
-                            f"{_dd:>6.2f}",
-                        ]
-                        print(f"  {_tmpl:<{_STRAT_W}}  {'  '.join(_pvals)}  {'  '.join(_pfvals)}")
-                print(f"  {_sep}")
+                        print(f"  {_n_lbl:<{_STRAT_W}}  {_npv}  {'  '.join(_npf)}")
+                    print(f"  {_sep}")
 
                 # ── Auto-commit and push updated strategy files ───────────────
                 # Prevents pull conflicts: Lightning AI's auto-applied params
