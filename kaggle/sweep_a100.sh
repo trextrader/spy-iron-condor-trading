@@ -58,7 +58,12 @@ touch "$STATE_FILE"
 #   med-max : 2048×0.25 + 5×128×0.60 + 13×1.00 = 512 + 384 + 13  = 909  → 3.61×
 #   max     : 4096×0.25 + 6×256×0.60 + 15×1.00 = 1024+ 922 + 15  = 1961 → 7.78×
 #   sobol   : 1024×0.25 + 0          + 11×1.00 = 256 + 0   + 11  = 267  → 1.06×
-LEVELS=("min-med" "med" "med-max" "max" "sobol")
+# Override via env: LEVELS_OVERRIDE="min-med med" bash sweep_a100.sh
+if [ -n "${LEVELS_OVERRIDE:-}" ]; then
+    read -ra LEVELS <<< "$LEVELS_OVERRIDE"
+else
+    LEVELS=("min-med" "med" "med-max" "max" "sobol")
+fi
 declare -A WORK_RATIO
 WORK_RATIO["min-med"]="1.00"
 WORK_RATIO["med"]="2.28"
