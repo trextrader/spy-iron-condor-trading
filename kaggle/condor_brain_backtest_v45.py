@@ -4458,7 +4458,47 @@ def main():
                 _pre_run_file_params = {
                     _t: _read_strat_cfg(_t, _BO_PARAM_KEYS_SNAP) for _t in _all_templates
                 }
-                print(f"\n[autoall] Starting sequential BO for {_n_total} strategy templates")
+                # ── Print current (pre-run) baseline so it's visible immediately ──
+                _BL_COL_W = 11
+                _BL_STRAT_W = 36
+                _BL_PERF_W  = 8
+                _BL_hdr_p   = "  ".join(f"{k[:_BL_COL_W]:>{_BL_COL_W}}" for k in _BO_PARAM_KEYS_SNAP)
+                _BL_total_w = _BL_STRAT_W + 2 + len(_BO_PARAM_KEYS_SNAP) * (_BL_COL_W + 2) + _BL_PERF_W + 2
+                _BL_sep     = "─" * _BL_total_w
+                print(f"\n[autoall] {'═'*_BL_total_w}")
+                print(f"[autoall] CURRENT BASELINE PARAMS (pre-run snapshot — orange = registry obj known)")
+                print(f"[autoall] {'═'*_BL_total_w}")
+                print(f"  {'STRATEGY':<{_BL_STRAT_W}}  {_BL_hdr_p}  {'reg_obj':>{_BL_PERF_W}}")
+                print(f"  {_BL_sep}")
+                _AO_BL = "\033[38;5;214m"; _AR_BL = "\033[0m"
+                for _t in _all_templates:
+                    _cp   = _pre_run_file_params.get(_t, {})
+                    _robj = _pre_run_registry.get(_t, {}).get('obj', 0.0)
+                    _pvs  = []
+                    for _k in _BO_PARAM_KEYS_SNAP:
+                        _v = _cp.get(_k)
+                        if _v is None or str(_v).strip() in ("—", "N/A", "None"):
+                            _pvs.append(f"{'—':>{_BL_COL_W}}")
+                        elif _k == "short_delta":
+                            try:    _pvs.append(f"{float(_v):>{_BL_COL_W}.4f}")
+                            except: _pvs.append(f"{_v!s:>{_BL_COL_W}}")
+                        elif isinstance(_v, int):
+                            _pvs.append(f"{_v:>{_BL_COL_W}}")
+                        elif isinstance(_v, float):
+                            _pvs.append(f"{_v:>{_BL_COL_W}.2f}")
+                        else:
+                            _pvs.append(f"{_v!s:>{_BL_COL_W}}")
+                    _has_reg = _robj > 0.0
+                    _robj_s  = f"{_robj:>{_BL_PERF_W}.3f}"
+                    _row = f"  {_t:<{_BL_STRAT_W}}  {'  '.join(_pvs)}  {_robj_s}"
+                    if _has_reg:
+                        print(f"{_AO_BL}{_row}{_AR_BL}")
+                    else:
+                        print(_row)
+                print(f"  {_BL_sep}")
+                print(f"[autoall] {'═'*_BL_total_w}\n")
+
+                print(f"[autoall] Starting sequential BO for {_n_total} strategy templates")
                 print(f"[autoall] intensity={_effective_intensity}  min_apply_obj={_apply_floor}")
                 print(f"[autoall] Templates ({_n_total}): {_all_templates}\n")
                 if _resume_state:
