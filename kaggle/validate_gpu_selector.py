@@ -48,8 +48,11 @@ def _make_random_candidates(K: int, device: torch.device) -> tuple:
 
 def validate_bar(ctx, bar_idx, td_t, sd_t, sw_t,
                  td_np, sd_np, sw_np, family, spot, K, device):
-    s_off = int(ctx.bar_offsets[bar_idx].item())
-    e_off = int(ctx.bar_offsets[bar_idx + 1].item())
+    _d_idx = int(ctx.bar_to_date_idx[bar_idx].item())
+    if _d_idx < 0:
+        return None  # no chain for this bar
+    s_off = int(ctx.date_offsets[_d_idx].item())
+    e_off = int(ctx.date_offsets[_d_idx + 1].item())
     if s_off >= e_off:
         return None  # no chain for this bar
 
@@ -107,8 +110,11 @@ def validate_bar(ctx, bar_idx, td_t, sd_t, sw_t,
 
 
 def bench(ctx, bar_idx, td_t, sd_t, sw_t, td_np, sd_np, sw_np, family, spot, K, device):
-    s_off = int(ctx.bar_offsets[bar_idx].item())
-    e_off = int(ctx.bar_offsets[bar_idx + 1].item())
+    _d_idx = int(ctx.bar_to_date_idx[bar_idx].item())
+    if _d_idx < 0:
+        return None, None
+    s_off = int(ctx.date_offsets[_d_idx].item())
+    e_off = int(ctx.date_offsets[_d_idx + 1].item())
     if s_off >= e_off:
         return None, None
 
@@ -180,8 +186,8 @@ def main():
     td_t, sd_t, sw_t, td_np, sd_np, sw_np = _make_random_candidates(args.K, device)
 
     # Sample bars from the chain
-    bar_offsets_np = ctx.bar_offsets.cpu().numpy()
-    has_chain = (bar_offsets_np[1:] - bar_offsets_np[:-1]) > 0
+    bar_to_date_np = ctx.bar_to_date_idx.cpu().numpy()
+    has_chain  = bar_to_date_np >= 0
     chain_bars = np.where(has_chain)[0]
     sample = chain_bars[np.linspace(0, len(chain_bars)-1, args.bars, dtype=int)]
 

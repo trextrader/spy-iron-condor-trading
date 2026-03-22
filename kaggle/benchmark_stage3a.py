@@ -90,7 +90,9 @@ def build_ctx(device: torch.device, T: int, M: int = 36,
     bar_bid    = np.concatenate([call_mid * 0.9, put_mid * 0.9])
     bar_ask    = np.concatenate([call_mid * 1.1, put_mid * 1.1])
 
-    offsets    = np.arange(T + 1, dtype=np.int64) * M
+    # Date-indexed CSR: D=T unique dates (one per bar in synthetic data)
+    date_offsets    = np.arange(T + 1, dtype=np.int64) * M
+    bar_to_date_idx = np.arange(T, dtype=np.int32)
     right_flat = np.tile(bar_right,  T)
     stk_flat   = np.tile(bar_strike, T)
     dte_flat   = np.tile(bar_dte,    T)
@@ -114,7 +116,8 @@ def build_ctx(device: torch.device, T: int, M: int = 36,
         gate_pop      = _t(gate_pop,   torch.float32),
         strategy_idx  = _t(strategy_idx, torch.int16),
         abstain       = _t(abstain,    torch.bool),
-        bar_offsets   = _t(offsets,    torch.int64),
+        date_offsets    = _t(date_offsets,    torch.int64),
+        bar_to_date_idx = _t(bar_to_date_idx, torch.int32),
         option_right  = _t(right_flat, torch.int8),
         option_strike = _t(stk_flat,   torch.float32),
         option_dte    = _t(dte_flat,   torch.float32),
@@ -160,7 +163,8 @@ def run_step_bar_loop(ctx: OptimizerContext, candidates: CandidateBatch,
     gate_p_np  = ctx.gate_pop.cpu().numpy()
     sidx_np    = ctx.strategy_idx.cpu().numpy()
     abstain_np = ctx.abstain.cpu().numpy().astype(bool)
-    offsets_np = ctx.bar_offsets.cpu().numpy()
+    date_offsets_np = ctx.date_offsets.cpu().numpy()
+    bar_to_date_np  = ctx.bar_to_date_idx.cpu().numpy()
     ts_t = torch.tensor(ctx.timestamps.cpu().numpy().astype(np.float64),
                         dtype=torch.float64, device=dev)
 
@@ -187,8 +191,9 @@ def run_step_bar_loop(ctx: OptimizerContext, candidates: CandidateBatch,
     state = init_bar_state(K, dev)
 
     for i in range(ctx.T):
-        s_off   = int(offsets_np[i])
-        e_off   = int(offsets_np[i + 1])
+        _d_idx = int(bar_to_date_np[i])
+        s_off  = int(date_offsets_np[_d_idx])     if _d_idx >= 0 else 0
+        e_off  = int(date_offsets_np[_d_idx + 1]) if _d_idx >= 0 else 0
         gate_ok = (
             float(gate_e_np[i]) > 0.55
             and float(gate_p_np[i]) > 0.50

@@ -742,8 +742,9 @@ def run_backtest_optimizer_batch(
     gate_p_np       = ctx.gate_pop.cpu().numpy()
     sidx_np         = ctx.strategy_idx.cpu().numpy()
     abstain_np      = ctx.abstain.cpu().numpy().astype(bool)
-    bar_offsets_np  = ctx.bar_offsets.cpu().numpy()
-    ts_np           = ctx.timestamps.cpu().numpy()
+    date_offsets_np    = ctx.date_offsets.cpu().numpy()
+    bar_to_date_np     = ctx.bar_to_date_idx.cpu().numpy()
+    ts_np              = ctx.timestamps.cpu().numpy()
 
     # GPU mode: keep 180M-element options arrays on device; avoid full transfer.
     # Crossover: GPU time is flat per GPU model; CPU scales at ~97µs/candidate.
@@ -837,9 +838,13 @@ def run_backtest_optimizer_batch(
         sidx   = int(sidx_np[i])
         abt    = bool(abstain_np[i])
 
-        # Chain slice for this bar
-        s_off = int(bar_offsets_np[i])
-        e_off = int(bar_offsets_np[i + 1])
+        # Chain slice for this bar (date-indexed CSR)
+        _d_idx = int(bar_to_date_np[i])
+        if _d_idx >= 0:
+            s_off = int(date_offsets_np[_d_idx])
+            e_off = int(date_offsets_np[_d_idx + 1])
+        else:
+            s_off = e_off = 0
         has_chain = s_off < e_off
         if has_chain:
             if _use_gpu:

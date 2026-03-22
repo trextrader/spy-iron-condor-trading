@@ -95,7 +95,9 @@ def build_ctx(device: torch.device, T: int, M: int = 36,
     bar_ask     = np.concatenate([call_mid * 1.1, put_mid * 1.1])
     bar_mid_arr = np.concatenate([call_mid, put_mid])
 
-    bar_offsets = np.arange(T + 1, dtype=np.int64) * M
+    # Date-indexed CSR: D=T unique dates (one per bar in synthetic data)
+    date_offsets    = np.arange(T + 1, dtype=np.int64) * M
+    bar_to_date_idx = np.arange(T, dtype=np.int32)
     right_flat  = np.tile(bar_right,   T)
     strike_flat = np.tile(bar_strike,  T)
     dte_flat    = np.tile(bar_dte,     T)
@@ -119,7 +121,8 @@ def build_ctx(device: torch.device, T: int, M: int = 36,
         gate_pop     = _t(gate_pop,     torch.float32),
         strategy_idx = _t(strategy_idx, torch.int16),
         abstain      = _t(abstain,      torch.bool),
-        bar_offsets  = _t(bar_offsets,  torch.int64),
+        date_offsets    = _t(date_offsets,    torch.int64),
+        bar_to_date_idx = _t(bar_to_date_idx, torch.int32),
         option_right = _t(right_flat,   torch.int8),
         option_strike= _t(strike_flat,  torch.float32),
         option_dte   = _t(dte_flat,     torch.float32),

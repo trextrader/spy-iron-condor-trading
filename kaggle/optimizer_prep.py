@@ -4,15 +4,20 @@ optimizer_prep.py — Immutable Tensor Context Builder
 Pre-processes the v45 bundle into flat CSR tensors for the batch optimizer.
 Build once; reuse across all BO rounds.
 
-CSR Layout (chain per M5 bar):
-    bar_offsets[T+1]  — start/end index into flat arrays for each M5 bar
-    option_right[N]   — 0=call  1=put
-    option_strike[N]  — float32 strike price
-    option_dte[N]     — float32 days-to-expiry (te column)
-    option_delta[N]   — float32 abs(delta)  (NaN when unavailable)
-    opt_bid[N]        — float32
-    opt_ask[N]        — float32
-    opt_mid[N]        — float32
+CSR Layout (date-indexed — one copy per unique trading date):
+    date_offsets[D+1]    — start/end index into flat arrays for each date
+    bar_to_date_idx[T]   — bar index → date index (-1 = no chain for that bar)
+    option_right[N]      — 0=call  1=put   (N = total options across D dates)
+    option_strike[N]     — float32 strike price
+    option_dte[N]        — float32 days-to-expiry (te column)
+    option_delta[N]      — float32 abs(delta)  (NaN when unavailable)
+    opt_bid[N]           — float32
+    opt_ask[N]           — float32
+    opt_mid[N]           — float32
+
+Date-indexed layout stores each date's chain ONCE (N = D × avg_opts_per_date)
+instead of once per bar (old: N = T × avg_opts_per_date).  For 5-year runs
+this reduces chain tensor size ~78× (bars_per_day ≈ 78).
 """
 from __future__ import annotations
 
@@ -39,8 +44,9 @@ class OptimizerContext:
     strategy_idx: torch.Tensor     # [T] int16  predicted strategy class idx
     abstain: torch.Tensor          # [T] bool
 
-    # ── Chain CSR ─────────────────────────────────────────────────────────
-    bar_offsets: torch.Tensor      # [T+1] int64
+    # ── Chain CSR (date-indexed) ───────────────────────────────────────────
+    date_offsets: torch.Tensor     # [D+1] int64  — one entry per unique trading date
+    bar_to_date_idx: torch.Tensor  # [T]   int32  — bar → date index, -1 = no chain
     option_right: torch.Tensor     # [N] int8   0=call  1=put
     option_strike: torch.Tensor    # [N] float32
     option_dte: torch.Tensor       # [N] float32
@@ -179,18 +185,25 @@ def build_optimizer_context(
     print(f"[optimizer_prep] {len(_date_cache)} dates with chain data  "
           f"(0 = key mismatch; check bundle.m5_dates vs chain_df_by_date keys)")
 
-    # Build CSR: one entry per bar (reuse cached arrays)
+    # Build date-indexed CSR: one copy per unique date (not one per bar).
+    # For 5-year runs this cuts chain_N from ~889M to ~11.4M (78× reduction).
+    _unique_dates_ordered = sorted(_date_cache.keys())
+    D = len(_unique_dates_ordered)
+    _date_to_didx = {d: i for i, d in enumerate(_unique_dates_ordered)}
+
     rights, strikes, dtes, deltas, bids, asks, mids = [], [], [], [], [], [], []
-    offsets = [0]
-    for date_str in bar_dates:
-        arrs = _date_cache.get(date_str)
-        if arrs is None:
-            offsets.append(offsets[-1])
-            continue
-        r, s, d, da, b, a, m = arrs
-        rights.append(r);  strikes.append(s); dtes.append(d)
-        deltas.append(da); bids.append(b);    asks.append(a); mids.append(m)
-        offsets.append(offsets[-1] + len(r))
+    date_offsets_list = [0]
+    for d in _unique_dates_ordered:
+        r, s, dte_a, da, b, a, m = _date_cache[d]
+        rights.append(r);  strikes.append(s); dtes.append(dte_a)
+        deltas.append(da); bids.append(b);    asks.append(a);    mids.append(m)
+        date_offsets_list.append(date_offsets_list[-1] + len(r))
+
+    # bar → date index mapping (-1 when bar's date has no chain data)
+    bar_to_date_np = np.array(
+        [_date_to_didx.get(d, -1) for d in bar_dates], dtype=np.int32
+    )
+    date_offsets_arr = np.array(date_offsets_list, dtype=np.int64)
 
     if rights:
         r_flat  = np.concatenate(rights)
@@ -209,35 +222,35 @@ def build_optimizer_context(
         as_flat = np.empty(0, np.float32)
         mi_flat = np.empty(0, np.float32)
 
-    offsets_arr = np.array(offsets, dtype=np.int64)
     dev = device
-
     chain_N = len(r_flat)
-    print(f"[optimizer_prep] T={T} bars  chain_N={chain_N:,}  device={dev}")
+    bars_with_chain = int((bar_to_date_np >= 0).sum())
+    print(f"[optimizer_prep] T={T} bars  D={D} dates  chain_N={chain_N:,}  "
+          f"bars_with_chain={bars_with_chain:,}  device={dev}")
 
     # ── Verbose tensor summary ────────────────────────────────────────────
-    _mb = lambda arr: arr.nbytes / 1024 / 1024
     print(f"[optimizer_prep] Tensor summary:")
-    print(f"  timestamps    shape=({T},)        dtype=int64    {ts_arr.nbytes/1e6:.2f} MB")
-    print(f"  spot          shape=({T},)        dtype=float32  {spot_arr.nbytes/1e6:.2f} MB")
-    print(f"  gate_entry    shape=({T},)        dtype=float32  {entry_sig.nbytes/1e6:.2f} MB")
-    print(f"  gate_pop      shape=({T},)        dtype=float32  {pop_sig.nbytes/1e6:.2f} MB")
-    print(f"  strategy_idx  shape=({T},)        dtype=int16    {sidx_arr.nbytes/1e6:.2f} MB")
-    print(f"  bar_offsets   shape=({T+1},)      dtype=int64    {offsets_arr.nbytes/1e6:.2f} MB")
-    print(f"  option_right  shape=({chain_N},)  dtype=int8     {r_flat.nbytes/1e6:.2f} MB")
-    print(f"  option_strike shape=({chain_N},)  dtype=float32  {s_flat.nbytes/1e6:.2f} MB")
-    print(f"  option_dte    shape=({chain_N},)  dtype=float32  {d_flat.nbytes/1e6:.2f} MB")
-    print(f"  option_delta  shape=({chain_N},)  dtype=float32  {da_flat.nbytes/1e6:.2f} MB")
-    print(f"  opt_bid/ask   shape=({chain_N},)  dtype=float32  {bi_flat.nbytes/1e6:.2f} MB each")
+    print(f"  timestamps      shape=({T},)      dtype=int64    {ts_arr.nbytes/1e6:.2f} MB")
+    print(f"  spot            shape=({T},)      dtype=float32  {spot_arr.nbytes/1e6:.2f} MB")
+    print(f"  gate_entry      shape=({T},)      dtype=float32  {entry_sig.nbytes/1e6:.2f} MB")
+    print(f"  gate_pop        shape=({T},)      dtype=float32  {pop_sig.nbytes/1e6:.2f} MB")
+    print(f"  strategy_idx    shape=({T},)      dtype=int16    {sidx_arr.nbytes/1e6:.2f} MB")
+    print(f"  bar_to_date_idx shape=({T},)      dtype=int32    {bar_to_date_np.nbytes/1e6:.2f} MB")
+    print(f"  date_offsets    shape=({D+1},)    dtype=int64    {date_offsets_arr.nbytes/1e6:.2f} MB")
+    print(f"  option_right    shape=({chain_N},) dtype=int8    {r_flat.nbytes/1e6:.2f} MB")
+    print(f"  option_strike   shape=({chain_N},) dtype=float32 {s_flat.nbytes/1e6:.2f} MB")
+    print(f"  option_dte      shape=({chain_N},) dtype=float32 {d_flat.nbytes/1e6:.2f} MB")
+    print(f"  option_delta    shape=({chain_N},) dtype=float32 {da_flat.nbytes/1e6:.2f} MB")
+    print(f"  opt_bid/ask     shape=({chain_N},) dtype=float32 {bi_flat.nbytes/1e6:.2f} MB each")
     total_mb = (ts_arr.nbytes + spot_arr.nbytes + entry_sig.nbytes + pop_sig.nbytes
-                + sidx_arr.nbytes + offsets_arr.nbytes + r_flat.nbytes + s_flat.nbytes
-                + d_flat.nbytes + da_flat.nbytes + bi_flat.nbytes + as_flat.nbytes + mi_flat.nbytes) / 1e6
-    print(f"  → Total context: {total_mb:.1f} MB on {dev}")
+                + sidx_arr.nbytes + bar_to_date_np.nbytes + date_offsets_arr.nbytes
+                + r_flat.nbytes + s_flat.nbytes + d_flat.nbytes + da_flat.nbytes
+                + bi_flat.nbytes + as_flat.nbytes + mi_flat.nbytes) / 1e6
+    print(f"  → Total context: {total_mb:.1f} MB on {dev}  "
+          f"(date-indexed: {D} dates × avg {chain_N//max(D,1):,} opts/date)")
     if chain_N > 0:
-        avg_opts = chain_N / max(n_unique, 1)
-        print(f"  → Avg options/date: {avg_opts:.0f}  "
-              f"(calls: {(r_flat==0).sum():,}  puts: {(r_flat==1).sum():,})")
-        print(f"  → DTE range in chain: [{d_flat.min():.1f}, {d_flat.max():.1f}]  "
+        print(f"  → Calls: {(r_flat==0).sum():,}  Puts: {(r_flat==1).sum():,}")
+        print(f"  → DTE range: [{d_flat.min():.1f}, {d_flat.max():.1f}]  "
               f"delta NaN frac: {np.isnan(da_flat).mean()*100:.1f}%")
         print(f"  → Strike range: [{s_flat.min():.2f}, {s_flat.max():.2f}]")
         print(f"  → Bid range: [{bi_flat[bi_flat>0].min() if (bi_flat>0).any() else 0:.2f}, {bi_flat.max():.2f}]")
@@ -245,23 +258,24 @@ def build_optimizer_context(
         print("  [WARN] chain_N=0 — no options data reached the tensor! Check bar_dates vs chain_df_by_date keys.")
 
     return OptimizerContext(
-        device        = dev,
-        T             = T,
-        timestamps    = torch.from_numpy(ts_arr).to(dev),
-        spot          = torch.from_numpy(spot_arr).to(dev),
-        gate_entry    = torch.from_numpy(entry_sig).to(dev),
-        gate_pop      = torch.from_numpy(pop_sig).to(dev),
-        strategy_idx  = torch.from_numpy(sidx_arr).to(dev),
-        abstain       = torch.from_numpy(abt_arr.astype(np.uint8)).bool().to(dev),
-        bar_offsets   = torch.from_numpy(offsets_arr).to(dev),
-        option_right  = torch.from_numpy(r_flat).to(dev),
-        option_strike = torch.from_numpy(s_flat).to(dev),
-        option_dte    = torch.from_numpy(d_flat).to(dev),
-        option_delta  = torch.from_numpy(da_flat).to(dev),
-        opt_bid       = torch.from_numpy(bi_flat).to(dev),
-        opt_ask       = torch.from_numpy(as_flat).to(dev),
-        opt_mid       = torch.from_numpy(mi_flat).to(dev),
-        fast_end      = max(1, int(T * 0.25)),
-        medium_end    = max(1, int(T * 0.60)),
-        bar_dates     = bar_dates,
+        device          = dev,
+        T               = T,
+        timestamps      = torch.from_numpy(ts_arr).to(dev),
+        spot            = torch.from_numpy(spot_arr).to(dev),
+        gate_entry      = torch.from_numpy(entry_sig).to(dev),
+        gate_pop        = torch.from_numpy(pop_sig).to(dev),
+        strategy_idx    = torch.from_numpy(sidx_arr).to(dev),
+        abstain         = torch.from_numpy(abt_arr.astype(np.uint8)).bool().to(dev),
+        date_offsets    = torch.from_numpy(date_offsets_arr).to(dev),
+        bar_to_date_idx = torch.from_numpy(bar_to_date_np).to(dev),
+        option_right    = torch.from_numpy(r_flat).to(dev),
+        option_strike   = torch.from_numpy(s_flat).to(dev),
+        option_dte      = torch.from_numpy(d_flat).to(dev),
+        option_delta    = torch.from_numpy(da_flat).to(dev),
+        opt_bid         = torch.from_numpy(bi_flat).to(dev),
+        opt_ask         = torch.from_numpy(as_flat).to(dev),
+        opt_mid         = torch.from_numpy(mi_flat).to(dev),
+        fast_end        = max(1, int(T * 0.25)),
+        medium_end      = max(1, int(T * 0.60)),
+        bar_dates       = bar_dates,
     )
