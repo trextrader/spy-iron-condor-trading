@@ -43,14 +43,14 @@ CONFIG = {
     ],
 
     # ── Sizing ────────────────────────────────────────────────────────────
-    "max_contracts":      7,          # Max contracts per trade
-    "margin_pct":         0.4553,        # Max % of buying power to deploy per trade
+    "max_contracts":      6,          # Max contracts per trade
+    "margin_pct":         0.4566,        # Max % of buying power to deploy per trade
     "margin_type":        "pct_spot",   # "width" (spread) or "pct_spot" (naked)
     "margin_spot_pct":    0.1343,      # If pct_spot: margin = spot * this * 100
 
     # ── Exit: Stop-Loss ───────────────────────────────────────────────────
     "stop_loss_mult":     0.0000,   # Close when loss >= N * |credit| * qty * 100
-    "stop_loss_dollar":   1500.0000,  # Hard dollar cap per trade (None = use multiplier only)
+    "stop_loss_dollar":   950.0000,  # Hard dollar cap per trade (None = use multiplier only)
 
     # ── Exit: Profit Target ───────────────────────────────────────────────
     "profit_target":      3000.0000,    # Dollar target (None = use 50% of credit)
@@ -64,22 +64,22 @@ CONFIG = {
 
     # ── Position Limits ───────────────────────────────────────────────────
     "max_positions":      0,           # Max concurrent open positions for this strategy
-    "cooldown_bars":      1,           # Min bars between trades
+    "cooldown_bars":      0,           # Min bars between trades
 
     # ── Entry: Structure (overrides neural model when not None) ──────────────
     "call_offset_pct":    None,  # % OTM for call strike (None = neural model)
     "put_offset_pct":     1.4671,  # % OTM for put strike  (None = neural model)
-    "spread_width":       9.0000,  # Spread width points   (None = neural model / N/A)
+    "spread_width":       13.0000,  # Spread width points   (None = neural model / N/A)
     "target_dte":         7,  # Target DTE at entry   (None = neural model)
 
     # ── Entry: Quality Filter ─────────────────────────────────────────────────
     "max_leg_spread":     0.0959,  # Max bid-ask ratio per leg
 
     # ── Entry: Delta Targets (template path) ────────────────────────────────
-    "short_delta":        0.4459,  # Target |delta| for short (selling) strikes
+    "short_delta":        0.1500,  # Target |delta| for short (selling) strikes
     "wing_delta":         0.2000,  # Target |delta| for long wing strikes (None = N/A)
 
     # ── Exit: Time ────────────────────────────────────────────────────────────
-    "max_dte_exit":       4,  # Close when DTE remaining <= N (0 = expire naturally)
-    "hold_days":          8,  # Max calendar days held
+    "max_dte_exit":       5,  # Close when DTE remaining <= N (0 = expire naturally)
+    "hold_days":          9,  # Max calendar days held
 }
