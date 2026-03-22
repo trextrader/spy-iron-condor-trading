@@ -128,11 +128,27 @@ def setup_logger(log_path: Path) -> logging.Logger:
     return logger
 
 
-# ── Idempotency helper ────────────────────────────────────────────────────────
+# ── Idempotency helpers ───────────────────────────────────────────────────────
 
 def _is_unpopulated(s: pd.Series) -> bool:
     """Column is unpopulated if entirely NaN (all-zero is valid data)."""
     return bool(s.isna().all())
+
+def _pivot_flags_missing(df: pd.DataFrame) -> bool:
+    """
+    Return True if PivotHigh/PivotLow need (re)computation.
+    Triggers on: all-NaN, OR all-zero (no detections — earlier script wrote 0s).
+    A valid pivot column for a 90k-row file must have at least some 1s.
+    """
+    for col in ("PivotHigh", "PivotLow"):
+        if col not in df.columns:
+            return True
+        s = df[col]
+        if s.isna().all():
+            return True
+        if pd.api.types.is_numeric_dtype(s) and not s.eq(1.0).any():
+            return True  # all-zero: no pivots detected
+    return False
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -790,30 +806,33 @@ def populate_file(
     _write("target_spot", _compute_target_spot(df))
 
     # Pivot analytics (all TFs — m5 pivots are sparse but present)
+    # Also force-recompute if PivotHigh/Low are all-zero (earlier script wrote 0s)
     if tf not in PIVOT_SKIP_TFS:
-        any_pivot_needed = any(c in need for c in PIVOT_COLS)
+        pivot_flags_bad = _pivot_flags_missing(df)
+        any_pivot_needed = any(c in need for c in PIVOT_COLS) or pivot_flags_bad
         if any_pivot_needed:
-            logger.info("    Computing pivot analytics for %s…", tf)
+            if pivot_flags_bad:
+                logger.info("    PivotHigh/Low are all-zero — force-recomputing pivot analytics…")
+            else:
+                logger.info("    Computing pivot analytics for %s…", tf)
             piv = _compute_pivot_analytics(df, tf)
             for col in PIVOT_COLS:
                 if col in piv.columns:
-                    _write(col, piv[col])
+                    if col in df.columns:
+                        df[col] = piv[col]  # direct write (bypasses need check)
+                        touched += 1
 
     # Strong pivot analytics (m1/m15/h1 only — m5 empty in 2025 reference)
     if tf not in STRONG_PIVOT_SKIP_TFS:
         any_strong_needed = any(c in need for c in STRONG_PIVOT_COLS)
         if any_strong_needed:
-            # Ensure PivotHigh/Low/Slope/SlopeATR are populated in df
-            pivot_ready = all(
-                c in df.columns and not _is_unpopulated(df[c])
-                for c in ["PivotHigh", "PivotLow", "Slope", "SlopeATR"]
-            )
-            if not pivot_ready:
+            # Ensure PivotHigh/Low have actual detections (not all-zero)
+            if _pivot_flags_missing(df):
                 logger.info("    Recomputing base pivot analytics for strong_pivot dependency…")
                 piv = _compute_pivot_analytics(df, tf)
                 for col in PIVOT_COLS:
-                    if col in piv.columns:
-                        df[col] = piv[col]  # write directly without touching counter
+                    if col in piv.columns and col in df.columns:
+                        df[col] = piv[col]
             logger.info("    Computing strong pivot analytics for %s…", tf)
             spiv = _compute_strong_pivot_analytics(df)
             for col in STRONG_PIVOT_COLS:
