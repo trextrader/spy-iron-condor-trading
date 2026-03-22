@@ -73,8 +73,8 @@ TF_MINUTES = {"m1": 1, "m5": 5, "m15": 15, "h1": 60}
 # Pivot analytics run on all TFs — m5 pivots are sparse but present
 PIVOT_SKIP_TFS: set = set()
 
-# Strong pivot analytics: m5 has empty strong_pivot in 2025 — skip for m5
-STRONG_PIVOT_SKIP_TFS: set = {"m5"}
+# Strong pivot analytics run on all TFs (2025 reference has them populated for all TFs)
+STRONG_PIVOT_SKIP_TFS: set = set()
 
 STRONG_PIVOT_COLS = [
     "strong_pivot_slope_h", "strong_pivot_slope_l",
