@@ -182,6 +182,14 @@ def main() -> int:
     # ── Clean ─────────────────────────────────────────────────────────────────
     cleaned = clean_2020_m5_artifacts(df)
 
+    # ── Reorder columns to match reference ────────────────────────────────────
+    # After dropping artifact cols the set matches but order may differ.
+    # Reorder to the exact reference column sequence.
+    missing_after = [c for c in ref_cols if c not in cleaned.columns]
+    if missing_after:
+        raise AssertionError(f"Columns missing after cleanup (cannot reorder): {missing_after}")
+    cleaned = cleaned[ref_cols]
+
     # ── Validate ──────────────────────────────────────────────────────────────
     if len(cleaned) != before_rows:
         raise AssertionError(

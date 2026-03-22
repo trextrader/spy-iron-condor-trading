@@ -65,12 +65,14 @@ COL_BOUNDS = {
     "psar_trend":     (-1.0,  1.0),
 }
 
-# Number of m1 bars equivalent to 60 minutes per timeframe
+# Number of bars used for the max_dd_60m rolling window per timeframe.
+# m1/m5/m15: exact 60-minute equivalent.
+# h1: 4 bars (4-hour lookback) — window=1 is always 0 (single bar max==min).
 TF_TO_BARS_60M = {
     "m1":  60,
     "m5":  12,
     "m15":  4,
-    "h1":   1,
+    "h1":   4,
 }
 
 COLUMN_FILL_POLICY: Dict[str, str] = {
@@ -347,12 +349,14 @@ def populate_ohlcv_block(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
 # ── Idempotency helper ────────────────────────────────────────────────────────
 
 def _is_unpopulated(s: pd.Series) -> bool:
-    """True if a column looks empty: all-NaN or all-zero (numeric)."""
-    if s.isna().all():
-        return True
-    if pd.api.types.is_numeric_dtype(s):
-        return bool(np.isclose(s.fillna(0.0).abs().sum(), 0.0))
-    return False
+    """True if a column is all-NaN (not yet computed).
+
+    We intentionally do NOT treat all-zero as unpopulated: a legitimate
+    computation (e.g. max_dd_60m with a short lookback) can produce zeros,
+    and re-triggering on zeros causes non-idempotent second runs.
+    Use --force-all-targets to unconditionally recompute.
+    """
+    return bool(s.isna().all())
 
 
 # ── File processor ────────────────────────────────────────────────────────────
