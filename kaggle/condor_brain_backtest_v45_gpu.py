@@ -3966,6 +3966,9 @@ def main():
                         help="Directory containing v4.3 multi-TF dataset CSVs (default: data/Datasetv4/v43)")
     parser.add_argument("--v43-seq-len", type=int, default=V43_SEQ_LEN,
                         help=f"Inference sequence length for CondorNet v4.3 (default: {V43_SEQ_LEN})")
+    parser.add_argument("--5years", dest="five_years", action="store_true", default=False,
+                        help="Use combined 2020-2024 datasets (data/Datasetv4/v43/combined). "
+                             "Implies --use-v43. Use for multi-year strategy optimization.")
 
     # Per-day-of-week max DTE caps (prevents weekend/overnight carry-over)
     parser.add_argument("--dte-mon", type=int, default=None,
@@ -3984,6 +3987,7 @@ def main():
                         help="Disable automatic Friday 3pm+ position closeout (hold through weekends)")
 
     args = parser.parse_args()
+    _five_years = getattr(args, 'five_years', False)
 
     try:
         _validate_json_runlog_path(getattr(args, "checkpoint", None), "--checkpoint")
@@ -4167,12 +4171,12 @@ def main():
                 print(f"✅ Found Data: {p}")
                 break
     
-    if not use_data_path and not args.use_v43:
+    if not use_data_path and not args.use_v43 and not _five_years:
         print("❌ CRITICAL: No data found. Please upload `mamba_institutional_1m.csv`.")
         return
 
     # 1. Load Data & Compute Features
-    if not args.use_v43:
+    if not args.use_v43 and not _five_years:
         df = load_data_and_features(use_data_path, rows=args.limit)
         if df is None or df.empty:
             print("❌ Data load failed.")
@@ -4186,7 +4190,7 @@ def main():
     # 2. Rule Engine
     rule_signals = None
     ruleset = None
-    if not args.use_v43 and (args.ruleset or os.path.exists(RULESET_PATH)):
+    if not args.use_v43 and not _five_years and (args.ruleset or os.path.exists(RULESET_PATH)):
         r_path = args.ruleset if args.ruleset else RULESET_PATH
         df, rule_signals, ruleset = run_rule_engine(df, r_path)
 
@@ -4194,8 +4198,8 @@ def main():
     model = None
     model_path = args.model if args.model else MODEL_PATH
     norm_stats = {}
-    
-    if not args.use_v43 and not args.rules_only:
+
+    if not args.use_v43 and not _five_years and not args.rules_only:
         if not os.path.exists(model_path):
             # Try variations
             if os.path.exists(f"spy-iron-condor-trading/{model_path}"):
@@ -4279,10 +4283,10 @@ def main():
                 norm_stats["median"] = checkpoint["median"]
                 norm_stats["mad"] = checkpoint["mad"]
 
-    # ── Phase 7: CondorNet v4.3 multi-TF inference (if --use-v43) ─────────────
+    # ── Phase 7: CondorNet v4.3 multi-TF inference (if --use-v43 or --5years) ──
     v43_outputs = None
     bundle_v43  = None
-    if args.use_v43:
+    if args.use_v43 or _five_years:
         if not HAS_V43_DATA:
             print(f"❌ --use-v43 requires backtest_v45_data.py. Import error: {_V43_IMPORT_ERR}")
             _spy_paths = [p for p in sys.path if 'spy' in p.lower() or 'kaggle' in p.lower() or 'condor' in p.lower()]
@@ -4291,8 +4295,21 @@ def main():
         v43_ckpt = args.v43_model or "models/condor_net_v43_run18.pth"
         print(f"\n[Phase 7] Loading CondorNet v4.3 checkpoint: {v43_ckpt}")
         v43_model_obj = load_v43_model(v43_ckpt, DEVICE, verbose=True)
-        print(f"[Phase 7] Loading multi-TF bundle from: {args.v43_data_dir}")
-        bundle_v43 = load_multi_tf_bundle(data_dir=args.v43_data_dir, verbose=True)
+        if _five_years:
+            _v43_data_dir = "data/Datasetv4/v43/combined"
+            _bundle_kwargs = dict(
+                m1_file   = "m1_dataset_v43_2020_2024.csv",
+                m5_file   = "m5_dataset_v43_2020_2024.csv",
+                m15_file  = "m15_dataset_v43_2020_2024.csv",
+                h1_file   = "h1_dataset_v43_2020_2024.csv",
+                chain_file= "options_v43_2020_2024.csv",
+            )
+            print(f"[Phase 7] --5years: loading combined 2020-2024 bundle from: {_v43_data_dir}")
+        else:
+            _v43_data_dir = args.v43_data_dir
+            _bundle_kwargs = {}
+            print(f"[Phase 7] Loading multi-TF bundle from: {_v43_data_dir}")
+        bundle_v43 = load_multi_tf_bundle(data_dir=_v43_data_dir, verbose=True, **_bundle_kwargs)
         bundle_v43.preload_to_gpu(DEVICE)
         _infer_bars = bundle_v43.n_bars if not args.limit else min(bundle_v43.n_bars, args.limit + args.v43_seq_len)
         print(f"[Phase 7] Running batch inference ({_infer_bars:,} M5 bars, seq_len={args.v43_seq_len})...")
