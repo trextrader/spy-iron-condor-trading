@@ -16,17 +16,17 @@ tfs    = ["m1", "m5", "m15", "h1"]
 years  = [2020, 2021, 2022, 2023, 2024]
 
 for tf in tfs:
-    # 2025 reference
+    # 2025 reference — full file for accurate empty detection
     ref_path = base / "2025" / f"{tf}_dataset_v43_2025.csv"
-    ref_df   = pd.read_csv(ref_path, nrows=500, low_memory=False)
+    ref_df   = pd.read_csv(ref_path, low_memory=False)
     ref_empty = set(c for c in ref_df.columns if ref_df[c].isna().all())
     ref_cols  = set(ref_df.columns)
 
-    # 2020-2024 union of empty cols
+    # 2020-2024 union of empty cols — full file
     empty_union = set()
     for year in years:
         p  = shells / str(year) / f"{tf}_dataset_v43_{year}.csv"
-        df = pd.read_csv(p, nrows=500, low_memory=False)
+        df = pd.read_csv(p, low_memory=False)
         empty_union.update(c for c in df.columns if df[c].isna().all())
 
     need_backfill      = sorted(empty_union - ref_empty - (empty_union - ref_cols))
