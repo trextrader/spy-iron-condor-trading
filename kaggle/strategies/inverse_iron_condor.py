@@ -54,10 +54,10 @@ CONFIG = {
 
     # ── Exit: Stop-Loss ───────────────────────────────────────────────────
     "stop_loss_mult":     5.0000,   # Close when loss >= N * |credit| * qty * 100
-    "stop_loss_dollar":   400.0000,  # Hard dollar cap per trade (None = use multiplier only)
+    "stop_loss_dollar":   1100.0000,  # Hard dollar cap per trade (None = use multiplier only)
 
     # ── Exit: Profit Target ───────────────────────────────────────────────
-    "profit_target":      2515.0000,    # Dollar target (None = use 50% of credit)
+    "profit_target":      3000.0000,    # Dollar target (None = use 50% of credit)
 
     # ── Template Preference ───────────────────────────────────────────────
     "fallback_template":  None,        # If no template eligible, use this template_id
@@ -73,17 +73,17 @@ CONFIG = {
     # ── Entry: Structure (overrides neural model when not None) ──────────────
     "call_offset_pct":    1.4553,  # % OTM for call strike (None = neural model)
     "put_offset_pct":     1.4847,  # % OTM for put strike  (None = neural model)
-    "spread_width":       11.5000,  # Spread width points   (None = neural model / N/A)
-    "target_dte":         8,  # Target DTE at entry   (None = neural model)
+    "spread_width":       11.0000,  # Spread width points   (None = neural model / N/A)
+    "target_dte":         10,  # Target DTE at entry   (None = neural model)
 
     # ── Entry: Quality Filter ─────────────────────────────────────────────────
     "max_leg_spread":     0.0750,  # Max bid-ask ratio per leg
 
     # ── Entry: Delta Targets (template path) ────────────────────────────────
-    "short_delta":        0.4199,  # Target |delta| for short (selling) strikes
+    "short_delta":        0.3017,  # Target |delta| for short (selling) strikes
     "wing_delta":         0.2255,  # Target |delta| for long wing strikes (None = N/A)
 
     # ── Exit: Time ────────────────────────────────────────────────────────────
     "max_dte_exit":       5,  # Close when DTE remaining <= N (0 = expire naturally)
-    "hold_days":          16,  # Max calendar days held
+    "hold_days":          5,  # Max calendar days held
 }

@@ -50,10 +50,10 @@ CONFIG = {
 
     # ── Exit: Stop-Loss ───────────────────────────────────────────────────
     "stop_loss_mult":     0.0000,   # Close when loss >= N * |credit| * qty * 100
-    "stop_loss_dollar":   400.0000,  # Hard dollar cap per trade (None = use multiplier only)
+    "stop_loss_dollar":   900.0000,  # Hard dollar cap per trade (None = use multiplier only)
 
     # ── Exit: Profit Target ───────────────────────────────────────────────
-    "profit_target":      2700.0000,    # Dollar target (None = use 50% of credit)
+    "profit_target":      3000.0000,    # Dollar target (None = use 50% of credit)
 
     # ── Template Preference ───────────────────────────────────────────────
     "fallback_template":  None,        # If no template eligible, use this template_id
@@ -63,8 +63,8 @@ CONFIG = {
     "pop_threshold":      None,        # Override PoP threshold (default 0.50)
 
     # ── Position Limits ───────────────────────────────────────────────────
-    "max_positions":      4,           # Max concurrent open positions for this strategy
-    "cooldown_bars":      5,           # Min bars between trades
+    "max_positions":      6,           # Max concurrent open positions for this strategy
+    "cooldown_bars":      6,           # Min bars between trades
 
     # ── Entry: Structure (overrides neural model when not None) ──────────────
     "call_offset_pct":    -0.1000,  # % OTM for call strike (None = neural model)
@@ -80,6 +80,6 @@ CONFIG = {
     "wing_delta":         None,  # Target |delta| for long wing strikes (None = N/A)
 
     # ── Exit: Time ────────────────────────────────────────────────────────────
-    "max_dte_exit":       3,  # Close when DTE remaining <= N (0 = expire naturally)
+    "max_dte_exit":       2,  # Close when DTE remaining <= N (0 = expire naturally)
     "hold_days":          21,  # Max calendar days held
 }

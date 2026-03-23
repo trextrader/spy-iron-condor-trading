@@ -43,17 +43,17 @@ CONFIG = {
     ],
 
     # ── Sizing ────────────────────────────────────────────────────────────
-    "max_contracts":      10,          # Max contracts per trade
+    "max_contracts":      9,          # Max contracts per trade
     "margin_pct":         0.4312,        # Max % of buying power to deploy per trade
     "margin_type":        "pct_spot",   # "width" (spread) or "pct_spot" (naked)
     "margin_spot_pct":    0.1741,      # If pct_spot: margin = spot * this * 100
 
     # ── Exit: Stop-Loss ───────────────────────────────────────────────────
     "stop_loss_mult":     0.0000,   # Close when loss >= N * |credit| * qty * 100
-    "stop_loss_dollar":   745.0000,  # Hard dollar cap per trade (None = use multiplier only)
+    "stop_loss_dollar":   1300.0000,  # Hard dollar cap per trade (None = use multiplier only)
 
     # ── Exit: Profit Target ───────────────────────────────────────────────
-    "profit_target":      1645.0000,    # Dollar target (None = use 50% of credit)
+    "profit_target":      900.0000,    # Dollar target (None = use 50% of credit)
 
     # ── Template Preference ───────────────────────────────────────────────
     "fallback_template":  None,        # If no template eligible, use this template_id
@@ -70,16 +70,16 @@ CONFIG = {
     "call_offset_pct":    1.4802,  # % OTM for call strike (None = neural model)
     "put_offset_pct":     1.5927,  # % OTM for put strike  (None = neural model)
     "spread_width":       12.0000,  # Spread width points   (None = neural model / N/A)
-    "target_dte":         15,  # Target DTE at entry   (None = neural model)
+    "target_dte":         23,  # Target DTE at entry   (None = neural model)
 
     # ── Entry: Quality Filter ─────────────────────────────────────────────────
     "max_leg_spread":     0.2863,  # Max bid-ask ratio per leg
 
     # ── Entry: Delta Targets (template path) ────────────────────────────────
-    "short_delta":        0.3080,  # Target |delta| for short (selling) strikes
+    "short_delta":        0.1759,  # Target |delta| for short (selling) strikes
     "wing_delta":         None,  # Target |delta| for long wing strikes (None = N/A)
 
     # ── Exit: Time ────────────────────────────────────────────────────────────
-    "max_dte_exit":       0,  # Close when DTE remaining <= N (0 = expire naturally)
-    "hold_days":          16,  # Max calendar days held
+    "max_dte_exit":       4,  # Close when DTE remaining <= N (0 = expire naturally)
+    "hold_days":          21,  # Max calendar days held
 }
